@@ -221,6 +221,41 @@ With dashboard date range set to **Last 90 days**:
 
 Only after this passes should you onboard additional clients (Phase 8).
 
+## Phase 8 — Multi-client (local)
+
+Second test client for isolation and independent syncs:
+
+| Client | Domain | Purpose |
+|--------|--------|---------|
+| SMA Marketing | `smamarketing.net` | Primary validation client (real integrations) |
+| Beacon Industrial | `beaconindustrial.com` | Second client shell for mappings + isolation |
+
+Re-run seed after pulling Phase 8 changes:
+
+```bash
+cd apps/api && source .venv/bin/activate && python -m app.seed
+```
+
+### Setup (Beacon Industrial)
+
+1. Admin → **Clients** — confirm both clients appear.
+2. Select **Beacon Industrial** → **Integrations**:
+   - Connect Google (can reuse same Google account; map **different** GSC site + GA4 property if available).
+   - Connect SE Ranking → map a **different** project than SMA.
+3. **Sync 90 days** for Beacon only (Platform or client workspace).
+4. Confirm SMA dashboard/metrics unchanged after Beacon syncs.
+
+### Manual acceptance gate (required before Phase 9)
+
+- [ ] Admin sees both clients; team user sees only assigned client(s)
+- [ ] Integrations and property mappings are independent per client
+- [ ] Sync jobs for client A do not block or mix with client B (same source allowed in parallel)
+- [ ] Dashboard, jobs list, and data health are scoped by `X-OrganicIQ-Client-Id`
+- [ ] Facts/watermarks for Beacon do not appear in SMA dashboard (and vice versa)
+- [ ] Beacon 90-day sync completes (success or expected `partial` lag) without affecting SMA watermarks
+
+Automated coverage: `pytest tests/test_phase8_multi_client.py tests/test_phase1.py`
+
 ## Phase map
 
 | Phase | Focus | Status |
@@ -231,9 +266,9 @@ Only after this passes should you onboard additional clients (Phase 8).
 | 4 | SE Ranking Search | Done |
 | 5 | SE Ranking AI (AIRT prompts, checks, presence stats) | Done |
 | 6 | Dashboard | Done |
-| 7 | 90-day validation (one client, ingestion stability + metric accuracy) | **Current** |
-| 8 | Multi-client (isolation, mappings, stable syncs) | After Phase 7 |
-| 9 | **Decision Engine** — rules, thresholds, recommendations, Growth Action mapping | After reporting is trusted (Phases 6–8) |
+| 7 | 90-day validation (one client, ingestion stability + metric accuracy) | Done |
+| 8 | Multi-client (isolation, mappings, stable syncs) | **Current** |
+| 9 | **Decision Engine** — rules, thresholds, recommendations, Growth Action mapping | After Phase 8 |
 | 10 | Growth Actions & Annotations (Decision → task → Teamwork → measurement) | |
 | 11 | Strategy & Content Plan | |
 | 12 | Client portal | |

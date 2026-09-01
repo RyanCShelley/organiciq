@@ -16,10 +16,7 @@ from app.models.user import User, UserClient, UserRole
 
 DEFAULT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 SMA_CLIENT_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-# Legacy demo clients from earlier local seeds — removed on every seed run.
-LEGACY_DEMO_CLIENT_IDS = (
-    uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),  # Beacon Industrial
-)
+BEACON_CLIENT_ID = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 ADMIN_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 TEAM_ID = uuid.UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
 
@@ -47,8 +44,10 @@ def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
         "facts_ga4_traffic",
         "staging_gsc_query_pages",
         "staging_gsc_pages",
+        "staging_gsc_daily",
         "facts_gsc_query_pages",
         "facts_gsc_pages",
+        "facts_gsc_daily",
         "sync_jobs",
         "data_watermarks",
         "integrations",
@@ -69,42 +68,45 @@ def seed(db: Session) -> None:
     if tier is None:
         raise RuntimeError("Default tier missing — run alembic upgrade head first")
 
-    for legacy_id in LEGACY_DEMO_CLIENT_IDS:
+    for legacy_id in ():
         if db.query(Client).filter(Client.id == legacy_id).one_or_none() is not None:
             _delete_client_cascade(db, legacy_id)
 
-    # Drop any leftover demo-named clients that are not SMA Marketing.
-    for row in db.query(Client).filter(Client.client_name.in_(["Acme Manufacturing", "Beacon Industrial"])).all():
-        if row.id != SMA_CLIENT_ID:
+    # Drop stray demo-named clients that are not part of the local multi-client seed set.
+    seeded_ids = {SMA_CLIENT_ID, BEACON_CLIENT_ID}
+    for row in db.query(Client).filter(Client.client_name.in_(["Acme Manufacturing"])).all():
+        if row.id not in seeded_ids:
             _delete_client_cascade(db, row.id)
 
-    client = db.query(Client).filter(Client.id == SMA_CLIENT_ID).one_or_none()
-    if client is None:
-        client = Client(
-            id=SMA_CLIENT_ID,
-            client_name="SMA Marketing",
-            domain="smamarketing.net",
-            tier_id=DEFAULT_TIER_ID,
-            start_date=date(2025, 1, 1),
-            primary_market="United States",
-            timezone="America/New_York",
-            monthly_lead_goal=25,
-            status=ClientStatus.ACTIVE,
-        )
-        db.add(client)
-        db.flush()
-        for provider in IntegrationProvider:
-            db.add(
-                Integration(
-                    client_id=client.id,
-                    provider=provider,
-                    connection_status=ConnectionStatus.NOT_CONNECTED,
-                )
+    def _ensure_client(
+        *,
+        client_id: uuid.UUID,
+        client_name: str,
+        domain: str,
+        monthly_lead_goal: int | None = None,
+    ) -> Client:
+        client = db.query(Client).filter(Client.id == client_id).one_or_none()
+        if client is None:
+            client = Client(
+                id=client_id,
+                client_name=client_name,
+                domain=domain,
+                tier_id=DEFAULT_TIER_ID,
+                start_date=date(2025, 1, 1),
+                primary_market="United States",
+                timezone="America/New_York",
+                monthly_lead_goal=monthly_lead_goal,
+                status=ClientStatus.ACTIVE,
             )
-    else:
-        client.client_name = "SMA Marketing"
-        client.domain = "smamarketing.net"
-        client.status = ClientStatus.ACTIVE
+            db.add(client)
+            db.flush()
+        else:
+            client.client_name = client_name
+            client.domain = domain
+            client.status = ClientStatus.ACTIVE
+            if monthly_lead_goal is not None:
+                client.monthly_lead_goal = monthly_lead_goal
+
         for provider in IntegrationProvider:
             exists = (
                 db.query(Integration)
@@ -119,6 +121,20 @@ def seed(db: Session) -> None:
                         connection_status=ConnectionStatus.NOT_CONNECTED,
                     )
                 )
+        return client
+
+    _ensure_client(
+        client_id=SMA_CLIENT_ID,
+        client_name="SMA Marketing",
+        domain="smamarketing.net",
+        monthly_lead_goal=25,
+    )
+    _ensure_client(
+        client_id=BEACON_CLIENT_ID,
+        client_name="Beacon Industrial",
+        domain="beaconindustrial.com",
+        monthly_lead_goal=10,
+    )
 
     if db.query(User).filter(User.id == ADMIN_ID).one_or_none() is None:
         db.add(
@@ -185,7 +201,9 @@ def seed(db: Session) -> None:
         )
 
     db.commit()
-    print("Seed complete: SMA Marketing client, admin@ and team@ users")
+    print(
+        "Seed complete: SMA Marketing + Beacon Industrial clients, admin@ and team@ users"
+    )
 
 
 if __name__ == "__main__":
