@@ -24,6 +24,8 @@ from app.models import (  # noqa: E402, F401 — register all models on Base.met
     FactGa4Traffic,
     FactGscDaily,
     FactGscPage,
+    Decision,
+    DecisionThreshold,
     FactGscQueryPage,
     FactSerCompetitor,
     FactSerKeyword,

@@ -52,6 +52,8 @@ def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
         "data_watermarks",
         "integrations",
         "conversion_definitions",
+        "decisions",
+        "decision_thresholds",
         "topics",
         "user_clients",
         "clients",

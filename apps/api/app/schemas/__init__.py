@@ -202,3 +202,54 @@ class UserClientAssign(BaseModel):
 class HealthOut(BaseModel):
     status: str
     service: str
+
+
+class DecisionOut(ORMModel):
+    id: UUID
+    client_id: UUID
+    rule_key: str
+    created_at: datetime
+    decision_type: str
+    growth_action: str | None
+    diagnostic_layer: str
+    priority: str
+    status: str
+    topic_id: UUID | None
+    page_url: str | None
+    query: str | None
+    keyword: str | None
+    prompt: str | None
+    diagnosis: str
+    recommended_action: str
+    evidence_json: dict
+    baseline_metrics_json: dict
+    success_metric: str
+    date_range_start: date
+    date_range_end: date
+    dismissal_reason: str | None
+
+
+class DecisionEvaluateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_date: date = Field(alias="from")
+    to_date: date = Field(alias="to")
+
+
+class DecisionEvaluateResponse(BaseModel):
+    created: list[DecisionOut]
+    skipped: int
+
+
+class DecisionStatusUpdate(BaseModel):
+    status: str
+    dismissal_reason: str | None = None
+
+
+class DecisionThresholdsOut(BaseModel):
+    thresholds: dict[str, float | int]
+    defaults: dict[str, float | int]
+
+
+class DecisionThresholdsUpdate(BaseModel):
+    thresholds: dict[str, float | int]

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, clients, dashboard, integrations, jobs, oauth_google, seranking, watch_list
+from app.api.routers import admin, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, watch_list
 from app.core.settings import get_settings
 
 settings = get_settings()
@@ -25,3 +25,4 @@ app.include_router(oauth_google.router)
 app.include_router(seranking.router)
 app.include_router(watch_list.router)
 app.include_router(dashboard.router)
+app.include_router(decisions.router)

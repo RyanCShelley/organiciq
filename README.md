@@ -256,6 +256,29 @@ cd apps/api && source .venv/bin/activate && python -m app.seed
 
 Automated coverage: `pytest tests/test_phase8_multi_client.py tests/test_phase1.py`
 
+## Phase 9 — Decision Engine (local)
+
+The Decision Engine evaluates validated dashboard + GSC query facts and stores recommendations mapped to the five Growth Actions (plus Content Planning Signals).
+
+### API
+
+- `GET /decisions?from=&to=` — list stored decisions for the selected client/period
+- `POST /decisions/evaluate` — run rules and persist new decisions (skips duplicates per rule/period)
+- `PATCH /decisions/{id}` — update decision status (`new`, `reviewed`, `accepted`, `dismissed`, …)
+- `GET/PUT /decisions/thresholds` — per-client rule thresholds (defaults in `app/decisions/thresholds.py`)
+
+### UI
+
+Open **Decision Engine** in the nav (uses the same client + date controls as Dashboard). Click **Evaluate period** after syncs complete.
+
+Run migration:
+
+```bash
+cd apps/api && alembic upgrade head
+```
+
+Automated coverage: `pytest tests/test_decisions_phase9.py`
+
 ## Phase map
 
 | Phase | Focus | Status |
@@ -267,8 +290,8 @@ Automated coverage: `pytest tests/test_phase8_multi_client.py tests/test_phase1.
 | 5 | SE Ranking AI (AIRT prompts, checks, presence stats) | Done |
 | 6 | Dashboard | Done |
 | 7 | 90-day validation (one client, ingestion stability + metric accuracy) | Done |
-| 8 | Multi-client (isolation, mappings, stable syncs) | **Current** |
-| 9 | **Decision Engine** — rules, thresholds, recommendations, Growth Action mapping | After Phase 8 |
+| 8 | Multi-client (isolation, mappings, stable syncs) | Done |
+| 9 | **Decision Engine** — rules, thresholds, recommendations, Growth Action mapping | **Current** |
 | 10 | Growth Actions & Annotations (Decision → task → Teamwork → measurement) | |
 | 11 | Strategy & Content Plan | |
 | 12 | Client portal | |
