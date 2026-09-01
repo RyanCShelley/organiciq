@@ -227,6 +227,45 @@ class DecisionOut(ORMModel):
     date_range_start: date
     date_range_end: date
     dismissal_reason: str | None
+    priority_score: float | None = None
+    impact: float | None = None
+    confidence: float | None = None
+    urgency: float | None = None
+    effort: float | None = None
+
+
+class LeverSummaryOut(BaseModel):
+    lever: str
+    label: str
+    findings_count: int
+    status: str
+
+
+class RecommendationOut(BaseModel):
+    rule_key: str
+    lever: str
+    label: str
+    stage: str
+    diagnosis: str
+    recommended_action: str
+    success_metric: str
+    priority_score: float
+    impact: float
+    confidence: float
+    urgency: float
+    effort: float
+    page_url: str | None = None
+    query: str | None = None
+    evidence_json: dict
+
+
+class DiagnoseResponse(BaseModel):
+    ready: bool
+    message: str | None = None
+    readiness: dict[str, bool]
+    formula: str
+    levers: list[LeverSummaryOut]
+    recommendations: list[RecommendationOut]
 
 
 class DecisionEvaluateRequest(BaseModel):
@@ -239,6 +278,7 @@ class DecisionEvaluateRequest(BaseModel):
 class DecisionEvaluateResponse(BaseModel):
     created: list[DecisionOut]
     skipped: int
+    diagnose: DiagnoseResponse
 
 
 class DecisionStatusUpdate(BaseModel):

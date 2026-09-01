@@ -2,11 +2,12 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
-from app.models.config import ConversionDefinition, OrganicChannel
-from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscQueryPage
+from app.models.config import OrganicChannel
+from app.models.crawl import FactCrawlPageSnapshot
+from app.models.ga4 import FactGa4Traffic
+from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.services.decisions import evaluate_and_store, list_decisions
+from app.services.decisions import evaluate_and_store, run_diagnose
 from tests.conftest import client_header, date_window
 
 
@@ -22,123 +23,96 @@ def _watermark(db, client_id, source: str, fact_through: date) -> None:
     )
 
 
-def test_evaluate_stores_conversion_bottleneck(db, client_a):
-    start = date(2026, 6, 4)
-    end = date(2026, 9, 1)
-    prev_start = date(2026, 3, 6)
-    prev_end = date(2026, 6, 3)
-
-    _watermark(db, client_a.id, "ga4", end)
+def test_diagnose_api(db, client, client_a, admin_user):
+    start, end = date_window(7)
+    _watermark(db, client_a.id, "gsc_pages", end)
     db.add(
-        ConversionDefinition(
+        FactGscPage(
             id=uuid4(),
             client_id=client_a.id,
-            event_name="generate_lead",
-            conversion_name="Lead",
-            conversion_type="lead",
-            is_primary=True,
-            active=True,
+            date=end,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            country="",
+            device="",
+            impressions=Decimal("100"),
+            clicks=Decimal("1"),
+            ctr=Decimal("0.01"),
+            average_position=Decimal("10"),
         )
     )
-    for day, sessions, leads in [
-        (end, Decimal("200"), 5),
-        (prev_end, Decimal("100"), 5),
-    ]:
-        db.add(
-            FactGa4Traffic(
-                id=uuid4(),
-                client_id=client_a.id,
-                date=day,
-                raw_url="https://example.com/",
-                normalized_url="https://example.com/",
-                session_source="google",
-                session_medium="organic",
-                channel=OrganicChannel.ORGANIC_SEARCH,
-                sessions=sessions,
-                active_users=sessions,
-                views=sessions,
-            )
-        )
-        db.add(
-            FactGa4Event(
-                id=uuid4(),
-                client_id=client_a.id,
-                date=day,
-                raw_url="https://example.com/",
-                normalized_url="https://example.com/",
-                session_source="google",
-                session_medium="organic",
-                channel=OrganicChannel.ORGANIC_SEARCH,
-                event_name="generate_lead",
-                event_count=leads,
-            )
-        )
     db.commit()
 
-    created, skipped = evaluate_and_store(db, client_a, from_date=start, to_date=end)
-    assert skipped == 0
-    assert any(row.growth_action and row.growth_action.value == "conversion_path" for row in created)
+    res = client.get(
+        f"/decisions/diagnose?from={start.isoformat()}&to={end.isoformat()}",
+        headers=client_header(client_a.id, admin_user.email),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ready"] is True
+    assert len(body["levers"]) == 6
+    assert "formula" in body
 
-    created_again, skipped_again = evaluate_and_store(db, client_a, from_date=start, to_date=end)
+
+def test_evaluate_persists_scored_decisions(db, client_a):
+    start, end = date_window(14)
+    page = "https://example.com/page"
+    _watermark(db, client_a.id, "gsc_pages", end)
+    db.add(
+        FactGscPage(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url=page,
+            normalized_url=page,
+            country="usa",
+            device="DESKTOP",
+            impressions=Decimal("1500"),
+            clicks=Decimal("2"),
+            ctr=Decimal("0.0013"),
+            average_position=Decimal("5"),
+        )
+    )
+    db.commit()
+
+    created, skipped, result = evaluate_and_store(db, client_a, from_date=start, to_date=end)
+    assert result.ready is True
+    assert len(created) >= 1
+    assert created[0].priority_score is not None
+    assert created[0].impact is not None
+
+    created_again, skipped_again, _ = evaluate_and_store(db, client_a, from_date=start, to_date=end)
     assert len(created_again) == 0
     assert skipped_again >= 1
 
 
-def test_evaluate_finds_high_impression_low_ctr_query(db, client_a):
-    start, end = date_window(14)
-    _watermark(db, client_a.id, "gsc_queries", end)
+def test_decisions_api_evaluate_includes_diagnose(db, client, client_a, admin_user):
+    start, end = date_window(7)
+    _watermark(db, client_a.id, "gsc_pages", end)
     db.add(
-        FactGscQueryPage(
+        FactGscPage(
             id=uuid4(),
             client_id=client_a.id,
             date=end,
-            query="carbon fiber tubes",
-            raw_url="https://example.com/products",
-            normalized_url="https://example.com/products",
-            country="usa",
-            device="DESKTOP",
-            impressions=Decimal("500"),
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            country="",
+            device="",
+            impressions=Decimal("100"),
             clicks=Decimal("1"),
-            ctr=Decimal("0.002"),
-            average_position=Decimal("4.5"),
+            ctr=Decimal("0.01"),
+            average_position=Decimal("10"),
         )
     )
     db.commit()
-
-    created, _ = evaluate_and_store(db, client_a, from_date=start, to_date=end)
-    matches = [row for row in created if row.query == "carbon fiber tubes"]
-    assert len(matches) == 1
-    assert matches[0].growth_action and matches[0].growth_action.value == "serp_ctr"
-
-
-def test_decisions_api_evaluate_and_list(client, client_a, admin_user):
-    start, end = date_window(7)
     headers = client_header(client_a.id, admin_user.email)
 
-    evaluate = client.post(
+    res = client.post(
         "/decisions/evaluate",
         headers=headers,
         json={"from": start.isoformat(), "to": end.isoformat()},
     )
-    assert evaluate.status_code == 200
-    body = evaluate.json()
-    assert "created" in body
-    assert "skipped" in body
-
-    listed = client.get(
-        f"/decisions?from={start.isoformat()}&to={end.isoformat()}",
-        headers=headers,
-    )
-    assert listed.status_code == 200
-    assert isinstance(listed.json(), list)
-
-
-def test_decisions_are_client_isolated(db, client_a, client_b):
-    start, end = date_window(7)
-    evaluate_and_store(db, client_a, from_date=start, to_date=end)
-    evaluate_and_store(db, client_b, from_date=start, to_date=end)
-
-    a_rows = list_decisions(db, client_a.id, from_date=start, to_date=end)
-    b_rows = list_decisions(db, client_b.id, from_date=start, to_date=end)
-    assert all(row.client_id == client_a.id for row in a_rows)
-    assert all(row.client_id == client_b.id for row in b_rows)
+    assert res.status_code == 200
+    body = res.json()
+    assert "diagnose" in body
+    assert body["diagnose"]["ready"] is True

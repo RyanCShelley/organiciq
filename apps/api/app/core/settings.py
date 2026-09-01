@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     google_data_oauth_client_secret: str = ""
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
+    decision_engine_enabled: bool = True
     se_ranking_api_key: str = ""
 
     @property

@@ -1,8 +1,9 @@
 import enum
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -106,3 +107,8 @@ class Decision(Base):
     date_range_start: Mapped[date] = mapped_column(Date, nullable=False)
     date_range_end: Mapped[date] = mapped_column(Date, nullable=False)
     dismissal_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    impact: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    urgency: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    effort: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

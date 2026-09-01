@@ -258,18 +258,24 @@ Automated coverage: `pytest tests/test_phase8_multi_client.py tests/test_phase1.
 
 ## Phase 9 — Decision Engine (local)
 
-The Decision Engine evaluates validated dashboard + GSC query facts and stores recommendations mapped to the five Growth Actions (plus Content Planning Signals).
+Deterministic lever engine in `app/services/lever_engine.py` → `diagnose()`:
+
+1. **Readiness gate** — requires Search Console page facts (`facts_gsc_pages`); crawl levers also need `facts_crawl_page_snapshots`
+2. **Per-page cascade** — pages with ≥30 impressions, first matching lever wins (Technical → Internal Linking → SERP/CTR)
+3. **Portfolio checks** — Structured Data/AI gap, Conversion Path (managed lead rate vs sessions)
+4. **Scoring** — `0.4·impact + 0.3·confidence + 0.2·urgency + 0.1·(100−effort)`
+5. **Rank** — top 14 recommendations returned to the UI
+
+Content Expansion is scaffolded in the UI but has no trigger yet (needs topic-demand data).
 
 ### API
 
-- `GET /decisions?from=&to=` — list stored decisions for the selected client/period
-- `POST /decisions/evaluate` — run rules and persist new decisions (skips duplicates per rule/period)
-- `PATCH /decisions/{id}` — update decision status (`new`, `reviewed`, `accepted`, `dismissed`, …)
-- `GET/PUT /decisions/thresholds` — per-client rule thresholds (defaults in `app/decisions/thresholds.py`)
+- `GET /decisions/diagnose?from=&to=` — live lever engine output (no persist)
+- `POST /decisions/evaluate` — persist top recommendations for the period
+- `PATCH /decisions/{id}` — update decision status
+- `GET/PUT /decisions/thresholds` — per-client rule thresholds
 
-### UI
-
-Open **Decision Engine** in the nav (uses the same client + date controls as Dashboard). Click **Evaluate period** after syncs complete.
+Set `DECISION_ENGINE_ENABLED=false` to disable evaluation.
 
 Run migration:
 
@@ -277,7 +283,7 @@ Run migration:
 cd apps/api && alembic upgrade head
 ```
 
-Automated coverage: `pytest tests/test_decisions_phase9.py`
+Automated coverage: `pytest tests/test_lever_engine_phase9.py tests/test_decisions_phase9.py`
 
 ## Phase map
 

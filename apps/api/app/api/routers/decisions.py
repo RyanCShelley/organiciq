@@ -19,10 +19,69 @@ from app.schemas import (
     DecisionStatusUpdate,
     DecisionThresholdsOut,
     DecisionThresholdsUpdate,
+    DiagnoseResponse,
+    LeverSummaryOut,
+    RecommendationOut,
 )
 from app.services import decisions as decision_service
+from app.services.lever_engine import LEVER_LABELS
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
+
+
+def _serialize_diagnose(result) -> DiagnoseResponse:
+    return DiagnoseResponse(
+        ready=result.ready,
+        message=result.message,
+        readiness=result.readiness,
+        formula=result.formula,
+        levers=[
+            LeverSummaryOut(
+                lever=row.lever,
+                label=row.label,
+                findings_count=row.findings_count,
+                status=row.status,
+            )
+            for row in result.levers
+        ],
+        recommendations=[
+            RecommendationOut(
+                rule_key=row.rule_key,
+                lever=row.lever,
+                label=LEVER_LABELS.get(row.lever, row.lever),
+                stage=row.stage.value,
+                diagnosis=row.diagnosis,
+                recommended_action=row.recommended_action,
+                success_metric=row.success_metric,
+                priority_score=row.priority_score,
+                impact=row.impact,
+                confidence=row.confidence,
+                urgency=row.urgency,
+                effort=row.effort,
+                page_url=row.page_url,
+                query=row.query,
+                evidence_json=row.evidence_json,
+            )
+            for row in result.recommendations
+        ],
+    )
+
+
+@router.get("/diagnose", response_model=DiagnoseResponse)
+def diagnose_client(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    from_date: Annotated[date, Query(alias="from")],
+    to_date: Annotated[date, Query(alias="to")],
+) -> DiagnoseResponse:
+    if from_date > to_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'from' must be on or before 'to'",
+        )
+    result = decision_service.run_diagnose(db, client, from_date=from_date, to_date=to_date)
+    return _serialize_diagnose(result)
 
 
 @router.get("", response_model=list[DecisionOut])
@@ -54,7 +113,7 @@ def evaluate_decisions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="'from' must be on or before 'to'",
         )
-    created, skipped = decision_service.evaluate_and_store(
+    created, skipped, result = decision_service.evaluate_and_store(
         db,
         client,
         from_date=payload.from_date,
@@ -63,6 +122,7 @@ def evaluate_decisions(
     return DecisionEvaluateResponse(
         created=[DecisionOut.model_validate(row) for row in created],
         skipped=skipped,
+        diagnose=_serialize_diagnose(result),
     )
 
 

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.decisions.engine import DecisionDraft, evaluate_decision_drafts
+from app.core.settings import get_settings
 from app.decisions.thresholds import DEFAULT_DECISION_THRESHOLDS, merge_thresholds
 from app.models.client import Client
-from app.models.decision import Decision, DecisionStatus, DecisionThreshold
+from app.models.decision import (
+    Decision,
+    DecisionPriority,
+    DecisionStatus,
+    DecisionThreshold,
+    DecisionType,
+    GrowthAction,
+)
+from app.services.lever_engine import DiagnoseResult, LeverFinding, diagnose
 
 
 def get_thresholds(db: Session, client_id: UUID) -> dict[str, float | int]:
@@ -31,6 +40,24 @@ def upsert_thresholds(db: Session, client_id: UUID, overrides: dict) -> dict[str
     return merged
 
 
+def run_diagnose(
+    db: Session,
+    client: Client,
+    *,
+    from_date: date,
+    to_date: date,
+) -> DiagnoseResult:
+    settings = get_settings()
+    if not settings.decision_engine_enabled:
+        return DiagnoseResult(
+            ready=False,
+            message="Decision Engine is disabled.",
+            readiness={"search_console": False, "crawl_audit": False},
+            formula="",
+        )
+    return diagnose(db, client, from_date=from_date, to_date=to_date)
+
+
 def list_decisions(
     db: Session,
     client_id: UUID,
@@ -49,7 +76,7 @@ def list_decisions(
         query = query.filter(Decision.status == status)
     return (
         query.order_by(
-            Decision.priority.desc(),
+            Decision.priority_score.desc().nullslast(),
             Decision.created_at.desc(),
         )
         .limit(limit)
@@ -57,26 +84,54 @@ def list_decisions(
     )
 
 
-def _draft_to_model(client_id: UUID, draft: DecisionDraft, from_date: date, to_date: date) -> Decision:
+def _priority_band(score: float) -> DecisionPriority:
+    if score >= 70:
+        return DecisionPriority.HIGH
+    if score >= 50:
+        return DecisionPriority.MEDIUM
+    return DecisionPriority.LOW
+
+
+def _decision_type_for_lever(lever: str) -> DecisionType:
+    if lever == "content_expansion":
+        return DecisionType.CONTENT_PLANNING_SIGNAL
+    if lever == GrowthAction.CONVERSION_PATH.value:
+        return DecisionType.BOTTLENECK
+    if lever in {GrowthAction.TECHNICAL_SEO.value, GrowthAction.SERP_CTR.value}:
+        return DecisionType.BOTTLENECK if lever == GrowthAction.TECHNICAL_SEO.value else DecisionType.OPPORTUNITY
+    return DecisionType.OPPORTUNITY
+
+
+def _growth_action_for_lever(lever: str) -> GrowthAction | None:
+    if lever == "content_expansion":
+        return None
+    return GrowthAction(lever)
+
+
+def _finding_to_model(client_id: UUID, finding: LeverFinding, from_date: date, to_date: date) -> Decision:
+    growth_action = _growth_action_for_lever(finding.lever)
     return Decision(
         client_id=client_id,
-        rule_key=draft.rule_key,
-        decision_type=draft.decision_type,
-        growth_action=draft.growth_action,
-        diagnostic_layer=draft.diagnostic_layer,
-        priority=draft.priority,
+        rule_key=finding.rule_key,
+        decision_type=_decision_type_for_lever(finding.lever),
+        growth_action=growth_action,
+        diagnostic_layer=finding.stage,
+        priority=_priority_band(finding.priority_score),
         status=DecisionStatus.NEW,
-        page_url=draft.page_url,
-        query=draft.query,
-        keyword=draft.keyword,
-        prompt=draft.prompt,
-        diagnosis=draft.diagnosis,
-        recommended_action=draft.recommended_action,
-        evidence_json=draft.evidence_json,
-        baseline_metrics_json=draft.baseline_metrics_json,
-        success_metric=draft.success_metric,
+        page_url=finding.page_url,
+        query=finding.query,
+        diagnosis=finding.diagnosis,
+        recommended_action=finding.recommended_action,
+        evidence_json=finding.evidence_json,
+        baseline_metrics_json=finding.baseline_metrics_json,
+        success_metric=finding.success_metric,
         date_range_start=from_date,
         date_range_end=to_date,
+        priority_score=Decimal(str(finding.priority_score)),
+        impact=Decimal(str(finding.impact)),
+        confidence=Decimal(str(finding.confidence)),
+        urgency=Decimal(str(finding.urgency)),
+        effort=Decimal(str(finding.effort)),
     )
 
 
@@ -86,24 +141,19 @@ def evaluate_and_store(
     *,
     from_date: date,
     to_date: date,
-) -> tuple[list[Decision], int]:
-    thresholds = get_thresholds(db, client.id)
-    drafts = evaluate_decision_drafts(
-        db,
-        client_id=client.id,
-        from_date=from_date,
-        to_date=to_date,
-        threshold_overrides=thresholds,
-    )
+) -> tuple[list[Decision], int, DiagnoseResult]:
+    result = run_diagnose(db, client, from_date=from_date, to_date=to_date)
+    if not result.ready:
+        return [], 0, result
 
     created: list[Decision] = []
     skipped = 0
-    for draft in drafts:
+    for finding in result.recommendations:
         existing = (
             db.query(Decision)
             .filter(
                 Decision.client_id == client.id,
-                Decision.rule_key == draft.rule_key,
+                Decision.rule_key == finding.rule_key,
                 Decision.date_range_start == from_date,
                 Decision.date_range_end == to_date,
             )
@@ -112,14 +162,14 @@ def evaluate_and_store(
         if existing is not None:
             skipped += 1
             continue
-        decision = _draft_to_model(client.id, draft, from_date, to_date)
+        decision = _finding_to_model(client.id, finding, from_date, to_date)
         db.add(decision)
         created.append(decision)
 
     db.commit()
     for decision in created:
         db.refresh(decision)
-    return created, skipped
+    return created, skipped, result
 
 
 def update_decision_status(
