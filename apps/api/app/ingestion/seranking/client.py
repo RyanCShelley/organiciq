@@ -256,6 +256,64 @@ def list_airt_prompts_paginated(
     return rows
 
 
+def list_site_audits(
+    *,
+    api_key: str,
+    limit: int = 100,
+    offset: int = 0,
+    search: str | None = None,
+    date_start: date | None = None,
+    date_end: date | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    if search:
+        params["search"] = search
+    if date_start is not None:
+        params["date_start"] = date_start.isoformat()
+    if date_end is not None:
+        params["date_end"] = date_end.isoformat()
+    data = _request(api_key=api_key, method="GET", path="/site-audit/audits", params=params)
+    return data if isinstance(data, dict) else {"items": [], "total": 0}
+
+
+def get_audit_status(*, api_key: str, audit_id: int | str) -> dict[str, Any]:
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/site-audit/audits/status",
+        params={"audit_id": audit_id},
+    )
+    return data if isinstance(data, dict) else {}
+
+
+def list_audit_pages_paginated(
+    *,
+    api_key: str,
+    audit_id: int | str,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        data = _request(
+            api_key=api_key,
+            method="GET",
+            path="/site-audit/audits/pages",
+            params={"audit_id": audit_id, "limit": page_size, "offset": offset},
+        )
+        if not isinstance(data, dict):
+            break
+        batch = data.get("items") or []
+        if not isinstance(batch, list):
+            break
+        rows.extend(item for item in batch if isinstance(item, dict))
+        total = int(data.get("total") or 0)
+        offset += len(batch)
+        if offset >= total or not batch:
+            break
+    return rows
+
+
 def list_airt_prompt_rankings_paginated(
     *,
     api_key: str,

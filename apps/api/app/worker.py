@@ -25,6 +25,9 @@ def _jobs_module():
         "app.ingestion.gsc.pipeline",
         "app.ingestion.ga4.fetch",
         "app.ingestion.ga4.pipeline",
+        "app.ingestion.seranking.fetch_audit",
+        "app.ingestion.seranking.publish_audit",
+        "app.ingestion.seranking.pipeline_audit",
     ):
         module = sys.modules.get(module_name)
         if module is None:

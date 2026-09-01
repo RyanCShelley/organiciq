@@ -65,7 +65,10 @@ export function SeRankingConnectPanel({
     router.refresh();
   }
 
-  async function syncDays(source: "se_ranking_search" | "se_ranking_ai", days: number) {
+  async function syncDays(
+    source: "se_ranking_search" | "se_ranking_ai" | "se_ranking_audit",
+    days: number,
+  ) {
     setPending(true);
     setMessage(null);
     const res = await fetch("/api/proxy/jobs", {
@@ -135,6 +138,14 @@ export function SeRankingConnectPanel({
           className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
         >
           Sync AI 90 days
+        </button>
+        <button
+          type="button"
+          disabled={pending || !propertyId}
+          onClick={() => syncDays("se_ranking_audit", 1)}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+        >
+          Sync Website Audit
         </button>
       </div>
 

@@ -10,7 +10,8 @@ type SyncSource =
   | "gsc_queries"
   | "ga4"
   | "se_ranking_search"
-  | "se_ranking_ai";
+  | "se_ranking_ai"
+  | "se_ranking_audit";
 
 async function enqueueJob(
   clientId: string,
@@ -59,7 +60,7 @@ export function SyncAll90DaysPanel({
       sources.push("ga4");
     }
     if (hasSerankingProject) {
-      sources.push("se_ranking_search", "se_ranking_ai");
+      sources.push("se_ranking_search", "se_ranking_ai", "se_ranking_audit");
     }
 
     const enqueued: string[] = [];

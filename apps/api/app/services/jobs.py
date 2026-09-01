@@ -77,6 +77,7 @@ def _job_handlers() -> dict[str, object]:
     from app.ingestion.gsc.pipeline import run_gsc_pages_job, run_gsc_queries_job
     from app.ingestion.seranking.pipeline import run_seranking_search_job
     from app.ingestion.seranking.pipeline_ai import run_seranking_ai_job
+    from app.ingestion.seranking.pipeline_audit import run_seranking_audit_job
 
     return {
         "gsc_pages": run_gsc_pages_job,
@@ -84,6 +85,7 @@ def _job_handlers() -> dict[str, object]:
         "ga4": run_ga4_job,
         "se_ranking_search": run_seranking_search_job,
         "se_ranking_ai": run_seranking_ai_job,
+        "se_ranking_audit": run_seranking_audit_job,
     }
 
 

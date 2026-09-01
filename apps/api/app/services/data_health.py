@@ -16,6 +16,7 @@ WATERMARK_SOURCES = (
     "ga4",
     "se_ranking_search",
     "se_ranking_ai",
+    "se_ranking_audit",
 )
 
 PROVIDER_FOR_SOURCE = {
@@ -24,6 +25,7 @@ PROVIDER_FOR_SOURCE = {
     "ga4": "ga4",
     "se_ranking_search": "se_ranking",
     "se_ranking_ai": "se_ranking",
+    "se_ranking_audit": "se_ranking",
 }
 
 

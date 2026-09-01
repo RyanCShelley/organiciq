@@ -277,6 +277,8 @@ Content Expansion is scaffolded in the UI but has no trigger yet (needs topic-de
 
 Set `DECISION_ENGINE_ENABLED=false` to disable evaluation.
 
+Until crawl snapshots are loaded, **Crawl / Audit** will show amber and Technical SEO / Internal Linking levers stay at 0. Sync via **Integrations → SE Ranking → Sync Website Audit** (requires a finished audit in SE Ranking for the mapped project).
+
 Run migration:
 
 ```bash

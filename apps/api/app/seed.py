@@ -49,6 +49,7 @@ def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
         "facts_gsc_pages",
         "facts_gsc_daily",
         "facts_crawl_page_snapshots",
+        "staging_ser_audit_pages",
         "sync_jobs",
         "data_watermarks",
         "decisions",

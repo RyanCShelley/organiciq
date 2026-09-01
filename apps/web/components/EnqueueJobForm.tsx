@@ -3,7 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-const SOURCES = ["gsc_pages", "gsc_queries", "ga4", "se_ranking_search", "se_ranking_ai", "unknown_test"];
+const SOURCES = [
+  "gsc_pages",
+  "gsc_queries",
+  "ga4",
+  "se_ranking_search",
+  "se_ranking_ai",
+  "se_ranking_audit",
+  "unknown_test",
+];
 
 export function EnqueueJobForm({ clientId }: { clientId: string }) {
   const router = useRouter();
