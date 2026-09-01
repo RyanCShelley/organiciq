@@ -1,0 +1,83 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: organiciq
+      POSTGRES_PASSWORD: organiciq
+      POSTGRES_DB: organiciq
+    ports:
+      - "5432:5432"
+    volumes:
+      - organiciq_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U organiciq -d organiciq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://organiciq:organiciq@db:5432/organiciq
+      AUTH_SECRET: dev-auth-secret-change-me
+      SMA_ADMIN_EMAILS: admin@smamarketing.net
+      SMA_GOOGLE_HOSTED_DOMAIN: smamarketing.net
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      WEB_APP_URL: http://127.0.0.1:3000
+      INTEGRATION_TOKEN_KEY: dev-integration-token-key-32bytes!!
+      GOOGLE_DATA_OAUTH_CLIENT_ID: ${GOOGLE_DATA_OAUTH_CLIENT_ID:-}
+      GOOGLE_DATA_OAUTH_CLIENT_SECRET: ${GOOGLE_DATA_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_DATA_OAUTH_REDIRECT_URI: http://127.0.0.1:8000/oauth/google/callback
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./apps/api:/app
+
+  worker:
+    build:
+      context: ./apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://organiciq:organiciq@db:5432/organiciq
+      AUTH_SECRET: dev-auth-secret-change-me
+      SMA_ADMIN_EMAILS: admin@smamarketing.net
+      WORKER_POLL_INTERVAL_SECONDS: "2"
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: python -m app.worker
+    volumes:
+      - ./apps/api:/app
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      AUTH_SECRET: dev-auth-secret-change-me
+      AUTH_URL: http://localhost:3000
+      API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      SMA_GOOGLE_HOSTED_DOMAIN: smamarketing.net
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      NEXTAUTH_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  organiciq_pg:

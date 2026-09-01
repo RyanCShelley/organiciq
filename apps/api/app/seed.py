@@ -1,0 +1,196 @@
+"""Seed SMA Marketing + admin/team users for local development."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import date
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.core.db import SessionLocal
+from app.models.client import Client, ClientStatus, Tier
+from app.models.config import ConversionDefinition
+from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
+from app.models.user import User, UserClient, UserRole
+
+DEFAULT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+SMA_CLIENT_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+# Legacy demo clients from earlier local seeds — removed on every seed run.
+LEGACY_DEMO_CLIENT_IDS = (
+    uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),  # Beacon Industrial
+)
+ADMIN_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+TEAM_ID = uuid.UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+
+def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
+    """Remove a client and client-scoped rows (FKs have no ON DELETE CASCADE)."""
+    tables = [
+        "staging_ser_ai_checks",
+        "staging_ser_ai_prompts",
+        "facts_ser_ai_checks",
+        "facts_ser_ai_presence",
+        "facts_ser_ai_tracker_stats",
+        "facts_ser_ai_prompts",
+        "staging_ser_competitors",
+        "staging_ser_site_summary",
+        "facts_ser_site_summary",
+        "staging_ser_positions",
+        "staging_ser_keywords",
+        "facts_ser_competitors",
+        "facts_ser_rankings",
+        "facts_ser_keywords",
+        "staging_ga4_events",
+        "staging_ga4_traffic",
+        "facts_ga4_events",
+        "facts_ga4_traffic",
+        "staging_gsc_query_pages",
+        "staging_gsc_pages",
+        "facts_gsc_query_pages",
+        "facts_gsc_pages",
+        "sync_jobs",
+        "data_watermarks",
+        "integrations",
+        "conversion_definitions",
+        "topics",
+        "user_clients",
+        "clients",
+    ]
+    for table in tables:
+        if table == "clients":
+            db.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
+        else:
+            db.execute(text(f"DELETE FROM {table} WHERE client_id = :id"), {"id": client_id})
+
+
+def seed(db: Session) -> None:
+    tier = db.query(Tier).filter(Tier.id == DEFAULT_TIER_ID).one_or_none()
+    if tier is None:
+        raise RuntimeError("Default tier missing — run alembic upgrade head first")
+
+    for legacy_id in LEGACY_DEMO_CLIENT_IDS:
+        if db.query(Client).filter(Client.id == legacy_id).one_or_none() is not None:
+            _delete_client_cascade(db, legacy_id)
+
+    # Drop any leftover demo-named clients that are not SMA Marketing.
+    for row in db.query(Client).filter(Client.client_name.in_(["Acme Manufacturing", "Beacon Industrial"])).all():
+        if row.id != SMA_CLIENT_ID:
+            _delete_client_cascade(db, row.id)
+
+    client = db.query(Client).filter(Client.id == SMA_CLIENT_ID).one_or_none()
+    if client is None:
+        client = Client(
+            id=SMA_CLIENT_ID,
+            client_name="SMA Marketing",
+            domain="smamarketing.net",
+            tier_id=DEFAULT_TIER_ID,
+            start_date=date(2025, 1, 1),
+            primary_market="United States",
+            timezone="America/New_York",
+            monthly_lead_goal=25,
+            status=ClientStatus.ACTIVE,
+        )
+        db.add(client)
+        db.flush()
+        for provider in IntegrationProvider:
+            db.add(
+                Integration(
+                    client_id=client.id,
+                    provider=provider,
+                    connection_status=ConnectionStatus.NOT_CONNECTED,
+                )
+            )
+    else:
+        client.client_name = "SMA Marketing"
+        client.domain = "smamarketing.net"
+        client.status = ClientStatus.ACTIVE
+        for provider in IntegrationProvider:
+            exists = (
+                db.query(Integration)
+                .filter(Integration.client_id == client.id, Integration.provider == provider)
+                .one_or_none()
+            )
+            if exists is None:
+                db.add(
+                    Integration(
+                        client_id=client.id,
+                        provider=provider,
+                        connection_status=ConnectionStatus.NOT_CONNECTED,
+                    )
+                )
+
+    if db.query(User).filter(User.id == ADMIN_ID).one_or_none() is None:
+        db.add(
+            User(
+                id=ADMIN_ID,
+                email="admin@smamarketing.net",
+                name="SMA Admin",
+                google_sub="seed-admin",
+                role=UserRole.SMA_ADMIN,
+            )
+        )
+
+    if db.query(User).filter(User.id == TEAM_ID).one_or_none() is None:
+        db.add(
+            User(
+                id=TEAM_ID,
+                email="team@smamarketing.net",
+                name="SMA Team",
+                google_sub="seed-team",
+                role=UserRole.SMA_TEAM,
+            )
+        )
+        db.flush()
+        db.add(
+            UserClient(
+                user_id=TEAM_ID,
+                client_id=SMA_CLIENT_ID,
+                role=UserRole.SMA_TEAM,
+            )
+        )
+    else:
+        assignment = (
+            db.query(UserClient)
+            .filter(UserClient.user_id == TEAM_ID, UserClient.client_id == SMA_CLIENT_ID)
+            .one_or_none()
+        )
+        if assignment is None:
+            db.add(
+                UserClient(
+                    user_id=TEAM_ID,
+                    client_id=SMA_CLIENT_ID,
+                    role=UserRole.SMA_TEAM,
+                )
+            )
+
+    lead_def = (
+        db.query(ConversionDefinition)
+        .filter(
+            ConversionDefinition.client_id == SMA_CLIENT_ID,
+            ConversionDefinition.event_name == "generate_lead",
+        )
+        .one_or_none()
+    )
+    if lead_def is None:
+        db.add(
+            ConversionDefinition(
+                client_id=SMA_CLIENT_ID,
+                event_name="generate_lead",
+                conversion_name="Lead Form Submission",
+                conversion_type="lead",
+                is_primary=True,
+                active=True,
+            )
+        )
+
+    db.commit()
+    print("Seed complete: SMA Marketing client, admin@ and team@ users")
+
+
+if __name__ == "__main__":
+    session = SessionLocal()
+    try:
+        seed(session)
+    finally:
+        session.close()
