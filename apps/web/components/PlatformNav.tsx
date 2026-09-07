@@ -16,11 +16,7 @@ export function PlatformNav({ active }: { active: string }) {
           <Link
             key={link.href}
             href={link.href}
-            className={`rounded-lg px-3 py-1.5 text-sm ${
-              isActive
-                ? "bg-[var(--accent)] text-white"
-                : "border border-[var(--border)] text-[var(--muted)] hover:text-white"
-            }`}
+            className={isActive ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
           >
             {link.label}
           </Link>

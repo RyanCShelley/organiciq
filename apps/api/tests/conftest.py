@@ -20,6 +20,7 @@ from app.core.db import Base, get_db  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402, F401 — register all models on Base.metadata
+    Annotation,
     FactGa4Event,
     FactGa4Traffic,
     FactGscDaily,
@@ -122,10 +123,12 @@ def tier(db: Session) -> Tier:
         tier_name=f"Tier-{uuid.uuid4().hex[:8]}",
         tracked_keyword_limit=100,
         tracked_prompt_limit=50,
-        content_allowance=4,
-        update_allowance=4,
-        conversion_limit=5,
-        reporting_level="standard",
+        content_allowance=3,
+        update_allowance=3,
+        growth_action_allowance=1,
+        watchlist_cadence="monthly",
+        conversion_limit=3,
+        reporting_level="launch",
     )
     db.add(row)
     db.commit()

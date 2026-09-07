@@ -17,7 +17,8 @@ from app.models.decision import (
     DecisionType,
     GrowthAction,
 )
-from app.services.lever_engine import DiagnoseResult, LeverFinding, diagnose
+from app.services.decision_types import DiagnoseResult, LeverFinding
+from app.services.lever_engine import diagnose
 
 
 def get_thresholds(db: Session, client_id: UUID) -> dict[str, float | int]:
@@ -54,6 +55,8 @@ def run_diagnose(
             message="Decision Engine is disabled.",
             readiness={"search_console": False, "crawl_audit": False},
             formula="",
+            requested_from=from_date,
+            requested_to=to_date,
         )
     return diagnose(db, client, from_date=from_date, to_date=to_date)
 
@@ -84,17 +87,17 @@ def list_decisions(
     )
 
 
-def _priority_band(score: float) -> DecisionPriority:
-    if score >= 70:
+def _priority_band(score: float, thresholds: dict[str, float | int] | None = None) -> DecisionPriority:
+    high = float((thresholds or {}).get("high_priority_threshold", 70))
+    medium = float((thresholds or {}).get("medium_priority_threshold", 50))
+    if score >= high:
         return DecisionPriority.HIGH
-    if score >= 50:
+    if score >= medium:
         return DecisionPriority.MEDIUM
     return DecisionPriority.LOW
 
 
 def _decision_type_for_lever(lever: str) -> DecisionType:
-    if lever == "content_expansion":
-        return DecisionType.CONTENT_PLANNING_SIGNAL
     if lever == GrowthAction.CONVERSION_PATH.value:
         return DecisionType.BOTTLENECK
     if lever in {GrowthAction.TECHNICAL_SEO.value, GrowthAction.SERP_CTR.value}:
@@ -103,12 +106,32 @@ def _decision_type_for_lever(lever: str) -> DecisionType:
 
 
 def _growth_action_for_lever(lever: str) -> GrowthAction | None:
-    if lever == "content_expansion":
+    if lever == "search_opportunity":
         return None
     return GrowthAction(lever)
 
 
-def _finding_to_model(client_id: UUID, finding: LeverFinding, from_date: date, to_date: date) -> Decision:
+def _priority_from_finding(
+    finding: LeverFinding,
+    thresholds: dict[str, float | int] | None = None,
+) -> DecisionPriority:
+    band = finding.priority_band
+    if band == "high":
+        return DecisionPriority.HIGH
+    if band == "medium":
+        return DecisionPriority.MEDIUM
+    if band == "low":
+        return DecisionPriority.LOW
+    return _priority_band(finding.priority_score, thresholds)
+
+
+def _finding_to_model(
+    client_id: UUID,
+    finding: LeverFinding,
+    from_date: date,
+    to_date: date,
+    thresholds: dict[str, float | int],
+) -> Decision:
     growth_action = _growth_action_for_lever(finding.lever)
     return Decision(
         client_id=client_id,
@@ -116,7 +139,7 @@ def _finding_to_model(client_id: UUID, finding: LeverFinding, from_date: date, t
         decision_type=_decision_type_for_lever(finding.lever),
         growth_action=growth_action,
         diagnostic_layer=finding.stage,
-        priority=_priority_band(finding.priority_score),
+        priority=_priority_from_finding(finding, thresholds),
         status=DecisionStatus.NEW,
         page_url=finding.page_url,
         query=finding.query,
@@ -146,9 +169,10 @@ def evaluate_and_store(
     if not result.ready:
         return [], 0, result
 
+    thresholds = get_thresholds(db, client.id)
     created: list[Decision] = []
     skipped = 0
-    for finding in result.recommendations:
+    for finding in result.recommended_actions:
         existing = (
             db.query(Decision)
             .filter(
@@ -162,7 +186,7 @@ def evaluate_and_store(
         if existing is not None:
             skipped += 1
             continue
-        decision = _finding_to_model(client.id, finding, from_date, to_date)
+        decision = _finding_to_model(client.id, finding, from_date, to_date, thresholds)
         db.add(decision)
         created.append(decision)
 
@@ -170,6 +194,49 @@ def evaluate_and_store(
     for decision in created:
         db.refresh(decision)
     return created, skipped, result
+
+
+def ensure_decision_for_rule(
+    db: Session,
+    client: Client,
+    *,
+    from_date: date,
+    to_date: date,
+    rule_key: str,
+) -> Decision | None:
+    """Upsert a Decision for any diagnose finding (recommended or additional)."""
+    existing = (
+        db.query(Decision)
+        .filter(
+            Decision.client_id == client.id,
+            Decision.rule_key == rule_key,
+            Decision.date_range_start == from_date,
+            Decision.date_range_end == to_date,
+        )
+        .one_or_none()
+    )
+    if existing is not None:
+        return existing
+
+    result = run_diagnose(db, client, from_date=from_date, to_date=to_date)
+    if not result.ready:
+        return None
+
+    finding = next((row for row in result.findings if row.rule_key == rule_key), None)
+    if finding is None:
+        finding = next(
+            (row for row in result.recommended_actions if row.rule_key == rule_key),
+            None,
+        )
+    if finding is None:
+        return None
+
+    thresholds = get_thresholds(db, client.id)
+    decision = _finding_to_model(client.id, finding, from_date, to_date, thresholds)
+    db.add(decision)
+    db.commit()
+    db.refresh(decision)
+    return decision
 
 
 def update_decision_status(

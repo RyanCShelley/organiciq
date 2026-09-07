@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -11,12 +11,20 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import (
+    benchmark_source_label,
+    expected_ctr_percent,
+    is_ctr_underperforming,
+    recoverable_clicks_at_threshold,
+)
+from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
 from app.models.crawl import FactCrawlPageSnapshot
-from app.models.decision import DiagnosticLayer, GrowthAction
+from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
+from app.models.job import DataWatermark, ValidationStatus
+from app.services.action_promotion import promote_findings
 from app.services.dashboard import (
     _effective_range,
     _lead_event_names,
@@ -25,19 +33,47 @@ from app.services.dashboard import (
     build_dashboard,
     previous_period,
 )
+from app.services.decision_impact import (
+    LeadRateContext,
+    PageBusinessContext,
+    SiteBusinessContext,
+    build_impact_explanation,
+    compute_page_type_lead_rates,
+    compute_topic_lead_rates,
+    load_page_business_contexts,
+    load_site_business_context,
+    portfolio_urgency_adjustment,
+    score_conversion_impact,
+    score_internal_linking_impact,
+    score_serp_ctr_impact,
+    score_structured_data_impact,
+    score_technical_impact,
+    with_p90_sessions,
+)
+from app.services.decision_types import DiagnoseResult, LeverFinding, LeverSummary
+from app.services.page_eligibility import PageClassification, PageType, classify_pages
 
-SCORE_FORMULA = "0.4·impact + 0.3·confidence + 0.2·urgency + 0.1·(100−effort)"
-DEFAULT_TOP_N = 14
+SCORE_FORMULA = (
+    "0.6·impact + (0.15·confidence + 0.15·urgency + 0.1·(100−effort)) × min(1, impact÷20)"
+)
+PRIORITY_IMPACT_WEIGHT = 0.60
+PRIORITY_CONFIDENCE_WEIGHT = 0.15
+PRIORITY_URGENCY_WEIGHT = 0.15
+PRIORITY_EFFORT_WEIGHT = 0.10
+PRIORITY_IMPACT_RELEVANCE_SCALE = 20.0
+DEFAULT_TOP_N = 25
 MIN_PAGE_IMPRESSIONS = 30
 
 LEVER_LABELS: dict[str, str] = {
     GrowthAction.TECHNICAL_SEO.value: "Technical SEO & Indexation",
-    GrowthAction.INTERNAL_LINKING.value: "Internal Linking & Architecture",
-    GrowthAction.SERP_CTR.value: "SERP / CTR Optimization",
-    GrowthAction.STRUCTURED_DATA_AI.value: "Structured Data & Entities",
+    GrowthAction.INTERNAL_LINKING.value: "Internal Linking & Site Architecture",
+    GrowthAction.SERP_CTR.value: "SERP & CTR Optimization",
+    GrowthAction.STRUCTURED_DATA_AI.value: "Structured Data, Entities & AI Visibility",
     GrowthAction.CONVERSION_PATH.value: "Conversion Path Optimization",
-    "content_expansion": "Content Expansion / Optimization",
 }
+
+SEARCH_OPPORTUNITY_LEVER = "search_opportunity"
+SEARCH_OPPORTUNITY_LABEL = "Search Opportunity"
 
 
 @dataclass(frozen=True)
@@ -91,60 +127,25 @@ LEVER_INPUTS: dict[str, LeverInputs] = {
         recommended_action="Audit the CTA/form/phone path on affected landing pages.",
         success_metric="Managed lead rate recovers while sessions remain stable.",
     ),
-    "content_expansion": LeverInputs(
-        confidence=60,
-        urgency=40,
-        effort=50,
-        stage=DiagnosticLayer.VISIBILITY,
-        recommended_action="Evaluate topic coverage during monthly content planning.",
-        success_metric="Priority topic demand is covered by a suitable page.",
-    ),
 }
 
 
-@dataclass
-class LeverFinding:
-    rule_key: str
-    lever: str
-    stage: DiagnosticLayer
-    diagnosis: str
-    recommended_action: str
-    success_metric: str
-    evidence_json: dict[str, Any]
-    baseline_metrics_json: dict[str, Any]
-    impact: float
-    confidence: float
-    urgency: float
-    effort: float
-    priority_score: float
-    page_url: str | None = None
-    query: str | None = None
-
-
-@dataclass
-class LeverSummary:
-    lever: str
-    label: str
-    findings_count: int
-    status: str
-
-
-@dataclass
-class DiagnoseResult:
-    ready: bool
-    message: str | None
-    readiness: dict[str, bool]
-    formula: str
-    levers: list[LeverSummary] = field(default_factory=list)
-    recommendations: list[LeverFinding] = field(default_factory=list)
-
-
-def score_finding(*, impact: float, confidence: float, urgency: float, effort: float) -> float:
-    return round(0.40 * impact + 0.30 * confidence + 0.20 * urgency + 0.10 * (100 - effort), 1)
-
-
-def impact_from_impressions(impressions: float) -> float:
-    return min(100.0, round(impressions / 40.0, 1))
+def score_finding(
+    *,
+    impact: float,
+    confidence: float,
+    urgency: float,
+    effort: float,
+) -> float:
+    """Impact-led priority: secondary inputs only contribute when impact is meaningful."""
+    impact_relevance = min(1.0, max(0.0, impact / PRIORITY_IMPACT_RELEVANCE_SCALE))
+    secondary = (
+        PRIORITY_CONFIDENCE_WEIGHT * confidence
+        + PRIORITY_URGENCY_WEIGHT * urgency
+        + PRIORITY_EFFORT_WEIGHT * (100.0 - effort)
+    )
+    score = PRIORITY_IMPACT_WEIGHT * impact + secondary * impact_relevance
+    return round(min(100.0, score), 1)
 
 
 def _rule_key(*parts: str) -> str:
@@ -152,7 +153,7 @@ def _rule_key(*parts: str) -> str:
 
 
 def _link_floor(word_count: int) -> int:
-    if word_count < 1000:
+    if word_count < 500:
         return 2
     if word_count < 2000:
         return 5
@@ -172,6 +173,69 @@ class PageDemand:
     clicks: float
     average_position: float
     ctr_percent: float
+
+
+def _gsc_fact_bounds(db: Session, client_id: UUID) -> tuple[date | None, date | None]:
+    min_date = (
+        db.query(func.min(FactGscPage.date))
+        .filter(FactGscPage.client_id == client_id)
+        .scalar()
+    )
+    max_date = (
+        db.query(func.max(FactGscPage.date))
+        .filter(FactGscPage.client_id == client_id)
+        .scalar()
+    )
+    return min_date, max_date
+
+
+def _resolve_gsc_analysis_period(
+    *,
+    from_date: date,
+    to_date: date,
+    watermark: DataWatermark | None,
+    fact_min: date | None,
+    fact_max: date | None,
+) -> tuple[tuple[date, date] | None, str | None, str | None]:
+    """Return (analysis period, blocking message, partial coverage note)."""
+    if watermark is None or watermark.fact_through_date is None:
+        return None, "Search Console has not been synced for this client yet.", None
+    if watermark.validation_status != ValidationStatus.PASSED:
+        return None, "Search Console data has not passed validation yet.", None
+    if fact_min is None or fact_max is None:
+        return (
+            None,
+            "Search Console page facts are required before the Decision Engine can run.",
+            None,
+        )
+
+    sync_through = watermark.fact_through_date
+    analysis_from = max(from_date, fact_min)
+    analysis_to = min(to_date, sync_through, fact_max)
+    if analysis_from > analysis_to:
+        return (
+            None,
+            (
+                f"No Search Console page facts overlap {from_date.isoformat()} to {to_date.isoformat()}. "
+                f"Available facts: {fact_min.isoformat()} to {sync_through.isoformat()}."
+            ),
+            None,
+        )
+
+    partial_parts: list[str] = []
+    if analysis_from > from_date:
+        partial_parts.append(
+            f"starts {analysis_from.isoformat()} (you selected {from_date.isoformat()})"
+        )
+    if analysis_to < to_date:
+        partial_parts.append(
+            f"ends {analysis_to.isoformat()} (you selected {to_date.isoformat()})"
+        )
+    partial_message = None
+    if partial_parts:
+        partial_message = f"Analysis uses available facts only: {'; '.join(partial_parts)}."
+
+    return (analysis_from, analysis_to), None, partial_message
 
 
 def _load_page_demand(
@@ -226,6 +290,47 @@ def _load_crawl_by_url(db: Session, client_id: UUID) -> dict[str, FactCrawlPageS
     return {row.normalized_url: row for row in rows}
 
 
+def _load_thresholds(db: Session, client_id: UUID) -> dict[str, float | int]:
+    row = db.query(DecisionThreshold).filter(DecisionThreshold.client_id == client_id).one_or_none()
+    if row is None:
+        return merge_thresholds(None)
+    return merge_thresholds(row.thresholds)
+
+
+def _lead_rate_context_for_url(
+    url: str,
+    classifications: dict[str, PageClassification],
+    page_type_rates: dict[str, float],
+    topic_rates: dict[str, float],
+) -> LeadRateContext:
+    classification = classifications.get(url)
+    return LeadRateContext(
+        page_type=classification.page_type if classification else None,
+        page_type_rates=page_type_rates,
+        topic=classification.priority_topic if classification else None,
+        topic_rates=topic_rates,
+    )
+
+
+def _enrich_finding(
+    finding: LeverFinding,
+    *,
+    classification: PageClassification | None,
+    page_ctx: PageBusinessContext | None,
+) -> None:
+    if classification is not None:
+        finding.evidence_json.update(classification.as_evidence())
+    finding.evidence_json["impact_explanation"] = build_impact_explanation(
+        finding.evidence_json,
+        classification=classification,
+        page_ctx=page_ctx,
+    )
+    if classification is not None and classification.priority_topic:
+        finding.finding_group_key = f"topic:{classification.priority_topic}:{finding.lever}"
+    else:
+        finding.finding_group_key = finding.rule_key
+
+
 def _make_finding(
     *,
     lever: str,
@@ -236,12 +341,15 @@ def _make_finding(
     impact: float,
     page_url: str | None = None,
     query: str | None = None,
+    urgency_override: float | None = None,
+    severity: float | None = None,
 ) -> LeverFinding:
     inputs = LEVER_INPUTS[lever]
+    urgency = urgency_override if urgency_override is not None else inputs.urgency
     priority_score = score_finding(
         impact=impact,
         confidence=inputs.confidence,
-        urgency=inputs.urgency,
+        urgency=urgency,
         effort=inputs.effort,
     )
     return LeverFinding(
@@ -255,22 +363,45 @@ def _make_finding(
         baseline_metrics_json=baseline_metrics_json,
         impact=impact,
         confidence=inputs.confidence,
-        urgency=inputs.urgency,
+        urgency=urgency,
         effort=inputs.effort,
         priority_score=priority_score,
         page_url=page_url,
         query=query,
+        severity=severity,
     )
 
 
-def _technical_finding(page: PageDemand, crawl: FactCrawlPageSnapshot) -> LeverFinding | None:
+def _technical_finding(
+    page: PageDemand,
+    crawl: FactCrawlPageSnapshot,
+    *,
+    page_ctx: PageBusinessContext | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None = None,
+    classification: PageClassification | None = None,
+) -> LeverFinding | None:
     canonical = _normalize_canonical(crawl.canonical_url)
     page_norm = _normalize_canonical(page.normalized_url)
     canonicalized_elsewhere = canonical is not None and page_norm is not None and canonical != page_norm
     status_bad = crawl.status_code is not None and crawl.status_code >= 400
     if crawl.indexable and not status_bad and not canonicalized_elsewhere:
         return None
-    impact = impact_from_impressions(page.impressions)
+    assessment = score_technical_impact(
+        impressions=page.impressions,
+        clicks=page.clicks,
+        average_position=page.average_position,
+        indexable=crawl.indexable,
+        status_code=crawl.status_code,
+        canonicalized_elsewhere=canonicalized_elsewhere,
+        page_ctx=page_ctx,
+        site=site,
+        classification=classification,
+        lead_rate_ctx=lead_rate_ctx,
+    )
+    urgency_override = None
+    if assessment.critical_override:
+        urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
     diagnosis = f"Technical issue on {page.normalized_url}"
     if not crawl.indexable:
         diagnosis = f"Non-indexable page with demand: {page.normalized_url}"
@@ -287,23 +418,42 @@ def _technical_finding(page: PageDemand, crawl: FactCrawlPageSnapshot) -> LeverF
             "indexable": crawl.indexable,
             "status_code": crawl.status_code,
             "canonical_url": crawl.canonical_url,
+            **assessment.evidence,
         },
         baseline_metrics_json={
             "impressions": page.impressions,
             "average_position": round(page.average_position, 1),
         },
-        impact=impact,
+        impact=assessment.impact,
+        severity=assessment.severity,
+        urgency_override=urgency_override,
         page_url=page.normalized_url,
     )
 
 
-def _internal_linking_finding(page: PageDemand, crawl: FactCrawlPageSnapshot) -> LeverFinding | None:
+def _internal_linking_finding(
+    page: PageDemand,
+    crawl: FactCrawlPageSnapshot,
+    *,
+    page_ctx: PageBusinessContext | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None = None,
+    classification: PageClassification | None = None,
+) -> LeverFinding | None:
     if page.average_position < 4 or page.average_position > 20:
         return None
     floor = _link_floor(crawl.word_count)
     if crawl.inbound_internal_links >= floor:
         return None
-    impact = impact_from_impressions(page.impressions)
+    impact, impact_evidence = score_internal_linking_impact(
+        impressions=page.impressions,
+        clicks=page.clicks,
+        average_position=page.average_position,
+        page_ctx=page_ctx,
+        site=site,
+        lead_rate_ctx=lead_rate_ctx,
+        strategic_priority=classification.strategic_priority if classification else 3,
+    )
     diagnosis = (
         f"Under-linked page ranking {page.average_position:.0f}: {page.normalized_url}"
     )
@@ -314,9 +464,11 @@ def _internal_linking_finding(page: PageDemand, crawl: FactCrawlPageSnapshot) ->
         evidence_json={
             "position": round(page.average_position, 1),
             "inbound_internal_links": crawl.inbound_internal_links,
+            "inlink_source": "se_ranking_audit",
             "link_floor": floor,
             "word_count": crawl.word_count,
             "impressions": int(page.impressions),
+            **impact_evidence,
         },
         baseline_metrics_json={
             "impressions": page.impressions,
@@ -327,18 +479,44 @@ def _internal_linking_finding(page: PageDemand, crawl: FactCrawlPageSnapshot) ->
     )
 
 
-def _serp_ctr_finding(page: PageDemand) -> LeverFinding | None:
+def _serp_ctr_finding(
+    page: PageDemand,
+    *,
+    page_ctx: PageBusinessContext | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None = None,
+    classification: PageClassification | None = None,
+) -> LeverFinding | None:
     if page.impressions < 1000:
         return None
     if page.average_position < 2 or page.average_position > 10:
         return None
     expected = expected_ctr_percent(page.average_position)
-    if page.ctr_percent >= expected * 0.5:
+    if not is_ctr_underperforming(
+        ctr_percent=page.ctr_percent,
+        expected_ctr=expected,
+        impressions=page.impressions,
+    ):
         return None
-    impact = impact_from_impressions(page.impressions)
+    recoverable = float(recoverable_clicks_at_threshold(
+        impressions=page.impressions,
+        ctr_percent=page.ctr_percent,
+        expected_ctr=expected,
+    ))
+    recoverable_int = int(round(recoverable))
+    impact, impact_evidence = score_serp_ctr_impact(
+        recoverable_clicks=recoverable,
+        page_ctx=page_ctx,
+        site=site,
+        clicks=page.clicks,
+        average_position=page.average_position,
+        lead_rate_ctx=lead_rate_ctx,
+        strategic_priority=classification.strategic_priority if classification else 3,
+    )
     diagnosis = (
-        f"High-impression page underperforming CTR: {page.normalized_url} "
-        f"(position {page.average_position:.1f}, CTR {page.ctr_percent:.2f}% vs expected {expected:.2f}%)"
+        f"Low CTR at position {page.average_position:.0f}: {page.normalized_url} "
+        f"(CTR {page.ctr_percent:.2f}% vs expected {expected:.1f}% at pos {page.average_position:.1f}; "
+        f"~{recoverable_int} clicks recoverable)"
     )
     return _make_finding(
         lever=GrowthAction.SERP_CTR.value,
@@ -348,8 +526,11 @@ def _serp_ctr_finding(page: PageDemand) -> LeverFinding | None:
             "impressions": int(page.impressions),
             "clicks": int(page.clicks),
             "ctr_percent": round(page.ctr_percent, 2),
-            "expected_ctr_percent": expected,
+            "expected_ctr_percent": round(expected, 2),
+            "ctr_benchmark_source": benchmark_source_label(),
+            "recoverable_clicks": recoverable_int,
             "average_position": round(page.average_position, 1),
+            **impact_evidence,
         },
         baseline_metrics_json={
             "impressions": page.impressions,
@@ -365,20 +546,121 @@ def _per_page_cascade(
     crawl_by_url: dict[str, FactCrawlPageSnapshot],
     *,
     crawl_ready: bool,
+    page_contexts: dict[str, PageBusinessContext],
+    site: SiteBusinessContext,
+    classifications: dict[str, PageClassification],
+    page_type_rates: dict[str, float],
+    topic_rates: dict[str, float],
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     for page in pages:
+        page_ctx = page_contexts.get(page.normalized_url)
+        classification = classifications.get(page.normalized_url)
+        lead_rate_ctx = _lead_rate_context_for_url(
+            page.normalized_url,
+            classifications,
+            page_type_rates,
+            topic_rates,
+        )
         crawl = crawl_by_url.get(page.normalized_url)
         finding: LeverFinding | None = None
         if crawl_ready and crawl is not None:
-            finding = _technical_finding(page, crawl)
+            finding = _technical_finding(
+                page,
+                crawl,
+                page_ctx=page_ctx,
+                site=site,
+                lead_rate_ctx=lead_rate_ctx,
+                classification=classification,
+            )
             if finding is None:
-                finding = _internal_linking_finding(page, crawl)
+                finding = _internal_linking_finding(
+                    page,
+                    crawl,
+                    page_ctx=page_ctx,
+                    site=site,
+                    lead_rate_ctx=lead_rate_ctx,
+                    classification=classification,
+                )
         if finding is None:
-            finding = _serp_ctr_finding(page)
+            finding = _serp_ctr_finding(
+                page,
+                page_ctx=page_ctx,
+                site=site,
+                lead_rate_ctx=lead_rate_ctx,
+                classification=classification,
+            )
         if finding is not None:
+            _enrich_finding(finding, classification=classification, page_ctx=page_ctx)
             findings.append(finding)
     return findings
+
+
+def _search_opportunities(
+    pages: list[PageDemand],
+    *,
+    actioned_urls: set[str],
+    classifications: dict[str, PageClassification],
+    thresholds: dict[str, float | int],
+) -> list[LeverFinding]:
+    min_pos = int(thresholds["gsc_striking_distance_min_pos"])
+    max_pos = int(thresholds["gsc_striking_distance_max_pos"])
+    min_impressions = max(
+        int(thresholds["gsc_striking_distance_min_impressions"]),
+        int(thresholds.get("content_planning_min_impressions", 200)),
+    )
+    top_n = int(thresholds.get("content_planning_top_n", 10))
+    candidates: list[tuple[float, LeverFinding]] = []
+
+    for page in pages:
+        if page.normalized_url in actioned_urls:
+            continue
+        if page.average_position < min_pos or page.average_position > max_pos:
+            continue
+        if page.impressions < min_impressions:
+            continue
+
+        classification = classifications.get(page.normalized_url)
+        if classification is None or not classification.eligible_for_growth_action:
+            continue
+        if classification.page_type in {PageType.COMMERCIAL, PageType.CONVERSION, PageType.UTILITY}:
+            continue
+        if classification.page_type not in {PageType.INFORMATIONAL, PageType.CONSIDERATION}:
+            continue
+        if not classification.priority_topic and page.impressions < 500:
+            continue
+
+        finding = LeverFinding(
+            rule_key=_rule_key("search_opportunity", page.normalized_url),
+            lever=SEARCH_OPPORTUNITY_LEVER,
+            stage=DiagnosticLayer.VISIBILITY,
+            diagnosis=f"Striking-distance ranking opportunity: {page.normalized_url}",
+            recommended_action="",
+            success_metric="",
+            evidence_json={
+                "opportunity_type": "Striking-Distance Opportunity",
+                "impressions": int(page.impressions),
+                "average_position": round(page.average_position, 1),
+                "clicks": int(page.clicks),
+                "ctr_percent": round(page.ctr_percent, 2),
+                "page_type": classification.page_type.value,
+                "priority_topic": classification.priority_topic,
+            },
+            baseline_metrics_json={
+                "impressions": page.impressions,
+                "average_position": round(page.average_position, 1),
+            },
+            impact=0.0,
+            confidence=0.0,
+            urgency=0.0,
+            effort=0.0,
+            priority_score=0.0,
+            page_url=page.normalized_url,
+        )
+        candidates.append((page.impressions, finding))
+
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return [finding for _, finding in candidates[:top_n]]
 
 
 def _structured_data_portfolio(
@@ -386,6 +668,8 @@ def _structured_data_portfolio(
     client_id: UUID,
     period: tuple[date, date] | None,
     ai_mention: float | None,
+    *,
+    site: SiteBusinessContext,
 ) -> LeverFinding | None:
     if period is None or ai_mention is None:
         return None
@@ -394,7 +678,11 @@ def _structured_data_portfolio(
         return None
     if ai_mention >= search_visibility / 2:
         return None
-    impact = min(100.0, round(search_visibility * 100, 1))
+    impact, impact_evidence = score_structured_data_impact(
+        search_visibility=search_visibility,
+        ai_mention=ai_mention,
+        site=site,
+    )
     return _make_finding(
         lever=GrowthAction.STRUCTURED_DATA_AI.value,
         rule_key=_rule_key("structured_data_gap", str(client_id)),
@@ -402,6 +690,7 @@ def _structured_data_portfolio(
         evidence_json={
             "search_visibility": search_visibility,
             "ai_mention_presence_pct": ai_mention,
+            **impact_evidence,
         },
         baseline_metrics_json={
             "search_visibility": search_visibility,
@@ -452,6 +741,7 @@ def _conversion_portfolio(
     from_date: date,
     to_date: date,
     dashboard: dict[str, Any],
+    site: SiteBusinessContext,
 ) -> LeverFinding | None:
     lead_events = _lead_event_names(db, client.id)
     if not lead_events:
@@ -479,7 +769,13 @@ def _conversion_portfolio(
     if lead_rate_change_pct > -10:
         return None
 
-    impact = min(100.0, round(abs(lead_rate_change_pct), 1))
+    impact, impact_evidence = score_conversion_impact(
+        sessions_current=float(sessions_current),
+        current_rate=current_rate,
+        previous_rate=previous_rate,
+        site=site,
+    )
+    urgency = portfolio_urgency_adjustment(LEVER_INPUTS[GrowthAction.CONVERSION_PATH.value].urgency, site)
     return _make_finding(
         lever=GrowthAction.CONVERSION_PATH.value,
         rule_key=_rule_key("conversion_path", str(client.id), from_date.isoformat(), to_date.isoformat()),
@@ -488,6 +784,7 @@ def _conversion_portfolio(
             "lead_rate_change_pct": round(lead_rate_change_pct, 1),
             "sessions_change_pct": round(sessions_change_pct, 1),
             "tracking_validated": True,
+            **impact_evidence,
         },
         baseline_metrics_json={
             "lead_rate_current": round(current_rate, 2),
@@ -496,21 +793,32 @@ def _conversion_portfolio(
             "sessions_previous": float(sessions_previous),
         },
         impact=impact,
+        urgency_override=urgency,
     )
 
 
-def _lever_summaries(findings: list[LeverFinding]) -> list[LeverSummary]:
-    counts: dict[str, int] = {key: 0 for key in LEVER_LABELS}
+def _lever_summaries(
+    findings: list[LeverFinding],
+    recommended_actions: list[LeverFinding],
+) -> list[LeverSummary]:
+    finding_counts: dict[str, int] = {key: 0 for key in LEVER_LABELS}
+    action_counts: dict[str, int] = {key: 0 for key in LEVER_LABELS}
     for finding in findings:
-        counts[finding.lever] = counts.get(finding.lever, 0) + 1
+        if finding.lever in finding_counts:
+            finding_counts[finding.lever] += 1
+    for action in recommended_actions:
+        if action.lever in action_counts:
+            action_counts[action.lever] += 1
     summaries: list[LeverSummary] = []
     for lever, label in LEVER_LABELS.items():
-        count = counts.get(lever, 0)
+        count = finding_counts.get(lever, 0)
+        action_count = action_counts.get(lever, 0)
         summaries.append(
             LeverSummary(
                 lever=lever,
                 label=label,
                 findings_count=count,
+                recommended_actions_count=action_count,
                 status="findings" if count else "clear",
             )
         )
@@ -526,10 +834,16 @@ def diagnose(
     top_n: int = DEFAULT_TOP_N,
 ) -> DiagnoseResult:
     watermarks = _load_watermarks(db, client.id)
-    gsc_period = _effective_range(from_date, to_date, watermarks.get("gsc_pages"))
-    ga4_period = _effective_range(from_date, to_date, watermarks.get("ga4"))
+    gsc_watermark = watermarks.get("gsc_pages")
+    fact_min, fact_max = _gsc_fact_bounds(db, client.id)
+    gsc_period, block_message, partial_message = _resolve_gsc_analysis_period(
+        from_date=from_date,
+        to_date=to_date,
+        watermark=gsc_watermark,
+        fact_min=fact_min,
+        fact_max=fact_max,
+    )
     ser_period = _effective_range(from_date, to_date, watermarks.get("se_ranking_search"))
-    ai_period = _effective_range(from_date, to_date, watermarks.get("se_ranking_ai"))
 
     gsc_rows = 0
     if gsc_period is not None:
@@ -557,25 +871,70 @@ def diagnose(
         "search_console": gsc_rows > 0,
         "crawl_audit": crawl_ready,
     }
+    base_result = {
+        "requested_from": from_date,
+        "requested_to": to_date,
+        "analysis_from": gsc_period[0] if gsc_period else None,
+        "analysis_to": gsc_period[1] if gsc_period else None,
+        "partial_message": partial_message,
+    }
     if gsc_rows == 0:
         return DiagnoseResult(
             ready=False,
-            message="Search Console page facts are required before the Decision Engine can run.",
+            message=block_message
+            or "Search Console page facts are required before the Decision Engine can run.",
             readiness=readiness,
             formula=SCORE_FORMULA,
-            levers=_lever_summaries([]),
+            levers=_lever_summaries([], []),
+            **base_result,
         )
 
     dashboard = build_dashboard(db, client, from_date, to_date)
     pages = _load_page_demand(db, client_id=client.id, period=gsc_period)
     crawl_by_url = _load_crawl_by_url(db, client.id)
 
+    lead_events = _lead_event_names(db, client.id)
+    ga4_period = _effective_range(from_date, to_date, watermarks.get("ga4"))
+    site_period = ga4_period or gsc_period
+    site = load_site_business_context(
+        db,
+        client,
+        period=site_period,
+        lead_events=lead_events,
+        dashboard=dashboard,
+    )
+    page_urls = [page.normalized_url for page in pages]
+    page_contexts = load_page_business_contexts(
+        db,
+        client_id=client.id,
+        period=gsc_period,
+        lead_events=lead_events,
+        normalized_urls=page_urls,
+    )
+    site = with_p90_sessions(site, page_contexts)
+    thresholds = _load_thresholds(db, client.id)
+    classifications = classify_pages(page_urls)
+    page_type_rates = compute_page_type_lead_rates(page_contexts, classifications)
+    topic_rates = compute_topic_lead_rates(page_contexts, classifications)
+
     findings: list[LeverFinding] = []
-    findings.extend(_per_page_cascade(pages, crawl_by_url, crawl_ready=crawl_ready))
+    findings.extend(
+        _per_page_cascade(
+            pages,
+            crawl_by_url,
+            crawl_ready=crawl_ready,
+            page_contexts=page_contexts,
+            site=site,
+            classifications=classifications,
+            page_type_rates=page_type_rates,
+            topic_rates=topic_rates,
+        )
+    )
 
     ai_mention = dashboard.get("visibility", {}).get("ai", {}).get("mention_presence", {}).get("current")
-    structured = _structured_data_portfolio(db, client.id, ser_period, ai_mention)
+    structured = _structured_data_portfolio(db, client.id, ser_period, ai_mention, site=site)
     if structured is not None:
+        _enrich_finding(structured, classification=None, page_ctx=None)
         findings.append(structured)
 
     conversion = _conversion_portfolio(
@@ -584,18 +943,35 @@ def diagnose(
         from_date=from_date,
         to_date=to_date,
         dashboard=dashboard,
+        site=site,
     )
     if conversion is not None:
+        _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
-    top_findings = findings[:top_n]
+    all_findings, recommended_actions = promote_findings(
+        findings,
+        classifications=classifications,
+        page_contexts=page_contexts,
+        thresholds=thresholds,
+    )
+    actioned_urls = {finding.page_url for finding in all_findings if finding.page_url}
+    search_opportunities = _search_opportunities(
+        pages,
+        actioned_urls=actioned_urls,
+        classifications=classifications,
+        thresholds=thresholds,
+    )
 
     return DiagnoseResult(
         ready=True,
         message=None,
         readiness=readiness,
         formula=SCORE_FORMULA,
-        levers=_lever_summaries(findings),
-        recommendations=top_findings,
+        levers=_lever_summaries(all_findings, recommended_actions),
+        findings=all_findings,
+        recommended_actions=recommended_actions,
+        search_opportunities=search_opportunities,
+        **base_result,
     )

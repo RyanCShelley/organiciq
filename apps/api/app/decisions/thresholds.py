@@ -15,6 +15,14 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     "ai_visibility_gap_mention_max_pct": 2.0,
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
+    "minimum_actionable_impact": 25,
+    "minimum_recommendation_confidence": 60,
+    "high_priority_threshold": 70,
+    "medium_priority_threshold": 50,
+    "meaningful_gsc_impressions": 100,
+    "meaningful_ga4_sessions": 10,
+    "content_planning_min_impressions": 200,
+    "content_planning_top_n": 10,
 }
 
 

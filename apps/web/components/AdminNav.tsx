@@ -17,10 +17,8 @@ export function AdminNav({ active }: { active: string }) {
           <Link
             key={link.href}
             href={link.href}
-            className={`rounded-lg px-3 py-1.5 text-sm ${
-              isActive
-                ? "bg-[var(--accent)] text-white"
-                : "border border-[var(--border)] text-[var(--muted)] hover:text-white"
+            className={`rounded-full px-3 py-1.5 text-sm ${
+              isActive ? "nav-link-active" : "btn btn-ghost btn-sm"
             }`}
           >
             {link.label}

@@ -1,3 +1,4 @@
+from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
 from app.models.config import ChannelRule, ConversionDefinition, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageSnapshot, StagingSerAuditPage
@@ -30,6 +31,9 @@ __all__ = [
     "Tier",
     "Client",
     "ClientStatus",
+    "Annotation",
+    "AnnotationType",
+    "AnnotationResult",
     "User",
     "UserClient",
     "UserRole",

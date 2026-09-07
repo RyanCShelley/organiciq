@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.models.config import OrganicChannel
 from app.models.crawl import FactCrawlPageSnapshot
 from app.models.ga4 import FactGa4Traffic
+from app.models.crawl import FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.decisions import evaluate_and_store, run_diagnose
@@ -50,13 +51,15 @@ def test_diagnose_api(db, client, client_a, admin_user):
     assert res.status_code == 200
     body = res.json()
     assert body["ready"] is True
-    assert len(body["levers"]) == 6
+    assert len(body["levers"]) == 5
+    assert "findings_count" in body
+    assert "recommended_actions" in body
     assert "formula" in body
 
 
 def test_evaluate_persists_scored_decisions(db, client_a):
     start, end = date_window(14)
-    page = "https://example.com/page"
+    page = "https://example.com/services/sem"
     _watermark(db, client_a.id, "gsc_pages", end)
     db.add(
         FactGscPage(
@@ -71,6 +74,19 @@ def test_evaluate_persists_scored_decisions(db, client_a):
             clicks=Decimal("2"),
             ctr=Decimal("0.0013"),
             average_position=Decimal("5"),
+        )
+    )
+    db.add(
+        FactCrawlPageSnapshot(
+            id=uuid4(),
+            client_id=client_a.id,
+            snapshot_date=end,
+            raw_url=page,
+            normalized_url=page,
+            indexable=False,
+            status_code=200,
+            inbound_internal_links=0,
+            word_count=1200,
         )
     )
     db.commit()

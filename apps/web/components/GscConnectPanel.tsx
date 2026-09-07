@@ -101,7 +101,7 @@ export function GscConnectPanel({
           type="button"
           disabled={pending}
           onClick={connectGoogle}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="btn btn-primary btn-sm disabled:opacity-50"
         >
           {connected ? "Reconnect Google" : "Connect Google"}
         </button>
@@ -156,7 +156,7 @@ export function GscConnectPanel({
             type="button"
             disabled={pending || !selected}
             onClick={saveProperty}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn btn-primary btn-sm disabled:opacity-50"
           >
             Save property
           </button>

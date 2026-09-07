@@ -8,8 +8,14 @@ from app.core.client_scope import require_client, user_can_access_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
-from app.schemas import ClientCreate, ClientOut, ClientUpdate
-from app.services import clients as client_service
+from app.schemas import (
+    BaselineSnapshotApplyRequest,
+    BaselineSnapshotPreviewOut,
+    ClientCreate,
+    ClientOut,
+    ClientUpdate,
+)
+from app.services import baseline_snapshot, clients as client_service
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -50,14 +56,58 @@ def get_client(
 def update_client(
     client_id: UUID,
     payload: ClientUpdate,
-    user: Annotated[AuthUser, Depends(require_sma_admin)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ClientOut:
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
     client = client_service.get_client(db, client_id)
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     updated = client_service.update_client(db, client, payload)
     return ClientOut.model_validate(updated)
+
+
+@router.get("/{client_id}/baseline/preview", response_model=BaselineSnapshotPreviewOut)
+def preview_baseline_from_ga4(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BaselineSnapshotPreviewOut:
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    try:
+        preview = baseline_snapshot.preview_baseline_from_ga4(db, client)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return BaselineSnapshotPreviewOut.model_validate(preview)
+
+
+@router.post("/{client_id}/baseline/from-ga4", response_model=BaselineSnapshotPreviewOut)
+def apply_baseline_from_ga4(
+    client_id: UUID,
+    payload: BaselineSnapshotApplyRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BaselineSnapshotPreviewOut:
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    try:
+        _, preview = baseline_snapshot.apply_baseline_from_ga4(
+            db,
+            client,
+            monthly_lead_goal=payload.monthly_lead_goal,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return BaselineSnapshotPreviewOut.model_validate(preview)
 
 
 @router.get("/current/context", response_model=ClientOut)

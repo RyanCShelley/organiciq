@@ -8,6 +8,36 @@ from app.models.crawl import FactCrawlPageSnapshot, StagingSerAuditPage
 from app.models.job import SyncJob
 
 
+def _pick_better_row(current: StagingSerAuditPage, incoming: StagingSerAuditPage) -> StagingSerAuditPage:
+    """When audit returns URL variants that normalize the same, keep the richer row."""
+    current_status = current.status_code or 0
+    incoming_status = incoming.status_code or 0
+    if incoming_status == 200 and current_status != 200:
+        return incoming
+    if current_status == 200 and incoming_status != 200:
+        return current
+    if incoming.word_count > current.word_count:
+        return incoming
+    if incoming.word_count < current.word_count:
+        return current
+    if incoming.inbound_internal_links > current.inbound_internal_links:
+        return incoming
+    return current
+
+
+def _dedupe_staging_rows(rows: list[StagingSerAuditPage]) -> list[StagingSerAuditPage]:
+    by_url: dict[str, StagingSerAuditPage] = {}
+    for row in rows:
+        if not row.normalized_url:
+            continue
+        existing = by_url.get(row.normalized_url)
+        if existing is None:
+            by_url[row.normalized_url] = row
+        else:
+            by_url[row.normalized_url] = _pick_better_row(existing, row)
+    return list(by_url.values())
+
+
 def publish_seranking_audit(db: Session, job: SyncJob) -> int:
     staging_rows = (
         db.query(StagingSerAuditPage)
@@ -18,6 +48,8 @@ def publish_seranking_audit(db: Session, job: SyncJob) -> int:
         return 0
 
     snapshot_date = staging_rows[0].snapshot_date
+    deduped = _dedupe_staging_rows(staging_rows)
+
     db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == job.client_id).delete()
 
     facts = [
@@ -33,7 +65,7 @@ def publish_seranking_audit(db: Session, job: SyncJob) -> int:
             word_count=row.word_count,
             in_sitemap=row.in_sitemap,
         )
-        for row in staging_rows
+        for row in deduped
     ]
     db.bulk_save_objects(facts)
     db.commit()

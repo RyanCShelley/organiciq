@@ -1,11 +1,22 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { StatusBadge } from "@/components/analytics/StatusBadge";
+import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
-import { apiFetch, type DataHealthRow } from "@/lib/api";
+import { Alert } from "@/components/ui/Alert";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import {
+  apiFetch,
+  type Client,
+  type ConversionDefinition,
+  type DataHealthRow,
+  type Tier,
+} from "@/lib/api";
 import { loadClientById } from "@/lib/context";
 
-export default async function ClientWorkspaceHomePage({
+export default async function ClientSettingsPage({
   params,
 }: {
   params: Promise<{ clientId: string }>;
@@ -14,65 +25,125 @@ export default async function ClientWorkspaceHomePage({
   const client = await loadClientById(clientId);
   if (!client) notFound();
 
+  let tiers: Tier[] = [];
   let health: DataHealthRow[] = [];
+  let conversions: ConversionDefinition[] = [];
+  let loadError: string | null = null;
+
   try {
-    health = await apiFetch<DataHealthRow[]>("/admin/data-health", { clientId });
-  } catch {
-    health = [];
+    const [tierRows, healthRows, conversionRows, freshClient] = await Promise.all([
+      apiFetch<Tier[]>("/admin/tiers"),
+      apiFetch<DataHealthRow[]>("/admin/data-health", { clientId }),
+      apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", { clientId }),
+      apiFetch<Client>(`/clients/${clientId}`, { clientId }),
+    ]);
+    tiers = tierRows;
+    health = healthRows;
+    conversions = conversionRows;
+    Object.assign(client, freshClient);
+  } catch (e) {
+    loadError = e instanceof Error ? e.message : "Failed to load client settings";
   }
 
+  const primary = conversions.filter((row) => row.active && row.is_primary);
+  const secondary = conversions.filter((row) => row.active && !row.is_primary);
+  const hasLeadConversions = conversions.some(
+    (row) => row.active && row.conversion_type === "lead",
+  );
   const healthy = health.filter((row) => row.status === "Healthy").length;
 
   return (
     <section>
       <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}`} />
-      <h1 className="text-2xl font-semibold">Workspace Overview</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Configure this client&apos;s integrations and conversions, then monitor sync health here.
-      </p>
+      <PageHeader
+        title="Client settings"
+        description="Account record for tier allowances, contract date, lead goal, conversions, and strategy sheet."
+      />
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <WorkspaceCard
-          href={`/clients/${clientId}/integrations`}
-          title="Integrations"
-          description="Google OAuth, GSC, GA4, SE Ranking"
-        />
-        <WorkspaceCard
-          href={`/clients/${clientId}/conversions`}
-          title="Conversions"
-          description="Map GA4 events to leads"
-        />
-        <WorkspaceCard
-          href={`/clients/${clientId}/data-health`}
-          title="Data Health"
-          description={`${healthy}/${health.length || 5} sources healthy`}
-        />
-        <WorkspaceCard
-          href={`/clients/${clientId}/jobs`}
-          title="Sync Jobs"
-          description="Enqueue and review ingestion"
-        />
+      {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
+
+      <div className="mt-4 space-y-[var(--section-gap)]">
+        <section className="workspace-section">
+          <SectionHeader title="Account record" description="Core fields for this Organic IQ client." />
+          <div className="workspace-panel">
+            <ClientSettingsForm
+              client={client}
+              tiers={tiers}
+              hasLeadConversions={hasLeadConversions}
+            />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Conversions"
+            description="Primary and secondary lead events used by Dashboard and Decision Engine."
+            actions={
+              <Link href={`/clients/${clientId}/conversions`} className="btn btn-ghost btn-sm">
+                Manage conversions
+              </Link>
+            }
+          />
+          <div className="workspace-panel space-y-3 text-sm">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+                Primary
+              </p>
+              <p className="mt-1 text-[var(--text-primary)]">
+                {primary.length > 0
+                  ? primary.map((row) => row.conversion_name).join(", ")
+                  : "None configured"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+                Secondary
+              </p>
+              <p className="mt-1 text-[var(--text-secondary)]">
+                {secondary.length > 0
+                  ? secondary.map((row) => row.conversion_name).join(", ")
+                  : "None configured"}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Data freshness"
+            description="Source health for this account. Moved off the Dashboard into the client record."
+            actions={
+              <Link href={`/clients/${clientId}/data-health`} className="btn btn-ghost btn-sm">
+                Open data health
+              </Link>
+            }
+          />
+          <div className="workspace-panel">
+            <p className="text-sm text-[var(--text-secondary)]">
+              {healthy}/{health.length || 0} sources healthy
+            </p>
+            {health.length > 0 ? (
+              <ul className="mt-3 divide-y divide-[var(--border)]">
+                {health.map((row) => (
+                  <li
+                    key={row.source}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                  >
+                    <span className="font-medium">{row.source.replaceAll("_", " ")}</span>
+                    <StatusBadge
+                      available={row.status === "Healthy"}
+                      availableLabel={row.status}
+                      unavailableLabel={row.status}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-[var(--text-tertiary)]">No freshness rows yet.</p>
+            )}
+          </div>
+        </section>
       </div>
     </section>
-  );
-}
-
-function WorkspaceCard({
-  href,
-  title,
-  description,
-}: {
-  href: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 hover:border-[var(--accent)]"
-    >
-      <div className="font-medium">{title}</div>
-      <div className="mt-1 text-sm text-[var(--muted)]">{description}</div>
-    </Link>
   );
 }

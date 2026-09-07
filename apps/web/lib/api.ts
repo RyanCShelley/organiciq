@@ -76,6 +76,19 @@ export type Client = {
   primary_market: string | null;
   timezone: string;
   monthly_lead_goal: number | null;
+  account_sheet_url?: string | null;
+  baseline_as_of?: string | null;
+  baseline_monthly_sessions?: number | null;
+  baseline_monthly_leads?: number | null;
+  baseline_lead_rate_pct?: number | null;
+  baseline_source?: string | null;
+  baseline_notes?: string | null;
+  custom_tracked_keyword_limit?: number | null;
+  custom_tracked_prompt_limit?: number | null;
+  custom_content_allowance?: number | null;
+  custom_update_allowance?: number | null;
+  custom_growth_action_allowance?: number | null;
+  custom_watchlist_cadence?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -119,8 +132,10 @@ export type Tier = {
   tracked_prompt_limit: number;
   content_allowance: number;
   update_allowance: number;
+  growth_action_allowance?: number;
   conversion_limit: number;
   reporting_level: string;
+  watchlist_cadence?: string;
 };
 
 export type ChannelRule = {

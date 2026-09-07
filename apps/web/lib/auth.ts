@@ -1,4 +1,5 @@
 import NextAuth from "next-auth";
+import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import { SignJWT, jwtVerify } from "jose";
 import type { Session } from "next-auth";
@@ -85,14 +86,32 @@ export async function ensureApiAccessToken(session: Session | null): Promise<str
   });
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  // Allow both 127.0.0.1 and localhost during local dev.
-  // Both redirect URIs must be registered in Google Cloud OAuth client.
+/**
+ * Canonical local origin for Google OAuth.
+ * Next.js rewrites `127.0.0.1` → `localhost` on NextRequest, so Auth.js route
+ * handlers must use a plain Request with this origin or authorize/token
+ * redirect_uri values diverge (Google: redirect_uri_mismatch).
+ */
+export const AUTH_ORIGIN =
+  (process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://127.0.0.1:3000").replace(
+    /\/$/,
+    "",
+  );
+
+process.env.AUTH_URL ||= AUTH_ORIGIN;
+process.env.NEXTAUTH_URL ||= AUTH_ORIGIN;
+
+export const authConfig = {
+  // Local Google OAuth must stay on 127.0.0.1. Chrome treats localhost as a
+  // different site, which breaks cookies on callback.
   trustHost: true,
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      // Confidential web client: state is enough. PKCE cookies were being
+      // consumed by middleware on the Google callback and failing in Chrome.
+      checks: ["state"],
       authorization: {
         params: {
           hd: HOSTED_DOMAIN,
@@ -161,4 +180,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/login",
   },
   secret: process.env.AUTH_SECRET,
-});
+} satisfies NextAuthConfig;
+
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);

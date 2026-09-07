@@ -3,6 +3,15 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def normalize_database_url(url: str) -> str:
+    """Railway/Postgres URLs are often postgresql://; we require the psycopg driver."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://") :]
+    if url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -19,6 +28,9 @@ class Settings(BaseSettings):
     web_app_url: str = "http://127.0.0.1:3000"
     decision_engine_enabled: bool = True
     se_ranking_api_key: str = ""
+
+    def model_post_init(self, __context) -> None:
+        object.__setattr__(self, "database_url", normalize_database_url(self.database_url))
 
     @property
     def admin_email_set(self) -> set[str]:

@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.ingestion.seranking.audit_pages import parse_audit_page, resolve_latest_finished_audit
+from app.ingestion.seranking.publish_audit import publish_seranking_audit
 from app.ingestion.seranking.pipeline_audit import run_seranking_audit_job
 from app.models.crawl import FactCrawlPageSnapshot
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
@@ -217,3 +218,59 @@ def test_seranking_audit_pipeline_with_mocked_api(db, client_a, monkeypatch):
     )
     assert watermark.fact_through_date == end
     assert watermark.validation_status == ValidationStatus.PASSED
+
+
+def test_publish_audit_dedupes_normalized_urls(db, client_a):
+    from app.models.crawl import StagingSerAuditPage
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="se_ranking_audit",
+        start_date=date(2026, 8, 29),
+        end_date=date(2026, 8, 29),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.flush()
+    db.add(
+        StagingSerAuditPage(
+            job_id=job.id,
+            client_id=client_a.id,
+            audit_id="1",
+            snapshot_date=date(2026, 8, 29),
+            raw="{}",
+            raw_url="https://example.com/page?a=1",
+            normalized_url="https://example.com/page",
+            indexable=True,
+            status_code=301,
+            inbound_internal_links=2,
+            word_count=100,
+        )
+    )
+    db.add(
+        StagingSerAuditPage(
+            job_id=job.id,
+            client_id=client_a.id,
+            audit_id="1",
+            snapshot_date=date(2026, 8, 29),
+            raw="{}",
+            raw_url="https://example.com/page",
+            normalized_url="https://example.com/page",
+            indexable=True,
+            status_code=200,
+            inbound_internal_links=6,
+            word_count=900,
+        )
+    )
+    db.commit()
+
+    written = publish_seranking_audit(db, job)
+    assert written == 1
+    fact = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(FactCrawlPageSnapshot.client_id == client_a.id)
+        .one()
+    )
+    assert fact.status_code == 200
+    assert fact.word_count == 900

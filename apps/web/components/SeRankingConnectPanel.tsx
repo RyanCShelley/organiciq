@@ -103,7 +103,7 @@ export function SeRankingConnectPanel({
           type="button"
           disabled={pending}
           onClick={loadProjects}
-          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="btn btn-primary btn-sm disabled:opacity-50"
         >
           Load projects
         </button>
@@ -171,7 +171,7 @@ export function SeRankingConnectPanel({
             type="button"
             disabled={pending || !selected}
             onClick={saveProperty}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn btn-primary btn-sm disabled:opacity-50"
           >
             Save project
           </button>

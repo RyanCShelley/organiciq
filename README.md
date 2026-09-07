@@ -9,7 +9,7 @@ SMA Marketing's operating system for predictable organic growth.
 - **Web:** Next.js 15 + TypeScript + Tailwind + Auth.js (Google Workspace)
 - **API:** Python FastAPI + SQLAlchemy 2 + Alembic
 - **DB / jobs:** PostgreSQL 16; durable sync jobs via dedicated worker (`FOR UPDATE SKIP LOCKED`)
-- **Hosting target:** Railway (Postgres + API + worker; web on Railway or Vercel)
+- **Hosting target:** Railway (Postgres + API + worker; web on Vercel)
 
 ## Repository layout
 
@@ -18,6 +18,85 @@ apps/web     Next.js app
 apps/api     FastAPI + worker
 docker-compose.yml
 ```
+
+## Deploy (Railway + Vercel)
+
+Production target: **Postgres + API + worker on Railway**, **web on Vercel**. Default platform hostnames (`*.up.railway.app`, `*.vercel.app`) are fine for the first ship; attach custom domains later and update OAuth + env URLs.
+
+### Architecture
+
+| Piece | Where | Notes |
+|-------|--------|--------|
+| Postgres 16 | Railway plugin | Source of `DATABASE_URL` for API + worker |
+| API | Railway service, [`apps/api/Dockerfile`](apps/api/Dockerfile) | Start: `scripts/start-api.sh` (alembic + uvicorn on `$PORT`) |
+| Worker | Railway service, same Dockerfile | Start: `scripts/start-worker.sh` → `python -m app.worker` |
+| Web | Vercel, Root Directory `apps/web` | Auth.js Google login; server calls API via `API_URL` |
+
+Healthcheck: `GET https://<railway-api-host>/health` → `{"status":"ok"}`.
+
+Printable env matrix + smoke checklist: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+### 1. Railway
+
+1. Create a Railway project; add **PostgreSQL**.
+2. Add service **api**
+   - Root Directory / Dockerfile context: `apps/api`
+   - Uses [`apps/api/railway.toml`](apps/api/railway.toml) (start `scripts/start-api.sh`, health `/health`)
+   - Generate a **public domain**
+3. Add service **worker**
+   - Same Dockerfile / context as api
+   - **Custom start command:** `scripts/start-worker.sh`
+   - No public domain required
+4. Set env on **api** and **worker** (see Production section in [`.env.example`](.env.example)):
+   - `DATABASE_URL` from the Postgres plugin (Railway `postgresql://` is normalized to `postgresql+psycopg://` in app settings)
+   - Shared secrets: `AUTH_SECRET`, `INTEGRATION_TOKEN_KEY` (32+ bytes, stable)
+   - `SMA_ADMIN_EMAILS`, `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.net`
+   - `ALLOWED_ORIGINS` / `WEB_APP_URL` = your Vercel URL (update after Vercel deploy if needed)
+   - Google data OAuth + `GOOGLE_DATA_OAUTH_REDIRECT_URI=https://<api-host>/oauth/google/callback`
+   - `SE_RANKING_API_KEY`, `DECISION_ENGINE_ENABLED=true`
+5. Deploy api; confirm `/health` is green. Migrations run automatically on each api start.
+6. **One-shot seed** (do not put seed in the restart loop):
+   ```bash
+   # Railway shell / one-off on the api service
+   python -m app.seed
+   ```
+
+### 2. Vercel
+
+1. Import the GitHub repo.
+2. **Root Directory:** `apps/web`
+3. Framework preset: Next.js (build `npm run build`).
+4. Env vars (must match Railway where noted):
+   - `AUTH_SECRET` (same as API)
+   - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` (login OAuth client)
+   - `AUTH_URL` / `NEXTAUTH_URL` = `https://<vercel-host>`
+   - `AUTH_TRUST_HOST=true`
+   - `API_URL` / `NEXT_PUBLIC_API_URL` = `https://<railway-api-host>`
+   - `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.net`
+5. Deploy; copy the production URL into Railway `ALLOWED_ORIGINS` and `WEB_APP_URL` if you had placeholders.
+
+### 3. Google Cloud OAuth (before first prod login)
+
+Keep **two** OAuth web clients (login vs data), as in local setup.
+
+**Login client (Auth.js):**
+- Authorized JavaScript origin: `https://<vercel-host>`
+- Redirect URI: `https://<vercel-host>/api/auth/callback/google`
+
+**Data client (GSC + GA4):**
+- Redirect URI: `https://<railway-api-host>/oauth/google/callback`
+
+### 4. Smoke test
+
+1. Open the Vercel URL → Google Workspace login (`@smamarketing.net`).
+2. SMA Marketing client loads; Dashboard / Decision Engine do not hard-fail.
+3. Client settings → connect GSC or GA4; OAuth returns to the web app.
+4. Enqueue a short sync; worker claims the job; Data Health updates.
+5. Baseline “Preview from GA4” and Decision Engine diagnose still load.
+
+### Custom domains (later)
+
+Point DNS at Vercel/Railway, then update `AUTH_URL` / `NEXTAUTH_URL`, `ALLOWED_ORIGINS`, `WEB_APP_URL`, `API_URL`, data OAuth redirect URI, and Google Console origins/redirects to match.
 
 ## Local development
 

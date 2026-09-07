@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const WORKSPACE_LINKS = [
-  { segment: "", label: "Overview" },
+  { segment: "", label: "Settings" },
   { segment: "integrations", label: "Integrations" },
   { segment: "conversions", label: "Conversions" },
   { segment: "data-health", label: "Data Health" },
@@ -29,8 +29,8 @@ export function ClientWorkspaceNav({
             href={href}
             className={`rounded-lg px-3 py-1.5 text-sm ${
               isActive
-                ? "bg-[var(--accent)] text-white"
-                : "border border-[var(--border)] text-[var(--muted)] hover:text-white"
+                ? "nav-link-active"
+                : "btn btn-ghost btn-sm"
             }`}
           >
             {link.label}

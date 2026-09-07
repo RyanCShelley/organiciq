@@ -25,6 +25,8 @@ def _jobs_module():
         "app.ingestion.gsc.pipeline",
         "app.ingestion.ga4.fetch",
         "app.ingestion.ga4.pipeline",
+        "app.ingestion.seranking.client",
+        "app.ingestion.seranking.audit_pages",
         "app.ingestion.seranking.fetch_audit",
         "app.ingestion.seranking.publish_audit",
         "app.ingestion.seranking.pipeline_audit",

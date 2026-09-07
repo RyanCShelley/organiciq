@@ -14,7 +14,11 @@ from app.models.config import ConversionDefinition
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.user import User, UserClient, UserRole
 
-DEFAULT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+DEFAULT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")  # Launch
+LIFT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111112")
+LEAD_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111113")
+LEGACY_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111110")
+ENTERPRISE_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111114")
 SMA_CLIENT_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 BEACON_CLIENT_ID = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 ADMIN_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
@@ -54,6 +58,7 @@ def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
         "data_watermarks",
         "decisions",
         "decision_thresholds",
+        "annotations",
         "integrations",
         "conversion_definitions",
         "topics",
@@ -68,9 +73,15 @@ def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
 
 
 def seed(db: Session) -> None:
-    tier = db.query(Tier).filter(Tier.id == DEFAULT_TIER_ID).one_or_none()
-    if tier is None:
-        raise RuntimeError("Default tier missing — run alembic upgrade head first")
+    for tier_id, name in (
+        (LEGACY_TIER_ID, "Legacy"),
+        (DEFAULT_TIER_ID, "Launch"),
+        (LIFT_TIER_ID, "Lift"),
+        (LEAD_TIER_ID, "Lead"),
+        (ENTERPRISE_TIER_ID, "Enterprise"),
+    ):
+        if db.query(Tier).filter(Tier.id == tier_id).one_or_none() is None:
+            raise RuntimeError(f"Tier {name} missing — run alembic upgrade head first")
 
     for legacy_id in ():
         if db.query(Client).filter(Client.id == legacy_id).one_or_none() is not None:
@@ -87,6 +98,7 @@ def seed(db: Session) -> None:
         client_id: uuid.UUID,
         client_name: str,
         domain: str,
+        tier_id: uuid.UUID = DEFAULT_TIER_ID,
         monthly_lead_goal: int | None = None,
     ) -> Client:
         client = db.query(Client).filter(Client.id == client_id).one_or_none()
@@ -95,7 +107,7 @@ def seed(db: Session) -> None:
                 id=client_id,
                 client_name=client_name,
                 domain=domain,
-                tier_id=DEFAULT_TIER_ID,
+                tier_id=tier_id,
                 start_date=date(2025, 1, 1),
                 primary_market="United States",
                 timezone="America/New_York",
@@ -107,6 +119,7 @@ def seed(db: Session) -> None:
         else:
             client.client_name = client_name
             client.domain = domain
+            client.tier_id = tier_id
             client.status = ClientStatus.ACTIVE
             if monthly_lead_goal is not None:
                 client.monthly_lead_goal = monthly_lead_goal
@@ -131,12 +144,14 @@ def seed(db: Session) -> None:
         client_id=SMA_CLIENT_ID,
         client_name="SMA Marketing",
         domain="smamarketing.net",
+        tier_id=LIFT_TIER_ID,
         monthly_lead_goal=25,
     )
     _ensure_client(
         client_id=BEACON_CLIENT_ID,
         client_name="Beacon Industrial",
         domain="beaconindustrial.com",
+        tier_id=DEFAULT_TIER_ID,
         monthly_lead_goal=10,
     )
 

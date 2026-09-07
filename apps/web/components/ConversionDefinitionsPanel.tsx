@@ -147,7 +147,7 @@ export function ConversionDefinitionsPanel({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn btn-primary btn-sm disabled:opacity-50"
           >
             {pending ? "Saving…" : "Add conversion"}
           </button>

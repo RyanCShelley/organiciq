@@ -85,6 +85,42 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       by_channel: Array.isArray(traffic?.by_channel) ? traffic.by_channel : [],
       top_pages: Array.isArray(traffic?.top_pages) ? traffic.top_pages : [],
     },
+    baseline: normalizeBaseline(data.baseline),
+  };
+}
+
+function normalizeBaseline(value: unknown): DashboardBaseline {
+  if (!value || typeof value !== "object") {
+    return {
+      configured: false,
+      as_of: null,
+      source: null,
+      notes: null,
+      monthly_sessions: null,
+      monthly_leads: null,
+      lead_rate: null,
+      vs_current: {
+        sessions: emptyPeriodMetric(),
+        leads: emptyPeriodMetric(),
+        lead_rate: emptyPeriodMetric(),
+      },
+    };
+  }
+  const baseline = value as Partial<DashboardBaseline>;
+  return {
+    configured: baseline.configured === true,
+    as_of: typeof baseline.as_of === "string" ? baseline.as_of : null,
+    source: typeof baseline.source === "string" ? baseline.source : null,
+    notes: typeof baseline.notes === "string" ? baseline.notes : null,
+    monthly_sessions:
+      typeof baseline.monthly_sessions === "number" ? baseline.monthly_sessions : null,
+    monthly_leads: typeof baseline.monthly_leads === "number" ? baseline.monthly_leads : null,
+    lead_rate: typeof baseline.lead_rate === "number" ? baseline.lead_rate : null,
+    vs_current: {
+      sessions: periodMetric(baseline.vs_current?.sessions),
+      leads: periodMetric(baseline.vs_current?.leads),
+      lead_rate: periodMetric(baseline.vs_current?.lead_rate),
+    },
   };
 }
 
@@ -153,5 +189,21 @@ export type DashboardResponse = {
       ga4_sessions: number;
       ga4_views: number;
     }[];
+  };
+  baseline: DashboardBaseline;
+};
+
+export type DashboardBaseline = {
+  configured: boolean;
+  as_of: string | null;
+  source: string | null;
+  notes: string | null;
+  monthly_sessions: number | null;
+  monthly_leads: number | null;
+  lead_rate: number | null;
+  vs_current: {
+    sessions: DashboardPeriodMetric;
+    leads: DashboardPeriodMetric;
+    lead_rate: DashboardPeriodMetric;
   };
 };

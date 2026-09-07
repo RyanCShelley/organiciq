@@ -1,4 +1,8 @@
 import { PlatformNav } from "@/components/PlatformNav";
+import { DataTable } from "@/components/analytics/DataTable";
+import { Alert } from "@/components/ui/Alert";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type ChannelRule, type Tier } from "@/lib/api";
 
 export default async function PlatformSettingsPage() {
@@ -16,85 +20,110 @@ export default async function PlatformSettingsPage() {
   return (
     <section>
       <PlatformNav active="/platform/settings" />
-      <h1 className="text-2xl font-semibold">Platform Settings</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Global tiers and channel rules. Client-specific conversion definitions live in each client
-        workspace.
-      </p>
-
-      {error ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {error}
-        </p>
-      ) : null}
-
-      <h2 className="mt-8 text-lg font-medium">Tiers</h2>
-      <ConfigTable
-        headers={["Name", "Keywords", "Prompts", "Content", "Reporting"]}
-        rows={tiers.map((tier) => [
-          tier.tier_name,
-          String(tier.tracked_keyword_limit),
-          String(tier.tracked_prompt_limit),
-          String(tier.content_allowance),
-          tier.reporting_level,
-        ])}
+      <PageHeader
+        title="Platform Settings"
+        description="Global tiers and channel rules. Client-specific conversion definitions live in each client workspace."
       />
 
-      <h2 className="mt-8 text-lg font-medium">Channel rules</h2>
-      <ConfigTable
-        headers={["Channel", "Source", "Medium", "Host contains", "Priority"]}
-        rows={rules.map((rule) => [
-          rule.channel,
-          rule.match_source ?? "—",
-          rule.match_medium ?? "—",
-          rule.match_host_contains ?? "—",
-          String(rule.priority),
-        ])}
-      />
+      {error ? <Alert variant="danger">{error}</Alert> : null}
+
+      <div className="mt-4 space-y-[var(--section-gap)]">
+        <section className="workspace-section">
+          <SectionHeader
+            title="Tiers"
+            description="Watchlist limits are keywords + AI prompts. New content and content refresh are per quarter; Growth Actions are per month."
+          />
+          <div className="workspace-panel">
+            <DataTable
+              columns={[
+                { key: "tier", header: "Tier", render: (row) => row.tier_name },
+                {
+                  key: "watchlist",
+                  header: "Watchlist",
+                  render: (row) =>
+                    row.isEnterprise
+                      ? "Custom per agreement"
+                      : `${row.tracked_keyword_limit} keywords + AI`,
+                },
+                {
+                  key: "cadence",
+                  header: "Cadence",
+                  render: (row) =>
+                    row.isEnterprise
+                      ? "Custom"
+                      : (row.watchlist_cadence ?? "monthly").replaceAll("_", "-"),
+                },
+                {
+                  key: "content",
+                  header: "New content /q",
+                  align: "right",
+                  render: (row) => (row.isEnterprise ? "Custom" : String(row.content_allowance)),
+                },
+                {
+                  key: "refresh",
+                  header: "Content refresh /q",
+                  align: "right",
+                  render: (row) => (row.isEnterprise ? "Custom" : String(row.update_allowance)),
+                },
+                {
+                  key: "growth",
+                  header: "Growth Actions /mo",
+                  align: "right",
+                  render: (row) =>
+                    row.isEnterprise
+                      ? "Custom"
+                      : String(row.growth_action_allowance ?? "—"),
+                },
+              ]}
+              rows={tiers.map((tier) => ({
+                ...tier,
+                isEnterprise:
+                  tier.tier_name === "Enterprise" || tier.reporting_level === "enterprise",
+              }))}
+              getRowKey={(row) => row.id}
+              emptyMessage="No tiers configured."
+            />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Channel rules"
+            description="How GA4 source/medium (and host) map into Organic IQ channels."
+          />
+          <div className="workspace-panel">
+            <DataTable
+              columns={[
+                { key: "channel", header: "Channel", render: (row) => row.channel },
+                {
+                  key: "source",
+                  header: "Source",
+                  render: (row) => row.match_source ?? "—",
+                },
+                {
+                  key: "medium",
+                  header: "Medium",
+                  render: (row) => row.match_medium ?? "—",
+                },
+                {
+                  key: "host",
+                  header: "Host contains",
+                  render: (row) => row.match_host_contains ?? "—",
+                },
+                {
+                  key: "priority",
+                  header: "Priority",
+                  align: "right",
+                  render: (row) => String(row.priority),
+                },
+              ]}
+              rows={rules}
+              getRowKey={(row) => row.id}
+              emptyMessage="No channel rules configured."
+            />
+          </div>
+        </section>
+      </div>
     </section>
-  );
-}
-
-function ConfigTable({
-  headers,
-  rows,
-  empty = "No rows.",
-}: {
-  headers: string[];
-  rows: string[][];
-  empty?: string;
-}) {
-  return (
-    <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)]">
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-white/5 text-[var(--muted)]">
-          <tr>
-            {headers.map((header) => (
-              <th key={header} className="px-4 py-3 font-medium">
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-t border-[var(--border)]">
-              {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="px-4 py-3">
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={headers.length} className="px-4 py-6 text-[var(--muted)]">
-                {empty}
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </div>
   );
 }

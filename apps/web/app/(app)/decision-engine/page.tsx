@@ -1,81 +1,29 @@
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 
-import { apiFetch } from "@/lib/api";
+import { AdditionalFindingsPanel } from "@/components/DecisionEngine/AdditionalFindingsPanel";
+import { GrowthActionFilter } from "@/components/DecisionEngine/GrowthActionFilter";
+import { GrowthActionGrid } from "@/components/DecisionEngine/GrowthActionGrid";
+import { RecommendedActionCard } from "@/components/DecisionEngine/RecommendedActionCard";
+import { SummaryStrip } from "@/components/DecisionEngine/SummaryStrip";
+import { Alert } from "@/components/ui/Alert";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { apiFetch, type Client, type Tier } from "@/lib/api";
 import { resolveClientId, resolveDateRange } from "@/lib/context";
-
-type LeverSummary = {
-  lever: string;
-  label: string;
-  findings_count: number;
-  status: string;
-};
-
-type Recommendation = {
-  rule_key: string;
-  lever: string;
-  label: string;
-  stage: string;
-  diagnosis: string;
-  recommended_action: string;
-  success_metric: string;
-  priority_score: number;
-  impact: number;
-  confidence: number;
-  urgency: number;
-  effort: number;
-  page_url: string | null;
-  query: string | null;
-  evidence_json: Record<string, unknown>;
-};
-
-type DiagnoseResponse = {
-  ready: boolean;
-  message: string | null;
-  readiness: Record<string, boolean>;
-  formula: string;
-  levers: LeverSummary[];
-  recommendations: Recommendation[];
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  visibility: "Visibility",
-  traffic: "Traffic",
-  conversion: "Outcomes",
-};
-
-function stageLabel(stage: string): string {
-  return STAGE_LABELS[stage] ?? stage;
-}
+import {
+  applyPlanMinimum,
+  normalizeDiagnoseResponse,
+  type DiagnoseResponse,
+  type StoredDecision,
+} from "@/lib/decision-engine";
+import { resolvePlanAllowances } from "@/lib/plan-allowances";
+import { withNavContext } from "@/lib/navigation";
 
 function readinessLabel(key: string): string {
   if (key === "search_console") return "Search Console";
   if (key === "crawl_audit") return "Crawl / Audit";
   return key;
-}
-
-function scoreBar(value: number): string {
-  return `${Math.max(0, Math.min(100, value))}%`;
-}
-
-function formatEvidence(evidence: Record<string, unknown>): string {
-  const parts: string[] = [];
-  if (typeof evidence.position === "number") parts.push(`position ${evidence.position}`);
-  if (typeof evidence.inbound_internal_links === "number") {
-    parts.push(`${evidence.inbound_internal_links} inbound internal links`);
-    if (typeof evidence.link_floor === "number") parts.push(`(floor ${evidence.link_floor})`);
-  }
-  if (typeof evidence.impressions === "number") parts.push(`${evidence.impressions.toLocaleString()} impr`);
-  if (typeof evidence.lead_rate_change_pct === "number") {
-    parts.push(`Lead rate ${evidence.lead_rate_change_pct}%`);
-  }
-  if (typeof evidence.sessions_change_pct === "number") {
-    parts.push(`while sessions ${evidence.sessions_change_pct}%`);
-  }
-  if (evidence.tracking_validated) parts.push("tracking-validated");
-  if (typeof evidence.ctr_percent === "number" && typeof evidence.expected_ctr_percent === "number") {
-    parts.push(`CTR ${evidence.ctr_percent}% vs expected ${evidence.expected_ctr_percent}%`);
-  }
-  return parts.join(", ");
 }
 
 async function evaluateDecisions(formData: FormData) {
@@ -102,164 +50,204 @@ export default async function DecisionEnginePage({
   const params = await searchParams;
   const clientId = await resolveClientId(params);
   const { from, to } = await resolveDateRange(params);
+  const leverFilter =
+    typeof params.lever === "string" && params.lever.length > 0 ? params.lever : "all";
 
   let data: DiagnoseResponse | null = null;
+  let decisions: StoredDecision[] = [];
+  let planMin = 0;
   let error: string | null = null;
 
   if (!clientId) {
     error = "Select a client to run the Decision Engine.";
   } else {
     try {
-      data = await apiFetch<DiagnoseResponse>(
-        `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-        { clientId },
-      );
+      const [diagnose, stored, client, tiers] = await Promise.all([
+        apiFetch<DiagnoseResponse>(
+          `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+          { clientId },
+        ),
+        apiFetch<StoredDecision[]>(
+          `/decisions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+          { clientId },
+        ).catch(() => [] as StoredDecision[]),
+        apiFetch<Client>(`/clients/${clientId}`, { clientId }),
+        apiFetch<Tier[]>("/admin/tiers"),
+      ]);
+      data = normalizeDiagnoseResponse(diagnose);
+      decisions = stored;
+      const tier = tiers.find((row) => row.id === client.tier_id);
+      planMin = resolvePlanAllowances(client, tier).growthActionAllowance;
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load Decision Engine";
     }
   }
 
+  const additionalFindings =
+    data?.findings.filter((finding) => !finding.is_recommended_action) ?? [];
+  const searchOpportunities = data?.search_opportunities ?? [];
+  const promoted = data?.recommended_actions ?? [];
+  const withPlanFloor = applyPlanMinimum(promoted, additionalFindings, planMin);
+  const filteredActions =
+    leverFilter === "all"
+      ? withPlanFloor
+      : withPlanFloor.filter((item) => item.lever === leverFilter);
+  const filteredAdditional =
+    leverFilter === "all"
+      ? additionalFindings.filter(
+          (finding) => !withPlanFloor.some((item) => item.rule_key === finding.rule_key),
+        )
+      : additionalFindings.filter(
+          (finding) =>
+            finding.lever === leverFilter &&
+            !withPlanFloor.some((item) => item.rule_key === finding.rule_key),
+        );
+  const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
+  const contentOppHref = clientId
+    ? withNavContext("/watch-list", clientId, from, to, { tab: "content-opp" })
+    : "/watch-list?tab=content-opp";
+
+  const analysisMeta =
+    data?.analysis_from && data?.analysis_to
+      ? data.analysis_from === from && data.analysis_to === to
+        ? null
+        : `Analyzing ${data.analysis_from} to ${data.analysis_to}`
+      : null;
+
   return (
     <section>
-      <h1 className="text-2xl font-semibold">Decision Engine</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Six growth levers · diagnoses the constrained stage, maps each finding to one lever, ranks by impact.
-      </p>
+      <PageHeader
+        title="Decision Engine"
+        description="Recommended Growth Actions for this period. Content opportunities live on Watch List → Content Opp."
+        meta={
+          <>
+            <span>
+              Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
+              <strong className="text-[var(--text-primary)]">{to}</strong>
+            </span>
+            {data?.ready ? (
+              <>
+                <span className="text-[var(--text-tertiary)]">·</span>
+                <span>
+                  Ranked by{" "}
+                  <span className="text-[var(--text-secondary)]">
+                    {data.formula ?? "impact-weighted score"}
+                  </span>
+                </span>
+              </>
+            ) : null}
+            {planMin > 0 ? (
+              <>
+                <span className="text-[var(--text-tertiary)]">·</span>
+                <span>Plan floor: {planMin} Growth Actions</span>
+              </>
+            ) : null}
+            {analysisMeta ? (
+              <>
+                <span className="text-[var(--text-tertiary)]">·</span>
+                <span>{analysisMeta}</span>
+              </>
+            ) : null}
+          </>
+        }
+        actions={
+          clientId ? (
+            <form action={evaluateDecisions}>
+              <input type="hidden" name="clientId" value={clientId} />
+              <input type="hidden" name="from" value={from} />
+              <input type="hidden" name="to" value={to} />
+              <button type="submit" className="btn btn-primary btn-sm">
+                Evaluate period
+              </button>
+            </form>
+          ) : null
+        }
+      />
+
+      {error ? <Alert variant="danger">{error}</Alert> : null}
+
+      {data?.partial_message ? <Alert variant="warning">{data.partial_message}</Alert> : null}
+
+      {data && !data.ready ? (
+        <Alert variant="info">
+          {data.message ?? "Decision Engine is not ready for this client and date range."}
+        </Alert>
+      ) : null}
 
       {data ? (
-        <div className="mt-4 flex flex-wrap gap-3 text-sm">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {Object.entries(data.readiness).map(([key, ready]) => (
-            <span
-              key={key}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1"
-            >
-              <span className={`inline-block h-2 w-2 rounded-full ${ready ? "bg-emerald-400" : "bg-amber-400"}`} />
+            <span key={key} className={`badge ${ready ? "badge-success" : "badge-warning"}`}>
               {readinessLabel(key)}
             </span>
           ))}
         </div>
       ) : null}
 
-      {clientId ? (
-        <form action={evaluateDecisions} className="mt-4 flex flex-wrap items-end gap-3">
-          <input type="hidden" name="clientId" value={clientId} />
-          <input type="hidden" name="from" value={from} />
-          <input type="hidden" name="to" value={to} />
-          <button
-            type="submit"
-            className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90"
-          >
-            Evaluate period
-          </button>
-          <p className="text-sm text-[var(--muted)]">
-            {from} to {to} · ranked by {data?.formula ?? "impact-weighted score"}
-          </p>
-        </form>
-      ) : null}
+      {data?.ready && clientId ? (
+        <div className="mt-4 space-y-[var(--section-gap)]">
+          <SummaryStrip
+            findingsCount={data.findings_count}
+            recommendedCount={withPlanFloor.length}
+            planMin={planMin}
+            additionalCount={filteredAdditional.length}
+            contentOppHref={contentOppHref}
+            contentOppCount={searchOpportunities.length}
+          />
 
-      {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          {error}
-        </p>
-      ) : null}
+          <section className="workspace-section">
+            <SectionHeader
+              title="Filter by Growth Action"
+              description="Narrow recommended actions and findings without changing scores."
+            />
+            <GrowthActionFilter clientId={clientId} from={from} to={to} active={leverFilter} />
+          </section>
 
-      {data && !data.ready ? (
-        <p className="mt-4 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
-          {data.message ?? "Decision Engine is not ready for this client and date range."}
-        </p>
-      ) : null}
+          <section id="recommended-actions" className="workspace-section scroll-mt-24">
+            <SectionHeader
+              title="Recommended Actions"
+              description="Promoted findings plus plan-floor fills from the next-best scored findings when needed."
+              actions={
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {filteredActions.length} shown
+                  {planMin > 0 ? ` · plan ${planMin}` : ""}
+                </span>
+              }
+            />
 
-      {data?.ready ? (
-        <>
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {data.levers.map((lever) => (
-              <div
-                key={lever.lever}
-                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="text-sm font-medium">{lever.label}</h2>
-                  <span
-                    className={`inline-flex items-center gap-2 text-xs ${
-                      lever.status === "clear" ? "text-emerald-300" : "text-amber-200"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-2 w-2 rounded-full ${
-                        lever.status === "clear" ? "bg-emerald-400" : "bg-amber-400"
-                      }`}
-                    />
-                    {lever.status === "clear" ? "clear" : `${lever.findings_count} findings`}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-medium">Recommendations</h2>
-              <p className="text-sm text-[var(--muted)]">
-                {data.recommendations.length} shown · ranked by {data.formula}
-              </p>
-            </div>
-
-            {data.recommendations.length === 0 ? (
-              <p className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
-                No findings matched the configured rules for this period.
-              </p>
+            {filteredActions.length === 0 ? (
+              <Alert variant="info">
+                No findings for this Growth Action filter.{" "}
+                <Link href={contentOppHref} className="underline">
+                  Review Content Opp
+                </Link>{" "}
+                for striking-distance pages.
+              </Alert>
             ) : (
-              <div className="space-y-4">
-                {data.recommendations.map((item) => (
-                  <article
+              <div className="space-y-3">
+                {filteredActions.map((item) => (
+                  <RecommendedActionCard
                     key={item.rule_key}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
-                  >
-                    <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-                      <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
-                        {stageLabel(item.stage)}
-                      </span>
-                      <span>{item.label}</span>
-                      <span>·</span>
-                      <span>Priority {Math.round(item.priority_score)}</span>
-                    </div>
-                    <h3 className="mt-2 text-lg font-medium">{item.diagnosis}</h3>
-                    <p className="mt-2 text-sm text-[var(--muted)]">
-                      {formatEvidence(item.evidence_json)}
-                    </p>
-                    <p className="mt-3 text-sm">
-                      <span className="text-[var(--muted)]">Action:</span> {item.recommended_action}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      {item.priority_score >= 70 ? "High priority" : "Priority recommendation"}
-                    </p>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      {[
-                        ["Impact", item.impact],
-                        ["Confidence", item.confidence],
-                        ["Urgency", item.urgency],
-                        ["Effort", item.effort],
-                      ].map(([label, value]) => (
-                        <div key={String(label)}>
-                          <div className="mb-1 flex justify-between text-xs text-[var(--muted)]">
-                            <span>{label}</span>
-                            <span>{value}</span>
-                          </div>
-                          <div className="h-2 rounded-full bg-white/10">
-                            <div
-                              className="h-2 rounded-full bg-white/70"
-                              style={{ width: scoreBar(Number(value)) }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </article>
+                    item={item}
+                    clientId={clientId}
+                    from={from}
+                    to={to}
+                    decision={decisionByRule.get(item.rule_key) ?? null}
+                  />
                 ))}
               </div>
             )}
-          </div>
-        </>
+          </section>
+
+          <GrowthActionGrid levers={data.levers} />
+          <AdditionalFindingsPanel
+            findings={filteredAdditional}
+            clientId={clientId}
+            from={from}
+            to={to}
+            decisionsByRule={decisionByRule}
+          />
+        </div>
       ) : null}
     </section>
   );

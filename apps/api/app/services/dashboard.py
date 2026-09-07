@@ -80,6 +80,51 @@ def _period_metric(current: float | int | None, previous: float | int | None) ->
     }
 
 
+def _baseline_comparison(
+    client: Client,
+    *,
+    current_sessions: float | None,
+    current_leads: int | None,
+    current_lead_rate: float | None,
+    period_days: int,
+) -> dict[str, Any]:
+    """Compare the selected window (scaled to monthly) against the durable baseline snapshot."""
+    has_baseline = (
+        client.baseline_monthly_sessions is not None or client.baseline_monthly_leads is not None
+    )
+    monthly_sessions = (
+        (current_sessions * DAYS_PER_MONTH / period_days)
+        if current_sessions is not None and period_days > 0
+        else None
+    )
+    monthly_leads = (
+        (current_leads * DAYS_PER_MONTH / period_days)
+        if current_leads is not None and period_days > 0
+        else None
+    )
+    baseline_rate = _to_float(client.baseline_lead_rate_pct)
+    if baseline_rate is None and client.baseline_monthly_sessions and client.baseline_monthly_leads:
+        if client.baseline_monthly_sessions > 0:
+            baseline_rate = (
+                client.baseline_monthly_leads / client.baseline_monthly_sessions
+            ) * 100
+
+    return {
+        "configured": has_baseline,
+        "as_of": client.baseline_as_of.isoformat() if client.baseline_as_of else None,
+        "source": client.baseline_source,
+        "notes": client.baseline_notes,
+        "monthly_sessions": client.baseline_monthly_sessions,
+        "monthly_leads": client.baseline_monthly_leads,
+        "lead_rate": baseline_rate,
+        "vs_current": {
+            "sessions": _period_metric(monthly_sessions, client.baseline_monthly_sessions),
+            "leads": _period_metric(monthly_leads, client.baseline_monthly_leads),
+            "lead_rate": _period_metric(current_lead_rate, baseline_rate),
+        },
+    }
+
+
 def _load_watermarks(db: Session, client_id: UUID) -> dict[str, DataWatermark]:
     rows = db.query(DataWatermark).filter(DataWatermark.client_id == client_id).all()
     return {row.source: row for row in rows}
@@ -676,6 +721,15 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     if period_goal and current_leads is not None:
         progress_pct = (current_leads / period_goal) * 100
 
+    period_days = (to_date - from_date).days + 1
+    baseline_payload = _baseline_comparison(
+        client,
+        current_sessions=current_sessions,
+        current_leads=current_leads,
+        current_lead_rate=current_lead_rate,
+        period_days=period_days,
+    )
+
     return {
         "period": {
             "from": from_date.isoformat(),
@@ -683,6 +737,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "previous_from": prev_from.isoformat(),
             "previous_to": prev_to.isoformat(),
         },
+        "baseline": baseline_payload,
         "freshness": _freshness(watermarks),
         "conversions": {
             "configured": conversions_configured,

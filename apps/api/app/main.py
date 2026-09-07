@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, watch_list
+from app.api.routers import admin, annotations, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, watch_list
 from app.core.settings import get_settings
 
 settings = get_settings()
@@ -16,6 +16,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 app.include_router(auth.router)
 app.include_router(clients.router)
 app.include_router(integrations.router)
@@ -26,3 +32,4 @@ app.include_router(seranking.router)
 app.include_router(watch_list.router)
 app.include_router(dashboard.router)
 app.include_router(decisions.router)
+app.include_router(annotations.router)

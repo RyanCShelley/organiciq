@@ -1,5 +1,18 @@
+import Link from "next/link";
+
+import { SearchOpportunitiesTable } from "@/components/DecisionEngine/SearchOpportunitiesTable";
+import { DataTable } from "@/components/analytics/DataTable";
+import { Alert } from "@/components/ui/Alert";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
-import { resolveClientId } from "@/lib/context";
+import { resolveClientId, resolveDateRange } from "@/lib/context";
+import {
+  normalizeDiagnoseResponse,
+  type DiagnoseResponse,
+  type SearchOpportunity,
+} from "@/lib/decision-engine";
+import { withNavContext } from "@/lib/navigation";
 
 type SearchRow = {
   keyword_id: string;
@@ -48,17 +61,27 @@ function formatSerpFeatures(features: string[]): string {
   return features.length > 0 ? features.join(", ") : "—";
 }
 
+type WatchTab = "search" | "ai" | "content-opp";
+
+function resolveTab(raw: string | string[] | undefined): WatchTab {
+  if (raw === "ai") return "ai";
+  if (raw === "content-opp" || raw === "content") return "content-opp";
+  return "search";
+}
+
 export default async function WatchListPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const tab = typeof params.tab === "string" ? params.tab : "search";
+  const tab = resolveTab(params.tab);
   const clientId = await resolveClientId(params);
+  const { from, to } = await resolveDateRange(params);
 
   let searchRows: SearchRow[] = [];
   let aiRows: AiRow[] = [];
+  let contentOpps: SearchOpportunity[] = [];
   let error: string | null = null;
 
   if (!clientId) {
@@ -75,125 +98,213 @@ export default async function WatchListPage({
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load AI Watch List";
     }
+  } else {
+    try {
+      const diagnose = normalizeDiagnoseResponse(
+        await apiFetch<DiagnoseResponse>(
+          `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+          { clientId },
+        ),
+      );
+      contentOpps = diagnose.search_opportunities ?? [];
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to load Content Opp";
+    }
   }
+
+  const tabs: { id: WatchTab; label: string }[] = [
+    { id: "search", label: "Search" },
+    { id: "ai", label: "AI" },
+  ];
 
   return (
     <section>
-      <h1 className="text-2xl font-semibold">Watch List</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Search keywords and AI prompts from SE Ranking.
-      </p>
+      <PageHeader
+        title="Watch List"
+        description={
+          tab === "content-opp"
+            ? "Striking-distance content opportunities from Search Console for strategist review."
+            : "Search keywords and AI prompts from SE Ranking."
+        }
+        meta={
+          tab === "content-opp" ? (
+            <span>
+              Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
+              <strong className="text-[var(--text-primary)]">{to}</strong>
+            </span>
+          ) : null
+        }
+      />
 
-      <div className="mt-4 flex gap-2 text-sm">
-        <a
-          href={clientId ? `/watch-list?tab=search&clientId=${clientId}` : "/watch-list?tab=search"}
-          className={`rounded-lg px-3 py-1.5 ${
-            tab === "search" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
-          }`}
-        >
-          Search
-        </a>
-        <a
-          href={clientId ? `/watch-list?tab=ai&clientId=${clientId}` : "/watch-list?tab=ai"}
-          className={`rounded-lg px-3 py-1.5 ${
-            tab === "ai" ? "bg-[var(--accent)] text-white" : "border border-[var(--border)]"
-          }`}
-        >
-          AI
-        </a>
+      {tab !== "content-opp" ? (
+      <div className="mt-4 flex flex-wrap gap-2 text-sm">
+        {tabs.map((item) => {
+          const href = clientId
+            ? withNavContext("/watch-list", clientId, from, to, {
+                tab: item.id === "search" ? undefined : item.id,
+              })
+            : `/watch-list?tab=${item.id}`;
+          const active = tab === item.id;
+          return (
+            <Link
+              key={item.id}
+              href={href}
+              className={active ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
       </div>
-
-      {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          {error}
-        </p>
       ) : null}
 
+      {error ? <Alert variant="danger" className="mt-4">{error}</Alert> : null}
+
       {tab === "search" ? (
-        <>
-          {!error && searchRows.length === 0 ? (
-            <p className="mt-6 text-sm text-[var(--muted)]">
-              No Search Watch List rows yet. Map an SE Ranking project in Admin → Integrations and run
-              Sync Search 14 days.
-            </p>
-          ) : null}
+        <section className="mt-4 workspace-section">
+          <SectionHeader
+            title="Search keywords"
+            description="Tracked keyword positions from SE Ranking."
+            actions={
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {searchRows.length} keyword{searchRows.length === 1 ? "" : "s"}
+              </span>
+            }
+          />
+          <div className="workspace-panel">
+            {!error && searchRows.length === 0 ? (
+              <Alert variant="info">
+                No Search Watch List rows yet. Map an SE Ranking project in Client settings →
+                Integrations and run Sync Search 14 days.
+              </Alert>
+            ) : (
+              <DataTable
+                columns={[
+                  { key: "keyword", header: "Keyword", render: (row) => row.keyword },
+                  {
+                    key: "group",
+                    header: "Group",
+                    render: (row) => row.group_name ?? "—",
+                  },
+                  {
+                    key: "volume",
+                    header: "Volume",
+                    align: "right",
+                    render: (row) => formatNum(row.volume),
+                  },
+                  {
+                    key: "position",
+                    header: "Position",
+                    align: "right",
+                    render: (row) => formatNum(row.current_position),
+                  },
+                  {
+                    key: "change",
+                    header: "Change",
+                    align: "right",
+                    render: (row) => formatNum(row.ranking_change),
+                  },
+                  {
+                    key: "serp",
+                    header: "SERP Features",
+                    render: (row) => formatSerpFeatures(row.earned_serp_features),
+                  },
+                  {
+                    key: "checked",
+                    header: "Checked",
+                    render: (row) => row.checked_at ?? "—",
+                  },
+                ]}
+                rows={searchRows}
+                getRowKey={(row) => `${row.site_engine_id}-${row.keyword_id}`}
+                emptyMessage="No search keywords."
+              />
+            )}
+          </div>
+        </section>
+      ) : null}
 
-          {searchRows.length > 0 ? (
-            <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--border)]">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-white/5 text-[var(--muted)]">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Keyword</th>
-                    <th className="px-4 py-3 font-medium">Group</th>
-                    <th className="px-4 py-3 font-medium">Volume</th>
-                    <th className="px-4 py-3 font-medium">Position</th>
-                    <th className="px-4 py-3 font-medium">Change</th>
-                    <th className="px-4 py-3 font-medium">SERP Features</th>
-                    <th className="px-4 py-3 font-medium">Checked</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {searchRows.map((r) => (
-                    <tr key={`${r.site_engine_id}-${r.keyword_id}`} className="border-t border-[var(--border)]">
-                      <td className="px-4 py-3">{r.keyword}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{r.group_name ?? "—"}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{formatNum(r.volume)}</td>
-                      <td className="px-4 py-3">{formatNum(r.current_position)}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{formatNum(r.ranking_change)}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">
-                        {formatSerpFeatures(r.earned_serp_features)}
-                      </td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{r.checked_at ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <>
-          {!error && aiRows.length === 0 ? (
-            <p className="mt-6 text-sm text-[var(--muted)]">
-              No AI Watch List rows yet. Map an SE Ranking project in Admin → Integrations and run Sync AI
-              14 days.
-            </p>
-          ) : null}
+      {tab === "ai" ? (
+        <section className="mt-4 workspace-section">
+          <SectionHeader
+            title="AI prompts"
+            description="Tracked AI visibility prompts from SE Ranking."
+            actions={
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {aiRows.length} prompt{aiRows.length === 1 ? "" : "s"}
+              </span>
+            }
+          />
+          <div className="workspace-panel">
+            {!error && aiRows.length === 0 ? (
+              <Alert variant="info">
+                No AI Watch List rows yet. Map an SE Ranking project in Client settings →
+                Integrations and run Sync AI 14 days.
+              </Alert>
+            ) : (
+              <DataTable
+                columns={[
+                  { key: "prompt", header: "Prompt", render: (row) => row.prompt },
+                  { key: "engine", header: "Engine", render: (row) => row.engine },
+                  {
+                    key: "group",
+                    header: "Group",
+                    render: (row) => row.group_name ?? "—",
+                  },
+                  {
+                    key: "mentioned",
+                    header: "Mentioned",
+                    render: (row) => formatBool(row.brand_mentioned),
+                  },
+                  {
+                    key: "cited",
+                    header: "Cited",
+                    render: (row) => formatBool(row.brand_cited),
+                  },
+                  {
+                    key: "mention_pos",
+                    header: "Mention Pos",
+                    align: "right",
+                    render: (row) => formatNum(row.mention_position),
+                  },
+                  {
+                    key: "citation_pos",
+                    header: "Citation Pos",
+                    align: "right",
+                    render: (row) => formatNum(row.url_position),
+                  },
+                  {
+                    key: "checked",
+                    header: "Checked",
+                    render: (row) => row.checked_at ?? "—",
+                  },
+                ]}
+                rows={aiRows}
+                getRowKey={(row) => `${row.engine}-${row.prompt_id}`}
+                emptyMessage="No AI prompts."
+              />
+            )}
+          </div>
+        </section>
+      ) : null}
 
-          {aiRows.length > 0 ? (
-            <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--border)]">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-white/5 text-[var(--muted)]">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Prompt</th>
-                    <th className="px-4 py-3 font-medium">Engine</th>
-                    <th className="px-4 py-3 font-medium">Group</th>
-                    <th className="px-4 py-3 font-medium">Mentioned</th>
-                    <th className="px-4 py-3 font-medium">Cited</th>
-                    <th className="px-4 py-3 font-medium">Mention Pos</th>
-                    <th className="px-4 py-3 font-medium">Citation Pos</th>
-                    <th className="px-4 py-3 font-medium">Checked</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {aiRows.map((r) => (
-                    <tr key={`${r.engine}-${r.prompt_id}`} className="border-t border-[var(--border)]">
-                      <td className="px-4 py-3">{r.prompt}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{r.engine}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{r.group_name ?? "—"}</td>
-                      <td className="px-4 py-3">{formatBool(r.brand_mentioned)}</td>
-                      <td className="px-4 py-3">{formatBool(r.brand_cited)}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{formatNum(r.mention_position)}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{formatNum(r.url_position)}</td>
-                      <td className="px-4 py-3 text-[var(--muted)]">{r.checked_at ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {tab === "content-opp" ? (
+        <section className="mt-4 workspace-section">
+          {!error && contentOpps.length === 0 ? (
+            <Alert variant="info">
+              No Content Opp rows for this period. Confirm GSC is synced and Decision Engine is
+              ready.
+            </Alert>
           ) : null}
-        </>
-      )}
+          {contentOpps.length > 0 ? (
+            <SearchOpportunitiesTable
+              items={contentOpps}
+              title="Content Opp"
+              description="Striking-distance rankings moved here from Decision Engine for content planning."
+            />
+          ) : null}
+        </section>
+      ) : null}
     </section>
   );
 }

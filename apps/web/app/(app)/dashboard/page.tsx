@@ -1,13 +1,15 @@
 import Link from "next/link";
 
+import { DataTable } from "@/components/analytics/DataTable";
+import { MetricCard } from "@/components/analytics/MetricCard";
+import { StatusBadge } from "@/components/analytics/StatusBadge";
+import { Alert } from "@/components/ui/Alert";
+import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SectionHeader, SubsectionTitle } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { resolveClientId, resolveDateRange } from "@/lib/context";
 import { normalizeDashboardResponse, type DashboardResponse } from "@/lib/dashboard";
-import {
-  DashboardMetricCard,
-  DashboardSection,
-  FreshnessBanner,
-} from "@/components/DashboardMetrics";
 
 function formatNum(value: number | null): string {
   if (value === null || Number.isNaN(value)) return "—";
@@ -49,278 +51,392 @@ export default async function DashboardPage({
 
   return (
     <section>
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Conversions → Visibility → Traffic from validated facts only ({from} to {to}).
-      </p>
+      <PageHeader
+        title="Dashboard"
+        description="Conversions → Visibility → Traffic from validated facts only."
+      />
 
-      {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert variant="danger">{error}</Alert> : null}
 
       {data ? (
-        <>
-          <FreshnessBanner rows={data.freshness} />
+        <div className="space-y-[var(--section-gap)]">
+          <section className="workspace-section">
+            <SectionHeader
+              title="Baseline"
+              description="Current period scaled to monthly vs the frozen kickoff / calculator snapshot."
+              actions={
+                clientId ? (
+                  <Link href={`/clients/${clientId}`} className="btn btn-ghost btn-sm">
+                    Edit baseline
+                  </Link>
+                ) : null
+              }
+            />
+            <div className="workspace-panel space-y-3">
+              {!data.baseline.configured ? (
+                <Alert variant="info">
+                  No baseline snapshot yet. Set monthly sessions, leads, and lead rate in{" "}
+                  <Link
+                    href={clientId ? `/clients/${clientId}` : "/clients"}
+                    className="font-medium text-[var(--brand-teal-hover)] underline"
+                  >
+                    Client settings
+                  </Link>{" "}
+                  (from the growth calculator when you have it).
+                </Alert>
+              ) : (
+                <>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Snapshot
+                    {data.baseline.as_of ? ` as of ${data.baseline.as_of}` : ""}
+                    {data.baseline.source ? ` · ${data.baseline.source}` : ""}
+                    {data.baseline.notes ? ` — ${data.baseline.notes}` : ""}
+                  </p>
+                  <div className="metric-grid sm:grid-cols-3">
+                    <MetricCard
+                      label="Monthly sessions vs baseline"
+                      metric={data.baseline.vs_current.sessions}
+                      comparisonLabel="vs baseline"
+                      hint={
+                        data.baseline.monthly_sessions != null
+                          ? `Baseline ${data.baseline.monthly_sessions.toLocaleString()}/mo`
+                          : undefined
+                      }
+                    />
+                    <MetricCard
+                      label="Monthly leads vs baseline"
+                      metric={data.baseline.vs_current.leads}
+                      comparisonLabel="vs baseline"
+                      hint={
+                        data.baseline.monthly_leads != null
+                          ? `Baseline ${data.baseline.monthly_leads.toLocaleString()}/mo`
+                          : undefined
+                      }
+                    />
+                    <MetricCard
+                      label="Lead rate vs baseline"
+                      metric={data.baseline.vs_current.lead_rate}
+                      unit="pct"
+                      comparisonLabel="vs baseline"
+                      hint={
+                        data.baseline.lead_rate != null
+                          ? `Baseline ${formatNum(data.baseline.lead_rate)}%`
+                          : undefined
+                      }
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
 
-          <DashboardSection
-            title="Conversions"
-            description="Lead events from GA4 conversion definitions. Lead rate uses GA4 sessions."
-          >
-            {!data.conversions.configured ? (
-              <p className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
-                No lead conversion definitions configured. Add them in{" "}
-                <Link
-                  href={clientId ? `/clients/${clientId}/conversions` : "/clients"}
-                  className="underline"
-                >
-                  Clients → workspace → Conversions
-                </Link>{" "}
-                to populate leads and lead rate.
-              </p>
-            ) : null}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <DashboardMetricCard label="Leads" metric={data.conversions.leads} />
-              <DashboardMetricCard label="Lead Rate" metric={data.conversions.lead_rate} unit="pct" />
-              {data.conversions.period_lead_goal ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-                  <div className="text-sm text-[var(--muted)]">
-                    {leadGoalLabel(data.conversions.goal_period_days)}
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {data.conversions.period_lead_goal.toLocaleString()}
-                  </div>
-                  {data.conversions.monthly_lead_goal &&
-                  data.conversions.goal_period_days !== null &&
-                  (data.conversions.goal_period_days < 28 ||
-                    data.conversions.goal_period_days > 31) ? (
-                    <div className="mt-1 text-xs text-[var(--muted)]">
-                      Based on {data.conversions.monthly_lead_goal.toLocaleString()}/month
+          <section className="workspace-section">
+            <SectionHeader
+              title="Conversions"
+              description="Lead events and lead rate from GA4 conversion definitions."
+              actions={
+                clientId ? (
+                  <Link
+                    href={`/clients/${clientId}/conversions`}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    Conversion settings
+                  </Link>
+                ) : null
+              }
+            />
+
+            <div className="workspace-panel space-y-3">
+              {!data.conversions.configured ? (
+                <Alert variant="info">
+                  No lead conversion definitions configured. Add them in{" "}
+                  <Link
+                    href={clientId ? `/clients/${clientId}/conversions` : "/clients"}
+                    className="font-medium text-[var(--brand-teal-hover)] underline"
+                  >
+                    Clients → Conversions
+                  </Link>
+                  .
+                </Alert>
+              ) : null}
+
+              <div className="metric-grid sm:grid-cols-2 lg:grid-cols-3">
+                <MetricCard label="Leads" metric={data.conversions.leads} />
+                <MetricCard label="Lead Rate" metric={data.conversions.lead_rate} unit="pct" />
+                {data.conversions.period_lead_goal ? (
+                  <Card className="flex h-full flex-col p-[var(--card-padding)]">
+                    <div className="text-xs font-medium text-[var(--text-secondary)]">
+                      {leadGoalLabel(data.conversions.goal_period_days)}
                     </div>
-                  ) : null}
-                  <div className="mt-2 text-xs text-[var(--muted)]">
-                    Progress {formatNum(data.conversions.goal_progress_pct)}%
+                    <div className="mt-1 font-[family-name:var(--font-display)] text-xl font-bold tracking-tight">
+                      {data.conversions.period_lead_goal.toLocaleString()}
+                    </div>
+                    {data.conversions.monthly_lead_goal &&
+                    data.conversions.goal_period_days !== null &&
+                    (data.conversions.goal_period_days < 28 ||
+                      data.conversions.goal_period_days > 31) ? (
+                      <div className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                        Based on {data.conversions.monthly_lead_goal.toLocaleString()}/month
+                      </div>
+                    ) : null}
+                    <div className="mt-auto pt-2 text-xs text-[var(--text-secondary)]">
+                      Progress{" "}
+                      <span className="font-medium text-[var(--text-primary)]">
+                        {formatNum(data.conversions.goal_progress_pct)}%
+                      </span>
+                    </div>
+                  </Card>
+                ) : null}
+              </div>
+
+              {data.conversions.leads_by_channel.length > 0 ? (
+                <DataTable
+                  columns={[
+                    { key: "channel", header: "Channel", render: (row) => row.label },
+                    {
+                      key: "leads",
+                      header: "Leads",
+                      align: "right",
+                      render: (row) => row.leads.toLocaleString(),
+                    },
+                  ]}
+                  rows={data.conversions.leads_by_channel}
+                  getRowKey={(row) => row.channel}
+                />
+              ) : null}
+            </div>
+          </section>
+
+          <section className="workspace-section">
+            <SectionHeader
+              title="Visibility"
+              description="Search and AI visibility reported separately."
+            />
+
+            <div className="workspace-panel space-y-4">
+              <div>
+                <SubsectionTitle>Search</SubsectionTitle>
+                <div className="metric-grid mt-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <MetricCard
+                    label="Search Visibility"
+                    metric={data.visibility.search.search_visibility}
+                    unit="visibility"
+                    size="compact"
+                    hint={
+                      data.visibility.search.search_visibility_source === "site_summary"
+                        ? "SE Ranking site summary"
+                        : data.visibility.search.search_visibility_source === "keyword_avg"
+                          ? "Average tracked keyword visibility"
+                          : "Run Sync Search to populate"
+                    }
+                  />
+                  <MetricCard
+                    label="Search SOV"
+                    metric={data.visibility.search.search_sov}
+                    unit="pct"
+                    size="compact"
+                    hint={
+                      data.visibility.search.search_sov.current !== null
+                        ? "Share of voice from visibility facts"
+                        : "Requires competitor visibility data"
+                    }
+                  />
+                  <MetricCard
+                    label="GSC Impressions"
+                    metric={data.visibility.search.gsc_impressions}
+                    size="compact"
+                  />
+                  <MetricCard
+                    label="Average Position"
+                    metric={data.visibility.search.average_position}
+                    unit="position"
+                    invertChange
+                    size="compact"
+                    hint={`Source: ${data.visibility.search.average_position_source.replaceAll("_", " ")}`}
+                  />
+                </div>
+
+                {Object.values(data.visibility.search.keyword_distribution).some((v) => v > 0) ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-5">
+                    {(
+                      [
+                        ["Top 3", data.visibility.search.keyword_distribution.top_3],
+                        ["Top 10", data.visibility.search.keyword_distribution.top_10],
+                        ["Top 20", data.visibility.search.keyword_distribution.top_20],
+                        ["Beyond 20", data.visibility.search.keyword_distribution.beyond_20],
+                        ["Not ranking", data.visibility.search.keyword_distribution.not_ranking],
+                      ] as const
+                    ).map(([label, count]) => (
+                      <div
+                        key={label}
+                        className="rounded-[var(--radius-md)] border border-[var(--border)] px-2.5 py-2"
+                      >
+                        <div className="text-[0.625rem] font-medium text-[var(--text-tertiary)]">
+                          {label}
+                        </div>
+                        <div className="mt-0.5 font-[family-name:var(--font-display)] text-base font-bold">
+                          {count}
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                ) : null}
+              </div>
+
+              <div>
+                <SubsectionTitle>AI</SubsectionTitle>
+                <div className="metric-grid mt-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <MetricCard
+                    label="Answers with your mention"
+                    metric={data.visibility.ai.mention_presence}
+                    unit="pct"
+                    size="compact"
+                  />
+                  <MetricCard
+                    label="Answers with your link"
+                    metric={data.visibility.ai.link_presence}
+                    unit="pct"
+                    size="compact"
+                  />
+                  <MetricCard
+                    label="Mention in Top 3"
+                    metric={data.visibility.ai.mention_top3_presence}
+                    unit="pct"
+                    size="compact"
+                  />
+                  <MetricCard
+                    label="Link in Top 3"
+                    metric={data.visibility.ai.link_top3_presence}
+                    unit="pct"
+                    size="compact"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                  {data.visibility.ai.prompt_count !== null
+                    ? `${data.visibility.ai.prompt_count} tracked prompts in SE Ranking.`
+                    : "Run Sync AI to pull AIRT presence stats."}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="workspace-section">
+            <SectionHeader title="Traffic" description="GSC clicks and GA4 sessions/views." />
+
+            <div className="workspace-panel space-y-4">
+              <div className="metric-grid sm:grid-cols-2 lg:grid-cols-4">
+                <MetricCard label="GSC Clicks" metric={data.traffic.gsc_clicks} size="compact" />
+                <MetricCard label="GSC CTR" metric={data.traffic.gsc_ctr} unit="pct" size="compact" />
+                <MetricCard label="GA4 Sessions" metric={data.traffic.ga4_sessions} size="compact" />
+                <MetricCard label="GA4 Views" metric={data.traffic.ga4_views} size="compact" />
+              </div>
+
+              {data.traffic.by_channel.length > 0 ? (
+                <div>
+                  <SubsectionTitle className="mb-2">Traffic by Channel</SubsectionTitle>
+                  <DataTable
+                    columns={[
+                      { key: "channel", header: "Channel", render: (row) => row.label },
+                      {
+                        key: "sessions",
+                        header: "Sessions",
+                        align: "right",
+                        render: (row) => formatNum(row.sessions),
+                      },
+                      {
+                        key: "views",
+                        header: "Views",
+                        align: "right",
+                        render: (row) => formatNum(row.views),
+                      },
+                    ]}
+                    rows={data.traffic.by_channel}
+                    getRowKey={(row) => row.channel}
+                  />
+                </div>
+              ) : null}
+
+              {data.traffic.top_pages.length > 0 ? (
+                <div>
+                  <SubsectionTitle className="mb-2">Top Pages</SubsectionTitle>
+                  <DataTable
+                    columns={[
+                      {
+                        key: "page",
+                        header: "Page",
+                        render: (row) => (
+                          <span className="block max-w-xs truncate" title={row.page}>
+                            {row.page}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "gsc_impressions",
+                        header: "GSC Impr.",
+                        align: "right",
+                        render: (row) => formatNum(row.gsc_impressions),
+                      },
+                      {
+                        key: "gsc_clicks",
+                        header: "GSC Clicks",
+                        align: "right",
+                        render: (row) => formatNum(row.gsc_clicks),
+                      },
+                      {
+                        key: "ga4_sessions",
+                        header: "GA4 Sessions",
+                        align: "right",
+                        render: (row) => formatNum(row.ga4_sessions),
+                      },
+                      {
+                        key: "ga4_views",
+                        header: "GA4 Views",
+                        align: "right",
+                        render: (row) => formatNum(row.ga4_views),
+                      },
+                    ]}
+                    rows={data.traffic.top_pages}
+                    getRowKey={(row) => row.page}
+                  />
                 </div>
               ) : null}
             </div>
-            {data.conversions.leads_by_channel.length > 0 ? (
-              <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--border)]">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-white/5 text-[var(--muted)]">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Channel</th>
-                      <th className="px-4 py-3 font-medium">Leads</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.conversions.leads_by_channel.map((row) => (
-                      <tr key={row.channel} className="border-t border-[var(--border)]">
-                        <td className="px-4 py-3">{row.label}</td>
-                        <td className="px-4 py-3">{row.leads}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </DashboardSection>
+          </section>
 
-          <DashboardSection
-            title="Visibility"
-            description="Search and AI visibility are reported separately — no combined score."
-          >
-            <h3 className="text-sm font-medium text-[var(--muted)]">Search</h3>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <DashboardMetricCard
-                label="Search Visibility"
-                metric={data.visibility.search.search_visibility}
-                unit="visibility"
-                hint={
-                  data.visibility.search.search_visibility_source === "site_summary"
-                    ? "SE Ranking site summary — same 0–1 scale as their project overview (e.g. 0.1)."
-                    : data.visibility.search.search_visibility_source === "keyword_avg"
-                      ? "Average tracked keyword visibility from SE Ranking (0–1 scale)."
-                      : "Run Sync Search in the client workspace to populate."
-                }
-              />
-              <DashboardMetricCard
-                label="Search SOV"
-                metric={data.visibility.search.search_sov}
-                unit="pct"
-                hint={
-                  data.visibility.search.search_sov.current !== null
-                    ? "Share of voice from site + competitor visibility facts."
-                    : "Requires competitor visibility from SE Ranking (not returned for current sync)."
-                }
-              />
-              <DashboardMetricCard
-                label="GSC Impressions"
-                metric={data.visibility.search.gsc_impressions}
-              />
-              <DashboardMetricCard
-                label="Average Position"
-                metric={data.visibility.search.average_position}
-                unit="position"
-                invertChange
-                hint={`Source: ${data.visibility.search.average_position_source.replaceAll("_", " ")}`}
-              />
-            </div>
-            {Object.values(data.visibility.search.keyword_distribution).some((v) => v > 0) ? (
-              <div className="mt-4 grid gap-3 sm:grid-cols-5">
-                {(
-                  [
-                    ["Top 3", data.visibility.search.keyword_distribution.top_3],
-                    ["Top 10", data.visibility.search.keyword_distribution.top_10],
-                    ["Top 20", data.visibility.search.keyword_distribution.top_20],
-                    ["Beyond 20", data.visibility.search.keyword_distribution.beyond_20],
-                    ["Not ranking", data.visibility.search.keyword_distribution.not_ranking],
-                  ] as const
-                ).map(([label, count]) => (
-                  <div
-                    key={label}
-                    className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                  >
-                    <div className="text-[var(--muted)]">{label}</div>
-                    <div className="mt-1 text-lg font-semibold">{count}</div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            <h3 className="mt-6 text-sm font-medium text-[var(--muted)]">AI</h3>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              From your SE Ranking AIRT tracked prompts — same presence metrics as the Rankings report.
-            </p>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <DashboardMetricCard
-                label="Answers with your mention"
-                metric={data.visibility.ai.mention_presence}
-                unit="pct"
-                hint="Share of tracked prompts where your brand is mentioned in the AI answer."
-              />
-              <DashboardMetricCard
-                label="Answers with your link"
-                metric={data.visibility.ai.link_presence}
-                unit="pct"
-                hint="Share of tracked prompts where your domain is cited with a link."
-              />
-              <DashboardMetricCard
-                label="Mention in Top 3"
-                metric={data.visibility.ai.mention_top3_presence}
-                unit="pct"
-                hint="Share of tracked prompts where your brand mention appears in the top 3 positions."
-              />
-              <DashboardMetricCard
-                label="Link in Top 3"
-                metric={data.visibility.ai.link_top3_presence}
-                unit="pct"
-                hint="Share of tracked prompts where your domain link appears in the top 3 positions."
-              />
-            </div>
-            {data.visibility.ai.prompt_count !== null ? (
-              <p className="mt-3 text-sm text-[var(--muted)]">
-                {data.visibility.ai.prompt_count} tracked prompts in SE Ranking.
-              </p>
-            ) : (
-              <p className="mt-3 text-sm text-[var(--muted)]">
-                Run Sync AI to pull AIRT presence stats from SE Ranking.
-              </p>
-            )}
-          </DashboardSection>
-
-          <DashboardSection title="Traffic" description="GSC clicks and GA4 sessions/views by channel.">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <DashboardMetricCard label="GSC Clicks" metric={data.traffic.gsc_clicks} />
-              <DashboardMetricCard label="GSC CTR" metric={data.traffic.gsc_ctr} unit="pct" />
-              <DashboardMetricCard label="GA4 Sessions" metric={data.traffic.ga4_sessions} />
-              <DashboardMetricCard label="GA4 Views" metric={data.traffic.ga4_views} />
-            </div>
-
-            {data.traffic.by_channel.length > 0 ? (
-              <>
-                <h3 className="mt-6 text-sm font-medium text-[var(--muted)]">Traffic by Channel</h3>
-                <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)]">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-white/5 text-[var(--muted)]">
-                      <tr>
-                        <th className="px-4 py-3 font-medium">Channel</th>
-                        <th className="px-4 py-3 font-medium">Sessions</th>
-                        <th className="px-4 py-3 font-medium">Views</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.traffic.by_channel.map((row) => (
-                        <tr key={row.channel} className="border-t border-[var(--border)]">
-                          <td className="px-4 py-3">{row.label}</td>
-                          <td className="px-4 py-3">{formatNum(row.sessions)}</td>
-                          <td className="px-4 py-3">{formatNum(row.views)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            ) : null}
-
-            {data.traffic.top_pages.length > 0 ? (
-              <>
-                <h3 className="mt-6 text-sm font-medium text-[var(--muted)]">Top Pages</h3>
-                <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)]">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-white/5 text-[var(--muted)]">
-                      <tr>
-                        <th className="px-4 py-3 font-medium">Page</th>
-                        <th className="px-4 py-3 font-medium">GSC Impr.</th>
-                        <th className="px-4 py-3 font-medium">GSC Clicks</th>
-                        <th className="px-4 py-3 font-medium">GA4 Sessions</th>
-                        <th className="px-4 py-3 font-medium">GA4 Views</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.traffic.top_pages.map((row) => (
-                        <tr key={row.page} className="border-t border-[var(--border)]">
-                          <td className="max-w-xs truncate px-4 py-3" title={row.page}>
-                            {row.page}
-                          </td>
-                          <td className="px-4 py-3">{formatNum(row.gsc_impressions)}</td>
-                          <td className="px-4 py-3">{formatNum(row.gsc_clicks)}</td>
-                          <td className="px-4 py-3">{formatNum(row.ga4_sessions)}</td>
-                          <td className="px-4 py-3">{formatNum(row.ga4_views)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            ) : null}
-          </DashboardSection>
-
-          <div className="mt-8 overflow-x-auto rounded-xl border border-[var(--border)]">
-            <h3 className="border-b border-[var(--border)] px-4 py-3 text-sm font-medium">
-              Data Freshness
-            </h3>
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-white/5 text-[var(--muted)]">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Source</th>
-                  <th className="px-4 py-3 font-medium">Fact Through</th>
-                  <th className="px-4 py-3 font-medium">Validation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.freshness.map((row) => (
-                  <tr key={row.source} className="border-t border-[var(--border)]">
-                    <td className="px-4 py-3">{row.source.replaceAll("_", " ")}</td>
-                    <td className="px-4 py-3 text-[var(--muted)]">{row.fact_through ?? "—"}</td>
-                    <td className="px-4 py-3 text-[var(--muted)]">{row.validation ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+          <section className="workspace-section">
+            <SectionHeader title="Data Freshness" description="Validated fact coverage by source." />
+            <DataTable
+              columns={[
+                {
+                  key: "source",
+                  header: "Source",
+                  render: (row) => row.source.replaceAll("_", " "),
+                },
+                {
+                  key: "fact_through",
+                  header: "Fact Through",
+                  render: (row) => (
+                    <span className="text-[var(--text-secondary)]">{row.fact_through ?? "—"}</span>
+                  ),
+                },
+                {
+                  key: "validation",
+                  header: "Validation",
+                  render: (row) => (
+                    <span className="text-[var(--text-secondary)]">{row.validation ?? "—"}</span>
+                  ),
+                },
+                {
+                  key: "available",
+                  header: "Status",
+                  render: (row) => <StatusBadge available={row.available} />,
+                },
+              ]}
+              rows={data.freshness}
+              getRowKey={(row) => row.source}
+            />
+          </section>
+        </div>
       ) : null}
     </section>
   );
