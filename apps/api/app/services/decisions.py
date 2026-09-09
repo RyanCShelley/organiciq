@@ -257,6 +257,8 @@ def update_decision_status(
     decision.status = status
     if status == DecisionStatus.DISMISSED:
         decision.dismissal_reason = dismissal_reason
+    else:
+        decision.dismissal_reason = None
     db.commit()
     db.refresh(decision)
     return decision

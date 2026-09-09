@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import type { StoredDecision } from "@/lib/decision-engine";
 
-const CLOSED = new Set(["dismissed", "task_created", "completed", "validated"]);
+const LOCKED = new Set(["task_created", "completed", "validated"]);
 
 export function DecisionActionBar({
   clientId,
@@ -35,7 +35,9 @@ export function DecisionActionBar({
   const [dismissalReason, setDismissalReason] = useState("");
 
   const status = decision?.status ?? null;
-  const isClosed = status != null && CLOSED.has(status);
+  const isAccepted = status === "accepted";
+  const isDismissed = status === "dismissed";
+  const isLocked = status != null && LOCKED.has(status);
 
   function runStatus(nextStatus: string, reason?: string) {
     setError(null);
@@ -55,14 +57,15 @@ export function DecisionActionBar({
         setError(result.error);
         return;
       }
-      setMessage(
-        nextStatus === "dismissed"
-          ? "Decision dismissed."
-          : nextStatus === "accepted"
-            ? "Decision accepted."
-            : "Decision marked reviewed.",
-      );
+      const feedback: Record<string, string> = {
+        dismissed: "Decision dismissed.",
+        accepted: "Decision accepted.",
+        reviewed: "Decision marked reviewed.",
+        new: "Selection cleared.",
+      };
+      setMessage(feedback[nextStatus] ?? "Decision updated.");
       setShowDismiss(false);
+      setDismissalReason("");
       router.refresh();
     });
   }
@@ -101,7 +104,60 @@ export function DecisionActionBar({
         </p>
       ) : null}
 
-      {!isClosed ? (
+      {isLocked ? (
+        <p className="text-xs text-[var(--text-tertiary)]">
+          This decision is {status?.replaceAll("_", " ")}. Re-evaluate the period to reopen
+          workflow for a new window.
+        </p>
+      ) : null}
+
+      {isDismissed ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => runStatus("new")}
+          >
+            Undo dismiss
+          </Button>
+        </div>
+      ) : null}
+
+      {isAccepted && !isLocked ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => runStatus("new")}
+          >
+            Deselect
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => setShowDismiss((open) => !open)}
+          >
+            Dismiss instead
+          </Button>
+          <Button
+            type="button"
+            variant="tertiary"
+            size="sm"
+            disabled={pending}
+            onClick={runTaskStub}
+          >
+            Mark task created
+          </Button>
+        </div>
+      ) : null}
+
+      {!isAccepted && !isDismissed && !isLocked ? (
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
@@ -140,14 +196,9 @@ export function DecisionActionBar({
             Mark task created
           </Button>
         </div>
-      ) : (
-        <p className="text-xs text-[var(--text-tertiary)]">
-          This decision is {status?.replaceAll("_", " ")}. Re-evaluate the period to reopen workflow
-          for a new window.
-        </p>
-      )}
+      ) : null}
 
-      {showDismiss && !isClosed ? (
+      {showDismiss && !isLocked && !isDismissed ? (
         <div className="flex flex-wrap items-end gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-3">
           <label className="field-label min-w-[220px] flex-1">
             Dismissal reason
@@ -170,9 +221,9 @@ export function DecisionActionBar({
         </div>
       ) : null}
 
-      {!isClosed ? (
+      {!isLocked && !isDismissed ? (
         <p className="text-xs text-[var(--text-tertiary)]">
-          “Mark task created” stores status only — Teamwork send is not wired yet.
+          Accept counts toward Selected on the plan. Deselect clears that without dismissing.
         </p>
       ) : null}
     </div>
