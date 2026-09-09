@@ -34,8 +34,8 @@ def _watermark(db, client_id, source: str, fact_through: date) -> None:
     )
 
 
-def test_dashboard_baseline_uses_trailing_month_not_selected_window(db, client_a):
-    """Baseline cards compare last ~30d GA4 totals to frozen monthly — never scale a 90d window."""
+def test_dashboard_baseline_scales_selected_window_to_monthly(db, client_a):
+    """Baseline cards follow the date filter and scale period totals to a monthly run-rate."""
     end = date(2026, 9, 9)
     start = end - timedelta(days=89)  # 90-day dashboard picker
     _watermark(db, client_a.id, "ga4", end)
@@ -45,7 +45,7 @@ def test_dashboard_baseline_uses_trailing_month_not_selected_window(db, client_a
     client_a.baseline_monthly_leads = 29
     client_a.baseline_lead_rate_pct = Decimal("1.01")
     client_a.baseline_source = "manual"
-    client_a.baseline_notes = "GA4 window; Lift 12-mo projection"
+    client_a.baseline_notes = "GA4 window"
 
     db.add(
         ConversionDefinition(
@@ -58,7 +58,6 @@ def test_dashboard_baseline_uses_trailing_month_not_selected_window(db, client_a
             active=True,
         )
     )
-    # Outside trailing 30d — must not inflate baseline comparison
     db.add(
         FactGa4Traffic(
             id=uuid4(),
@@ -88,7 +87,6 @@ def test_dashboard_baseline_uses_trailing_month_not_selected_window(db, client_a
             event_count=90,
         )
     )
-    # Inside trailing 30d
     db.add(
         FactGa4Traffic(
             id=uuid4(),
@@ -123,14 +121,14 @@ def test_dashboard_baseline_uses_trailing_month_not_selected_window(db, client_a
     payload = build_dashboard(db, client_a, start, end)
     baseline = payload["baseline"]
     assert baseline["configured"] is True
-    assert baseline["current_window"]["from"] == (end - timedelta(days=29)).isoformat()
+    assert baseline["current_window"]["from"] == start.isoformat()
     assert baseline["current_window"]["to"] == end.isoformat()
-    assert baseline["vs_current"]["sessions"]["current"] == 2876.0
-    assert baseline["vs_current"]["leads"]["current"] == 19
-    assert len(baseline["vs_current"]["sessions"]["series"]) == 30
-    assert sum(baseline["vs_current"]["sessions"]["series"]) == 2876.0
-    assert sum(baseline["vs_current"]["leads"]["series"]) == 19
-    # Conversions still respect the selected 90d window
+    assert baseline["current_window"]["days"] == 90
+    # (9000 + 2876) * 30/90
+    assert round(baseline["vs_current"]["sessions"]["current"], 4) == 3958.6667
+    # (90 + 19) * 30/90
+    assert round(baseline["vs_current"]["leads"]["current"], 4) == 36.3333
+    assert len(baseline["vs_current"]["sessions"]["series"]) == 90
     assert payload["conversions"]["leads"]["current"] == 109
     assert len(payload["conversions"]["leads"]["series"]) == 90
 

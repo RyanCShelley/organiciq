@@ -119,20 +119,6 @@ def _fill_daily(
     return out
 
 
-def _trailing_month_range(
-    to_date: date,
-    watermark: DataWatermark | None,
-) -> tuple[date, date] | None:
-    """Last ~30 calendar days ending at the watermark-capped dashboard end."""
-    if watermark is None or watermark.fact_through_date is None:
-        return None
-    if watermark.validation_status != ValidationStatus.PASSED:
-        return None
-    end = min(to_date, watermark.fact_through_date)
-    start = end - timedelta(days=DAYS_PER_MONTH - 1)
-    return _effective_range(start, end, watermark)
-
-
 def _baseline_comparison(
     client: Client,
     *,
@@ -144,25 +130,38 @@ def _baseline_comparison(
     leads_series: list[float] | None = None,
     lead_rate_series: list[float] | None = None,
 ) -> dict[str, Any]:
-    """Compare trailing ~30d GA4 totals 1:1 against the frozen monthly baseline snapshot."""
+    """Compare the selected window (scaled to monthly) against the frozen baseline snapshot."""
     has_baseline = (
         client.baseline_monthly_sessions is not None or client.baseline_monthly_leads is not None
     )
+    period_days = 0
+    window_payload: dict[str, Any] | None = None
+    if current_window is not None:
+        window_from, window_to = current_window
+        period_days = (window_to - window_from).days + 1
+        window_payload = {
+            "from": window_from.isoformat(),
+            "to": window_to.isoformat(),
+            "days": period_days,
+        }
+
+    monthly_sessions = (
+        (current_sessions * DAYS_PER_MONTH / period_days)
+        if current_sessions is not None and period_days > 0
+        else None
+    )
+    monthly_leads = (
+        (current_leads * DAYS_PER_MONTH / period_days)
+        if current_leads is not None and period_days > 0
+        else None
+    )
+
     baseline_rate = _to_float(client.baseline_lead_rate_pct)
     if baseline_rate is None and client.baseline_monthly_sessions and client.baseline_monthly_leads:
         if client.baseline_monthly_sessions > 0:
             baseline_rate = (
                 client.baseline_monthly_leads / client.baseline_monthly_sessions
             ) * 100
-
-    window_payload: dict[str, Any] | None = None
-    if current_window is not None:
-        window_from, window_to = current_window
-        window_payload = {
-            "from": window_from.isoformat(),
-            "to": window_to.isoformat(),
-            "days": (window_to - window_from).days + 1,
-        }
 
     tier_name = client.tier.tier_name if getattr(client, "tier", None) is not None else None
 
@@ -177,11 +176,10 @@ def _baseline_comparison(
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
         "vs_current": {
-            # Trailing month totals compare directly to frozen monthly baseline (no period scaling).
             "sessions": _period_metric(
-                current_sessions, client.baseline_monthly_sessions, sessions_series
+                monthly_sessions, client.baseline_monthly_sessions, sessions_series
             ),
-            "leads": _period_metric(current_leads, client.baseline_monthly_leads, leads_series),
+            "leads": _period_metric(monthly_leads, client.baseline_monthly_leads, leads_series),
             "lead_rate": _period_metric(current_lead_rate, baseline_rate, lead_rate_series),
         },
     }
@@ -1011,27 +1009,6 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     if period_goal and current_leads is not None:
         progress_pct = (current_leads / period_goal) * 100
 
-    # Baseline panel always uses trailing ~30d GA4, independent of the page date picker.
-    baseline_window = _trailing_month_range(to_date, watermarks.get("ga4"))
-    baseline_sessions = _sum_sessions(db, client.id, baseline_window)
-    baseline_leads = _sum_leads(db, client.id, lead_events, baseline_window)
-    baseline_lead_rate = _lead_rate(baseline_leads, baseline_sessions)
-    baseline_sessions_series, _ = _daily_ga4_traffic_series(db, client.id, baseline_window)
-    baseline_leads_series = _daily_leads_series(db, client.id, lead_events, baseline_window)
-    baseline_lead_rate_series = _daily_lead_rate_series(
-        baseline_sessions_series, baseline_leads_series
-    )
-    baseline_payload = _baseline_comparison(
-        client,
-        current_sessions=baseline_sessions,
-        current_leads=baseline_leads,
-        current_lead_rate=baseline_lead_rate,
-        current_window=baseline_window,
-        sessions_series=baseline_sessions_series,
-        leads_series=baseline_leads_series,
-        lead_rate_series=baseline_lead_rate_series,
-    )
-
     sessions_series, views_series = _daily_ga4_traffic_series(db, client.id, ga4_current)
     leads_series = _daily_leads_series(db, client.id, lead_events, ga4_current)
     lead_rate_series = _daily_lead_rate_series(sessions_series, leads_series)
@@ -1041,6 +1018,18 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     ai_series = _daily_ai_presence_series(db, client.id, ai_current)
     visibility_series = _daily_site_visibility_series(db, client.id, ser_current)
     position_series = gsc_pos_series
+
+    # Baseline follows the selected date filter; period totals are scaled to monthly for comparison.
+    baseline_payload = _baseline_comparison(
+        client,
+        current_sessions=current_sessions,
+        current_leads=current_leads,
+        current_lead_rate=current_lead_rate,
+        current_window=ga4_current,
+        sessions_series=sessions_series,
+        leads_series=leads_series,
+        lead_rate_series=lead_rate_series,
+    )
 
     return {
         "period": {

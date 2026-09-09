@@ -64,7 +64,7 @@ export default async function DashboardPage({
           <section className="workspace-section">
             <SectionHeader
               title="Baseline"
-              description="Last 30 days of validated GA4 vs the frozen kickoff / calculator monthly snapshot."
+              description="Selected period scaled to monthly vs the frozen kickoff / calculator snapshot."
               actions={
                 clientId ? (
                   <Link href={`/clients/${clientId}`} className="btn btn-ghost btn-sm">
@@ -93,7 +93,11 @@ export default async function DashboardPage({
                     {data.baseline.source ? ` · ${data.baseline.source}` : ""}
                     {data.baseline.tier_name ? ` · ${data.baseline.tier_name}` : ""}
                     {data.baseline.current_window
-                      ? ` — comparing ${data.baseline.current_window.from}→${data.baseline.current_window.to}`
+                      ? ` — period ${data.baseline.current_window.from}→${data.baseline.current_window.to}${
+                          data.baseline.current_window.days
+                            ? ` (${data.baseline.current_window.days}d → monthly)`
+                            : ""
+                        }`
                       : ""}
                   </p>
                   <div className="metric-grid sm:grid-cols-3">
