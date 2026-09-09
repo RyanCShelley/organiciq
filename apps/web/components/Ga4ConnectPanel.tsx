@@ -76,7 +76,7 @@ export function Ga4ConnectPanel({
       setMessage(text || "Failed to save property");
       return;
     }
-    setMessage("GA4 property saved — use Sync 90 days below to pull data.");
+    setMessage("GA4 property saved — use Sync GA4 below to pull data.");
     router.refresh();
   }
 

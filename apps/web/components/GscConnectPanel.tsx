@@ -88,8 +88,8 @@ export function GscConnectPanel({
     }
     setMessage(
       role === "primary"
-        ? "Primary property saved — use Sync 90 days below to pull data."
-        : "Secondary property saved — re-run Sync 90 days to pull historical data.",
+        ? "Primary property saved — use Sync GSC below to pull data."
+        : "Secondary property saved — re-run Sync GSC to pull historical data.",
     );
     if (role === "secondary") setSelectedSecondary("");
     router.refresh();

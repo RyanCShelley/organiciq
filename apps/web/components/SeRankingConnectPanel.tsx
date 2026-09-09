@@ -4,12 +4,15 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { syncJobWindow } from "@/lib/dates";
 
 type Project = {
   site_id: string;
   title: string;
   url?: string | null;
 };
+
+type SerSource = "se_ranking_search" | "se_ranking_ai" | "se_ranking_audit";
 
 export function SeRankingConnectPanel({
   clientId,
@@ -70,7 +73,29 @@ export function SeRankingConnectPanel({
       setMessage(text || "Failed to save project");
       return;
     }
-    setMessage("SE Ranking project saved — use Sync 90 days below to pull data.");
+    setMessage("SE Ranking project saved.");
+    router.refresh();
+  }
+
+  async function syncSource(source: SerSource, days: number) {
+    setPending(true);
+    setMessage(null);
+    const res = await fetch("/api/proxy/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId,
+        source,
+        ...syncJobWindow(days),
+      }),
+    });
+    if (!res.ok) {
+      setPending(false);
+      setMessage(await res.text());
+      return;
+    }
+    setPending(false);
+    setMessage(`Enqueued ${source.replaceAll("_", " ")} (${days} day${days === 1 ? "" : "s"}).`);
     router.refresh();
   }
 
@@ -78,7 +103,8 @@ export function SeRankingConnectPanel({
     <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-lg font-medium">SE Ranking</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Uses the account API key. Map this client&apos;s project (Search + AI + Audit sync together).
+        Uses the account API key. Map this client&apos;s project, then sync Search, AI, or Website
+        Audit without calling Google.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -89,6 +115,30 @@ export function SeRankingConnectPanel({
           className="btn btn-primary btn-sm disabled:opacity-50"
         >
           {propertyId ? "Change project" : "Load projects"}
+        </button>
+        <button
+          type="button"
+          disabled={pending || !propertyId}
+          onClick={() => syncSource("se_ranking_search", 90)}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+        >
+          Sync Search
+        </button>
+        <button
+          type="button"
+          disabled={pending || !propertyId}
+          onClick={() => syncSource("se_ranking_ai", 90)}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+        >
+          Sync AI
+        </button>
+        <button
+          type="button"
+          disabled={pending || !propertyId}
+          onClick={() => syncSource("se_ranking_audit", 1)}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+        >
+          Sync Website Audit
         </button>
       </div>
 
@@ -116,6 +166,7 @@ export function SeRankingConnectPanel({
         <p className="mt-3 text-sm text-[var(--muted)]">
           Connected project: {projectName ? `${projectName} / ` : ""}
           {propertyId}
+          {connected ? "" : " (not marked connected)"}
         </p>
       ) : null}
       {message ? <p className="mt-3 text-sm text-[var(--muted)]">{message}</p> : null}

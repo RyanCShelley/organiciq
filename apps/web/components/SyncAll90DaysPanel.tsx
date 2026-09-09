@@ -14,6 +14,8 @@ type SyncSource =
   | "se_ranking_ai"
   | "se_ranking_audit";
 
+type SyncProvider = "gsc" | "ga4" | "se_ranking";
+
 const ACTIVE_STATUSES = new Set([
   "queued",
   "fetching",
@@ -29,6 +31,12 @@ const SOURCE_LABELS: Record<SyncSource, string> = {
   se_ranking_search: "SE Ranking search",
   se_ranking_ai: "SE Ranking AI",
   se_ranking_audit: "SE Ranking audit",
+};
+
+const PROVIDER_LABELS: Record<SyncProvider, string> = {
+  gsc: "GSC",
+  ga4: "GA4",
+  se_ranking: "SE Ranking",
 };
 
 type SourceProgress = {
@@ -111,6 +119,7 @@ export function SyncAll90DaysPanel({
   const [pending, setPending] = useState(false);
   const [tracking, setTracking] = useState(false);
   const [progressRows, setProgressRows] = useState<SourceProgress[]>([]);
+  const [runSources, setRunSources] = useState<SyncSource[]>([]);
   const trackingRef = useRef(false);
   const wasActiveRef = useRef(false);
 
@@ -124,7 +133,7 @@ export function SyncAll90DaysPanel({
   if (hasGa4Property) mapped.push("GA4");
   if (hasSerankingProject) mapped.push("SE Ranking");
 
-  const trackedSources = useMemo(() => {
+  const allSources = useMemo(() => {
     const sources: SyncSource[] = [];
     if (hasGscProperty) sources.push("gsc_pages", "gsc_queries");
     if (hasGa4Property) sources.push("ga4");
@@ -134,8 +143,21 @@ export function SyncAll90DaysPanel({
     return sources;
   }, [hasGscProperty, hasGa4Property, hasSerankingProject]);
 
+  const providerSources = useMemo(() => {
+    const map: Record<SyncProvider, SyncSource[]> = {
+      gsc: hasGscProperty ? ["gsc_pages", "gsc_queries"] : [],
+      ga4: hasGa4Property ? ["ga4"] : [],
+      se_ranking: hasSerankingProject
+        ? ["se_ranking_search", "se_ranking_ai", "se_ranking_audit"]
+        : [],
+    };
+    return map;
+  }, [hasGscProperty, hasGa4Property, hasSerankingProject]);
+
+  const trackedSources = runSources.length ? runSources : allSources;
+
   useEffect(() => {
-    if (!trackedSources.length) return;
+    if (!allSources.length) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -160,6 +182,7 @@ export function SyncAll90DaysPanel({
       } else if (trackingRef.current && wasActiveRef.current) {
         wasActiveRef.current = false;
         setTracking(false);
+        setRunSources([]);
         const failed = rows.filter((row) => row.status === "failed");
         setMessage(
           failed.length
@@ -177,19 +200,21 @@ export function SyncAll90DaysPanel({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [clientId, trackedSources, router]);
+  }, [clientId, trackedSources, allSources.length, router]);
 
-  async function syncAll90Days() {
+  async function syncSources(sources: SyncSource[], label: string) {
     setPending(true);
     setMessage(null);
     const window = syncJobWindow(90);
-    if (!trackedSources.length) {
+    if (!sources.length) {
       setPending(false);
       setMessage("No mapped integrations to sync.");
       return;
     }
 
-    for (const source of trackedSources) {
+    setRunSources(sources);
+
+    for (const source of sources) {
       const result = await enqueueJob(clientId, source, window);
       if (result !== "created" && result !== "already_active") {
         setPending(false);
@@ -203,7 +228,7 @@ export function SyncAll90DaysPanel({
     setPending(false);
     setTracking(true);
     wasActiveRef.current = true;
-    setMessage(null);
+    setMessage(`Started ${label} sync (90 days).`);
     router.refresh();
   }
 
@@ -223,8 +248,9 @@ export function SyncAll90DaysPanel({
     }
     wasActiveRef.current = false;
     setTracking(false);
+    setRunSources([]);
     setProgressRows([]);
-    setMessage("Stuck sync cleared. You can run Sync 90 days again.");
+    setMessage("Stuck sync cleared. You can run sync again.");
     router.refresh();
   }
 
@@ -235,24 +261,47 @@ export function SyncAll90DaysPanel({
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const current =
     progressRows.find((row) => row.status != null && ACTIVE_STATUSES.has(row.status)) ?? null;
+  const busy = pending || active;
+
+  const providerButtons: { provider: SyncProvider; enabled: boolean }[] = [
+    { provider: "gsc", enabled: hasGscProperty },
+    { provider: "ga4", enabled: hasGa4Property },
+    { provider: "se_ranking", enabled: hasSerankingProject },
+  ];
 
   return (
     <div className="mt-6 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-4">
       <h2 className="text-lg font-medium">Sync data</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Pull the last <strong>90 days</strong> for every mapped source on this client
-        {mapped.length ? ` (${mapped.join(", ")})` : ""}. Use this for the first backfill or a full
-        refresh. After that, the platform auto-syncs the last few days every morning.
+        Pull the last <strong>90 days</strong> for all mapped sources, or sync one provider so you
+        do not call Google when you only need SE Ranking
+        {mapped.length ? ` (mapped: ${mapped.join(", ")})` : ""}. After the first backfill, the
+        platform auto-syncs the last few days every morning.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={pending || !canSync || active}
-          onClick={syncAll90Days}
+          disabled={busy || !canSync}
+          onClick={() => syncSources(allSources, "all sources")}
           className="btn btn-primary disabled:opacity-50"
         >
-          {pending ? "Starting sync…" : active ? "Sync in progress…" : "Sync 90 days"}
+          {pending ? "Starting sync…" : active ? "Sync in progress…" : "Sync all (90 days)"}
         </button>
+        {providerButtons.map(({ provider, enabled }) =>
+          enabled ? (
+            <button
+              key={provider}
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                syncSources(providerSources[provider], PROVIDER_LABELS[provider])
+              }
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm disabled:opacity-50"
+            >
+              Sync {PROVIDER_LABELS[provider]}
+            </button>
+          ) : null,
+        )}
         {active ? (
           <button
             type="button"
