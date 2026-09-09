@@ -27,8 +27,8 @@ export type Finding = {
   promotion_blocked_reason?: string | null;
   priority_band?: string;
   priority_band_reason?: string | null;
-  /** UI-only: filled to meet tier Growth Action allowance (shown as Suggested growth action) */
-  plan_fill?: boolean;
+  /** UI-only: optional alternative surfaced when hard recommendations are below the plan allowance */
+  is_suggested?: boolean;
 };
 
 export type SearchOpportunity = {
@@ -178,25 +178,6 @@ export function growthActionLabel(lever: string): string {
   return GROWTH_ACTION_FILTERS.find((row) => row.value === lever)?.label ?? lever.replaceAll("_", " ");
 }
 
-/**
- * Surface at least `planMin` recommendations by filling from additional findings
- * sorted by existing priority_score — no score inflation.
- */
-export function applyPlanMinimum(
-  recommended: Finding[],
-  additional: Finding[],
-  planMin: number,
-): Finding[] {
-  if (planMin <= 0 || recommended.length >= planMin) return recommended;
-  const used = new Set(recommended.map((item) => item.rule_key));
-  const fillers = [...additional]
-    .filter((item) => !used.has(item.rule_key))
-    .sort((a, b) => b.priority_score - a.priority_score)
-    .slice(0, planMin - recommended.length)
-    .map((item) => ({ ...item, is_recommended_action: true, plan_fill: true }));
-  return [...recommended, ...fillers];
-}
-
 export type StoredDecision = {
   id: string;
   rule_key: string;
@@ -205,6 +186,36 @@ export type StoredDecision = {
   page_url: string | null;
   dismissal_reason?: string | null;
 };
+
+/**
+ * When hard recommendations are below the growth-plan allowance, surface additional
+ * findings as suggested alternatives (sorted by priority_score — no score inflation).
+ */
+export function applySuggestedAlternatives(
+  recommended: Finding[],
+  additional: Finding[],
+  allowance: number,
+): Finding[] {
+  if (allowance <= 0 || recommended.length >= allowance) return [];
+  const used = new Set(recommended.map((item) => item.rule_key));
+  return [...additional]
+    .filter((item) => !used.has(item.rule_key))
+    .sort((a, b) => b.priority_score - a.priority_score)
+    .slice(0, allowance - recommended.length)
+    .map((item) => ({ ...item, is_suggested: true }));
+}
+
+const SELECTED_TOWARD_PLAN_STATUSES = new Set([
+  "accepted",
+  "task_created",
+  "completed",
+  "measuring",
+  "validated",
+]);
+
+export function countSelectedTowardPlan(decisions: StoredDecision[]): number {
+  return decisions.filter((row) => SELECTED_TOWARD_PLAN_STATUSES.has(row.status)).length;
+}
 
 export function decisionStatusLabel(status: string): string {
   switch (status) {

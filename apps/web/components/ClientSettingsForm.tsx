@@ -234,8 +234,8 @@ export function ClientSettingsForm({
             </div>
           </dl>
           <p className="mt-2 text-xs text-[var(--text-secondary)]">
-            Decision Engine uses the monthly Growth Action allowance as a plan floor for how many
-            recommendations to surface — without changing scores.
+            Decision Engine uses the monthly Growth Action allowance for how many accepted
+            recommendations count toward the plan — without changing scores.
           </p>
         </div>
       ) : null}
@@ -248,7 +248,7 @@ export function ClientSettingsForm({
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               Set agreement-specific amounts for this client. These override the catalog and drive
-              Watch List limits and the Decision Engine plan floor.
+              Watch List limits and the Decision Engine growth-plan allowance.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">

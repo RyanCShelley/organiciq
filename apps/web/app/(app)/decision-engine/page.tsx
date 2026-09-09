@@ -12,7 +12,8 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type Client, type Tier } from "@/lib/api";
 import { resolveClientId, resolveDateRange } from "@/lib/context";
 import {
-  applyPlanMinimum,
+  applySuggestedAlternatives,
+  countSelectedTowardPlan,
   normalizeDiagnoseResponse,
   type DiagnoseResponse,
   type Finding,
@@ -40,7 +41,7 @@ export default async function DecisionEnginePage({
 
   let data: DiagnoseResponse | null = null;
   let decisions: StoredDecision[] = [];
-  let planMin = 0;
+  let growthPlanAllowance = 0;
   let error: string | null = null;
 
   if (!clientId) {
@@ -62,7 +63,7 @@ export default async function DecisionEnginePage({
       data = normalizeDiagnoseResponse(diagnose);
       decisions = stored;
       const tier = tiers.find((row) => row.id === client.tier_id);
-      planMin = resolvePlanAllowances(client, tier).growthActionAllowance;
+      growthPlanAllowance = resolvePlanAllowances(client, tier).growthActionAllowance;
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load Decision Engine";
     }
@@ -71,19 +72,26 @@ export default async function DecisionEnginePage({
   const allFindings: Finding[] = data?.findings ?? [];
   const additionalFindings = allFindings.filter((finding) => !finding.is_recommended_action);
   const searchOpportunities = data?.search_opportunities ?? [];
-  const promoted = data?.recommended_actions ?? [];
-  const withPlanFloor = applyPlanMinimum(promoted, additionalFindings, planMin);
-  const recommendedKeys = new Set(promoted.map((item) => item.rule_key));
-  const planFillKeys = new Set(
-    withPlanFloor.filter((item) => item.plan_fill).map((item) => item.rule_key),
+  const recommendations = data?.recommended_actions ?? [];
+  const suggestions = applySuggestedAlternatives(
+    recommendations,
+    additionalFindings,
+    growthPlanAllowance,
   );
-  const filteredActions =
+  const recommendedKeys = new Set(recommendations.map((item) => item.rule_key));
+  const suggestedKeys = new Set(suggestions.map((item) => item.rule_key));
+  const filteredRecommendations =
     leverFilter === "all"
-      ? withPlanFloor
-      : withPlanFloor.filter((item) => item.lever === leverFilter);
+      ? recommendations
+      : recommendations.filter((item) => item.lever === leverFilter);
+  const filteredSuggestions =
+    leverFilter === "all"
+      ? suggestions
+      : suggestions.filter((item) => item.lever === leverFilter);
   const filteredFindings =
     leverFilter === "all" ? allFindings : allFindings.filter((item) => item.lever === leverFilter);
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
+  const selectedTowardPlan = countSelectedTowardPlan(decisions);
   const contentOppHref = clientId
     ? withNavContext("/content-opp", clientId, from, to)
     : "/content-opp";
@@ -101,7 +109,7 @@ export default async function DecisionEnginePage({
     <section>
       <PageHeader
         title="Decision Engine"
-        description="Engine shortlist plus full findings for human review. Content opportunities live under Content Opp."
+        description="Hard recommendations from your thresholds, optional suggestions, and full findings for review."
         meta={
           <>
             <span>
@@ -115,12 +123,6 @@ export default async function DecisionEnginePage({
                   Analyzing{" "}
                   <strong className="text-[var(--text-primary)]">{analysisWindow}</strong>
                 </span>
-              </>
-            ) : null}
-            {planMin > 0 ? (
-              <>
-                <span className="text-[var(--text-tertiary)]">·</span>
-                <span>Plan floor: {planMin} Growth Actions</span>
               </>
             ) : null}
           </>
@@ -150,13 +152,18 @@ export default async function DecisionEnginePage({
 
       {data?.ready && clientId ? (
         <div className="mt-4 space-y-[var(--section-gap)]">
-          <GrowthActionGrid levers={data.levers} />
+          <GrowthActionGrid
+            levers={data.levers}
+            contentOppHref={contentOppHref}
+            contentOppCount={searchOpportunities.length}
+          />
 
           <SummaryStrip
             findingsCount={data.findings_count}
-            recommendedCount={withPlanFloor.length}
-            planMin={planMin}
-            reviewCount={filteredFindings.length}
+            recommendationsCount={recommendations.length}
+            selectedCount={selectedTowardPlan}
+            growthPlanAllowance={growthPlanAllowance}
+            suggestedCount={suggestions.length}
             contentOppHref={contentOppHref}
             contentOppCount={searchOpportunities.length}
           />
@@ -164,30 +171,37 @@ export default async function DecisionEnginePage({
           <section className="workspace-section">
             <SectionHeader
               title="Filter by Growth Action"
-              description="Narrow the shortlist and review table without changing scores."
+              description="Narrow recommendations, suggestions, and the findings list without changing scores."
             />
             <GrowthActionFilter clientId={clientId} from={from} to={to} active={leverFilter} />
           </section>
 
           <section id="recommended-actions" className="workspace-section scroll-mt-24">
             <SectionHeader
-              title="Engine shortlist"
-              description="What the engine promoted for this period. You still decide — review the full findings list below to override."
+              title="Recommendations"
+              description="Cleared the engine’s impact and confidence thresholds for this period."
               actions={
                 <span className="text-xs text-[var(--text-tertiary)]">
-                  {filteredActions.length} shown
-                  {planMin > 0 ? ` · plan ${planMin}` : ""}
+                  {filteredRecommendations.length} shown
                 </span>
               }
             />
 
-            {filteredActions.length === 0 ? (
+            {filteredRecommendations.length === 0 ? (
               <Alert variant="info">
-                No promoted actions for this filter. Check{" "}
+                No hard recommendations for this filter. Check{" "}
+                {filteredSuggestions.length > 0 ? (
+                  <>
+                    <a href="#suggested-alternatives" className="underline">
+                      Suggested alternatives
+                    </a>
+                    ,{" "}
+                  </>
+                ) : null}
                 <a href="#findings-review" className="underline">
                   All findings
-                </a>{" "}
-                or{" "}
+                </a>
+                , or{" "}
                 <Link href={contentOppHref} className="underline">
                   Content Opp
                 </Link>
@@ -195,7 +209,7 @@ export default async function DecisionEnginePage({
               </Alert>
             ) : (
               <div className="space-y-3">
-                {filteredActions.map((item) => (
+                {filteredRecommendations.map((item) => (
                   <RecommendedActionCard
                     key={item.rule_key}
                     item={item}
@@ -209,10 +223,36 @@ export default async function DecisionEnginePage({
             )}
           </section>
 
+          {filteredSuggestions.length > 0 ? (
+            <section id="suggested-alternatives" className="workspace-section scroll-mt-24">
+              <SectionHeader
+                title="Suggested alternatives"
+                description="Optional extras when recommendations are below your growth-plan allowance. Not threshold promotions."
+                actions={
+                  <span className="text-xs text-[var(--text-tertiary)]">
+                    {filteredSuggestions.length} shown
+                  </span>
+                }
+              />
+              <div className="space-y-3">
+                {filteredSuggestions.map((item) => (
+                  <RecommendedActionCard
+                    key={item.rule_key}
+                    item={item}
+                    clientId={clientId}
+                    from={from}
+                    to={to}
+                    decision={decisionByRule.get(item.rule_key) ?? null}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <FindingsReviewPanel
             findings={filteredFindings}
             recommendedKeys={recommendedKeys}
-            planFillKeys={planFillKeys}
+            suggestedKeys={suggestedKeys}
             clientId={clientId}
             from={from}
             to={to}

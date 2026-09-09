@@ -19,15 +19,15 @@ import {
   type StoredDecision,
 } from "@/lib/decision-engine";
 
-function engineStatus(item: Finding, recommendedKeys: Set<string>, planFillKeys: Set<string>): {
+function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys: Set<string>): {
   label: string;
   variant: "success" | "warning" | "neutral" | "accent";
 } {
-  if (planFillKeys.has(item.rule_key)) {
-    return { label: "Suggested growth action", variant: "accent" };
-  }
   if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) {
-    return { label: "Engine recommended", variant: "success" };
+    return { label: "Recommendation", variant: "success" };
+  }
+  if (suggestedKeys.has(item.rule_key) || item.is_suggested) {
+    return { label: "Suggested", variant: "accent" };
   }
   return {
     label: promotionBlockedLabel(item.promotion_blocked_reason),
@@ -52,8 +52,7 @@ function ExpandedFinding({
 }) {
   const explanations = impactExplanation(item.evidence_json);
   const canAct = Boolean(clientId && from && to);
-  const isEnginePick =
-    statusLabel === "Engine recommended" || statusLabel === "Suggested growth action";
+  const isEnginePick = statusLabel === "Recommendation" || statusLabel === "Suggested";
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface-muted)] px-3 py-3 text-sm">
@@ -122,7 +121,7 @@ function ExpandedFinding({
 export function FindingsReviewPanel({
   findings,
   recommendedKeys,
-  planFillKeys,
+  suggestedKeys,
   clientId,
   from,
   to,
@@ -130,7 +129,7 @@ export function FindingsReviewPanel({
 }: {
   findings: Finding[];
   recommendedKeys: Set<string>;
-  planFillKeys: Set<string>;
+  suggestedKeys: Set<string>;
   clientId?: string;
   from?: string;
   to?: string;
@@ -138,14 +137,14 @@ export function FindingsReviewPanel({
 }) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const needsReview = findings.filter(
-    (item) => !recommendedKeys.has(item.rule_key) && !planFillKeys.has(item.rule_key),
+    (item) => !recommendedKeys.has(item.rule_key) && !suggestedKeys.has(item.rule_key),
   ).length;
 
   return (
     <section id="findings-review" className="workspace-section scroll-mt-24">
       <SectionHeader
         title="All findings — your review"
-        description="Everything the engine detected for this period. Recommended Actions above are the shortlist; use Accept / Dismiss here to override."
+        description="Everything the engine detected for this period. Recommendations and suggestions above are shortcuts; use Accept / Dismiss here to override."
         actions={
           <span className="text-xs text-[var(--text-tertiary)]">
             {findings.length} total
@@ -176,7 +175,7 @@ export function FindingsReviewPanel({
               {findings.map((item) => {
                 const isOpen = expandedKey === item.rule_key;
                 const decision = decisionsByRule?.get(item.rule_key) ?? null;
-                const status = engineStatus(item, recommendedKeys, planFillKeys);
+                const status = engineStatus(item, recommendedKeys, suggestedKeys);
                 return (
                   <Fragment key={item.rule_key}>
                     <tr className="align-top">

@@ -64,7 +64,7 @@ export function RecommendedActionCard({
   return (
     <article className="highlight-card p-[var(--card-padding-lg)]">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="accent">{item.plan_fill ? "Suggested growth action" : "Recommended"}</Badge>
+        <Badge variant="accent">{item.is_suggested ? "Suggested" : "Recommendation"}</Badge>
         <Badge variant="neutral">{growthActionLabel(item.lever)}</Badge>
         <Badge variant="neutral">{stageLabel(item.stage)}</Badge>
         {decision ? (

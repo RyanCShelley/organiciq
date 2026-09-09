@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { leverStatusLabel, type LeverSummary } from "@/lib/decision-engine";
@@ -12,12 +14,23 @@ function statusTone(status: string): { badge: "success" | "warning" | "neutral";
   return { badge: "neutral", text: "text-[var(--text-secondary)]" };
 }
 
-export function GrowthActionGrid({ levers }: { levers: LeverSummary[] }) {
+export function GrowthActionGrid({
+  levers,
+  contentOppHref,
+  contentOppCount,
+}: {
+  levers: LeverSummary[];
+  contentOppHref: string;
+  contentOppCount: number;
+}) {
+  const contentOppStatus = contentOppCount > 0 ? "findings" : "clear";
+  const contentOppTone = statusTone(contentOppStatus);
+
   return (
     <section id="growth-actions" className="workspace-section scroll-mt-24">
       <SectionHeader
         title="Growth Action Evaluation"
-        description="Status for each Growth Action lever in this period."
+        description="Status for each Growth Action lever in this period, plus Content Opp."
       />
 
       <div className="workspace-panel">
@@ -53,6 +66,30 @@ export function GrowthActionGrid({ levers }: { levers: LeverSummary[] }) {
               </div>
             );
           })}
+
+          <Link
+            href={contentOppHref}
+            className="flex h-full flex-col rounded-[var(--radius-md)] border border-[var(--border)] p-[var(--card-padding)] transition-colors hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">
+                Content Opp
+              </h3>
+              <Badge variant={contentOppTone.badge}>
+                {contentOppCount > 0 ? "Opportunities" : "Clear"}
+              </Badge>
+            </div>
+            {contentOppCount > 0 ? (
+              <p className={`mt-2 text-xs leading-relaxed ${contentOppTone.text}`}>
+                {contentOppCount} striking-distance opportunit
+                {contentOppCount === 1 ? "y" : "ies"} · open Content Opp
+              </p>
+            ) : (
+              <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+                No content opportunities in this window. Open Content Opp to review.
+              </p>
+            )}
+          </Link>
         </div>
       </div>
     </section>

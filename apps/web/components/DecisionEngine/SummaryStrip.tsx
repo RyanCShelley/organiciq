@@ -2,37 +2,45 @@ import Link from "next/link";
 
 export function SummaryStrip({
   findingsCount,
-  recommendedCount,
-  planMin,
-  reviewCount,
+  recommendationsCount,
+  selectedCount,
+  growthPlanAllowance,
+  suggestedCount,
   contentOppHref,
   contentOppCount,
 }: {
   findingsCount: number;
-  recommendedCount: number;
-  planMin: number;
-  reviewCount: number;
+  recommendationsCount: number;
+  selectedCount: number;
+  growthPlanAllowance: number;
+  suggestedCount: number;
   contentOppHref: string;
   contentOppCount: number;
 }) {
+  const selectedLabel =
+    growthPlanAllowance > 0
+      ? `${selectedCount.toLocaleString()} / ${growthPlanAllowance.toLocaleString()}`
+      : selectedCount.toLocaleString();
+
   const links = [
-    { href: "#growth-actions", label: "Growth Actions", count: null as number | null },
-    { href: "#recommended-actions", label: "Engine shortlist", count: recommendedCount },
-    { href: "#findings-review", label: "All findings", count: reviewCount },
+    { href: "#recommended-actions", label: "Recommendations", count: recommendationsCount },
+    ...(suggestedCount > 0
+      ? [{ href: "#suggested-alternatives", label: "Suggested", count: suggestedCount }]
+      : []),
+    { href: "#findings-review", label: "All findings", count: findingsCount },
     { href: contentOppHref, label: "Content Opp", count: contentOppCount },
   ];
 
   return (
     <div className="workspace-panel">
-      <div className="metric-grid sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Findings" value={findingsCount} />
-        <Stat label="Engine shortlist" value={recommendedCount} highlight />
-        <Stat label="Plan floor" value={planMin} />
-        <Stat label="For your review" value={reviewCount} />
+      <div className="metric-grid sm:grid-cols-3">
+        <Stat label="Findings" value={findingsCount.toLocaleString()} />
+        <Stat label="Recommendations" value={recommendationsCount.toLocaleString()} highlight />
+        <Stat label="Selected toward plan" value={selectedLabel} />
       </div>
       <p className="mt-2 text-xs text-[var(--text-secondary)]">
-        The engine promotes a shortlist. Open All findings to override — Accept any row even if it
-        was not promoted.
+        Recommendations cleared the engine thresholds. Suggested alternatives are optional extras.
+        Accept items in All findings to count them toward your growth plan.
       </p>
       <nav className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--border)] pt-3">
         {links.map((link) => (
@@ -52,7 +60,7 @@ function Stat({
   highlight = false,
 }: {
   label: string;
-  value: number;
+  value: string;
   highlight?: boolean;
 }) {
   return (
@@ -61,11 +69,11 @@ function Stat({
         {label}
       </div>
       <div
-        className={`mt-0.5 font-[family-name:var(--font-display)] text-xl font-bold ${
+        className={`mt-0.5 font-[family-name:var(--font-display)] text-xl font-bold tabular-nums ${
           highlight ? "text-action-emphasis" : "text-[var(--text-primary)]"
         }`}
       >
-        {value.toLocaleString()}
+        {value}
       </div>
     </div>
   );
