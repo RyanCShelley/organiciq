@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.ingestion.ga4.client import run_report
-from app.ingestion.google_credentials import access_token_for_client
+from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
 from app.models.ga4 import StagingGa4Event, StagingGa4Traffic
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import SyncJob
@@ -24,7 +24,7 @@ def _load_ga4_integration(db: Session, client_id: UUID) -> Integration:
     )
     if integration is None:
         raise RuntimeError("GA4 integration row missing")
-    if not integration.credentials:
+    if not client_has_google_credentials(db, client_id):
         raise RuntimeError("GA4 is not connected (missing credentials)")
     if not integration.external_property_id:
         raise RuntimeError("GA4 property is not selected")

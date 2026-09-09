@@ -123,6 +123,8 @@ export const authConfig = {
   ],
   session: {
     strategy: "jwt",
+    // Keep SMA staff signed in; jwt callback still refreshes the API access token.
+    maxAge: 30 * 24 * 60 * 60,
     // Re-run jwt callback periodically so stale API tokens get refreshed in the cookie.
     updateAge: 5 * 60,
   },

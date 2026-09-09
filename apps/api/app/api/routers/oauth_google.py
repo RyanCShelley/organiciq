@@ -12,13 +12,18 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client, user_can_access_client
-from app.core.crypto import decrypt_json, encrypt_json
+from app.core.crypto import decrypt_json
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
 from app.ingestion.ga4.client import list_ga4_properties
 from app.ingestion.google_auth import DATA_OAUTH_SCOPES
-from app.ingestion.google_credentials import access_token_for_client
+from app.ingestion.google_credentials import (
+    access_token_for_client,
+    client_has_google_credentials,
+    propagate_google_credentials,
+    workspace_google_refresh_token,
+)
 from app.ingestion.gsc.client import list_sites
 from app.models.client import Client
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
@@ -31,8 +36,6 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Short-lived in-memory state for local OAuth (single-process API). Durable store later if needed.
 _oauth_states: dict[str, dict] = {}
-
-_GOOGLE_PROVIDERS = (IntegrationProvider.GSC, IntegrationProvider.GA4)
 
 
 class SaveGscPropertyRequest(BaseModel):
@@ -48,32 +51,8 @@ def _scope_param() -> str:
 
 
 def _upsert_google_credentials(db: Session, client_id: UUID, cred_payload: dict) -> None:
-    for provider in _GOOGLE_PROVIDERS:
-        integration = (
-            db.query(Integration)
-            .filter(Integration.client_id == client_id, Integration.provider == provider)
-            .one_or_none()
-        )
-        if integration is None:
-            integration = Integration(client_id=client_id, provider=provider)
-            db.add(integration)
-
-        existing: dict = {}
-        if integration.credentials:
-            try:
-                existing = decrypt_json(integration.credentials)
-            except Exception:  # noqa: BLE001
-                existing = {}
-
-        merged = {
-            "refresh_token": cred_payload.get("refresh_token") or existing.get("refresh_token"),
-            "token": cred_payload.get("token") or existing.get("token"),
-            "token_type": cred_payload.get("token_type", existing.get("token_type", "Bearer")),
-            "scope": cred_payload.get("scope") or existing.get("scope") or _scope_param(),
-        }
-        integration.credentials = encrypt_json(merged)
-        integration.connection_status = ConnectionStatus.CONNECTED
-        integration.error_message = None
+    # Workspace-shared: one Google Data OAuth grant applies to every client.
+    propagate_google_credentials(db, cred_payload)
 
 
 def _integration_for(
@@ -88,12 +67,12 @@ def _integration_for(
 
 def _access_token_for_google(db: Session, client_id: UUID, preferred: IntegrationProvider) -> tuple[str, Integration]:
     integration = _integration_for(db, client_id, preferred)
-    if integration is None or not integration.credentials:
+    if integration is None:
         fallback = (
             IntegrationProvider.GSC if preferred == IntegrationProvider.GA4 else IntegrationProvider.GA4
         )
         integration = _integration_for(db, client_id, fallback)
-    if integration is None or not integration.credentials:
+    if integration is None or not client_has_google_credentials(db, client_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google is not connected")
 
     try:
@@ -181,24 +160,25 @@ def google_data_oauth_callback(
         "scope": tokens.get("scope", _scope_param()),
     }
     if not cred_payload["refresh_token"]:
-        # Incremental reconnect can omit refresh_token; keep existing per provider inside upsert.
-        gsc = _integration_for(db, client_id, IntegrationProvider.GSC)
-        ga4 = _integration_for(db, client_id, IntegrationProvider.GA4)
-        existing_rt = None
-        for row in (gsc, ga4):
-            if row and row.credentials:
-                try:
-                    existing_rt = decrypt_json(row.credentials).get("refresh_token")
-                except Exception:  # noqa: BLE001
-                    existing_rt = None
-                if existing_rt:
-                    break
+        # Incremental reconnect can omit refresh_token; keep existing workspace grant.
+        existing_rt = workspace_google_refresh_token(db)
+        if not existing_rt:
+            gsc = _integration_for(db, client_id, IntegrationProvider.GSC)
+            ga4 = _integration_for(db, client_id, IntegrationProvider.GA4)
+            for row in (gsc, ga4):
+                if row and row.credentials:
+                    try:
+                        existing_rt = decrypt_json(row.credentials).get("refresh_token")
+                    except Exception:  # noqa: BLE001
+                        existing_rt = None
+                    if existing_rt:
+                        break
         cred_payload["refresh_token"] = existing_rt
     if not cred_payload["refresh_token"]:
         return RedirectResponse(f"{web}/clients?oauth=error&message=missing_refresh_token")
 
     _upsert_google_credentials(db, client_id, cred_payload)
-    db.commit()
+    # propagate_google_credentials already commits
 
     return RedirectResponse(
         f"{web}/clients/{client_id}/integrations?oauth=connected"
@@ -238,7 +218,7 @@ def save_gsc_property(
     db: Annotated[Session, Depends(get_db)],
 ) -> IntegrationOut:
     integration = _integration_for(db, client.id, IntegrationProvider.GSC)
-    if integration is None or not integration.credentials:
+    if integration is None or not client_has_google_credentials(db, client.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GSC not connected")
 
     integration.external_property_id = payload.site_url
@@ -277,7 +257,7 @@ def save_ga4_property(
     db: Annotated[Session, Depends(get_db)],
 ) -> IntegrationOut:
     integration = _integration_for(db, client.id, IntegrationProvider.GA4)
-    if integration is None or not integration.credentials:
+    if integration is None or not client_has_google_credentials(db, client.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GA4 not connected — reconnect Google to grant Analytics access",

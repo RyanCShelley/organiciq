@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.ingestion.google_credentials import access_token_for_client
+from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
 from app.ingestion.gsc.client import query_search_analytics
 from app.models.gsc import StagingGscDaily, StagingGscPage, StagingGscQueryPage
 from app.models.integration import Integration, IntegrationProvider
@@ -24,7 +24,7 @@ def _load_gsc_integration(db: Session, client_id: UUID) -> Integration:
     )
     if integration is None:
         raise RuntimeError("GSC integration row missing")
-    if not integration.credentials:
+    if not client_has_google_credentials(db, client_id):
         raise RuntimeError("GSC is not connected (missing credentials)")
     if not integration.external_property_id:
         raise RuntimeError("GSC property is not selected")

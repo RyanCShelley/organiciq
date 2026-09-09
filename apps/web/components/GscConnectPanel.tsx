@@ -93,7 +93,8 @@ export function GscConnectPanel({
     <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-lg font-medium">Google Search Console</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Connect Google for Search Console and Analytics, select a property, then sync 14 or 90 days.
+        Google is shared across clients — connect once, then pick this client&apos;s Search Console
+        property and sync.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">

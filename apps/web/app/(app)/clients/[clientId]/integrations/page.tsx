@@ -41,13 +41,14 @@ export default async function ClientIntegrationsPage({
       <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/integrations`} />
       <h1 className="text-2xl font-semibold">Integrations</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Connect Google Data OAuth for Search Console and Analytics, then map properties for{" "}
-        {client.client_name}. SE Ranking uses an account API key.
+        Connect Google once for the workspace (Search Console + Analytics). Then map each
+        client&apos;s properties. SE Ranking uses an account API key.
       </p>
 
       {oauth === "connected" ? (
         <p className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
-          Google connected. Load properties and select a GSC site and a GA4 property.
+          Google connected for all clients. Load properties and select a GSC site and a GA4 property
+          for {client.client_name}.
         </p>
       ) : null}
       {oauth === "error" ? (

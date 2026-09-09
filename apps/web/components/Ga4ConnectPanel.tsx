@@ -97,8 +97,8 @@ export function Ga4ConnectPanel({
     <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-lg font-medium">Google Analytics 4</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Same Google Data OAuth as Search Console. Reconnect if Analytics was not granted, then pick a
-        property and sync 14 or 90 days.
+        Google is shared across clients — connect once, then pick this client&apos;s GA4 property and
+        sync. Reconnect if Analytics access was not granted.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">

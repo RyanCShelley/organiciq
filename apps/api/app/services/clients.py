@@ -4,7 +4,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import list_accessible_client_ids
+from app.core.crypto import decrypt_json
 from app.core.security import AuthUser
+from app.ingestion.google_credentials import (
+    upsert_google_credentials_for_client,
+    workspace_google_refresh_token,
+)
 from app.models.client import Client
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.schemas import ClientCreate, ClientUpdate, IntegrationCreate, IntegrationUpdate
@@ -76,6 +81,28 @@ def create_client(db: Session, payload: ClientCreate) -> Client:
                 connection_status=ConnectionStatus.NOT_CONNECTED,
             )
         )
+    db.flush()
+
+    # Copy shared Google Data OAuth onto the new client's GSC/GA4 rows when present.
+    shared = workspace_google_refresh_token(db)
+    if shared:
+        donor = (
+            db.query(Integration)
+            .filter(
+                Integration.provider.in_((IntegrationProvider.GSC, IntegrationProvider.GA4)),
+                Integration.credentials.isnot(None),
+            )
+            .first()
+        )
+        if donor and donor.credentials:
+            try:
+                upsert_google_credentials_for_client(
+                    db, client.id, decrypt_json(donor.credentials), commit=False
+                )
+            except Exception:  # noqa: BLE001
+                upsert_google_credentials_for_client(
+                    db, client.id, {"refresh_token": shared}, commit=False
+                )
 
     db.commit()
     db.refresh(client)
