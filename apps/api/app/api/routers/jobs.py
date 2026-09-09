@@ -9,7 +9,12 @@ from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
 from app.models.job import DataWatermark
 from app.schemas import DataWatermarkOut, SyncJobCreate, SyncJobOut
-from app.services.jobs import OverlappingJobError, enqueue_sync_job, list_sync_jobs
+from app.services.jobs import (
+    OverlappingJobError,
+    cancel_active_jobs,
+    enqueue_sync_job,
+    list_sync_jobs,
+)
 
 router = APIRouter(tags=["jobs"])
 
@@ -37,6 +42,16 @@ def create_job(
     except OverlappingJobError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return SyncJobOut.model_validate(job)
+
+
+@router.post("/jobs/cancel-active", response_model=list[SyncJobOut])
+def cancel_active(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[SyncJobOut]:
+    jobs = cancel_active_jobs(db, client.id, message="Cancelled — stuck sync cleared")
+    return [SyncJobOut.model_validate(j) for j in jobs]
 
 
 @router.get("/watermarks", response_model=list[DataWatermarkOut])

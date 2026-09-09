@@ -207,6 +207,27 @@ export function SyncAll90DaysPanel({
     router.refresh();
   }
 
+  async function cancelStuckSync() {
+    setPending(true);
+    setMessage(null);
+    const res = await fetch("/api/proxy/jobs/cancel-active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId }),
+    });
+    const text = await res.text();
+    setPending(false);
+    if (!res.ok) {
+      setMessage(parseErrorDetail(text) || "Failed to cancel stuck sync");
+      return;
+    }
+    wasActiveRef.current = false;
+    setTracking(false);
+    setProgressRows([]);
+    setMessage("Stuck sync cleared. You can run Sync 90 days again.");
+    router.refresh();
+  }
+
   const total = progressRows.length || trackedSources.length;
   const done = completedCount(progressRows);
   const active = hasActiveJobs(progressRows);
@@ -232,6 +253,16 @@ export function SyncAll90DaysPanel({
         >
           {pending ? "Starting sync…" : active ? "Sync in progress…" : "Sync 90 days"}
         </button>
+        {active ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={cancelStuckSync}
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+          >
+            Clear stuck sync
+          </button>
+        ) : null}
       </div>
       {!canSync ? (
         <p className="mt-3 text-sm text-[var(--muted)]">

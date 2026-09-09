@@ -45,6 +45,14 @@ def run_once() -> bool:
     jobs = _jobs_module()
     db = SessionLocal()
     try:
+        stale = jobs.fail_stale_active_jobs(db)
+        for job in stale:
+            logger.warning(
+                "Cleared stale job %s source=%s client=%s",
+                job.id,
+                job.source,
+                job.client_id,
+            )
         job = jobs.claim_next_job(db)
         if job is None:
             return False

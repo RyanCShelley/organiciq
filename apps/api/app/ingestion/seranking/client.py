@@ -291,16 +291,31 @@ def list_audit_pages_paginated(
     api_key: str,
     audit_id: int | str,
     page_size: int = 100,
+    max_requests: int = 2000,
+    max_seconds: float = 20 * 60,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     offset = 0
+    requests_made = 0
+    started = time.monotonic()
     while True:
+        if requests_made >= max_requests:
+            raise RuntimeError(
+                f"SE Ranking audit {audit_id} page fetch exceeded {max_requests} requests "
+                f"({len(rows)} pages staged)"
+            )
+        if time.monotonic() - started > max_seconds:
+            raise RuntimeError(
+                f"SE Ranking audit {audit_id} page fetch timed out after {int(max_seconds)}s "
+                f"({len(rows)} pages staged)"
+            )
         data = _request(
             api_key=api_key,
             method="GET",
             path="/site-audit/audits/pages",
             params={"audit_id": audit_id, "limit": page_size, "offset": offset},
         )
+        requests_made += 1
         if not isinstance(data, dict):
             break
         batch = data.get("items") or []

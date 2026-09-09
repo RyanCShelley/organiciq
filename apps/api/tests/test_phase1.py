@@ -64,6 +64,58 @@ def test_overlapping_jobs_rejected(client, admin_user, client_a):
     assert second.status_code == 409
 
 
+def test_cancel_active_jobs_clears_overlap(client, admin_user, client_a):
+    start, end = date_window(14)
+    payload = {
+        "source": "se_ranking_audit",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+    }
+    headers = client_header(client_a.id, admin_user.email)
+
+    first = client.post("/jobs", headers=headers, json=payload)
+    assert first.status_code == 201
+
+    cancelled = client.post("/jobs/cancel-active", headers=headers)
+    assert cancelled.status_code == 200
+    body = cancelled.json()
+    assert len(body) == 1
+    assert body[0]["status"] == "failed"
+    assert "stuck sync" in (body[0]["error_message"] or "").lower()
+
+    second = client.post("/jobs", headers=headers, json=payload)
+    assert second.status_code == 201
+
+
+def test_fail_stale_active_jobs(db, client_a):
+    from datetime import datetime, timedelta, timezone
+    from uuid import uuid4
+
+    from app.models.job import SyncJob, SyncJobStatus
+    from app.services.jobs import fail_stale_active_jobs
+
+    start, end = date_window(14)
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="se_ranking_audit",
+        start_date=start,
+        end_date=end,
+        status=SyncJobStatus.FETCHING,
+        started_at=old,
+        created_at=old,
+    )
+    db.add(job)
+    db.commit()
+
+    stale = fail_stale_active_jobs(db, max_age_minutes=45)
+    assert len(stale) == 1
+    db.refresh(job)
+    assert job.status == SyncJobStatus.FAILED
+    assert "timed out" in (job.error_message or "").lower()
+
+
 def test_job_for_different_source_allowed(client, admin_user, client_a):
     start, end = date_window(14)
     headers = client_header(client_a.id, admin_user.email)

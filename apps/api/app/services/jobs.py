@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -6,6 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.models.job import SyncJob, SyncJobStatus
 from app.schemas import SyncJobCreate
+
+ACTIVE_JOB_STATUSES = (
+    SyncJobStatus.QUEUED,
+    SyncJobStatus.FETCHING,
+    SyncJobStatus.STAGING,
+    SyncJobStatus.NORMALIZING,
+    SyncJobStatus.VALIDATING,
+)
+
+# Audit pulls can be large; still fail jobs that clearly hung after a deploy/crash.
+STALE_ACTIVE_JOB_MINUTES = 45
 
 
 class OverlappingJobError(Exception):
@@ -43,6 +54,63 @@ def list_sync_jobs(db: Session, client_id: UUID, limit: int = 50) -> list[SyncJo
         .limit(limit)
         .all()
     )
+
+
+def list_active_jobs(db: Session, client_id: UUID | None = None) -> list[SyncJob]:
+    query = db.query(SyncJob).filter(SyncJob.status.in_(ACTIVE_JOB_STATUSES))
+    if client_id is not None:
+        query = query.filter(SyncJob.client_id == client_id)
+    return query.order_by(SyncJob.created_at.asc()).all()
+
+
+def cancel_active_jobs(
+    db: Session,
+    client_id: UUID,
+    *,
+    message: str = "Cancelled by user",
+) -> list[SyncJob]:
+    jobs = list_active_jobs(db, client_id)
+    now = datetime.now(timezone.utc)
+    for job in jobs:
+        job.status = SyncJobStatus.FAILED
+        job.error_message = message
+        job.completed_at = now
+    if jobs:
+        db.commit()
+        for job in jobs:
+            db.refresh(job)
+    return jobs
+
+
+def fail_stale_active_jobs(
+    db: Session,
+    *,
+    max_age_minutes: int = STALE_ACTIVE_JOB_MINUTES,
+) -> list[SyncJob]:
+    """Mark hung active jobs failed so Sync All / enqueue can proceed after worker crashes."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    jobs = list_active_jobs(db)
+    stale: list[SyncJob] = []
+    now = datetime.now(timezone.utc)
+    for job in jobs:
+        anchor = job.started_at or job.updated_at or job.created_at
+        if anchor is None:
+            continue
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        if anchor > cutoff:
+            continue
+        job.status = SyncJobStatus.FAILED
+        job.error_message = (
+            f"Timed out after {max_age_minutes} minutes while syncing (stuck job cleared)"
+        )
+        job.completed_at = now
+        stale.append(job)
+    if stale:
+        db.commit()
+        for job in stale:
+            db.refresh(job)
+    return stale
 
 
 def claim_next_job(db: Session) -> SyncJob | None:
