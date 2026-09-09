@@ -30,6 +30,11 @@ def parse_audit_page(page: dict[str, Any]) -> dict[str, Any]:
     if indexable_status and indexable_status != "ok":
         indexable = False
 
+    title = str(page.get("title") or "").strip()
+    description = str(page.get("description") or "").strip()
+    robots = str(page.get("robots") or page.get("xrobots") or "").strip() or None
+    redirect_raw = str(page.get("redirect_url") or "").strip() or None
+
     return {
         "raw_url": raw_url,
         "normalized_url": normalize_url(raw_url) if raw_url else "",
@@ -39,6 +44,15 @@ def parse_audit_page(page: dict[str, Any]) -> dict[str, Any]:
         "inbound_internal_links": _parse_int(page.get("inlinks")) or 0,
         "word_count": _parse_int(page.get("words_count")) or 0,
         "in_sitemap": _truthy(page.get("sitemap")),
+        # Empty string = known missing; None only when column never populated (pre-enrichment).
+        "title": title,
+        "description": description,
+        "title_duplicate": _truthy(page.get("title_duplicate")),
+        "description_duplicate": _truthy(page.get("description_duplicate")),
+        "robots": robots,
+        "blocked_by_robots": _truthy(page.get("blocked_robots")),
+        "redirect_url": normalize_url(redirect_raw) if redirect_raw else None,
+        "redirect_count": _parse_int(page.get("redirect_count")) or 0,
     }
 
 

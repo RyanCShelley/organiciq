@@ -21,7 +21,8 @@ class GrowthAction(str, enum.Enum):
     INTERNAL_LINKING = "internal_linking"
     TECHNICAL_SEO = "technical_seo"
     SERP_CTR = "serp_ctr"
-    STRUCTURED_DATA_AI = "structured_data_ai"
+    # Stored value kept for DB enum compatibility; product name is Search & AI Visibility.
+    AI_VISIBILITY = "structured_data_ai"
     CONVERSION_PATH = "conversion_path"
 
 

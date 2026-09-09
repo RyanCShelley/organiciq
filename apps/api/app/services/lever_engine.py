@@ -19,21 +19,22 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
-from app.models.crawl import FactCrawlPageSnapshot
+from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot
 from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
+from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
 from app.services.action_promotion import promote_findings
 from app.services.dashboard import (
     _effective_range,
     _lead_event_names,
     _load_watermarks,
-    _resolve_search_visibility,
     build_dashboard,
     previous_period,
 )
 from app.services.decision_impact import (
+    ADVISORY_AUDIT_SIGNALS,
     LeadRateContext,
     PageBusinessContext,
     SiteBusinessContext,
@@ -43,10 +44,10 @@ from app.services.decision_impact import (
     load_page_business_contexts,
     load_site_business_context,
     portfolio_urgency_adjustment,
+    score_ai_visibility_impact,
     score_conversion_impact,
     score_internal_linking_impact,
     score_serp_ctr_impact,
-    score_structured_data_impact,
     score_technical_impact,
     with_p90_sessions,
 )
@@ -68,7 +69,7 @@ LEVER_LABELS: dict[str, str] = {
     GrowthAction.TECHNICAL_SEO.value: "Technical SEO & Indexation",
     GrowthAction.INTERNAL_LINKING.value: "Internal Linking & Site Architecture",
     GrowthAction.SERP_CTR.value: "SERP & CTR Optimization",
-    GrowthAction.STRUCTURED_DATA_AI.value: "Structured Data, Entities & AI Visibility",
+    GrowthAction.AI_VISIBILITY.value: "Search & AI Visibility",
     GrowthAction.CONVERSION_PATH.value: "Conversion Path Optimization",
 }
 
@@ -92,8 +93,14 @@ LEVER_INPUTS: dict[str, LeverInputs] = {
         urgency=80,
         effort=45,
         stage=DiagnosticLayer.VISIBILITY,
-        recommended_action="Resolve indexation, status, or canonical issues on affected URLs.",
-        success_metric="Page becomes indexable with a healthy status code and self-canonical URL.",
+        recommended_action=(
+            "Resolve the flagged technical issue (status, redirect, indexation, "
+            "canonical, or core meta) on the affected URL or site."
+        ),
+        success_metric=(
+            "Issue clears in the next Website Audit and the page remains indexable "
+            "with healthy status and meta."
+        ),
     ),
     GrowthAction.INTERNAL_LINKING.value: LeverInputs(
         confidence=75,
@@ -111,13 +118,19 @@ LEVER_INPUTS: dict[str, LeverInputs] = {
         recommended_action="Improve title/meta alignment and SERP snippet appeal for this page.",
         success_metric="CTR reaches at least half the expected rate for its average position.",
     ),
-    GrowthAction.STRUCTURED_DATA_AI.value: LeverInputs(
-        confidence=65,
-        urgency=45,
-        effort=55,
+    GrowthAction.AI_VISIBILITY.value: LeverInputs(
+        confidence=75,
+        urgency=60,
+        effort=40,
         stage=DiagnosticLayer.VISIBILITY,
-        recommended_action="Strengthen entity clarity, structured data, and citation-ready content.",
-        success_metric="AI visibility improves toward parity with search visibility.",
+        recommended_action=(
+            "Recover search rankings for tracked keywords and improve AI citation "
+            "presence for tracked prompts."
+        ),
+        success_metric=(
+            "Keywords return to the target rank band and prompts earn consistent "
+            "AI citations/mentions."
+        ),
     ),
     GrowthAction.CONVERSION_PATH.value: LeverInputs(
         confidence=70,
@@ -278,6 +291,266 @@ def _load_crawl_by_url(db: Session, client_id: UUID) -> dict[str, FactCrawlPageS
     return {row.normalized_url: row for row in rows}
 
 
+def _load_audit_issues(
+    db: Session, client_id: UUID
+) -> tuple[dict[str, set[str]], set[str]]:
+    """Return (page_url -> issue codes, site-level issue codes)."""
+    rows = db.query(FactCrawlPageIssue).filter(FactCrawlPageIssue.client_id == client_id).all()
+    by_url: dict[str, set[str]] = {}
+    site_codes: set[str] = set()
+    for row in rows:
+        if row.normalized_url:
+            by_url.setdefault(row.normalized_url, set()).add(row.issue_code)
+        else:
+            site_codes.add(row.issue_code)
+    return by_url, site_codes
+
+
+ROBOTS_BLOCKING_CODES = frozenset({"robots_disallow_crawling"})
+ROBOTS_ADVISORY_CODES = frozenset(
+    {"no_robots", "robots_not_accessible", "robots_has_errors"}
+)
+
+
+@dataclass(frozen=True)
+class DetectedTechnicalSignal:
+    audit_signal: str
+    issue_code: str | None
+    diagnosis: str
+
+
+def detect_technical_signal(
+    page_url: str,
+    crawl: FactCrawlPageSnapshot,
+    *,
+    page_issue_codes: set[str] | None = None,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
+) -> DetectedTechnicalSignal | None:
+    """Priority-ordered Technical SEO detector for a single page."""
+    codes = page_issue_codes or set()
+    canonical = _normalize_canonical(crawl.canonical_url)
+    page_norm = _normalize_canonical(page_url)
+    canonicalized_elsewhere = canonical is not None and page_norm is not None and canonical != page_norm
+    status = crawl.status_code
+    status_bad = status is not None and status >= 400
+    is_redirect = status is not None and 300 <= status < 400
+
+    redirect_target_bad = False
+    if crawl.redirect_url and crawl_by_url:
+        target = crawl_by_url.get(crawl.redirect_url)
+        if target is not None and target.status_code is not None and target.status_code >= 400:
+            redirect_target_bad = True
+
+    if status_bad:
+        return DetectedTechnicalSignal(
+            audit_signal="status_error",
+            issue_code=None,
+            diagnosis=f"HTTP {status} on page with demand: {page_url}",
+        )
+    if "redirect45xx" in codes or (is_redirect and redirect_target_bad):
+        return DetectedTechnicalSignal(
+            audit_signal="broken_redirect",
+            issue_code="redirect45xx" if "redirect45xx" in codes else None,
+            diagnosis=f"Broken redirect on page with demand: {page_url}",
+        )
+    if "redirect_chain" in codes or crawl.redirect_count >= 3:
+        return DetectedTechnicalSignal(
+            audit_signal="redirect_chain",
+            issue_code="redirect_chain" if "redirect_chain" in codes else None,
+            diagnosis=f"Redirect chain on page with demand: {page_url}",
+        )
+    if not crawl.indexable:
+        return DetectedTechnicalSignal(
+            audit_signal="non_indexable",
+            issue_code=None,
+            diagnosis=f"Non-indexable page with demand: {page_url}",
+        )
+    if canonicalized_elsewhere:
+        return DetectedTechnicalSignal(
+            audit_signal="canonical_elsewhere",
+            issue_code=None,
+            diagnosis=f"Canonicalized elsewhere: {page_url}",
+        )
+    missing_title = crawl.title == "" or "title_missing" in codes
+    missing_description = crawl.description == "" or "description_missing" in codes
+    if missing_title or missing_description:
+        issue_code = "title_missing" if missing_title else "description_missing"
+        return DetectedTechnicalSignal(
+            audit_signal="missing_meta",
+            issue_code=issue_code,
+            diagnosis=f"Missing core meta on page with demand: {page_url}",
+        )
+    duplicate = (
+        crawl.title_duplicate
+        or crawl.description_duplicate
+        or "title_duplicate" in codes
+        or "description_duplicate" in codes
+    )
+    if duplicate:
+        issue_code = (
+            "title_duplicate"
+            if crawl.title_duplicate or "title_duplicate" in codes
+            else "description_duplicate"
+        )
+        return DetectedTechnicalSignal(
+            audit_signal="duplicate_meta",
+            issue_code=issue_code,
+            diagnosis=f"Duplicate meta on page with demand: {page_url}",
+        )
+    return None
+
+
+def _technical_finding(
+    page: PageDemand,
+    crawl: FactCrawlPageSnapshot,
+    *,
+    page_ctx: PageBusinessContext | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None = None,
+    classification: PageClassification | None = None,
+    page_issue_codes: set[str] | None = None,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
+) -> LeverFinding | None:
+    detected = detect_technical_signal(
+        page.normalized_url,
+        crawl,
+        page_issue_codes=page_issue_codes,
+        crawl_by_url=crawl_by_url,
+    )
+    if detected is None:
+        return None
+
+    assessment = score_technical_impact(
+        impressions=page.impressions,
+        clicks=page.clicks,
+        average_position=page.average_position,
+        indexable=crawl.indexable,
+        status_code=crawl.status_code,
+        canonicalized_elsewhere=detected.audit_signal == "canonical_elsewhere",
+        page_ctx=page_ctx,
+        site=site,
+        classification=classification,
+        lead_rate_ctx=lead_rate_ctx,
+        audit_signal=detected.audit_signal,
+    )
+    urgency_override = None
+    if assessment.critical_override:
+        urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
+    return _make_finding(
+        lever=GrowthAction.TECHNICAL_SEO.value,
+        rule_key=_rule_key("technical", page.normalized_url),
+        diagnosis=detected.diagnosis,
+        evidence_json={
+            "impressions": int(page.impressions),
+            "indexable": crawl.indexable,
+            "status_code": crawl.status_code,
+            "canonical_url": crawl.canonical_url,
+            "title": crawl.title,
+            "description": crawl.description,
+            "title_duplicate": crawl.title_duplicate,
+            "description_duplicate": crawl.description_duplicate,
+            "redirect_url": crawl.redirect_url,
+            "redirect_count": crawl.redirect_count,
+            "audit_signal": detected.audit_signal,
+            "issue_code": detected.issue_code,
+            "promotion_class": (
+                "advisory" if detected.audit_signal in ADVISORY_AUDIT_SIGNALS else "actionable"
+            ),
+            **assessment.evidence,
+        },
+        baseline_metrics_json={
+            "impressions": page.impressions,
+            "average_position": round(page.average_position, 1),
+        },
+        impact=assessment.impact,
+        severity=assessment.severity,
+        urgency_override=urgency_override,
+        page_url=page.normalized_url,
+    )
+
+
+def _site_technical_findings(
+    site_codes: set[str],
+    *,
+    site: SiteBusinessContext,
+    client_id: UUID,
+) -> list[LeverFinding]:
+    findings: list[LeverFinding] = []
+    if "sitemap_missing" in site_codes:
+        assessment = score_technical_impact(
+            impressions=0,
+            clicks=0,
+            average_position=10,
+            indexable=True,
+            status_code=200,
+            canonicalized_elsewhere=False,
+            page_ctx=None,
+            site=site,
+            audit_signal="sitemap_missing",
+        )
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.TECHNICAL_SEO.value,
+                rule_key=_rule_key("technical_sitemap", str(client_id)),
+                diagnosis="Website Audit reports the XML sitemap is missing.",
+                evidence_json={
+                    "audit_signal": "sitemap_missing",
+                    "issue_code": "sitemap_missing",
+                    "promotion_class": "advisory",
+                    **assessment.evidence,
+                },
+                baseline_metrics_json={},
+                impact=assessment.impact,
+                severity=assessment.severity,
+            )
+        )
+
+    robots_codes = site_codes & (ROBOTS_BLOCKING_CODES | ROBOTS_ADVISORY_CODES)
+    if robots_codes:
+        blocking = sorted(robots_codes & ROBOTS_BLOCKING_CODES)
+        audit_signal = "robots_blocking" if blocking else "robots_advisory"
+        primary_code = blocking[0] if blocking else sorted(robots_codes)[0]
+        assessment = score_technical_impact(
+            impressions=0,
+            clicks=0,
+            average_position=10,
+            indexable=True,
+            status_code=200,
+            canonicalized_elsewhere=False,
+            page_ctx=None,
+            site=site,
+            audit_signal=audit_signal,
+        )
+        urgency_override = None
+        if assessment.critical_override:
+            urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.TECHNICAL_SEO.value,
+                rule_key=_rule_key("technical_robots", str(client_id)),
+                diagnosis=(
+                    "Website Audit reports robots.txt is blocking crawl."
+                    if audit_signal == "robots_blocking"
+                    else "Website Audit reports robots.txt problems."
+                ),
+                evidence_json={
+                    "audit_signal": audit_signal,
+                    "issue_code": primary_code,
+                    "issue_codes": sorted(robots_codes),
+                    "promotion_class": (
+                        "advisory" if audit_signal in ADVISORY_AUDIT_SIGNALS else "actionable"
+                    ),
+                    **assessment.evidence,
+                },
+                baseline_metrics_json={},
+                impact=assessment.impact,
+                severity=assessment.severity,
+                urgency_override=urgency_override,
+            )
+        )
+    return findings
+
+
 def _load_thresholds(db: Session, client_id: UUID) -> dict[str, float | int]:
     row = db.query(DecisionThreshold).filter(DecisionThreshold.client_id == client_id).one_or_none()
     if row is None:
@@ -357,65 +630,6 @@ def _make_finding(
         page_url=page_url,
         query=query,
         severity=severity,
-    )
-
-
-def _technical_finding(
-    page: PageDemand,
-    crawl: FactCrawlPageSnapshot,
-    *,
-    page_ctx: PageBusinessContext | None,
-    site: SiteBusinessContext,
-    lead_rate_ctx: LeadRateContext | None = None,
-    classification: PageClassification | None = None,
-) -> LeverFinding | None:
-    canonical = _normalize_canonical(crawl.canonical_url)
-    page_norm = _normalize_canonical(page.normalized_url)
-    canonicalized_elsewhere = canonical is not None and page_norm is not None and canonical != page_norm
-    status_bad = crawl.status_code is not None and crawl.status_code >= 400
-    if crawl.indexable and not status_bad and not canonicalized_elsewhere:
-        return None
-    assessment = score_technical_impact(
-        impressions=page.impressions,
-        clicks=page.clicks,
-        average_position=page.average_position,
-        indexable=crawl.indexable,
-        status_code=crawl.status_code,
-        canonicalized_elsewhere=canonicalized_elsewhere,
-        page_ctx=page_ctx,
-        site=site,
-        classification=classification,
-        lead_rate_ctx=lead_rate_ctx,
-    )
-    urgency_override = None
-    if assessment.critical_override:
-        urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
-    diagnosis = f"Technical issue on {page.normalized_url}"
-    if not crawl.indexable:
-        diagnosis = f"Non-indexable page with demand: {page.normalized_url}"
-    elif status_bad:
-        diagnosis = f"HTTP {crawl.status_code} on page with demand: {page.normalized_url}"
-    elif canonicalized_elsewhere:
-        diagnosis = f"Canonicalized elsewhere: {page.normalized_url}"
-    return _make_finding(
-        lever=GrowthAction.TECHNICAL_SEO.value,
-        rule_key=_rule_key("technical", page.normalized_url),
-        diagnosis=diagnosis,
-        evidence_json={
-            "impressions": int(page.impressions),
-            "indexable": crawl.indexable,
-            "status_code": crawl.status_code,
-            "canonical_url": crawl.canonical_url,
-            **assessment.evidence,
-        },
-        baseline_metrics_json={
-            "impressions": page.impressions,
-            "average_position": round(page.average_position, 1),
-        },
-        impact=assessment.impact,
-        severity=assessment.severity,
-        urgency_override=urgency_override,
-        page_url=page.normalized_url,
     )
 
 
@@ -539,8 +753,10 @@ def _per_page_cascade(
     classifications: dict[str, PageClassification],
     page_type_rates: dict[str, float],
     topic_rates: dict[str, float],
+    issues_by_url: dict[str, set[str]] | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
+    issue_map = issues_by_url or {}
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -560,6 +776,8 @@ def _per_page_cascade(
                 site=site,
                 lead_rate_ctx=lead_rate_ctx,
                 classification=classification,
+                page_issue_codes=issue_map.get(page.normalized_url),
+                crawl_by_url=crawl_by_url,
             )
             if finding is None:
                 finding = _internal_linking_finding(
@@ -591,6 +809,7 @@ def _search_opportunities(
     classifications: dict[str, PageClassification],
     thresholds: dict[str, float | int],
 ) -> list[LeverFinding]:
+    # GEO Grader / structured-data enrichment for Content Opportunities is deferred.
     min_pos = int(thresholds["gsc_striking_distance_min_pos"])
     max_pos = int(thresholds["gsc_striking_distance_max_pos"])
     min_impressions = max(
@@ -651,41 +870,229 @@ def _search_opportunities(
     return [finding for _, finding in candidates[:top_n]]
 
 
-def _structured_data_portfolio(
+def _rank_position(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        position = float(value)
+    except (TypeError, ValueError):
+        return None
+    if position <= 0:
+        return None
+    return position
+
+
+def _keyword_volume(row: FactSerKeyword) -> float:
+    try:
+        return float(row.volume or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def detect_keyword_rank_signal(
+    *,
+    current_position: Any,
+    previous_position: Any,
+) -> str | None:
+    """Return keyword_fell_top5 / keyword_fell_top10 / keyword_not_ranking or None."""
+    prev = _rank_position(previous_position)
+    curr = _rank_position(current_position)
+    if prev is not None and prev <= 5 and (curr is None or curr > 5):
+        return "keyword_fell_top5"
+    if prev is not None and prev <= 10 and (curr is None or curr > 10):
+        return "keyword_fell_top10"
+    if curr is None:
+        return "keyword_not_ranking"
+    return None
+
+
+def _ai_visibility_keyword_findings(
+    db: Session,
+    client_id: UUID,
+    *,
+    site: SiteBusinessContext,
+    thresholds: dict[str, float | int],
+) -> list[LeverFinding]:
+    min_volume = float(thresholds.get("ai_visibility_min_keyword_volume", 50))
+    top_n = int(thresholds.get("ai_visibility_keyword_top_n", 25))
+    rows = db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
+    candidates: list[tuple[float, LeverFinding]] = []
+    for row in rows:
+        volume = _keyword_volume(row)
+        if volume < min_volume:
+            continue
+        signal = detect_keyword_rank_signal(
+            current_position=row.current_position,
+            previous_position=row.previous_position,
+        )
+        if signal is None:
+            continue
+        impact, impact_evidence = score_ai_visibility_impact(
+            signal=signal,
+            volume=volume,
+            site=site,
+        )
+        prev = _rank_position(row.previous_position)
+        curr = _rank_position(row.current_position)
+        curr_label = f"{curr:.0f}" if curr is not None else "not ranking"
+        if signal == "keyword_fell_top5":
+            diagnosis = (
+                f"Keyword fell out of the top 5: “{row.keyword}” "
+                f"(was {prev:.0f}, now {curr_label})"
+            )
+        elif signal == "keyword_fell_top10":
+            diagnosis = (
+                f"Keyword fell out of the top 10: “{row.keyword}” "
+                f"(was {prev:.0f}, now {curr_label})"
+            )
+        else:
+            diagnosis = f"Tracked keyword is not ranking: “{row.keyword}”"
+        finding = _make_finding(
+            lever=GrowthAction.AI_VISIBILITY.value,
+            rule_key=_rule_key("ai_vis_kw", f"{row.site_engine_id}:{row.keyword_id}"),
+            diagnosis=diagnosis,
+            evidence_json={
+                "audit_signal": signal,
+                "keyword": row.keyword,
+                "keyword_id": row.keyword_id,
+                "site_engine_id": row.site_engine_id,
+                "current_position": curr,
+                "previous_position": prev,
+                "ranking_url": row.ranking_url,
+                "volume": volume,
+                **impact_evidence,
+            },
+            baseline_metrics_json={
+                "current_position": curr,
+                "previous_position": prev,
+                "volume": volume,
+            },
+            impact=impact,
+            query=row.keyword,
+            page_url=row.ranking_url,
+        )
+        # Prefer fallouts over not-ranking when sorting; volume is secondary.
+        rank_boost = {"keyword_fell_top5": 1e9, "keyword_fell_top10": 1e8}.get(signal, 0.0)
+        candidates.append((rank_boost + volume, finding))
+
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return [finding for _, finding in candidates[:top_n]]
+
+
+def _ai_visibility_prompt_findings(
     db: Session,
     client_id: UUID,
     period: tuple[date, date] | None,
-    ai_mention: float | None,
     *,
     site: SiteBusinessContext,
-) -> LeverFinding | None:
-    if period is None or ai_mention is None:
-        return None
-    search_visibility, _ = _resolve_search_visibility(db, client_id, period)
-    if search_visibility is None or search_visibility < 0.10:
-        return None
-    if ai_mention >= search_visibility / 2:
-        return None
-    impact, impact_evidence = score_structured_data_impact(
-        search_visibility=search_visibility,
-        ai_mention=ai_mention,
-        site=site,
+    thresholds: dict[str, float | int],
+) -> list[LeverFinding]:
+    if period is None:
+        return []
+    start, end = period
+    min_checks = int(thresholds.get("ai_visibility_prompt_min_checks", 2))
+    top_n = int(thresholds.get("ai_visibility_prompt_top_n", 25))
+
+    checks = (
+        db.query(FactSerAiCheck)
+        .filter(
+            FactSerAiCheck.client_id == client_id,
+            FactSerAiCheck.date >= start,
+            FactSerAiCheck.date <= end,
+        )
+        .all()
     )
-    return _make_finding(
-        lever=GrowthAction.STRUCTURED_DATA_AI.value,
-        rule_key=_rule_key("structured_data_gap", str(client_id)),
-        diagnosis="Search visibility is healthy but AI visibility lags search visibility.",
-        evidence_json={
-            "search_visibility": search_visibility,
-            "ai_mention_presence_pct": ai_mention,
-            **impact_evidence,
-        },
-        baseline_metrics_json={
-            "search_visibility": search_visibility,
-            "ai_mention_presence_pct": ai_mention,
-        },
-        impact=impact,
+    if not checks:
+        return []
+
+    by_prompt: dict[tuple[str, str], list[FactSerAiCheck]] = {}
+    for check in checks:
+        by_prompt.setdefault((check.llm_id, check.prompt_id), []).append(check)
+
+    prompt_meta = {
+        (row.llm_id, row.prompt_id): row
+        for row in db.query(FactSerAiPrompt).filter(FactSerAiPrompt.client_id == client_id).all()
+    }
+
+    candidates: list[tuple[float, LeverFinding]] = []
+    for key, rows in by_prompt.items():
+        if len(rows) < min_checks:
+            continue
+        cited_any = False
+        for row in rows:
+            url_pos = _rank_position(row.url_position)
+            if url_pos is not None or row.brand_cited is True:
+                cited_any = True
+                break
+        if cited_any:
+            continue
+
+        meta = prompt_meta.get(key)
+        prompt_text = (meta.prompt if meta else rows[0].prompt) or "AI prompt"
+        try:
+            volume = float(meta.search_volume or 0) if meta else 0.0
+        except (TypeError, ValueError):
+            volume = 0.0
+        impact, impact_evidence = score_ai_visibility_impact(
+            signal="prompt_not_cited",
+            volume=max(volume, 50.0),
+            site=site,
+        )
+        engine = meta.engine if meta else None
+        diagnosis = (
+            f"Tracked prompt is not earning AI citations across {len(rows)} checks: "
+            f"“{prompt_text[:120]}”"
+        )
+        finding = _make_finding(
+            lever=GrowthAction.AI_VISIBILITY.value,
+            rule_key=_rule_key("ai_vis_prompt", f"{key[0]}:{key[1]}"),
+            diagnosis=diagnosis,
+            evidence_json={
+                "audit_signal": "prompt_not_cited",
+                "prompt": prompt_text,
+                "prompt_id": key[1],
+                "llm_id": key[0],
+                "engine": engine,
+                "checks_in_period": len(rows),
+                "min_checks_required": min_checks,
+                "brand_cited": False,
+                "search_volume": volume,
+                **impact_evidence,
+            },
+            baseline_metrics_json={
+                "checks_in_period": len(rows),
+                "search_volume": volume,
+            },
+            impact=impact,
+            query=prompt_text[:200],
+        )
+        candidates.append((volume + len(rows), finding))
+
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return [finding for _, finding in candidates[:top_n]]
+
+
+def _ai_visibility_findings(
+    db: Session,
+    client_id: UUID,
+    period: tuple[date, date] | None,
+    *,
+    site: SiteBusinessContext,
+    thresholds: dict[str, float | int],
+) -> list[LeverFinding]:
+    """Ranking + AI citation findings.
+
+    Structured data / GEO Grader schema signals are deferred to Content Opportunities.
+    """
+    findings = _ai_visibility_keyword_findings(
+        db, client_id, site=site, thresholds=thresholds
     )
+    findings.extend(
+        _ai_visibility_prompt_findings(
+            db, client_id, period, site=site, thresholds=thresholds
+        )
+    )
+    return findings
 
 
 def _managed_lead_rate(
@@ -832,6 +1239,7 @@ def diagnose(
         fact_max=fact_max,
     )
     ser_period = _effective_range(from_date, to_date, watermarks.get("se_ranking_search"))
+    ai_period = _effective_range(from_date, to_date, watermarks.get("se_ranking_ai")) or ser_period
 
     gsc_rows = 0
     if gsc_period is not None:
@@ -880,6 +1288,7 @@ def diagnose(
     dashboard = build_dashboard(db, client, from_date, to_date)
     pages = _load_page_demand(db, client_id=client.id, period=gsc_period)
     crawl_by_url = _load_crawl_by_url(db, client.id)
+    issues_by_url, site_issue_codes = _load_audit_issues(db, client.id)
 
     lead_events = _lead_event_names(db, client.id)
     ga4_period = _effective_range(from_date, to_date, watermarks.get("ga4"))
@@ -916,14 +1325,24 @@ def diagnose(
             classifications=classifications,
             page_type_rates=page_type_rates,
             topic_rates=topic_rates,
+            issues_by_url=issues_by_url,
         )
     )
+    for site_finding in _site_technical_findings(
+        site_issue_codes, site=site, client_id=client.id
+    ):
+        _enrich_finding(site_finding, classification=None, page_ctx=None)
+        findings.append(site_finding)
 
-    ai_mention = dashboard.get("visibility", {}).get("ai", {}).get("mention_presence", {}).get("current")
-    structured = _structured_data_portfolio(db, client.id, ser_period, ai_mention, site=site)
-    if structured is not None:
-        _enrich_finding(structured, classification=None, page_ctx=None)
-        findings.append(structured)
+    for ai_finding in _ai_visibility_findings(
+        db,
+        client.id,
+        ai_period,
+        site=site,
+        thresholds=thresholds,
+    ):
+        _enrich_finding(ai_finding, classification=None, page_ctx=None)
+        findings.append(ai_finding)
 
     conversion = _conversion_portfolio(
         db,

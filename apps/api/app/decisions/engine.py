@@ -193,7 +193,7 @@ def _visibility_rules(
             DecisionDraft(
                 rule_key=_rule_key("ai_visibility_gap", str(client_id), start.isoformat(), end.isoformat()),
                 decision_type=DecisionType.OPPORTUNITY,
-                growth_action=GrowthAction.STRUCTURED_DATA_AI,
+                growth_action=GrowthAction.AI_VISIBILITY,
                 diagnostic_layer=DiagnosticLayer.VISIBILITY,
                 priority=DecisionPriority.MEDIUM,
                 diagnosis=(

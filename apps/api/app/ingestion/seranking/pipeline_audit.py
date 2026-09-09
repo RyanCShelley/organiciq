@@ -84,13 +84,15 @@ def run_seranking_audit_job(db: Session, job: SyncJob) -> SyncJob:
             db.commit()
 
         _set_status(db, job, SyncJobStatus.FETCHING)
-        pages_fetched, pages_staged, audit_id, snapshot_date_text = fetch_seranking_audit(db, job)
-        job.records_fetched = pages_fetched
+        pages_fetched, pages_staged, issues_staged, audit_id, snapshot_date_text = fetch_seranking_audit(
+            db, job
+        )
+        job.records_fetched = pages_fetched + issues_staged
 
         _set_status(db, job, SyncJobStatus.STAGING)
         _set_status(db, job, SyncJobStatus.NORMALIZING)
-        pages_written = publish_seranking_audit(db, job)
-        job.records_written = pages_written
+        pages_written, issues_written = publish_seranking_audit(db, job)
+        job.records_written = pages_written + issues_written
 
         _set_status(db, job, SyncJobStatus.VALIDATING)
         if pages_written == 0:
@@ -102,7 +104,11 @@ def run_seranking_audit_job(db: Session, job: SyncJob) -> SyncJob:
         job.fact_watermark = snapshot_date
         job.validation_status = ValidationStatus.PASSED
         job.status = SyncJobStatus.SUCCESSFUL
-        job.error_message = f"Published audit {audit_id} snapshot {snapshot_date.isoformat()}"
+        job.error_message = (
+            f"Published audit {audit_id} snapshot {snapshot_date.isoformat()} "
+            f"({pages_written} pages, {issues_written} issue rows"
+            f"{f', staged {pages_staged}' if pages_staged else ''})"
+        )
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
 

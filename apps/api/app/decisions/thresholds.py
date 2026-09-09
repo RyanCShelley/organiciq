@@ -11,8 +11,13 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     "gsc_striking_distance_min_impressions": 50,
     "conversion_sessions_growth_min_pct": 5.0,
     "conversion_lead_rate_decline_min_pct": 10.0,
+    # Legacy portfolio gap (unused by lever_engine AI Visibility rules).
     "ai_visibility_gap_search_min": 0.05,
     "ai_visibility_gap_mention_max_pct": 2.0,
+    "ai_visibility_min_keyword_volume": 50,
+    "ai_visibility_keyword_top_n": 25,
+    "ai_visibility_prompt_min_checks": 2,
+    "ai_visibility_prompt_top_n": 25,
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,

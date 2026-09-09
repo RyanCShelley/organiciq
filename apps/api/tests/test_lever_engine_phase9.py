@@ -88,6 +88,8 @@ def test_internal_linking_cascade(db, client_a):
             status_code=200,
             inbound_internal_links=6,
             word_count=2500,
+            title="Schema blog post",
+            description="A long-form comparison of schema approaches.",
         )
     )
     db.commit()

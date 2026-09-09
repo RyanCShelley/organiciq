@@ -335,17 +335,51 @@ def estimate_indexation_unlock_clicks(*, impressions: float, clicks: float, aver
     return max(full_expected_clicks, clicks)
 
 
+# Advisory Website Audit signals stay in All findings unless commercial/critical override.
+ADVISORY_AUDIT_SIGNALS: frozenset[str] = frozenset(
+    {
+        "redirect_chain",
+        "missing_meta",
+        "duplicate_meta",
+        "sitemap_missing",
+        "robots_advisory",
+    }
+)
+
+_AUDIT_SIGNAL_SEVERITY: dict[str, tuple[float, str]] = {
+    "status_error": (75.0, "client_error_on_demand_page"),
+    "broken_redirect": (85.0, "broken_redirect_on_demand_page"),
+    "redirect_chain": (35.0, "redirect_chain"),
+    "non_indexable": (80.0, "unexpected_noindex"),
+    "canonical_elsewhere": (60.0, "incorrect_canonical"),
+    "missing_meta": (30.0, "missing_core_meta"),
+    "duplicate_meta": (28.0, "duplicate_meta"),
+    "sitemap_missing": (40.0, "sitemap_missing"),
+    "robots_blocking": (88.0, "robots_blocking_crawl"),
+    "robots_advisory": (45.0, "robots_txt_issue"),
+}
+
+
 def assess_technical_severity(
     *,
     indexable: bool,
     status_code: int | None,
     canonicalized_elsewhere: bool,
     classification: PageClassification | None,
+    audit_signal: str | None = None,
 ) -> tuple[float, bool, str | None]:
     base = 40.0
     reason: str | None = None
 
-    if not indexable:
+    if audit_signal and audit_signal in _AUDIT_SIGNAL_SEVERITY:
+        base, reason = _AUDIT_SIGNAL_SEVERITY[audit_signal]
+        if audit_signal == "status_error" and status_code is not None and status_code >= 500:
+            base = 90.0
+            reason = "server_error_on_demand_page"
+        elif audit_signal == "status_error" and status_code is not None and status_code >= 400:
+            base = 75.0
+            reason = "client_error_on_demand_page"
+    elif not indexable:
         base = 80.0
         reason = "unexpected_noindex"
     elif status_code is not None and status_code >= 500:
@@ -367,6 +401,10 @@ def assess_technical_severity(
 
     critical_override = False
     critical_reason: str | None = None
+    advisory = audit_signal in ADVISORY_AUDIT_SIGNALS if audit_signal else False
+
+    if advisory:
+        return severity, False, reason
 
     if (
         not indexable
@@ -390,6 +428,9 @@ def assess_technical_severity(
         and classification is not None
         and classification.commercial_priority >= 4
     ):
+        critical_override = True
+        critical_reason = reason
+    elif audit_signal in {"broken_redirect", "robots_blocking"} and severity >= 85.0:
         critical_override = True
         critical_reason = reason
     elif severity >= 85.0:
@@ -637,12 +678,17 @@ def score_technical_impact(
     site: SiteBusinessContext,
     classification: PageClassification | None = None,
     lead_rate_ctx: LeadRateContext | None = None,
+    audit_signal: str | None = None,
 ) -> TechnicalAssessment:
     status_error = status_code is not None and status_code >= 400
-    blocked = not indexable or status_error
+    hard_block = (
+        not indexable
+        or status_error
+        or audit_signal in {"broken_redirect", "status_error", "robots_blocking"}
+    )
     strategic_priority = classification.strategic_priority if classification else 3
 
-    if blocked:
+    if hard_block:
         recoverable_clicks = estimate_indexation_unlock_clicks(
             impressions=impressions,
             clicks=clicks,
@@ -665,17 +711,21 @@ def score_technical_impact(
         lead_rate_ctx=lead_rate_ctx,
         strategic_priority=strategic_priority,
     )
-    if blocked:
+    if hard_block:
         evidence = {
             **evidence,
             "unlock_clicks": round(recoverable_clicks, 1),
         }
+    if audit_signal in ADVISORY_AUDIT_SIGNALS:
+        # Keep advisories visible but below typical shortlist impact gates.
+        impact = min(impact, 18.0)
 
     severity, critical_override, critical_reason = assess_technical_severity(
         indexable=indexable,
         status_code=status_code,
         canonicalized_elsewhere=canonicalized_elsewhere,
         classification=classification,
+        audit_signal=audit_signal,
     )
 
     return TechnicalAssessment(
@@ -688,6 +738,7 @@ def score_technical_impact(
             "severity": severity,
             "critical_override": critical_override,
             "critical_override_reason": critical_reason,
+            "audit_signal": audit_signal,
         },
     )
 
@@ -784,12 +835,42 @@ def score_serp_ctr_impact(
     }
 
 
+def score_ai_visibility_impact(
+    *,
+    signal: str,
+    volume: float,
+    site: SiteBusinessContext,
+) -> tuple[float, dict[str, Any]]:
+    """Impact for keyword rank / AI citation gaps (structured data shelved)."""
+    weight = {
+        "keyword_fell_top5": 0.18,
+        "keyword_fell_top10": 0.10,
+        "keyword_not_ranking": 0.06,
+        "prompt_not_cited": 0.12,
+    }.get(signal, 0.05)
+    recoverable_clicks = max(0.0, volume) * weight
+    impact, norm_meta = normalize_business_impact(
+        site=site,
+        recoverable_clicks=recoverable_clicks,
+        strategic_priority=4 if signal.startswith("keyword_fell") else 3,
+        data_confidence="medium" if volume >= 100 else "low",
+    )
+    return impact, {
+        "impact_basis": "fallback",
+        "audit_signal": signal,
+        "volume": round(volume, 1),
+        "recoverable_clicks": round(recoverable_clicks, 1),
+        **norm_meta,
+    }
+
+
 def score_structured_data_impact(
     *,
     search_visibility: float,
     ai_mention: float,
     site: SiteBusinessContext,
 ) -> tuple[float, dict[str, Any]]:
+    """Deprecated portfolio gap scorer — kept for legacy decisions.engine only."""
     gap = max(0.0, search_visibility - ai_mention)
     if site.site_lead_rate_pct is not None and site.period_leads > 0:
         estimated = site.period_leads * gap * 0.25

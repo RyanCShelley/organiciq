@@ -79,6 +79,53 @@ def test_ineligible_utility_page_not_promoted():
     assert findings[0].promotion_blocked_reason == "opt_out_preferences"
 
 
+def test_advisory_audit_signal_stays_in_findings_not_shortlist():
+    from app.models.decision import DiagnosticLayer
+
+    url = "https://example.com/blog/useful-post"
+    findings = [
+        LeverFinding(
+            rule_key=f"technical:{url}",
+            lever=GrowthAction.TECHNICAL_SEO.value,
+            stage=DiagnosticLayer.VISIBILITY,
+            diagnosis="Duplicate meta",
+            recommended_action="Fix meta",
+            success_metric="Unique meta",
+            evidence_json={
+                "impressions": 500,
+                "audit_signal": "duplicate_meta",
+                "issue_code": "title_duplicate",
+                "promotion_class": "advisory",
+                "critical_override": False,
+            },
+            baseline_metrics_json={},
+            impact=40,
+            confidence=85,
+            urgency=80,
+            effort=45,
+            priority_score=50,
+            page_url=url,
+        )
+    ]
+    classifications = {url: classify_page_url(url)}
+    all_findings, actions = promote_findings(
+        findings,
+        classifications=classifications,
+        page_contexts={},
+        thresholds={
+            "minimum_actionable_impact": 25,
+            "minimum_recommendation_confidence": 60,
+            "high_priority_threshold": 70,
+            "medium_priority_threshold": 50,
+            "meaningful_gsc_impressions": 100,
+            "meaningful_ga4_sessions": 10,
+        },
+    )
+    assert len(all_findings) == 1
+    assert len(actions) == 0
+    assert findings[0].promotion_blocked_reason == "advisory_audit_signal"
+
+
 def test_critical_override_promotes_with_high_band_without_score_floor():
     from app.models.decision import DiagnosticLayer
 

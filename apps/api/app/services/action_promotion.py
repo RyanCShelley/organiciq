@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.models.decision import GrowthAction
-from app.services.decision_impact import PageBusinessContext, SiteBusinessContext
+from app.services.decision_impact import ADVISORY_AUDIT_SIGNALS, PageBusinessContext
 from app.services.decision_types import LeverFinding
 from app.services.page_eligibility import PageClassification
 
@@ -23,6 +23,13 @@ def priority_band(score: float, *, high: float, medium: float) -> str:
 
 def _critical_override_applied(finding: LeverFinding) -> bool:
     return finding.evidence_json.get("critical_override") is True
+
+
+def _is_advisory_audit_signal(finding: LeverFinding) -> bool:
+    if finding.evidence_json.get("promotion_class") == "advisory":
+        return True
+    signal = finding.evidence_json.get("audit_signal")
+    return isinstance(signal, str) and signal in ADVISORY_AUDIT_SIGNALS
 
 
 def _has_meaningful_opportunity_signal(
@@ -66,7 +73,7 @@ def passes_action_eligibility(
 ) -> tuple[bool, str | None]:
     if finding.lever == GrowthAction.CONVERSION_PATH.value:
         return True, None
-    if finding.lever == GrowthAction.STRUCTURED_DATA_AI.value:
+    if finding.lever == GrowthAction.AI_VISIBILITY.value:
         return True, None
 
     if classification is not None and not classification.eligible_for_growth_action:
@@ -82,6 +89,15 @@ def passes_action_eligibility(
             return False, "insufficient_business_signal"
 
     if finding.lever == GrowthAction.TECHNICAL_SEO.value:
+        if _is_advisory_audit_signal(finding):
+            if _critical_override_applied(finding):
+                return True, None
+            if (
+                classification is not None
+                and classification.commercial_priority >= MEANINGFUL_COMMERCIAL_PRIORITY
+            ):
+                return True, None
+            return False, "advisory_audit_signal"
         if _critical_override_applied(finding):
             return True, None
         if classification is not None and classification.commercial_priority >= MEANINGFUL_COMMERCIAL_PRIORITY:
@@ -92,6 +108,9 @@ def passes_action_eligibility(
             classification=classification,
             thresholds=thresholds,
         ):
+            return True, None
+        # Site-level robots blocking has no page URL / GSC impressions.
+        if finding.evidence_json.get("audit_signal") == "robots_blocking":
             return True, None
         return False, "insufficient_business_signal"
 

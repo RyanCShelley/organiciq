@@ -329,6 +329,86 @@ def list_audit_pages_paginated(
     return rows
 
 
+# Curated Website Audit issue codes used by Decision Engine Technical SEO.
+AUDIT_ISSUE_CODES: tuple[str, ...] = (
+    "redirect45xx",
+    "redirect_chain",
+    "title_missing",
+    "description_missing",
+    "title_duplicate",
+    "description_duplicate",
+    "sitemap_missing",
+    "no_robots",
+    "robots_not_accessible",
+    "robots_has_errors",
+    "robots_disallow_crawling",
+)
+
+SITE_LEVEL_ISSUE_CODES: frozenset[str] = frozenset(
+    {
+        "sitemap_missing",
+        "no_robots",
+        "robots_not_accessible",
+        "robots_has_errors",
+        "robots_disallow_crawling",
+    }
+)
+
+
+def list_issue_pages_paginated(
+    *,
+    api_key: str,
+    audit_id: int | str,
+    code: str,
+    page_size: int = 100,
+    max_requests: int = 500,
+    max_seconds: float = 5 * 60,
+) -> list[dict[str, Any]]:
+    """Return pages (or site markers) affected by a Website Audit issue code."""
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    requests_made = 0
+    started = time.monotonic()
+    while True:
+        if requests_made >= max_requests:
+            raise RuntimeError(
+                f"SE Ranking audit {audit_id} issue {code} fetch exceeded {max_requests} requests"
+            )
+        if time.monotonic() - started > max_seconds:
+            raise RuntimeError(
+                f"SE Ranking audit {audit_id} issue {code} fetch timed out after {int(max_seconds)}s"
+            )
+        data = _request(
+            api_key=api_key,
+            method="GET",
+            path="/site-audit/audits/issue-pages",
+            params={
+                "audit_id": audit_id,
+                "code": code,
+                "limit": page_size,
+                "offset": offset,
+            },
+        )
+        requests_made += 1
+        if data is None:
+            break
+        if isinstance(data, list):
+            batch = [item for item in data if isinstance(item, dict)]
+            rows.extend(batch)
+            break
+        if not isinstance(data, dict):
+            break
+        batch = data.get("items") or data.get("pages") or []
+        if not isinstance(batch, list):
+            break
+        rows.extend(item for item in batch if isinstance(item, dict))
+        total = int(data.get("total") or 0)
+        offset += len(batch)
+        if offset >= total or not batch:
+            break
+    return rows
+
+
 def list_airt_prompt_rankings_paginated(
     *,
     api_key: str,

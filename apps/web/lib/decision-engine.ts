@@ -170,7 +170,7 @@ export const GROWTH_ACTION_FILTERS: { value: string; label: string }[] = [
   { value: "internal_linking", label: "Internal Linking" },
   { value: "technical_seo", label: "Technical SEO" },
   { value: "serp_ctr", label: "SERP CTR" },
-  { value: "structured_data_ai", label: "Structured Data / AI" },
+  { value: "structured_data_ai", label: "Search & AI Visibility" },
   { value: "conversion_path", label: "Conversion Path" },
 ];
 

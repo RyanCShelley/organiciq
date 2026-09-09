@@ -4,7 +4,12 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.crawl import FactCrawlPageSnapshot, StagingSerAuditPage
+from app.models.crawl import (
+    FactCrawlPageIssue,
+    FactCrawlPageSnapshot,
+    StagingSerAuditIssue,
+    StagingSerAuditPage,
+)
 from app.models.job import SyncJob
 
 
@@ -38,40 +43,71 @@ def _dedupe_staging_rows(rows: list[StagingSerAuditPage]) -> list[StagingSerAudi
     return list(by_url.values())
 
 
-def publish_seranking_audit(db: Session, job: SyncJob) -> int:
+def publish_seranking_audit(db: Session, job: SyncJob) -> tuple[int, int]:
+    """Publish page snapshots + issue codes. Returns (pages_written, issues_written)."""
     staging_rows = (
         db.query(StagingSerAuditPage)
         .filter(StagingSerAuditPage.job_id == job.id, StagingSerAuditPage.client_id == job.client_id)
         .all()
     )
-    if not staging_rows:
-        return 0
+    issue_rows = (
+        db.query(StagingSerAuditIssue)
+        .filter(StagingSerAuditIssue.job_id == job.id, StagingSerAuditIssue.client_id == job.client_id)
+        .all()
+    )
+    if not staging_rows and not issue_rows:
+        return 0, 0
 
-    snapshot_date = staging_rows[0].snapshot_date
-    deduped = _dedupe_staging_rows(staging_rows)
+    snapshot_date = (staging_rows or issue_rows)[0].snapshot_date
+    pages_written = 0
+    if staging_rows:
+        deduped = _dedupe_staging_rows(staging_rows)
+        db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == job.client_id).delete()
+        facts = [
+            FactCrawlPageSnapshot(
+                client_id=job.client_id,
+                snapshot_date=snapshot_date,
+                raw_url=row.raw_url,
+                normalized_url=row.normalized_url,
+                indexable=row.indexable,
+                status_code=row.status_code,
+                canonical_url=row.canonical_url,
+                inbound_internal_links=row.inbound_internal_links,
+                word_count=row.word_count,
+                in_sitemap=row.in_sitemap,
+                title=row.title,
+                description=row.description,
+                title_duplicate=row.title_duplicate,
+                description_duplicate=row.description_duplicate,
+                robots=row.robots,
+                blocked_by_robots=row.blocked_by_robots,
+                redirect_url=row.redirect_url,
+                redirect_count=row.redirect_count,
+            )
+            for row in deduped
+        ]
+        db.bulk_save_objects(facts)
+        pages_written = len(facts)
 
-    db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == job.client_id).delete()
-
-    facts = [
-        FactCrawlPageSnapshot(
+    db.query(FactCrawlPageIssue).filter(FactCrawlPageIssue.client_id == job.client_id).delete()
+    issue_facts = [
+        FactCrawlPageIssue(
             client_id=job.client_id,
-            snapshot_date=snapshot_date,
-            raw_url=row.raw_url,
+            snapshot_date=row.snapshot_date,
+            issue_code=row.issue_code,
             normalized_url=row.normalized_url,
-            indexable=row.indexable,
-            status_code=row.status_code,
-            canonical_url=row.canonical_url,
-            inbound_internal_links=row.inbound_internal_links,
-            word_count=row.word_count,
-            in_sitemap=row.in_sitemap,
+            severity=row.severity,
+            raw=row.raw or {},
         )
-        for row in deduped
+        for row in issue_rows
     ]
-    db.bulk_save_objects(facts)
+    if issue_facts:
+        db.bulk_save_objects(issue_facts)
     db.commit()
-    return len(facts)
+    return pages_written, len(issue_facts)
 
 
 def clear_staging_for_job(db: Session, job_id: UUID) -> None:
     db.query(StagingSerAuditPage).filter(StagingSerAuditPage.job_id == job_id).delete()
+    db.query(StagingSerAuditIssue).filter(StagingSerAuditIssue.job_id == job_id).delete()
     db.commit()

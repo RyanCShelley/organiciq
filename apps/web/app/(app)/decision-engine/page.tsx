@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { AdditionalFindingsPanel } from "@/components/DecisionEngine/AdditionalFindingsPanel";
+import { FindingsReviewPanel } from "@/components/DecisionEngine/FindingsReviewPanel";
 import { GrowthActionFilter } from "@/components/DecisionEngine/GrowthActionFilter";
 import { GrowthActionGrid } from "@/components/DecisionEngine/GrowthActionGrid";
 import { RecommendedActionCard } from "@/components/DecisionEngine/RecommendedActionCard";
@@ -15,6 +15,7 @@ import {
   applyPlanMinimum,
   normalizeDiagnoseResponse,
   type DiagnoseResponse,
+  type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
 import { resolvePlanAllowances } from "@/lib/plan-allowances";
@@ -67,25 +68,21 @@ export default async function DecisionEnginePage({
     }
   }
 
-  const additionalFindings =
-    data?.findings.filter((finding) => !finding.is_recommended_action) ?? [];
+  const allFindings: Finding[] = data?.findings ?? [];
+  const additionalFindings = allFindings.filter((finding) => !finding.is_recommended_action);
   const searchOpportunities = data?.search_opportunities ?? [];
   const promoted = data?.recommended_actions ?? [];
   const withPlanFloor = applyPlanMinimum(promoted, additionalFindings, planMin);
+  const recommendedKeys = new Set(promoted.map((item) => item.rule_key));
+  const planFillKeys = new Set(
+    withPlanFloor.filter((item) => item.plan_fill).map((item) => item.rule_key),
+  );
   const filteredActions =
     leverFilter === "all"
       ? withPlanFloor
       : withPlanFloor.filter((item) => item.lever === leverFilter);
-  const filteredAdditional =
-    leverFilter === "all"
-      ? additionalFindings.filter(
-          (finding) => !withPlanFloor.some((item) => item.rule_key === finding.rule_key),
-        )
-      : additionalFindings.filter(
-          (finding) =>
-            finding.lever === leverFilter &&
-            !withPlanFloor.some((item) => item.rule_key === finding.rule_key),
-        );
+  const filteredFindings =
+    leverFilter === "all" ? allFindings : allFindings.filter((item) => item.lever === leverFilter);
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const contentOppHref = clientId
     ? withNavContext("/content-opp", clientId, from, to)
@@ -104,7 +101,7 @@ export default async function DecisionEnginePage({
     <section>
       <PageHeader
         title="Decision Engine"
-        description="Recommended Growth Actions for this period. Content opportunities live under Content Opp."
+        description="Engine shortlist plus full findings for human review. Content opportunities live under Content Opp."
         meta={
           <>
             <span>
@@ -153,11 +150,13 @@ export default async function DecisionEnginePage({
 
       {data?.ready && clientId ? (
         <div className="mt-4 space-y-[var(--section-gap)]">
+          <GrowthActionGrid levers={data.levers} />
+
           <SummaryStrip
             findingsCount={data.findings_count}
             recommendedCount={withPlanFloor.length}
             planMin={planMin}
-            additionalCount={filteredAdditional.length}
+            reviewCount={filteredFindings.length}
             contentOppHref={contentOppHref}
             contentOppCount={searchOpportunities.length}
           />
@@ -165,15 +164,15 @@ export default async function DecisionEnginePage({
           <section className="workspace-section">
             <SectionHeader
               title="Filter by Growth Action"
-              description="Narrow recommended actions and findings without changing scores."
+              description="Narrow the shortlist and review table without changing scores."
             />
             <GrowthActionFilter clientId={clientId} from={from} to={to} active={leverFilter} />
           </section>
 
           <section id="recommended-actions" className="workspace-section scroll-mt-24">
             <SectionHeader
-              title="Recommended Actions"
-              description="Promoted findings plus plan-floor fills from the next-best scored findings when needed."
+              title="Engine shortlist"
+              description="What the engine promoted for this period. You still decide — review the full findings list below to override."
               actions={
                 <span className="text-xs text-[var(--text-tertiary)]">
                   {filteredActions.length} shown
@@ -184,11 +183,15 @@ export default async function DecisionEnginePage({
 
             {filteredActions.length === 0 ? (
               <Alert variant="info">
-                No findings for this Growth Action filter.{" "}
+                No promoted actions for this filter. Check{" "}
+                <a href="#findings-review" className="underline">
+                  All findings
+                </a>{" "}
+                or{" "}
                 <Link href={contentOppHref} className="underline">
-                  Review Content Opp
-                </Link>{" "}
-                for striking-distance pages.
+                  Content Opp
+                </Link>
+                .
               </Alert>
             ) : (
               <div className="space-y-3">
@@ -206,9 +209,10 @@ export default async function DecisionEnginePage({
             )}
           </section>
 
-          <GrowthActionGrid levers={data.levers} />
-          <AdditionalFindingsPanel
-            findings={filteredAdditional}
+          <FindingsReviewPanel
+            findings={filteredFindings}
+            recommendedKeys={recommendedKeys}
+            planFillKeys={planFillKeys}
             clientId={clientId}
             from={from}
             to={to}
