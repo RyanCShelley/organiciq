@@ -27,7 +27,7 @@ export type Finding = {
   promotion_blocked_reason?: string | null;
   priority_band?: string;
   priority_band_reason?: string | null;
-  /** UI-only: filled to meet tier Growth Action plan floor */
+  /** UI-only: filled to meet tier Growth Action allowance (shown as Suggested growth action) */
   plan_fill?: boolean;
 };
 

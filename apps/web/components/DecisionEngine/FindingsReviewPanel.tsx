@@ -24,7 +24,7 @@ function engineStatus(item: Finding, recommendedKeys: Set<string>, planFillKeys:
   variant: "success" | "warning" | "neutral" | "accent";
 } {
   if (planFillKeys.has(item.rule_key)) {
-    return { label: "Plan floor fill", variant: "accent" };
+    return { label: "Suggested growth action", variant: "accent" };
   }
   if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) {
     return { label: "Engine recommended", variant: "success" };
@@ -52,7 +52,8 @@ function ExpandedFinding({
 }) {
   const explanations = impactExplanation(item.evidence_json);
   const canAct = Boolean(clientId && from && to);
-  const isEnginePick = statusLabel === "Engine recommended" || statusLabel === "Plan floor fill";
+  const isEnginePick =
+    statusLabel === "Engine recommended" || statusLabel === "Suggested growth action";
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface-muted)] px-3 py-3 text-sm">
