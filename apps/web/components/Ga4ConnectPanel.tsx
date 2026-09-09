@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { syncJobWindow } from "@/lib/dates";
 
 type Ga4Property = {
@@ -25,6 +26,15 @@ export function Ga4ConnectPanel({
   const [selected, setSelected] = useState(propertyId ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const propertyOptions = useMemo(
+    () =>
+      properties.map((p) => ({
+        value: p.property_id,
+        label: `${p.account_name ? `${p.account_name} / ` : ""}${p.display_name} (${p.property_id})`,
+      })),
+    [properties],
+  );
 
   async function connectGoogle() {
     setPending(true);
@@ -142,22 +152,13 @@ export function Ga4ConnectPanel({
 
       {properties.length > 0 ? (
         <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
-            GA4 property
-            <select
-              className="min-w-[320px] rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <option value="">Select…</option>
-              {properties.map((p) => (
-                <option key={p.property_id} value={p.property_id}>
-                  {p.account_name ? `${p.account_name} / ` : ""}
-                  {p.display_name} ({p.property_id})
-                </option>
-              ))}
-            </select>
-          </label>
+          <SearchableSelect
+            label="GA4 property"
+            options={propertyOptions}
+            value={selected}
+            onChange={setSelected}
+            searchPlaceholder="Search properties…"
+          />
           <button
             type="button"
             disabled={pending || !selected}

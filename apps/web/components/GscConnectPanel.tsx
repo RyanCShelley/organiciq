@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { syncJobWindow } from "@/lib/dates";
 
 type Site = { site_url: string; permission_level?: string };
@@ -21,6 +22,11 @@ export function GscConnectPanel({
   const [selected, setSelected] = useState(propertyId ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const siteOptions = useMemo(
+    () => sites.map((s) => ({ value: s.site_url, label: s.site_url })),
+    [sites],
+  );
 
   async function connectGoogle() {
     setPending(true);
@@ -138,21 +144,13 @@ export function GscConnectPanel({
 
       {sites.length > 0 ? (
         <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
-            GSC property
-            <select
-              className="min-w-[320px] rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <option value="">Select…</option>
-              {sites.map((s) => (
-                <option key={s.site_url} value={s.site_url}>
-                  {s.site_url}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SearchableSelect
+            label="GSC property"
+            options={siteOptions}
+            value={selected}
+            onChange={setSelected}
+            searchPlaceholder="Search sites…"
+          />
           <button
             type="button"
             disabled={pending || !selected}
