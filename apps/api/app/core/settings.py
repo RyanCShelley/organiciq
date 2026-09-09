@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     web_app_url: str = "http://127.0.0.1:3000"
     decision_engine_enabled: bool = True
     se_ranking_api_key: str = ""
+    # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
+    daily_sync_enabled: bool = True
+    daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)
+    daily_sync_lookback_days: int = 3
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))

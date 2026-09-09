@@ -64,10 +64,30 @@ def run_once() -> bool:
         db.close()
 
 
+def _maybe_daily_sync() -> None:
+    from app.services import daily_sync
+
+    db = SessionLocal()
+    try:
+        daily_sync.maybe_run_daily_sync(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("Daily sync scheduler failed")
+    finally:
+        db.close()
+
+
 def main() -> None:
     settings = get_settings()
-    logger.info("Organic IQ worker started (poll=%.1fs)", settings.worker_poll_interval_seconds)
+    logger.info(
+        "Organic IQ worker started (poll=%.1fs, daily_sync=%s hour_utc=%s lookback=%sd)",
+        settings.worker_poll_interval_seconds,
+        settings.daily_sync_enabled,
+        settings.daily_sync_hour_utc,
+        settings.daily_sync_lookback_days,
+    )
     while True:
+        _maybe_daily_sync()
         worked = run_once()
         if not worked:
             time.sleep(settings.worker_poll_interval_seconds)

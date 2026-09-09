@@ -34,6 +34,7 @@ from app.models import (  # noqa: E402, F401 — register all models on Base.met
     FactSerRanking,
     FactSerAiCheck,
     FactSerAiPrompt,
+    SchedulerCheckpoint,
     StagingGa4Event,
     StagingGa4Traffic,
     StagingGscDaily,

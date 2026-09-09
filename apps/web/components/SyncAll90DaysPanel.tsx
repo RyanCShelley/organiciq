@@ -91,8 +91,8 @@ export function SyncAll90DaysPanel({
       <h2 className="text-lg font-medium">Sync data</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Pull the last <strong>90 days</strong> for every mapped source on this client
-        {mapped.length ? ` (${mapped.join(", ")})` : ""}. Run this after connecting properties; re-run
-        when you want a fresh backfill. Nightly auto-sync is not enabled yet.
+        {mapped.length ? ` (${mapped.join(", ")})` : ""}. Use this for the first backfill or a full
+        refresh. After that, the platform auto-syncs the last few days every morning.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <button

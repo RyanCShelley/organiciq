@@ -31,6 +31,9 @@ Use with [README → Deploy](../README.md#deploy-railway--vercel) and [`.env.exa
 | `SE_RANKING_API_KEY` | — | required for SE syncs | required for SE syncs |
 | `DECISION_ENGINE_ENABLED` | — | `true` | optional |
 | `WORKER_POLL_INTERVAL_SECONDS` | — | — | `2` (default) |
+| `DAILY_SYNC_ENABLED` | — | `true` | `true` |
+| `DAILY_SYNC_HOUR_UTC` | — | `11` (~7am ET) | same |
+| `DAILY_SYNC_LOOKBACK_DAYS` | — | `3` | same |
 
 ## Google Console
 

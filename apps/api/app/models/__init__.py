@@ -7,6 +7,7 @@ from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Event, Stagin
 from app.models.gsc import FactGscDaily, FactGscPage, FactGscQueryPage, StagingGscDaily, StagingGscPage, StagingGscQueryPage
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
+from app.models.scheduler import SchedulerCheckpoint
 from app.models.seranking import (
     FactSerAiCheck,
     FactSerAiPresence,
@@ -44,6 +45,7 @@ __all__ = [
     "SyncJobStatus",
     "ValidationStatus",
     "DataWatermark",
+    "SchedulerCheckpoint",
     "ConversionDefinition",
     "ChannelRule",
     "OrganicChannel",
