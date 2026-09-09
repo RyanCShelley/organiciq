@@ -77,7 +77,15 @@ export default async function ClientIntegrationsPage({
               <tr key={row.id} className="border-t border-[var(--border)]">
                 <td className="px-4 py-3 uppercase">{row.provider}</td>
                 <td className="px-4 py-3">{formatStatus(row.connection_status)}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.external_property_id ?? "—"}</td>
+                <td className="px-4 py-3 text-[var(--muted)]">
+                  {row.external_property_id
+                    ? `${row.external_property_id}${
+                        row.provider === "gsc" && (row.gsc_secondary_site_urls?.length ?? 0) > 0
+                          ? ` (+${row.gsc_secondary_site_urls!.length} secondary)`
+                          : ""
+                      }`
+                    : "—"}
+                </td>
                 <td className="px-4 py-3 text-[var(--muted)]">{row.last_successful_sync ?? "—"}</td>
               </tr>
             ))}
@@ -89,6 +97,7 @@ export default async function ClientIntegrationsPage({
         clientId={clientId}
         connected={gsc?.connection_status === "connected"}
         propertyId={gsc?.external_property_id ?? null}
+        secondarySiteUrls={gsc?.gsc_secondary_site_urls ?? []}
       />
       <Ga4ConnectPanel
         clientId={clientId}

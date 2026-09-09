@@ -267,6 +267,7 @@ class IntegrationOut(ORMModel):
     provider: IntegrationProvider
     external_account_id: str | None
     external_property_id: str | None
+    gsc_secondary_site_urls: list[str] = []
     connection_status: ConnectionStatus
     last_sync_started: DateTime | None
     last_sync_completed: DateTime | None

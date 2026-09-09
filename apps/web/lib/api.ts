@@ -101,6 +101,7 @@ export type Integration = {
   provider: string;
   external_account_id: string | null;
   external_property_id: string | null;
+  gsc_secondary_site_urls?: string[];
   connection_status: string;
   last_sync_started: string | null;
   last_sync_completed: string | null;

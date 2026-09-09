@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -38,6 +38,7 @@ class Integration(Base):
     )
     external_account_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_property_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gsc_secondary_site_urls: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     connection_status: Mapped[ConnectionStatus] = mapped_column(
         Enum(
             ConnectionStatus,

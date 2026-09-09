@@ -22,6 +22,38 @@ export async function POST(request: Request) {
       ...authHeaders,
       "X-OrganicIQ-Client-Id": clientId,
     },
+    body: JSON.stringify({
+      site_url: body.site_url,
+      role: body.role === "secondary" ? "secondary" : "primary",
+    }),
+  });
+
+  const text = await res.text();
+  return new NextResponse(text, {
+    status: res.status,
+    headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
+  });
+}
+
+export async function DELETE(request: Request) {
+  const authHeaders = await getProxyAuthHeaders();
+  if (!authHeaders) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const clientId = body.clientId as string | undefined;
+  if (!clientId || !body.site_url) {
+    return NextResponse.json({ detail: "clientId and site_url required" }, { status: 400 });
+  }
+
+  const res = await fetch(`${API_URL}/integrations/gsc/property`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      "X-OrganicIQ-Client-Id": clientId,
+    },
     body: JSON.stringify({ site_url: body.site_url }),
   });
 

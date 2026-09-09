@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -40,10 +40,27 @@ _oauth_states: dict[str, dict] = {}
 
 class SaveGscPropertyRequest(BaseModel):
     site_url: str
+    role: Literal["primary", "secondary"] = "primary"
+
+
+class DeleteGscPropertyRequest(BaseModel):
+    site_url: str
 
 
 class SaveGa4PropertyRequest(BaseModel):
     property_id: str
+
+
+def _normalize_secondary_urls(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            url = item.strip()
+            if url not in out:
+                out.append(url)
+    return out
 
 
 def _scope_param() -> str:
@@ -221,9 +238,70 @@ def save_gsc_property(
     if integration is None or not client_has_google_credentials(db, client.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GSC not connected")
 
-    integration.external_property_id = payload.site_url
+    site_url = payload.site_url.strip()
+    if not site_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="site_url required")
+
+    secondaries = _normalize_secondary_urls(integration.gsc_secondary_site_urls)
+    primary = (integration.external_property_id or "").strip() or None
+
+    if payload.role == "primary":
+        if site_url in secondaries:
+            secondaries = [url for url in secondaries if url != site_url]
+        integration.external_property_id = site_url
+        integration.gsc_secondary_site_urls = secondaries
+    else:
+        if primary is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Set a primary GSC property before adding a secondary",
+            )
+        if site_url == primary:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Site is already the primary GSC property",
+            )
+        if site_url not in secondaries:
+            secondaries.append(site_url)
+        integration.gsc_secondary_site_urls = secondaries
+
     integration.connection_status = ConnectionStatus.CONNECTED
     integration.error_message = None
+    db.commit()
+    db.refresh(integration)
+    return IntegrationOut.model_validate(integration)
+
+
+@router.delete("/integrations/gsc/property", response_model=IntegrationOut)
+def delete_gsc_property(
+    payload: DeleteGscPropertyRequest,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> IntegrationOut:
+    integration = _integration_for(db, client.id, IntegrationProvider.GSC)
+    if integration is None or not client_has_google_credentials(db, client.id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GSC not connected")
+
+    site_url = payload.site_url.strip()
+    if not site_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="site_url required")
+
+    secondaries = _normalize_secondary_urls(integration.gsc_secondary_site_urls)
+    primary = (integration.external_property_id or "").strip() or None
+
+    if primary == site_url:
+        if secondaries:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Remove secondary properties before clearing the primary",
+            )
+        integration.external_property_id = None
+    elif site_url in secondaries:
+        integration.gsc_secondary_site_urls = [url for url in secondaries if url != site_url]
+    else:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GSC property not found")
+
     db.commit()
     db.refresh(integration)
     return IntegrationOut.model_validate(integration)

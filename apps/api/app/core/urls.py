@@ -41,6 +41,32 @@ def normalize_url(raw: str) -> str:
     return urlunsplit((scheme, netloc, path, "", ""))
 
 
+def rewrite_url_host(raw_url: str, target_host: str) -> str:
+    """Replace the URL host with target_host, preserving path/query/fragment."""
+    host = (target_host or "").strip()
+    if not host:
+        return raw_url
+    if "://" in host:
+        host = urlsplit(host).hostname or host
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if not host:
+        return raw_url
+
+    value = (raw_url or "").strip()
+    if not value:
+        return raw_url
+    if "://" not in value:
+        value = f"https://{value}"
+
+    parts = urlsplit(value)
+    scheme = (parts.scheme or "https").lower()
+    if scheme not in {"http", "https"}:
+        scheme = "https"
+    return urlunsplit((scheme, host, parts.path or "/", parts.query, parts.fragment))
+
+
 def normalize_landing_page(raw: str, domain: str | None = None) -> str:
     """Canonical landing page. GA4 often returns a path; prefix with client domain when present."""
     value = (raw or "").strip()
