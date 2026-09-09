@@ -161,6 +161,7 @@ def platform_overview(
             {
                 "client_id": str(client.id),
                 "client_name": client.client_name,
+                "client_slug": client.slug,
                 "domain": client.domain,
                 "status": client.status.value,
                 "integrations": {
@@ -188,6 +189,7 @@ def platform_data_health(
                 {
                     "client_id": str(client.id),
                     "client_name": client.client_name,
+                    "client_slug": client.slug,
                     **health,
                 }
             )
@@ -213,6 +215,7 @@ def platform_jobs(
             "id": str(job.id),
             "client_id": str(job.client_id),
             "client_name": client.client_name,
+            "client_slug": client.slug,
             "source": job.source,
             "start_date": job.start_date.isoformat(),
             "end_date": job.end_date.isoformat(),

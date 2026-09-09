@@ -9,7 +9,8 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader, SubsectionTitle } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
-import { resolveClientId, resolveDateRange } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { loadClientById, resolveClientId, resolveDateRange } from "@/lib/context";
 import { normalizeDashboardResponse, type DashboardResponse } from "@/lib/dashboard";
 
 function formatNum(value: number | null): string {
@@ -31,6 +32,11 @@ export default async function DashboardPage({
   const params = await searchParams;
   const clientId = await resolveClientId(params);
   const { from, to } = await resolveDateRange(params);
+  const selectedClient = clientId ? await loadClientById(clientId) : null;
+  const clientPath = selectedClient ? clientHref(selectedClient.slug) : "/clients";
+  const conversionsPath = selectedClient
+    ? clientHref(selectedClient.slug, "conversions")
+    : "/clients";
 
   let data: DashboardResponse | null = null;
   let error: string | null = null;
@@ -67,7 +73,7 @@ export default async function DashboardPage({
               description="Selected period scaled to monthly vs the frozen kickoff / calculator snapshot."
               actions={
                 clientId ? (
-                  <Link href={`/clients/${clientId}`} className="btn btn-ghost btn-sm">
+                  <Link href={clientPath} className="btn btn-ghost btn-sm">
                     Edit baseline
                   </Link>
                 ) : null
@@ -78,7 +84,7 @@ export default async function DashboardPage({
                 <Alert variant="info">
                   No baseline snapshot yet. Set monthly sessions, leads, and lead rate in{" "}
                   <Link
-                    href={clientId ? `/clients/${clientId}` : "/clients"}
+                    href={clientPath}
                     className="font-medium text-[var(--brand-teal-hover)] underline"
                   >
                     Client settings
@@ -145,7 +151,7 @@ export default async function DashboardPage({
               actions={
                 clientId ? (
                   <Link
-                    href={`/clients/${clientId}/conversions`}
+                    href={conversionsPath}
                     className="btn btn-ghost btn-sm"
                   >
                     Conversion settings
@@ -159,7 +165,7 @@ export default async function DashboardPage({
                 <Alert variant="info">
                   No lead conversion definitions configured. Add them in{" "}
                   <Link
-                    href={clientId ? `/clients/${clientId}/conversions` : "/clients"}
+                    href={conversionsPath}
                     className="font-medium text-[var(--brand-teal-hover)] underline"
                   >
                     Clients → Conversions

@@ -1,18 +1,17 @@
-import { notFound } from "next/navigation";
-
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { EnqueueJobForm } from "@/components/EnqueueJobForm";
 import { apiFetch, type SyncJob } from "@/lib/api";
-import { loadClientById } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientJobsPage({
   params,
 }: {
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
 }) {
-  const { clientId } = await params;
-  const client = await loadClientById(clientId);
-  if (!client) notFound();
+  const { clientSlug } = await params;
+  const client = await requireWorkspaceClient(clientSlug, "jobs");
+  const clientId = client.id;
 
   let rows: SyncJob[] = [];
   let error: string | null = null;
@@ -25,7 +24,7 @@ export default async function ClientJobsPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/jobs`} />
+      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "jobs")} />
       <h1 className="text-2xl font-semibold">Sync Jobs</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Enqueue ingestion for {client.client_name}. All clients are visible on Platform → Sync Jobs.

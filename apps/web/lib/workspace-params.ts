@@ -76,16 +76,17 @@ export function useWorkspaceParams({
   useEffect(() => {
     if (!persistDefault) return;
     if (didPersistDefault.current || !clientId) return;
-    if (searchParams.get("clientId")) return;
     didPersistDefault.current = true;
     document.cookie = `oiq_client_id=${clientId}; path=/; max-age=31536000`;
     const params = new URLSearchParams(searchParams.toString());
-    params.set("clientId", clientId);
+    // Keep date range in the URL; persist client via cookie (and path under /clients/).
+    params.delete("clientId");
     if (activeFrom) params.set("from", activeFrom);
     if (activeTo) params.set("to", activeTo);
     params.set("range", rangeKey);
+    const qs = params.toString();
     startTransition(() => {
-      router.replace(`${pathname}?${params.toString()}`);
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
       router.refresh();
     });
   }, [
@@ -102,6 +103,7 @@ export function useWorkspaceParams({
 
   function apply(next: {
     clientId?: string;
+    clientSlug?: string;
     from?: string;
     to?: string;
     range?: RangeKey;
@@ -112,7 +114,10 @@ export function useWorkspaceParams({
     const nextTo = next.to ?? activeTo;
     const nextRange = next.range ?? rangeKey;
 
-    if (nextClientId) params.set("clientId", nextClientId);
+    params.delete("clientId");
+    if (nextClientId && !pathname.startsWith("/clients/")) {
+      params.set("clientId", nextClientId);
+    }
     params.set("from", nextFrom);
     params.set("to", nextTo);
     params.set("range", nextRange);
@@ -123,12 +128,13 @@ export function useWorkspaceParams({
     document.cookie = `oiq_range=${nextRange}; path=/; max-age=31536000`;
 
     const nextPath =
-      next.clientId && pathname.startsWith("/clients/")
-        ? pathname.replace(/^\/clients\/[^/]+/, `/clients/${nextClientId}`)
+      next.clientSlug && pathname.startsWith("/clients/")
+        ? pathname.replace(/^\/clients\/[^/]+/, `/clients/${next.clientSlug}`)
         : pathname;
 
+    const qs = params.toString();
     startTransition(() => {
-      router.push(`${nextPath}?${params.toString()}`);
+      router.push(qs ? `${nextPath}?${qs}` : nextPath);
       router.refresh();
     });
   }

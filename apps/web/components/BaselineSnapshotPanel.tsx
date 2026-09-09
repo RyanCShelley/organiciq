@@ -21,9 +21,11 @@ function formatNum(value: number | null | undefined): string {
 
 export function BaselineSnapshotPanel({
   clientId,
+  clientSlug,
   hasLeadConversions,
 }: {
   clientId: string;
+  clientSlug: string;
   hasLeadConversions: boolean;
 }) {
   const router = useRouter();
@@ -38,7 +40,7 @@ export function BaselineSnapshotPanel({
       <Alert variant="info">
         Declare lead conversion sources first, then create the baseline snapshot from GA4.{" "}
         <Link
-          href={`/clients/${clientId}/conversions`}
+          href={`/clients/${clientSlug}/conversions`}
           className="font-medium text-[var(--brand-teal-hover)] underline"
         >
           Manage conversions

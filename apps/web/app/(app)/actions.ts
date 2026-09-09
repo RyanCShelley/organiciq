@@ -124,7 +124,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     };
   }
 
-  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients", "layout");
   revalidatePath("/dashboard");
   revalidatePath("/decision-engine");
   return { ok: true as const };

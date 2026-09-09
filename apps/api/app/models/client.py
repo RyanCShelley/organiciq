@@ -43,6 +43,7 @@ class Client(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     tier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tiers.id"), nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)

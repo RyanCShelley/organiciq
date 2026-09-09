@@ -1,18 +1,17 @@
-import { notFound } from "next/navigation";
-
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
 import { apiFetch, type ConversionDefinition } from "@/lib/api";
-import { loadClientById } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientConversionsPage({
   params,
 }: {
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
 }) {
-  const { clientId } = await params;
-  const client = await loadClientById(clientId);
-  if (!client) notFound();
+  const { clientSlug } = await params;
+  const client = await requireWorkspaceClient(clientSlug, "conversions");
+  const clientId = client.id;
 
   let conversions: ConversionDefinition[] = [];
   let error: string | null = null;
@@ -27,7 +26,7 @@ export default async function ClientConversionsPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/conversions`} />
+      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "conversions")} />
       <h1 className="text-2xl font-semibold">Conversions</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Define which GA4 events count as leads for {client.client_name}. Dashboard conversion KPIs

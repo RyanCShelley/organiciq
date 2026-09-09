@@ -1,17 +1,17 @@
 import { notFound } from "next/navigation";
 
 import { ClientWorkspaceHeader } from "@/components/ClientWorkspaceNav";
-import { loadClientById } from "@/lib/context";
+import { loadClientByParam } from "@/lib/context";
 
 export default async function ClientWorkspaceLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
 }) {
-  const { clientId } = await params;
-  const client = await loadClientById(clientId);
+  const { clientSlug } = await params;
+  const client = await loadClientByParam(clientSlug);
   if (!client) notFound();
 
   return (

@@ -141,6 +141,7 @@ def _make_client(db: Session, tier: Tier, name: str) -> Client:
     c = Client(
         id=uuid.uuid4(),
         client_name=name,
+        slug=name.lower().replace(" ", "-"),
         domain=f"{name.lower().replace(' ', '')}.example",
         tier_id=tier.id,
         status=ClientStatus.ACTIVE,

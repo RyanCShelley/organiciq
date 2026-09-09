@@ -196,7 +196,11 @@ export function ClientSettingsForm({
             />
           </FieldLabel>
         </div>
-        <BaselineSnapshotPanel clientId={client.id} hasLeadConversions={hasLeadConversions} />
+        <BaselineSnapshotPanel
+          clientId={client.id}
+          clientSlug={client.slug}
+          hasLeadConversions={hasLeadConversions}
+        />
       </div>
 
       {selectedTier && !enterprise ? (

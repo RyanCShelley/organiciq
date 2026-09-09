@@ -51,6 +51,7 @@ def seed(db: Session) -> None:
         client_id: uuid.UUID,
         client_name: str,
         domain: str,
+        slug: str,
         tier_id: uuid.UUID = DEFAULT_TIER_ID,
         monthly_lead_goal: int | None = None,
     ) -> Client:
@@ -59,6 +60,7 @@ def seed(db: Session) -> None:
             client = Client(
                 id=client_id,
                 client_name=client_name,
+                slug=slug,
                 domain=domain,
                 tier_id=tier_id,
                 start_date=date(2025, 1, 1),
@@ -71,6 +73,7 @@ def seed(db: Session) -> None:
             db.flush()
         else:
             client.client_name = client_name
+            client.slug = slug
             client.domain = domain
             # Preserve an existing tier (e.g. Enterprise) — seed must not reset plan assignment.
             client.status = ClientStatus.ACTIVE
@@ -97,6 +100,7 @@ def seed(db: Session) -> None:
         client_id=SMA_CLIENT_ID,
         client_name="SMA Marketing",
         domain="smamarketing.net",
+        slug="sma-marketing",
         tier_id=ENTERPRISE_TIER_ID,
         monthly_lead_goal=25,
     )
@@ -108,6 +112,7 @@ def seed(db: Session) -> None:
         client_id=BEACON_CLIENT_ID,
         client_name="Beacon Industrial",
         domain="beaconindustrial.com",
+        slug="beacon-industrial",
         tier_id=DEFAULT_TIER_ID,
         monthly_lead_goal=10,
     )

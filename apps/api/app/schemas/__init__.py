@@ -57,6 +57,7 @@ class ClientCreate(BaseModel):
     client_name: str
     domain: str
     tier_id: UUID
+    slug: str | None = None
     start_date: Date | None = None
     primary_market: str | None = None
     timezone: str = "America/New_York"
@@ -79,6 +80,7 @@ class ClientCreate(BaseModel):
 
 class ClientUpdate(BaseModel):
     client_name: str | None = None
+    slug: str | None = None
     domain: str | None = None
     tier_id: UUID | None = None
     start_date: Date | None = None
@@ -104,6 +106,7 @@ class ClientUpdate(BaseModel):
 class ClientOut(ORMModel):
     id: UUID
     client_name: str
+    slug: str
     domain: str
     tier_id: UUID
     start_date: Date | None

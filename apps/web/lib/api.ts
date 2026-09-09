@@ -70,6 +70,7 @@ export async function apiFetch<T>(
 export type Client = {
   id: string;
   client_name: string;
+  slug: string;
   domain: string;
   tier_id: string;
   start_date: string | null;
@@ -170,6 +171,7 @@ export type DataHealthRow = {
 export type PlatformOverviewRow = {
   client_id: string;
   client_name: string;
+  client_slug: string;
   domain: string;
   status: string;
   integrations: {
@@ -184,12 +186,14 @@ export type PlatformOverviewRow = {
 export type PlatformDataHealthRow = DataHealthRow & {
   client_id: string;
   client_name: string;
+  client_slug: string;
 };
 
 export type PlatformJobRow = {
   id: string;
   client_id: string;
   client_name: string;
+  client_slug: string;
   source: string;
   start_date: string;
   end_date: string;

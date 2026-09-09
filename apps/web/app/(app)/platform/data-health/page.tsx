@@ -38,7 +38,7 @@ export default async function PlatformDataHealthPage() {
                 header: "Client",
                 render: (row) => (
                   <Link
-                    href={`/clients/${row.client_id}`}
+                    href={`/clients/${row.client_slug}`}
                     className="text-[var(--brand-teal-hover)] underline"
                   >
                     {row.client_name}

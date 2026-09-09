@@ -1,24 +1,23 @@
-import { notFound } from "next/navigation";
-
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { Ga4ConnectPanel } from "@/components/Ga4ConnectPanel";
 import { GscConnectPanel } from "@/components/GscConnectPanel";
 import { SeRankingConnectPanel } from "@/components/SeRankingConnectPanel";
 import { SyncAll90DaysPanel } from "@/components/SyncAll90DaysPanel";
 import { apiFetch, type Integration } from "@/lib/api";
-import { loadClientById } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientIntegrationsPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { clientId } = await params;
+  const { clientSlug } = await params;
   const query = await searchParams;
-  const client = await loadClientById(clientId);
-  if (!client) notFound();
+  const client = await requireWorkspaceClient(clientSlug, "integrations");
+  const clientId = client.id;
 
   const oauth = typeof query.oauth === "string" ? query.oauth : null;
   const oauthMessage = typeof query.message === "string" ? query.message : null;
@@ -38,7 +37,7 @@ export default async function ClientIntegrationsPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/integrations`} />
+      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "integrations")} />
       <h1 className="text-2xl font-semibold">Integrations</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Connect each source, confirm it shows connected with a property, then run one{" "}

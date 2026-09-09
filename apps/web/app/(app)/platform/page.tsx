@@ -62,7 +62,7 @@ export default async function PlatformOverviewPage() {
                 header: "Workspace",
                 render: (row) => (
                   <Link
-                    href={`/clients/${row.client_id}`}
+                    href={`/clients/${row.client_slug}`}
                     className="text-[var(--brand-teal-hover)] underline"
                   >
                     Open workspace

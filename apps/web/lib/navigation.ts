@@ -13,8 +13,8 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-export function accountNavGroups(clientId: string): NavGroup[] {
-  const settingsHref = clientId ? `/clients/${clientId}` : "/clients";
+export function accountNavGroups(clientSlug: string): NavGroup[] {
+  const settingsHref = clientSlug ? `/clients/${clientSlug}` : "/clients";
   return [
     {
       label: "Account",
@@ -70,7 +70,10 @@ export function withNavContext(
   extra?: { tab?: string },
 ): string {
   const params = new URLSearchParams();
-  if (clientId) params.set("clientId", clientId);
+  // Client workspace paths already encode the client; skip redundant clientId query.
+  if (clientId && !href.startsWith("/clients/")) {
+    params.set("clientId", clientId);
+  }
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (extra?.tab) params.set("tab", extra.tab);

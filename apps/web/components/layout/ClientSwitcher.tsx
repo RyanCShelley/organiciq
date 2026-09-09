@@ -35,7 +35,11 @@ export function ClientSwitcher({
         )}
         value={clientId}
         disabled={pending || clients.length === 0}
-        onChange={(event) => apply({ clientId: event.target.value })}
+        onChange={(event) => {
+          const nextId = event.target.value;
+          const next = clients.find((client) => client.id === nextId);
+          apply({ clientId: nextId, clientSlug: next?.slug });
+        }}
       >
         {clients.length === 0 ? <option value="">No clients</option> : null}
         {clients.map((client) => (

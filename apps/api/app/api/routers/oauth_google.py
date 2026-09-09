@@ -180,9 +180,9 @@ def google_data_oauth_callback(
     _upsert_google_credentials(db, client_id, cred_payload)
     # propagate_google_credentials already commits
 
-    return RedirectResponse(
-        f"{web}/clients/{client_id}/integrations?oauth=connected"
-    )
+    account = db.query(Client).filter(Client.id == client_id).one_or_none()
+    slug = account.slug if account is not None else str(client_id)
+    return RedirectResponse(f"{web}/clients/{slug}/integrations?oauth=connected")
 
 
 @router.get("/integrations/gsc/sites")

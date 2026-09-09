@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { ClientSettingsForm } from "@/components/ClientSettingsForm";
@@ -15,16 +14,17 @@ import {
   type DataHealthRow,
   type Tier,
 } from "@/lib/api";
-import { loadClientById } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientSettingsPage({
   params,
 }: {
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
 }) {
-  const { clientId } = await params;
-  const client = await loadClientById(clientId);
-  if (!client) notFound();
+  const { clientSlug } = await params;
+  const client = await requireWorkspaceClient(clientSlug);
+  const clientId = client.id;
 
   let tiers: Tier[] = [];
   let health: DataHealthRow[] = [];
@@ -53,7 +53,7 @@ export default async function ClientSettingsPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}`} />
+      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug)} />
       <PageHeader
         title="Client settings"
         description="Account record for tier allowances, contract date, lead goal, conversions, and strategy sheet."
@@ -78,7 +78,7 @@ export default async function ClientSettingsPage({
             title="Conversions"
             description="Add or remove GA4 lead events used by Dashboard and Decision Engine."
             actions={
-              <Link href={`/clients/${clientId}/conversions`} className="btn btn-ghost btn-sm">
+              <Link href={clientHref(client.slug, "conversions")} className="btn btn-ghost btn-sm">
                 Open conversions page
               </Link>
             }
@@ -93,33 +93,42 @@ export default async function ClientSettingsPage({
             title="Data freshness"
             description="Source health for this account. Moved off the Dashboard into the client record."
             actions={
-              <Link href={`/clients/${clientId}/data-health`} className="btn btn-ghost btn-sm">
+              <Link href={clientHref(client.slug, "data-health")} className="btn btn-ghost btn-sm">
                 Open data health
               </Link>
             }
           />
-          <div className="workspace-panel">
+          <div className="workspace-panel space-y-3">
             <p className="text-sm text-[var(--text-secondary)]">
               {healthy}/{health.length || 0} sources healthy
             </p>
             {health.length > 0 ? (
-              <ul className="mt-3 divide-y divide-[var(--border)]">
-                {health.map((row) => (
-                  <li
-                    key={row.source}
-                    className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-                  >
-                    <span className="font-medium">{row.source.replaceAll("_", " ")}</span>
-                    <StatusBadge
-                      available={row.status === "Healthy"}
-                      availableLabel={row.status}
-                      unavailableLabel={row.status}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-[var(--text-tertiary)]">
+                    <tr>
+                      <th className="py-2 pr-4 font-medium">Source</th>
+                      <th className="py-2 pr-4 font-medium">Status</th>
+                      <th className="py-2 font-medium">Fact through</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {health.map((row) => (
+                      <tr key={row.source} className="border-t border-[var(--border)]">
+                        <td className="py-2 pr-4">{row.source.replaceAll("_", " ")}</td>
+                        <td className="py-2 pr-4">
+                          <StatusBadge available={row.status === "Healthy"} />
+                        </td>
+                        <td className="py-2 text-[var(--text-secondary)]">
+                          {row.fact_through ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--text-tertiary)]">No freshness rows yet.</p>
+              <p className="text-sm text-[var(--text-tertiary)]">No watermark data yet.</p>
             )}
           </div>
         </section>

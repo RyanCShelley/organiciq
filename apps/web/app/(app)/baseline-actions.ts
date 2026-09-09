@@ -75,7 +75,7 @@ export async function applyBaselineFromGa4Action(formData: FormData) {
         },
       },
     );
-    revalidatePath(`/clients/${clientId}`);
+    revalidatePath("/clients", "layout");
     revalidatePath("/dashboard");
     return { ok: true as const, preview };
   } catch (e) {

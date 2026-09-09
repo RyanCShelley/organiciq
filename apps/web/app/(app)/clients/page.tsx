@@ -52,7 +52,7 @@ export default async function ClientsIndexPage({
             key={client.id}
             className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
           >
-            <Link href={`/clients/${client.id}`} className="block hover:opacity-90">
+            <Link href={`/clients/${client.slug}`} className="block hover:opacity-90">
               <div className="text-lg font-semibold">{client.client_name}</div>
               <div className="text-sm text-[var(--muted)]">{client.domain}</div>
               <div className="mt-3 text-sm text-[var(--accent)]">Open workspace →</div>

@@ -1,17 +1,16 @@
-import { notFound } from "next/navigation";
-
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { apiFetch, type DataHealthRow } from "@/lib/api";
-import { loadClientById } from "@/lib/context";
+import { clientHref } from "@/lib/client-path";
+import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientDataHealthPage({
   params,
 }: {
-  params: Promise<{ clientId: string }>;
+  params: Promise<{ clientSlug: string }>;
 }) {
-  const { clientId } = await params;
-  const client = await loadClientById(clientId);
-  if (!client) notFound();
+  const { clientSlug } = await params;
+  const client = await requireWorkspaceClient(clientSlug, "data-health");
+  const clientId = client.id;
 
   let rows: DataHealthRow[] = [];
   let error: string | null = null;
@@ -24,7 +23,7 @@ export default async function ClientDataHealthPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/data-health`} />
+      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "data-health")} />
       <h1 className="text-2xl font-semibold">Data Health</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Freshness and validation for {client.client_name}. Cross-client view is on Platform → Data

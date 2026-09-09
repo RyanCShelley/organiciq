@@ -45,7 +45,8 @@ export function SidebarNav({
   const searchParams = useSearchParams();
   const tab = searchParams.get("tab");
   const platformOnly = isPlatformContext(pathname);
-  const groups = accountNavGroups(clientId);
+  const selected = clients.find((client) => client.id === clientId);
+  const groups = accountNavGroups(selected?.slug ?? "");
   const logoHref = platformOnly
     ? withNavContext("/clients", clientId, from, to)
     : withNavContext("/dashboard", clientId, from, to);

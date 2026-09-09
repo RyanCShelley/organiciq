@@ -114,7 +114,7 @@ export async function saveBaselineAction(formData: FormData) {
     };
   }
 
-  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients", "layout");
   revalidatePath("/dashboard");
   return { ok: true as const };
 }

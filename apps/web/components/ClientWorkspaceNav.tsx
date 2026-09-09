@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { clientHref } from "@/lib/client-path";
+
 const WORKSPACE_LINKS = [
   { segment: "", label: "Settings" },
   { segment: "integrations", label: "Integrations" },
@@ -9,19 +11,16 @@ const WORKSPACE_LINKS = [
 ];
 
 export function ClientWorkspaceNav({
-  clientId,
+  clientSlug,
   active,
 }: {
-  clientId: string;
+  clientSlug: string;
   active: string;
 }) {
   return (
     <div className="mb-6 flex flex-wrap gap-2">
       {WORKSPACE_LINKS.map((link) => {
-        const href =
-          link.segment === ""
-            ? `/clients/${clientId}`
-            : `/clients/${clientId}/${link.segment}`;
+        const href = clientHref(clientSlug, link.segment);
         const isActive = active === href;
         return (
           <Link

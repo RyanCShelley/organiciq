@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
 
 import { apiFetch, type Client } from "@/lib/api";
+import { clientHref, isClientUuid } from "@/lib/client-path";
 import { defaultDateRange } from "@/lib/dates";
 
 export async function resolveClientId(
@@ -50,4 +52,29 @@ export async function loadClientById(clientId: string): Promise<Client | null> {
   } catch {
     return null;
   }
+}
+
+/** Resolve a workspace path param that may be a slug or a legacy UUID. */
+export async function loadClientByParam(param: string): Promise<Client | null> {
+  try {
+    const clients = await apiFetch<Client[]>("/clients");
+    const bySlug = clients.find((client) => client.slug === param);
+    if (bySlug) return bySlug;
+    if (isClientUuid(param)) {
+      return clients.find((client) => client.id === param) ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Load client for a workspace page; redirect UUID paths to the slug URL. */
+export async function requireWorkspaceClient(param: string, segment = ""): Promise<Client> {
+  const client = await loadClientByParam(param);
+  if (!client) notFound();
+  if (isClientUuid(param) && client.slug !== param) {
+    redirect(clientHref(client.slug, segment));
+  }
+  return client;
 }

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import re
 from uuid import UUID
 
 from sqlalchemy import text
@@ -56,6 +59,32 @@ _CLIENT_CASCADE_TABLES = (
 )
 
 
+def slugify_client_name(value: str) -> str:
+    text_value = value.strip().lower()
+    text_value = re.sub(r"[^a-z0-9]+", "-", text_value)
+    text_value = re.sub(r"-{2,}", "-", text_value).strip("-")
+    return text_value or "client"
+
+
+def allocate_client_slug(
+    db: Session,
+    *,
+    desired: str,
+    exclude_client_id: UUID | None = None,
+) -> str:
+    base = slugify_client_name(desired)
+    candidate = base
+    n = 2
+    while True:
+        query = db.query(Client).filter(Client.slug == candidate)
+        if exclude_client_id is not None:
+            query = query.filter(Client.id != exclude_client_id)
+        if query.one_or_none() is None:
+            return candidate
+        candidate = f"{base}-{n}"
+        n += 1
+
+
 def list_clients(db: Session, user: AuthUser) -> list[Client]:
     query = db.query(Client).order_by(Client.client_name.asc())
     accessible = list_accessible_client_ids(db, user)
@@ -68,8 +97,15 @@ def get_client(db: Session, client_id: UUID) -> Client | None:
     return db.query(Client).filter(Client.id == client_id).one_or_none()
 
 
+def get_client_by_slug(db: Session, slug: str) -> Client | None:
+    return db.query(Client).filter(Client.slug == slug).one_or_none()
+
+
 def create_client(db: Session, payload: ClientCreate) -> Client:
-    client = Client(**payload.model_dump())
+    data = payload.model_dump()
+    desired_slug = data.pop("slug", None) or data["client_name"]
+    data["slug"] = allocate_client_slug(db, desired=desired_slug)
+    client = Client(**data)
     db.add(client)
     db.flush()
 
@@ -111,6 +147,10 @@ def create_client(db: Session, payload: ClientCreate) -> Client:
 
 def update_client(db: Session, client: Client, payload: ClientUpdate) -> Client:
     data = payload.model_dump(exclude_unset=True)
+    if "slug" in data and data["slug"]:
+        data["slug"] = allocate_client_slug(
+            db, desired=str(data["slug"]), exclude_client_id=client.id
+        )
     for key, value in data.items():
         setattr(client, key, value)
     db.commit()
