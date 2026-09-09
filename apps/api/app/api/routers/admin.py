@@ -1,6 +1,7 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -94,6 +95,32 @@ def create_conversion_definition(
     db.commit()
     db.refresh(row)
     return ConversionDefinitionOut.model_validate(row)
+
+
+@router.delete(
+    "/conversion-definitions/{definition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+def delete_conversion_definition(
+    definition_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    row = (
+        db.query(ConversionDefinition)
+        .filter(
+            ConversionDefinition.id == definition_id,
+            ConversionDefinition.client_id == client.id,
+        )
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversion not found")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/conversion-definitions/ga4-events")

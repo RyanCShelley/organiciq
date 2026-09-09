@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
+import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
 import { Alert } from "@/components/ui/Alert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -45,8 +46,6 @@ export default async function ClientSettingsPage({
     loadError = e instanceof Error ? e.message : "Failed to load client settings";
   }
 
-  const primary = conversions.filter((row) => row.active && row.is_primary);
-  const secondary = conversions.filter((row) => row.active && !row.is_primary);
   const hasLeadConversions = conversions.some(
     (row) => row.active && row.conversion_type === "lead",
   );
@@ -77,34 +76,15 @@ export default async function ClientSettingsPage({
         <section className="workspace-section">
           <SectionHeader
             title="Conversions"
-            description="Primary and secondary lead events used by Dashboard and Decision Engine."
+            description="Add or remove GA4 lead events used by Dashboard and Decision Engine."
             actions={
               <Link href={`/clients/${clientId}/conversions`} className="btn btn-ghost btn-sm">
-                Manage conversions
+                Open conversions page
               </Link>
             }
           />
-          <div className="workspace-panel space-y-3 text-sm">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
-                Primary
-              </p>
-              <p className="mt-1 text-[var(--text-primary)]">
-                {primary.length > 0
-                  ? primary.map((row) => row.conversion_name).join(", ")
-                  : "None configured"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
-                Secondary
-              </p>
-              <p className="mt-1 text-[var(--text-secondary)]">
-                {secondary.length > 0
-                  ? secondary.map((row) => row.conversion_name).join(", ")
-                  : "None configured"}
-              </p>
-            </div>
+          <div className="workspace-panel">
+            <ConversionDefinitionsPanel clientId={clientId} conversions={conversions} />
           </div>
         </section>
 

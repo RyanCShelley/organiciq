@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
 
 import type { ConversionDefinition } from "@/lib/api";
 
@@ -26,6 +26,8 @@ export function ConversionDefinitionsPanel({
   const [active, setActive] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [deletePending, startDeleteTransition] = useTransition();
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +45,7 @@ export function ConversionDefinitionsPanel({
     };
   }, [clientId]);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setPending(true);
     setMessage(null);
@@ -74,6 +76,30 @@ export function ConversionDefinitionsPanel({
     setIsPrimary(false);
     setActive(true);
     router.refresh();
+  }
+
+  function onRemove(conversion: ConversionDefinition) {
+    const confirmed = window.confirm(
+      `Remove “${conversion.conversion_name}” (${conversion.event_name}) from this client?`,
+    );
+    if (!confirmed) return;
+
+    setMessage(null);
+    setRemovingId(conversion.id);
+    startDeleteTransition(async () => {
+      const res = await fetch(
+        `/api/proxy/conversion-definitions/${encodeURIComponent(conversion.id)}?clientId=${encodeURIComponent(clientId)}`,
+        { method: "DELETE" },
+      );
+      setRemovingId(null);
+      if (!res.ok) {
+        const text = await res.text();
+        setMessage(text || "Failed to remove conversion");
+        return;
+      }
+      setMessage("Conversion removed");
+      router.refresh();
+    });
   }
 
   return (
@@ -178,6 +204,7 @@ export function ConversionDefinitionsPanel({
               <th className="px-4 py-3 font-medium">Type</th>
               <th className="px-4 py-3 font-medium">Primary</th>
               <th className="px-4 py-3 font-medium">Active</th>
+              <th className="px-4 py-3 font-medium"> </th>
             </tr>
           </thead>
           <tbody>
@@ -188,11 +215,21 @@ export function ConversionDefinitionsPanel({
                 <td className="px-4 py-3">{conversion.conversion_type}</td>
                 <td className="px-4 py-3">{conversion.is_primary ? "yes" : "no"}</td>
                 <td className="px-4 py-3">{conversion.active ? "yes" : "no"}</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    disabled={deletePending && removingId === conversion.id}
+                    onClick={() => onRemove(conversion)}
+                    className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
+                  >
+                    {deletePending && removingId === conversion.id ? "Removing…" : "Remove"}
+                  </button>
+                </td>
               </tr>
             ))}
             {conversions.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-[var(--muted)]">
+                <td colSpan={6} className="px-4 py-6 text-[var(--muted)]">
                   No conversion definitions yet.
                 </td>
               </tr>
