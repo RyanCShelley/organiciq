@@ -57,6 +57,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 "sessions": row.sessions or Decimal(0),
                 "active_users": row.active_users or Decimal(0),
                 "views": row.views or Decimal(0),
+                "engaged_sessions": row.engaged_sessions,
             }
         )
 
@@ -90,6 +91,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 "sessions": stmt.excluded.sessions,
                 "active_users": stmt.excluded.active_users,
                 "views": stmt.excluded.views,
+                "engaged_sessions": stmt.excluded.engaged_sessions,
             },
         )
         db.execute(stmt)

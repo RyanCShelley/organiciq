@@ -62,7 +62,7 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         start_date=job.start_date,
         end_date=job.end_date,
         dimensions=["date", "landingPage", "sessionSource", "sessionMedium"],
-        metrics=["sessions", "activeUsers", "screenPageViews"],
+        metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions"],
     )
     event_rows = run_report(
         access_token=token,
@@ -92,6 +92,7 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 sessions=_metric(row, 0),
                 active_users=_metric(row, 1),
                 views=_metric(row, 2),
+                engaged_sessions=_metric(row, 3),
             )
         )
 

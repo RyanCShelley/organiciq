@@ -93,7 +93,16 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       gsc_ctr: periodMetric(traffic?.gsc_ctr),
       ga4_sessions: periodMetric(traffic?.ga4_sessions),
       ga4_views: periodMetric(traffic?.ga4_views),
-      by_channel: Array.isArray(traffic?.by_channel) ? traffic.by_channel : [],
+      by_channel: Array.isArray(traffic?.by_channel)
+        ? traffic.by_channel.map((row) => ({
+            channel: String(row.channel ?? ""),
+            label: String(row.label ?? row.channel ?? ""),
+            sessions: typeof row.sessions === "number" ? row.sessions : 0,
+            views: typeof row.views === "number" ? row.views : 0,
+            conversions: typeof row.conversions === "number" ? row.conversions : 0,
+            bounce_rate: typeof row.bounce_rate === "number" ? row.bounce_rate : null,
+          }))
+        : [],
       top_pages: Array.isArray(traffic?.top_pages) ? traffic.top_pages : [],
     },
     baseline: normalizeBaseline(data.baseline),
@@ -210,7 +219,14 @@ export type DashboardResponse = {
     gsc_ctr: DashboardPeriodMetric;
     ga4_sessions: DashboardPeriodMetric;
     ga4_views: DashboardPeriodMetric;
-    by_channel: { channel: string; label: string; sessions: number; views: number }[];
+    by_channel: {
+      channel: string;
+      label: string;
+      sessions: number;
+      views: number;
+      conversions: number;
+      bounce_rate: number | null;
+    }[];
     top_pages: {
       page: string;
       gsc_impressions: number;

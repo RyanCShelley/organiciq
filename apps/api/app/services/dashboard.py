@@ -824,6 +824,7 @@ def _traffic_by_channel(
     db: Session,
     client_id: UUID,
     period: tuple[date, date] | None,
+    lead_events: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     if period is None:
         return []
@@ -833,6 +834,7 @@ def _traffic_by_channel(
             FactGa4Traffic.channel,
             func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
             func.coalesce(func.sum(FactGa4Traffic.views), 0),
+            func.sum(FactGa4Traffic.engaged_sessions),
         )
         .filter(
             FactGa4Traffic.client_id == client_id,
@@ -842,16 +844,46 @@ def _traffic_by_channel(
         .group_by(FactGa4Traffic.channel)
         .all()
     )
-    return [
-        {
-            "channel": channel.value,
-            "label": CHANNEL_LABELS[channel],
-            "sessions": float(sessions or 0),
-            "views": float(views or 0),
-        }
-        for channel, sessions, views in rows
-        if float(sessions or 0) > 0 or float(views or 0) > 0
-    ]
+
+    conversions_by_channel: dict[OrganicChannel, int] = {}
+    if lead_events:
+        lead_rows = (
+            db.query(
+                FactGa4Event.channel,
+                func.coalesce(func.sum(FactGa4Event.event_count), 0),
+            )
+            .filter(
+                FactGa4Event.client_id == client_id,
+                FactGa4Event.date >= start,
+                FactGa4Event.date <= end,
+                FactGa4Event.event_name.in_(lead_events),
+            )
+            .group_by(FactGa4Event.channel)
+            .all()
+        )
+        conversions_by_channel = {channel: int(total or 0) for channel, total in lead_rows}
+
+    out: list[dict[str, Any]] = []
+    for channel, sessions, views, engaged in rows:
+        sessions_f = float(sessions or 0)
+        views_f = float(views or 0)
+        conversions = conversions_by_channel.get(channel, 0)
+        bounce_rate: float | None = None
+        if engaged is not None and sessions_f > 0:
+            bounce_rate = max(0.0, min(100.0, (1.0 - (float(engaged) / sessions_f)) * 100.0))
+        if sessions_f <= 0 and views_f <= 0 and conversions <= 0:
+            continue
+        out.append(
+            {
+                "channel": channel.value,
+                "label": CHANNEL_LABELS[channel],
+                "sessions": sessions_f,
+                "views": views_f,
+                "conversions": conversions,
+                "bounce_rate": bounce_rate,
+            }
+        )
+    return out
 
 
 def _top_pages(
@@ -1090,7 +1122,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                 _ga4_views(db, client.id, ga4_previous),
                 views_series,
             ),
-            "by_channel": _traffic_by_channel(db, client.id, ga4_current),
+            "by_channel": _traffic_by_channel(db, client.id, ga4_current, lead_events),
             "top_pages": _top_pages(db, client.id, gsc_current, ga4_current),
         },
     }

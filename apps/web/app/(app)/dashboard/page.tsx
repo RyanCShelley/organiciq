@@ -366,6 +366,19 @@ export default async function DashboardPage({
                         align: "right",
                         render: (row) => formatNum(row.views),
                       },
+                      {
+                        key: "conversions",
+                        header: "Conversions",
+                        align: "right",
+                        render: (row) => row.conversions.toLocaleString(),
+                      },
+                      {
+                        key: "bounce_rate",
+                        header: "Bounce Rate",
+                        align: "right",
+                        render: (row) =>
+                          row.bounce_rate == null ? "—" : `${row.bounce_rate.toFixed(1)}%`,
+                      },
                     ]}
                     rows={data.traffic.by_channel}
                     getRowKey={(row) => row.channel}

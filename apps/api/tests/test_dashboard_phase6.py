@@ -553,3 +553,59 @@ def test_ai_tracker_presence_from_facts(db, client_a):
     assert payload["visibility"]["ai"]["mention_top3_presence"]["current"] == 3.0
     assert payload["visibility"]["ai"]["link_top3_presence"]["current"] == 5.0
     assert payload["visibility"]["ai"]["tracked_prompt_source"] == "airt_statistics"
+
+
+def test_traffic_by_channel_includes_conversions_and_bounce(db, client_a):
+    end = date.today()
+    start = end - timedelta(days=2)
+    _watermark(db, client_a.id, "ga4", end)
+    db.add(
+        ConversionDefinition(
+            id=uuid4(),
+            client_id=client_a.id,
+            event_name="generate_lead",
+            conversion_name="Lead",
+            conversion_type="lead",
+            is_primary=True,
+            active=True,
+        )
+    )
+    db.add(
+        FactGa4Traffic(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            session_source="google",
+            session_medium="organic",
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            sessions=Decimal("100"),
+            active_users=Decimal("80"),
+            views=Decimal("150"),
+            engaged_sessions=Decimal("60"),
+        )
+    )
+    db.add(
+        FactGa4Event(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            session_source="google",
+            session_medium="organic",
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            event_name="generate_lead",
+            event_count=4,
+        )
+    )
+    db.commit()
+
+    payload = build_dashboard(db, client_a, start, end)
+    rows = payload["traffic"]["by_channel"]
+    assert len(rows) == 1
+    assert rows[0]["channel"] == OrganicChannel.ORGANIC_SEARCH.value
+    assert rows[0]["sessions"] == 100.0
+    assert rows[0]["conversions"] == 4
+    assert rows[0]["bounce_rate"] == 40.0
