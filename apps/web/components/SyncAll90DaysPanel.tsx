@@ -44,8 +44,11 @@ export function SyncAll90DaysPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const canSync =
-    hasGscProperty || hasGa4Property || hasSerankingProject;
+  const canSync = hasGscProperty || hasGa4Property || hasSerankingProject;
+  const mapped: string[] = [];
+  if (hasGscProperty) mapped.push("GSC");
+  if (hasGa4Property) mapped.push("GA4");
+  if (hasSerankingProject) mapped.push("SE Ranking");
 
   async function syncAll90Days() {
     setPending(true);
@@ -77,7 +80,7 @@ export function SyncAll90DaysPanel({
     setPending(false);
     setMessage(
       enqueued.length
-        ? `Enqueued ${enqueued.join(", ")} (90 days, ${window.start_date} → ${window.end_date})`
+        ? `Sync started for ${enqueued.length} jobs (${window.start_date} → ${window.end_date}). Watch Platform → Sync jobs for progress.`
         : "No mapped integrations to sync.",
     );
     router.refresh();
@@ -85,10 +88,11 @@ export function SyncAll90DaysPanel({
 
   return (
     <div className="mt-6 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-4">
-      <h2 className="text-lg font-medium">Phase 7 — 90-day validation</h2>
+      <h2 className="text-lg font-medium">Sync data</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Backfill 90 days for every mapped integration on this client, then validate dashboard metrics
-        and data health against GSC, GA4, and SE Ranking.
+        Pull the last <strong>90 days</strong> for every mapped source on this client
+        {mapped.length ? ` (${mapped.join(", ")})` : ""}. Run this after connecting properties; re-run
+        when you want a fresh backfill. Nightly auto-sync is not enabled yet.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <button
@@ -97,12 +101,12 @@ export function SyncAll90DaysPanel({
           onClick={syncAll90Days}
           className="btn btn-primary disabled:opacity-50"
         >
-          Sync all sources 90 days
+          {pending ? "Starting sync…" : "Sync 90 days"}
         </button>
       </div>
       {!canSync ? (
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Map at least one GSC, GA4, or SE Ranking property above before running a 90-day sync.
+          Map at least one GSC, GA4, or SE Ranking property above before syncing.
         </p>
       ) : null}
       {message ? <p className="mt-3 text-sm text-[var(--muted)]">{message}</p> : null}

@@ -1,16 +1,12 @@
-# Railway service config for the Organic IQ API.
-# Create a second Railway service from the same Dockerfile with:
-#   Custom Start Command: scripts/start-worker.sh
-#
-# Root Directory / Dockerfile path: apps/api
+# Shared by API + worker (same Dockerfile under apps/api).
+# Worker service: set SERVICE_ROLE=worker and do NOT set a healthcheck path
+# (worker has no HTTP server). API service keeps healthcheck in the Railway UI.
 
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "scripts/start-api.sh"
-healthcheckPath = "/health"
-healthcheckTimeout = 30
+startCommand = "scripts/start.sh"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5

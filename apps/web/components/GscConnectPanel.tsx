@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { SearchableSelect } from "@/components/SearchableSelect";
-import { syncJobWindow } from "@/lib/dates";
 
 type Site = { site_url: string; permission_level?: string };
 
@@ -69,29 +68,7 @@ export function GscConnectPanel({
       setMessage(text || "Failed to save property");
       return;
     }
-    setMessage("Property saved");
-    router.refresh();
-  }
-
-  async function syncDays(days: number) {
-    setPending(true);
-    setMessage(null);
-    const window = syncJobWindow(days);
-
-    for (const source of ["gsc_pages", "gsc_queries"]) {
-      const res = await fetch("/api/proxy/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, source, ...window }),
-      });
-      if (!res.ok) {
-        setPending(false);
-        setMessage(await res.text());
-        return;
-      }
-    }
-    setPending(false);
-    setMessage(`Enqueued gsc_pages + gsc_queries (${days} days)`);
+    setMessage("Property saved — use Sync 90 days below to pull data.");
     router.refresh();
   }
 
@@ -99,8 +76,7 @@ export function GscConnectPanel({
     <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
       <h2 className="text-lg font-medium">Google Search Console</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Google is shared across clients — connect once, then pick this client&apos;s Search Console
-        property and sync.
+        Connect Google once for the workspace, then pick this client&apos;s Search Console property.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -113,32 +89,14 @@ export function GscConnectPanel({
           {connected ? "Reconnect Google" : "Connect Google"}
         </button>
         {connected ? (
-          <>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={loadSites}
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Load properties
-            </button>
-            <button
-              type="button"
-              disabled={pending || !propertyId}
-              onClick={() => syncDays(14)}
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Sync GSC 14 days
-            </button>
-            <button
-              type="button"
-              disabled={pending || !propertyId}
-              onClick={() => syncDays(90)}
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Sync GSC 90 days
-            </button>
-          </>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={loadSites}
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm disabled:opacity-50"
+          >
+            {propertyId ? "Change property" : "Load properties"}
+          </button>
         ) : null}
       </div>
 
@@ -163,7 +121,7 @@ export function GscConnectPanel({
       ) : null}
 
       {propertyId ? (
-        <p className="mt-3 text-sm text-[var(--muted)]">Selected property: {propertyId}</p>
+        <p className="mt-3 text-sm text-[var(--muted)]">Connected property: {propertyId}</p>
       ) : null}
       {message ? <p className="mt-3 text-sm text-[var(--muted)]">{message}</p> : null}
     </div>

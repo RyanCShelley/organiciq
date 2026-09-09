@@ -41,8 +41,8 @@ export default async function ClientIntegrationsPage({
       <ClientWorkspaceNav clientId={clientId} active={`/clients/${clientId}/integrations`} />
       <h1 className="text-2xl font-semibold">Integrations</h1>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Connect Google once for the workspace (Search Console + Analytics). Then map each
-        client&apos;s properties. SE Ranking uses an account API key.
+        Connect each source, confirm it shows connected with a property, then run one{" "}
+        <strong>Sync 90 days</strong> for this client.
       </p>
 
       {oauth === "connected" ? (

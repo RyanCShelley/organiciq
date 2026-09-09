@@ -10,13 +10,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN chmod +x scripts/start-api.sh scripts/start-worker.sh
+RUN chmod +x scripts/start-api.sh scripts/start-worker.sh scripts/start.sh
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
+ENV SERVICE_ROLE=api
 
 EXPOSE 8000
 
-# Default = API (migrate + uvicorn). Worker service overrides CMD to scripts/start-worker.sh
-CMD ["scripts/start-api.sh"]
+# Default = API. Worker service sets SERVICE_ROLE=worker (same image).
+CMD ["scripts/start.sh"]
