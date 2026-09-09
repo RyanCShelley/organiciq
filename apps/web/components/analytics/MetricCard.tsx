@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Card } from "@/components/ui/Card";
+import { Sparkline } from "@/components/analytics/Sparkline";
 import { TrendIndicator } from "@/components/analytics/TrendIndicator";
 import { cn } from "@/lib/cn";
 import { emptyPeriodMetric, type DashboardPeriodMetric } from "@/lib/dashboard";
@@ -54,13 +55,22 @@ export function MetricCard({
       title={hint}
     >
       <div className="text-xs font-medium text-[var(--text-secondary)]">{label}</div>
-      <div
-        className={cn(
-          "mt-1 font-[family-name:var(--font-display)] font-bold tracking-tight text-[var(--text-primary)]",
-          isCompact ? "text-lg" : "text-xl",
-        )}
-      >
-        {formatValue(safeMetric.current, unit)}
+      <div className="mt-1 flex items-start justify-between gap-3">
+        <div
+          className={cn(
+            "font-[family-name:var(--font-display)] font-bold tracking-tight text-[var(--text-primary)]",
+            isCompact ? "text-lg" : "text-xl",
+          )}
+        >
+          {formatValue(safeMetric.current, unit)}
+        </div>
+        <Sparkline
+          values={safeMetric.series}
+          invert={invertChange}
+          width={isCompact ? 56 : 72}
+          height={isCompact ? 22 : 28}
+          className="mt-0.5"
+        />
       </div>
       {countLabel && countValue !== null && countValue !== undefined ? (
         <div className="mt-0.5 text-xs text-[var(--text-secondary)]">
@@ -75,6 +85,7 @@ export function MetricCard({
           changePct={safeMetric.change_pct}
           invert={invertChange}
           comparisonLabel={comparisonLabel}
+          comparisonValue={formatValue(safeMetric.previous, unit)}
           compact
         />
       </div>

@@ -2,19 +2,25 @@ export type DashboardPeriodMetric = {
   current: number | null;
   previous: number | null;
   change_pct: number | null;
+  /** Daily values for the selected (or baseline) window — used for sparklines. */
+  series: number[];
 };
 
 export function emptyPeriodMetric(): DashboardPeriodMetric {
-  return { current: null, previous: null, change_pct: null };
+  return { current: null, previous: null, change_pct: null, series: [] };
 }
 
 function periodMetric(value: unknown): DashboardPeriodMetric {
   if (!value || typeof value !== "object") return emptyPeriodMetric();
   const metric = value as Partial<DashboardPeriodMetric>;
+  const series = Array.isArray(metric.series)
+    ? metric.series.filter((v): v is number => typeof v === "number" && !Number.isNaN(v))
+    : [];
   return {
     current: typeof metric.current === "number" ? metric.current : null,
     previous: typeof metric.previous === "number" ? metric.previous : null,
     change_pct: typeof metric.change_pct === "number" ? metric.change_pct : null,
+    series,
   };
 }
 
@@ -49,6 +55,11 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
         typeof conversions?.goal_period_days === "number" ? conversions.goal_period_days : null,
       goal_progress_pct:
         typeof conversions?.goal_progress_pct === "number" ? conversions.goal_progress_pct : null,
+      leads_series: Array.isArray(conversions?.leads_series)
+        ? conversions.leads_series.filter(
+            (v): v is number => typeof v === "number" && !Number.isNaN(v),
+          )
+        : [],
     },
     visibility: {
       search: {
@@ -96,6 +107,8 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       as_of: null,
       source: null,
       notes: null,
+      tier_name: null,
+      current_window: null,
       monthly_sessions: null,
       monthly_leads: null,
       lead_rate: null,
@@ -106,12 +119,27 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       },
     };
   }
-  const baseline = value as Partial<DashboardBaseline>;
+  const baseline = value as Partial<DashboardBaseline> & {
+    current_window?: { from?: string; to?: string; days?: number } | null;
+  };
+  const window = baseline.current_window;
   return {
     configured: baseline.configured === true,
     as_of: typeof baseline.as_of === "string" ? baseline.as_of : null,
     source: typeof baseline.source === "string" ? baseline.source : null,
     notes: typeof baseline.notes === "string" ? baseline.notes : null,
+    tier_name: typeof baseline.tier_name === "string" ? baseline.tier_name : null,
+    current_window:
+      window &&
+      typeof window === "object" &&
+      typeof window.from === "string" &&
+      typeof window.to === "string"
+        ? {
+            from: window.from,
+            to: window.to,
+            days: typeof window.days === "number" ? window.days : null,
+          }
+        : null,
     monthly_sessions:
       typeof baseline.monthly_sessions === "number" ? baseline.monthly_sessions : null,
     monthly_leads: typeof baseline.monthly_leads === "number" ? baseline.monthly_leads : null,
@@ -149,6 +177,7 @@ export type DashboardResponse = {
     period_lead_goal: number | null;
     goal_period_days: number | null;
     goal_progress_pct: number | null;
+    leads_series: number[];
   };
   visibility: {
     search: {
@@ -198,6 +227,8 @@ export type DashboardBaseline = {
   as_of: string | null;
   source: string | null;
   notes: string | null;
+  tier_name: string | null;
+  current_window: { from: string; to: string; days: number | null } | null;
   monthly_sessions: number | null;
   monthly_leads: number | null;
   lead_rate: number | null;

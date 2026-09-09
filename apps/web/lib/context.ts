@@ -40,7 +40,7 @@ export async function resolveDateRange(
     return { from: fromCookie, to: toCookie };
   }
 
-  return defaultDateRange(90);
+  return defaultDateRange(30);
 }
 
 export async function loadClientById(clientId: string): Promise<Client | null> {

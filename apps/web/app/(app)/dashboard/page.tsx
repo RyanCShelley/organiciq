@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { DataTable } from "@/components/analytics/DataTable";
 import { MetricCard } from "@/components/analytics/MetricCard";
+import { Sparkline } from "@/components/analytics/Sparkline";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -63,7 +64,7 @@ export default async function DashboardPage({
           <section className="workspace-section">
             <SectionHeader
               title="Baseline"
-              description="Current period scaled to monthly vs the frozen kickoff / calculator snapshot."
+              description="Last 30 days of validated GA4 vs the frozen kickoff / calculator monthly snapshot."
               actions={
                 clientId ? (
                   <Link href={`/clients/${clientId}`} className="btn btn-ghost btn-sm">
@@ -90,7 +91,10 @@ export default async function DashboardPage({
                     Snapshot
                     {data.baseline.as_of ? ` as of ${data.baseline.as_of}` : ""}
                     {data.baseline.source ? ` · ${data.baseline.source}` : ""}
-                    {data.baseline.notes ? ` — ${data.baseline.notes}` : ""}
+                    {data.baseline.tier_name ? ` · ${data.baseline.tier_name}` : ""}
+                    {data.baseline.current_window
+                      ? ` — comparing ${data.baseline.current_window.from}→${data.baseline.current_window.to}`
+                      : ""}
                   </p>
                   <div className="metric-grid sm:grid-cols-3">
                     <MetricCard
@@ -168,8 +172,16 @@ export default async function DashboardPage({
                     <div className="text-xs font-medium text-[var(--text-secondary)]">
                       {leadGoalLabel(data.conversions.goal_period_days)}
                     </div>
-                    <div className="mt-1 font-[family-name:var(--font-display)] text-xl font-bold tracking-tight">
-                      {data.conversions.period_lead_goal.toLocaleString()}
+                    <div className="mt-1 flex items-start justify-between gap-3">
+                      <div className="font-[family-name:var(--font-display)] text-xl font-bold tracking-tight">
+                        {data.conversions.period_lead_goal.toLocaleString()}
+                      </div>
+                      <Sparkline
+                        values={data.conversions.leads_series}
+                        width={72}
+                        height={28}
+                        className="mt-0.5"
+                      />
                     </div>
                     {data.conversions.monthly_lead_goal &&
                     data.conversions.goal_period_days !== null &&
@@ -184,6 +196,11 @@ export default async function DashboardPage({
                       <span className="font-medium text-[var(--text-primary)]">
                         {formatNum(data.conversions.goal_progress_pct)}%
                       </span>
+                      {data.conversions.leads.current != null ? (
+                        <span className="ml-1.5 text-[var(--text-tertiary)]">
+                          ({data.conversions.leads.current.toLocaleString()} leads)
+                        </span>
+                      ) : null}
                     </div>
                   </Card>
                 ) : null}

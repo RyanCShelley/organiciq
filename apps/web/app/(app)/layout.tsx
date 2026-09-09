@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const cookieStore = await cookies();
-  const ranges = defaultDateRange(90);
+  const ranges = defaultDateRange(30);
 
   let clients: Client[] = [];
   try {

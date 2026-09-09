@@ -4,21 +4,29 @@ export function TrendIndicator({
   changePct,
   invert = false,
   comparisonLabel = "vs previous period",
+  comparisonValue,
   className,
   compact = false,
 }: {
   changePct: number | null;
   invert?: boolean;
   comparisonLabel?: string;
+  /** Absolute comparison figure (previous period or baseline). */
+  comparisonValue?: string | null;
   className?: string;
   compact?: boolean;
 }) {
+  const comparisonText =
+    comparisonValue && comparisonValue !== "—"
+      ? `${comparisonLabel} ${comparisonValue}`
+      : comparisonLabel;
+
   if (changePct === null || Number.isNaN(changePct)) {
     return (
       <div className={cn(compact ? "text-xs" : "text-sm", "text-[var(--text-tertiary)]", className)}>
         <span>—</span>
-        {!compact && comparisonLabel ? (
-          <span className="mt-0.5 block text-xs">{comparisonLabel}</span>
+        {comparisonText ? (
+          <span className={cn(compact ? "ml-1.5" : "mt-0.5 block text-xs")}>{comparisonText}</span>
         ) : null}
       </div>
     );
@@ -42,7 +50,7 @@ export function TrendIndicator({
         {arrow} {sign}
         {Math.abs(changePct).toFixed(1)}%
       </span>
-      <span className="ml-1.5 text-[var(--text-tertiary)]">{comparisonLabel}</span>
+      <span className="ml-1.5 text-[var(--text-tertiary)]">{comparisonText}</span>
     </div>
   );
 }

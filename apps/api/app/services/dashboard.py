@@ -69,15 +69,68 @@ def _to_float(value: Decimal | int | float | None) -> float | None:
     return float(value)
 
 
-def _period_metric(current: float | int | None, previous: float | int | None) -> dict[str, float | None]:
+def _period_metric(
+    current: float | int | None,
+    previous: float | int | None,
+    series: list[float] | None = None,
+) -> dict[str, Any]:
     change_pct: float | None = None
     if current is not None and previous is not None and previous != 0:
         change_pct = ((current - previous) / previous) * 100
-    return {
+    payload: dict[str, Any] = {
         "current": _to_float(current),
         "previous": _to_float(previous),
         "change_pct": change_pct,
+        "series": series or [],
     }
+    return payload
+
+
+def _date_axis(period: tuple[date, date] | None) -> list[date]:
+    if period is None:
+        return []
+    start, end = period
+    days = (end - start).days + 1
+    if days <= 0:
+        return []
+    return [start + timedelta(days=i) for i in range(days)]
+
+
+def _fill_daily(
+    period: tuple[date, date] | None,
+    by_date: dict[date, float],
+    *,
+    default: float = 0.0,
+    forward_fill: bool = False,
+) -> list[float]:
+    axis = _date_axis(period)
+    if not axis:
+        return []
+    out: list[float] = []
+    last: float | None = None
+    for day in axis:
+        if day in by_date:
+            last = float(by_date[day])
+            out.append(last)
+        elif forward_fill and last is not None:
+            out.append(last)
+        else:
+            out.append(default)
+    return out
+
+
+def _trailing_month_range(
+    to_date: date,
+    watermark: DataWatermark | None,
+) -> tuple[date, date] | None:
+    """Last ~30 calendar days ending at the watermark-capped dashboard end."""
+    if watermark is None or watermark.fact_through_date is None:
+        return None
+    if watermark.validation_status != ValidationStatus.PASSED:
+        return None
+    end = min(to_date, watermark.fact_through_date)
+    start = end - timedelta(days=DAYS_PER_MONTH - 1)
+    return _effective_range(start, end, watermark)
 
 
 def _baseline_comparison(
@@ -86,21 +139,14 @@ def _baseline_comparison(
     current_sessions: float | None,
     current_leads: int | None,
     current_lead_rate: float | None,
-    period_days: int,
+    current_window: tuple[date, date] | None,
+    sessions_series: list[float] | None = None,
+    leads_series: list[float] | None = None,
+    lead_rate_series: list[float] | None = None,
 ) -> dict[str, Any]:
-    """Compare the selected window (scaled to monthly) against the durable baseline snapshot."""
+    """Compare trailing ~30d GA4 totals 1:1 against the frozen monthly baseline snapshot."""
     has_baseline = (
         client.baseline_monthly_sessions is not None or client.baseline_monthly_leads is not None
-    )
-    monthly_sessions = (
-        (current_sessions * DAYS_PER_MONTH / period_days)
-        if current_sessions is not None and period_days > 0
-        else None
-    )
-    monthly_leads = (
-        (current_leads * DAYS_PER_MONTH / period_days)
-        if current_leads is not None and period_days > 0
-        else None
     )
     baseline_rate = _to_float(client.baseline_lead_rate_pct)
     if baseline_rate is None and client.baseline_monthly_sessions and client.baseline_monthly_leads:
@@ -109,18 +155,34 @@ def _baseline_comparison(
                 client.baseline_monthly_leads / client.baseline_monthly_sessions
             ) * 100
 
+    window_payload: dict[str, Any] | None = None
+    if current_window is not None:
+        window_from, window_to = current_window
+        window_payload = {
+            "from": window_from.isoformat(),
+            "to": window_to.isoformat(),
+            "days": (window_to - window_from).days + 1,
+        }
+
+    tier_name = client.tier.tier_name if getattr(client, "tier", None) is not None else None
+
     return {
         "configured": has_baseline,
         "as_of": client.baseline_as_of.isoformat() if client.baseline_as_of else None,
         "source": client.baseline_source,
         "notes": client.baseline_notes,
+        "tier_name": tier_name,
+        "current_window": window_payload,
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
         "vs_current": {
-            "sessions": _period_metric(monthly_sessions, client.baseline_monthly_sessions),
-            "leads": _period_metric(monthly_leads, client.baseline_monthly_leads),
-            "lead_rate": _period_metric(current_lead_rate, baseline_rate),
+            # Trailing month totals compare directly to frozen monthly baseline (no period scaling).
+            "sessions": _period_metric(
+                current_sessions, client.baseline_monthly_sessions, sessions_series
+            ),
+            "leads": _period_metric(current_leads, client.baseline_monthly_leads, leads_series),
+            "lead_rate": _period_metric(current_lead_rate, baseline_rate, lead_rate_series),
         },
     }
 
@@ -219,6 +281,202 @@ def _sum_sessions(
         .scalar()
     )
     return float(total or 0)
+
+
+def _daily_ga4_traffic_series(
+    db: Session,
+    client_id: UUID,
+    period: tuple[date, date] | None,
+) -> tuple[list[float], list[float]]:
+    """Return (sessions_series, views_series) for each day in period."""
+    if period is None:
+        return [], []
+    start, end = period
+    rows = (
+        db.query(
+            FactGa4Traffic.date,
+            func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
+            func.coalesce(func.sum(FactGa4Traffic.views), 0),
+        )
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+        )
+        .group_by(FactGa4Traffic.date)
+        .all()
+    )
+    sessions_by_date = {day: float(sessions or 0) for day, sessions, _ in rows}
+    views_by_date = {day: float(views or 0) for day, _, views in rows}
+    return (
+        _fill_daily(period, sessions_by_date),
+        _fill_daily(period, views_by_date),
+    )
+
+
+def _daily_leads_series(
+    db: Session,
+    client_id: UUID,
+    event_names: list[str],
+    period: tuple[date, date] | None,
+) -> list[float]:
+    if not event_names or period is None:
+        return []
+    start, end = period
+    rows = (
+        db.query(
+            FactGa4Event.date,
+            func.coalesce(func.sum(FactGa4Event.event_count), 0),
+        )
+        .filter(
+            FactGa4Event.client_id == client_id,
+            FactGa4Event.date >= start,
+            FactGa4Event.date <= end,
+            FactGa4Event.event_name.in_(event_names),
+        )
+        .group_by(FactGa4Event.date)
+        .all()
+    )
+    by_date = {day: float(total or 0) for day, total in rows}
+    return _fill_daily(period, by_date)
+
+
+def _daily_lead_rate_series(
+    sessions_series: list[float],
+    leads_series: list[float],
+) -> list[float]:
+    if not sessions_series or len(sessions_series) != len(leads_series):
+        return []
+    out: list[float] = []
+    for sessions, leads in zip(sessions_series, leads_series, strict=True):
+        out.append((leads / sessions) * 100 if sessions > 0 else 0.0)
+    return out
+
+
+def _daily_gsc_series(
+    db: Session,
+    client_id: UUID,
+    period: tuple[date, date] | None,
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Return (impressions, clicks, ctr_pct, avg_position) daily series."""
+    if period is None:
+        return [], [], [], []
+    start, end = period
+    daily_count = (
+        db.query(func.count())
+        .select_from(FactGscDaily)
+        .filter(
+            FactGscDaily.client_id == client_id,
+            FactGscDaily.date >= start,
+            FactGscDaily.date <= end,
+        )
+        .scalar()
+    )
+    fact_model = FactGscDaily if daily_count else FactGscPage
+    rows = (
+        db.query(
+            fact_model.date,
+            func.coalesce(func.sum(fact_model.impressions), 0),
+            func.coalesce(func.sum(fact_model.clicks), 0),
+            func.coalesce(func.sum(fact_model.average_position * fact_model.impressions), 0),
+        )
+        .filter(
+            fact_model.client_id == client_id,
+            fact_model.date >= start,
+            fact_model.date <= end,
+        )
+        .group_by(fact_model.date)
+        .all()
+    )
+    impressions_by: dict[date, float] = {}
+    clicks_by: dict[date, float] = {}
+    ctr_by: dict[date, float] = {}
+    pos_by: dict[date, float] = {}
+    for day, impressions, clicks, weighted_pos in rows:
+        impr = float(impressions or 0)
+        clk = float(clicks or 0)
+        wpos = float(weighted_pos or 0)
+        impressions_by[day] = impr
+        clicks_by[day] = clk
+        ctr_by[day] = (clk / impr) * 100 if impr > 0 else 0.0
+        if impr > 0:
+            pos_by[day] = wpos / impr
+    return (
+        _fill_daily(period, impressions_by),
+        _fill_daily(period, clicks_by),
+        _fill_daily(period, ctr_by),
+        _fill_daily(period, pos_by, forward_fill=True),
+    )
+
+
+def _daily_ai_presence_series(
+    db: Session,
+    client_id: UUID,
+    period: tuple[date, date] | None,
+) -> dict[str, list[float]]:
+    empty = {
+        "mention_presence": [],
+        "link_presence": [],
+        "mention_top3": [],
+        "link_top3": [],
+    }
+    if period is None:
+        return empty
+    start, end = period
+    rows = (
+        db.query(FactSerAiTrackerStats)
+        .filter(
+            FactSerAiTrackerStats.client_id == client_id,
+            FactSerAiTrackerStats.metric_date >= start,
+            FactSerAiTrackerStats.metric_date <= end,
+        )
+        .order_by(FactSerAiTrackerStats.metric_date.asc())
+        .all()
+    )
+    mention: dict[date, float] = {}
+    link: dict[date, float] = {}
+    mention_top3: dict[date, float] = {}
+    link_top3: dict[date, float] = {}
+    for row in rows:
+        day = row.metric_date
+        if row.mention_presence_pct is not None:
+            mention[day] = float(row.mention_presence_pct)
+        if row.link_presence_pct is not None:
+            link[day] = float(row.link_presence_pct)
+        if row.mention_top3_pct is not None:
+            mention_top3[day] = float(row.mention_top3_pct)
+        if row.link_top3_pct is not None:
+            link_top3[day] = float(row.link_top3_pct)
+    return {
+        "mention_presence": _fill_daily(period, mention, forward_fill=True),
+        "link_presence": _fill_daily(period, link, forward_fill=True),
+        "mention_top3": _fill_daily(period, mention_top3, forward_fill=True),
+        "link_top3": _fill_daily(period, link_top3, forward_fill=True),
+    }
+
+
+def _daily_site_visibility_series(
+    db: Session,
+    client_id: UUID,
+    period: tuple[date, date] | None,
+) -> list[float]:
+    if period is None:
+        return []
+    start, end = period
+    rows = (
+        db.query(FactSerSiteSummary.metric_date, FactSerSiteSummary.visibility_percent)
+        .filter(
+            FactSerSiteSummary.client_id == client_id,
+            FactSerSiteSummary.metric_date.isnot(None),
+            FactSerSiteSummary.metric_date >= start,
+            FactSerSiteSummary.metric_date <= end,
+            FactSerSiteSummary.visibility_percent.isnot(None),
+        )
+        .order_by(FactSerSiteSummary.metric_date.asc())
+        .all()
+    )
+    by_date = {day: float(vis) for day, vis in rows if day is not None and vis is not None}
+    return _fill_daily(period, by_date, forward_fill=True)
 
 
 def _lead_rate(leads: int | None, sessions: float | None) -> float | None:
@@ -721,14 +979,36 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     if period_goal and current_leads is not None:
         progress_pct = (current_leads / period_goal) * 100
 
-    period_days = (to_date - from_date).days + 1
+    # Baseline panel always uses trailing ~30d GA4, independent of the page date picker.
+    baseline_window = _trailing_month_range(to_date, watermarks.get("ga4"))
+    baseline_sessions = _sum_sessions(db, client.id, baseline_window)
+    baseline_leads = _sum_leads(db, client.id, lead_events, baseline_window)
+    baseline_lead_rate = _lead_rate(baseline_leads, baseline_sessions)
+    baseline_sessions_series, _ = _daily_ga4_traffic_series(db, client.id, baseline_window)
+    baseline_leads_series = _daily_leads_series(db, client.id, lead_events, baseline_window)
+    baseline_lead_rate_series = _daily_lead_rate_series(
+        baseline_sessions_series, baseline_leads_series
+    )
     baseline_payload = _baseline_comparison(
         client,
-        current_sessions=current_sessions,
-        current_leads=current_leads,
-        current_lead_rate=current_lead_rate,
-        period_days=period_days,
+        current_sessions=baseline_sessions,
+        current_leads=baseline_leads,
+        current_lead_rate=baseline_lead_rate,
+        current_window=baseline_window,
+        sessions_series=baseline_sessions_series,
+        leads_series=baseline_leads_series,
+        lead_rate_series=baseline_lead_rate_series,
     )
+
+    sessions_series, views_series = _daily_ga4_traffic_series(db, client.id, ga4_current)
+    leads_series = _daily_leads_series(db, client.id, lead_events, ga4_current)
+    lead_rate_series = _daily_lead_rate_series(sessions_series, leads_series)
+    gsc_impr_series, gsc_clicks_series, gsc_ctr_series, gsc_pos_series = _daily_gsc_series(
+        db, client.id, gsc_current
+    )
+    ai_series = _daily_ai_presence_series(db, client.id, ai_current)
+    visibility_series = _daily_site_visibility_series(db, client.id, ser_current)
+    position_series = gsc_pos_series
 
     return {
         "period": {
@@ -742,28 +1022,35 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         "conversions": {
             "configured": conversions_configured,
             "lead_events": lead_events,
-            "leads": _period_metric(current_leads, previous_leads),
-            "lead_rate": _period_metric(current_lead_rate, previous_lead_rate),
+            "leads": _period_metric(current_leads, previous_leads, leads_series),
+            "lead_rate": _period_metric(current_lead_rate, previous_lead_rate, lead_rate_series),
             "leads_by_channel": _leads_by_channel(db, client.id, lead_events, ga4_current),
             "monthly_lead_goal": monthly_goal,
             "period_lead_goal": period_goal,
             "goal_period_days": goal_period_days,
             "goal_progress_pct": progress_pct,
+            "leads_series": leads_series,
         },
         "visibility": {
             "search": {
                 "search_visibility": _period_metric(
                     search_visibility_current,
                     search_visibility_previous,
+                    visibility_series,
                 ),
                 "search_visibility_source": search_visibility_source,
                 "search_sov": _period_metric(
                     _search_sov(db, client.id, ser_current),
                     _search_sov(db, client.id, ser_previous),
+                    visibility_series,
                 ),
                 "search_sov_source": "competitor_visibility",
-                "gsc_impressions": _period_metric(gsc_impressions_current, gsc_impressions_previous),
-                "average_position": _period_metric(average_position_current, average_position_previous),
+                "gsc_impressions": _period_metric(
+                    gsc_impressions_current, gsc_impressions_previous, gsc_impr_series
+                ),
+                "average_position": _period_metric(
+                    average_position_current, average_position_previous, position_series
+                ),
                 "average_position_source": average_position_source,
                 "keyword_distribution": _keyword_distribution(db, client.id, ser_current),
             },
@@ -771,30 +1058,37 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                 "mention_presence": _period_metric(
                     ai_current_metrics["mention_presence"],
                     ai_previous_metrics["mention_presence"],
+                    ai_series["mention_presence"],
                 ),
                 "link_presence": _period_metric(
                     ai_current_metrics["link_presence"],
                     ai_previous_metrics["link_presence"],
+                    ai_series["link_presence"],
                 ),
                 "mention_top3_presence": _period_metric(
                     ai_current_metrics["mention_top3"],
                     ai_previous_metrics["mention_top3"],
+                    ai_series["mention_top3"],
                 ),
                 "link_top3_presence": _period_metric(
                     ai_current_metrics["link_top3"],
                     ai_previous_metrics["link_top3"],
+                    ai_series["link_top3"],
                 ),
                 "prompt_count": ai_current_metrics["prompt_count"],
                 "tracked_prompt_source": "airt_statistics",
             },
         },
         "traffic": {
-            "gsc_clicks": _period_metric(gsc_clicks_current, gsc_clicks_previous),
-            "gsc_ctr": _period_metric(gsc_ctr_current, gsc_ctr_previous),
-            "ga4_sessions": _period_metric(current_sessions, previous_sessions),
+            "gsc_clicks": _period_metric(
+                gsc_clicks_current, gsc_clicks_previous, gsc_clicks_series
+            ),
+            "gsc_ctr": _period_metric(gsc_ctr_current, gsc_ctr_previous, gsc_ctr_series),
+            "ga4_sessions": _period_metric(current_sessions, previous_sessions, sessions_series),
             "ga4_views": _period_metric(
                 _ga4_views(db, client.id, ga4_current),
                 _ga4_views(db, client.id, ga4_previous),
+                views_series,
             ),
             "by_channel": _traffic_by_channel(db, client.id, ga4_current),
             "top_pages": _top_pages(db, client.id, gsc_current, ga4_current),

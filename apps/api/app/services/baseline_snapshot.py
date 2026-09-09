@@ -121,10 +121,10 @@ def apply_baseline_from_ga4(
     )
     note = notes
     if note is None:
+        # Snapshot provenance only — plan projections belong in the calculator UI, not the dashboard.
         note = (
             f"GA4 {preview['window']['from']}→{preview['window']['to']} "
-            f"({preview['window']['period_days']}d scaled to {preview['window']['scaled_to_days']}d); "
-            f"{preview['plan_label']} 12-mo projection"
+            f"({preview['window']['period_days']}d scaled to {preview['window']['scaled_to_days']}d)"
         )
 
     updated = client_service.update_client(

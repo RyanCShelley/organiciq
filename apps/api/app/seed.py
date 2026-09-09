@@ -72,7 +72,7 @@ def seed(db: Session) -> None:
         else:
             client.client_name = client_name
             client.domain = domain
-            client.tier_id = tier_id
+            # Preserve an existing tier (e.g. Enterprise) — seed must not reset plan assignment.
             client.status = ClientStatus.ACTIVE
             if monthly_lead_goal is not None:
                 client.monthly_lead_goal = monthly_lead_goal
@@ -97,9 +97,13 @@ def seed(db: Session) -> None:
         client_id=SMA_CLIENT_ID,
         client_name="SMA Marketing",
         domain="smamarketing.net",
-        tier_id=LIFT_TIER_ID,
+        tier_id=ENTERPRISE_TIER_ID,
         monthly_lead_goal=25,
     )
+    # Demo SMA account is Enterprise; keep it pinned so prior Lift seeds don't stick.
+    sma = db.query(Client).filter(Client.id == SMA_CLIENT_ID).one()
+    sma.tier_id = ENTERPRISE_TIER_ID
+
     _ensure_client(
         client_id=BEACON_CLIENT_ID,
         client_name="Beacon Industrial",
