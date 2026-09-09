@@ -2,7 +2,7 @@
 
 import { Bookmark, Eye, FileSearch, Gauge, LayoutDashboard, Settings, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
 import { Logo } from "@/components/brand/Logo";
@@ -42,8 +42,6 @@ export function SidebarNav({
   signOutAction: () => Promise<void>;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const tab = searchParams.get("tab");
   const platformOnly = isPlatformContext(pathname);
   const selected = clients.find((client) => client.id === clientId);
   const groups = accountNavGroups(selected?.slug ?? "");
@@ -77,10 +75,7 @@ export function SidebarNav({
                 </p>
                 <ul className="space-y-0.5">
                   {group.items.map((item) => {
-                    const active = isNavActive(pathname, item.href, item.exact, {
-                      tab,
-                      contentOpp: item.contentOpp,
-                    });
+                    const active = isNavActive(pathname, item.href, item.exact);
                     const Icon = ACCOUNT_ICONS[item.label] ?? Settings;
                     return (
                       <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>

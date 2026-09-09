@@ -1,17 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { SearchOpportunitiesTable } from "@/components/DecisionEngine/SearchOpportunitiesTable";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { resolveClientId, resolveDateRange } from "@/lib/context";
-import {
-  normalizeDiagnoseResponse,
-  type DiagnoseResponse,
-  type SearchOpportunity,
-} from "@/lib/decision-engine";
 import { withNavContext } from "@/lib/navigation";
 
 type SearchRow = {
@@ -61,11 +56,10 @@ function formatSerpFeatures(features: string[]): string {
   return features.length > 0 ? features.join(", ") : "—";
 }
 
-type WatchTab = "search" | "ai" | "content-opp";
+type WatchTab = "search" | "ai";
 
 function resolveTab(raw: string | string[] | undefined): WatchTab {
   if (raw === "ai") return "ai";
-  if (raw === "content-opp" || raw === "content") return "content-opp";
   return "search";
 }
 
@@ -75,13 +69,23 @@ export default async function WatchListPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  // Legacy Content Opp lived under Watch List — send bookmarks to the standalone tool.
+  if (params.tab === "content-opp" || params.tab === "content") {
+    const qs = new URLSearchParams();
+    if (typeof params.clientId === "string") qs.set("clientId", params.clientId);
+    if (typeof params.from === "string") qs.set("from", params.from);
+    if (typeof params.to === "string") qs.set("to", params.to);
+    if (typeof params.range === "string") qs.set("range", params.range);
+    const suffix = qs.toString();
+    redirect(suffix ? `/content-opp?${suffix}` : "/content-opp");
+  }
+
   const tab = resolveTab(params.tab);
   const clientId = await resolveClientId(params);
   const { from, to } = await resolveDateRange(params);
 
   let searchRows: SearchRow[] = [];
   let aiRows: AiRow[] = [];
-  let contentOpps: SearchOpportunity[] = [];
   let error: string | null = null;
 
   if (!clientId) {
@@ -92,23 +96,11 @@ export default async function WatchListPage({
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load Search Watch List";
     }
-  } else if (tab === "ai") {
+  } else {
     try {
       aiRows = await apiFetch<AiRow[]>("/watch-list/ai", { clientId });
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load AI Watch List";
-    }
-  } else {
-    try {
-      const diagnose = normalizeDiagnoseResponse(
-        await apiFetch<DiagnoseResponse>(
-          `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-          { clientId },
-        ),
-      );
-      contentOpps = diagnose.search_opportunities ?? [];
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load Content Opp";
     }
   }
 
@@ -121,22 +113,9 @@ export default async function WatchListPage({
     <section>
       <PageHeader
         title="Watch List"
-        description={
-          tab === "content-opp"
-            ? "Striking-distance content opportunities from Search Console for strategist review."
-            : "Search keywords and AI prompts from SE Ranking."
-        }
-        meta={
-          tab === "content-opp" ? (
-            <span>
-              Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
-              <strong className="text-[var(--text-primary)]">{to}</strong>
-            </span>
-          ) : null
-        }
+        description="Search keywords and AI prompts from SE Ranking."
       />
 
-      {tab !== "content-opp" ? (
       <div className="mt-4 flex flex-wrap gap-2 text-sm">
         {tabs.map((item) => {
           const href = clientId
@@ -156,7 +135,6 @@ export default async function WatchListPage({
           );
         })}
       </div>
-      ) : null}
 
       {error ? <Alert variant="danger" className="mt-4">{error}</Alert> : null}
 
@@ -285,24 +263,6 @@ export default async function WatchListPage({
               />
             )}
           </div>
-        </section>
-      ) : null}
-
-      {tab === "content-opp" ? (
-        <section className="mt-4 workspace-section">
-          {!error && contentOpps.length === 0 ? (
-            <Alert variant="info">
-              No Content Opp rows for this period. Confirm GSC is synced and Decision Engine is
-              ready.
-            </Alert>
-          ) : null}
-          {contentOpps.length > 0 ? (
-            <SearchOpportunitiesTable
-              items={contentOpps}
-              title="Content Opp"
-              description="Striking-distance rankings moved here from Decision Engine for content planning."
-            />
-          ) : null}
         </section>
       ) : null}
     </section>

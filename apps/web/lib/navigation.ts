@@ -2,10 +2,8 @@ export type NavItem = {
   href: string;
   label: string;
   exact?: boolean;
-  /** Query string appended by withNavContext (e.g. Watch List Content Opp tab). */
+  /** Query string appended by withNavContext (e.g. Watch List AI tab). */
   tab?: string;
-  /** When true, active only when tab is this value. When false/undefined on /watch-list, active unless Content Opp. */
-  contentOpp?: boolean;
 };
 
 export type NavGroup = {
@@ -21,7 +19,7 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
       items: [
         { href: "/dashboard", label: "Dashboard", exact: true },
         { href: "/watch-list", label: "Watch List" },
-        { href: "/watch-list", label: "Content Opp", tab: "content-opp", contentOpp: true },
+        { href: "/content-opp", label: "Content Opp" },
         { href: "/decision-engine", label: "Decision Engine" },
         { href: "/annotations", label: "Annotations" },
         { href: settingsHref, label: "Client settings" },
@@ -46,18 +44,7 @@ export function isPlatformContext(pathname: string): boolean {
   return false;
 }
 
-export function isNavActive(
-  pathname: string,
-  href: string,
-  exact = false,
-  options?: { tab?: string | null; contentOpp?: boolean },
-): boolean {
-  if (href === "/watch-list" || options?.contentOpp) {
-    if (!pathname.startsWith("/watch-list")) return false;
-    const isContentOpp = options?.tab === "content-opp";
-    if (options?.contentOpp) return isContentOpp;
-    return !isContentOpp;
-  }
+export function isNavActive(pathname: string, href: string, exact = false): boolean {
   if (href === "/dashboard" || exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }

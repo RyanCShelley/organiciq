@@ -104,8 +104,8 @@ export default async function DecisionEnginePage({
         );
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const contentOppHref = clientId
-    ? withNavContext("/watch-list", clientId, from, to, { tab: "content-opp" })
-    : "/watch-list?tab=content-opp";
+    ? withNavContext("/content-opp", clientId, from, to)
+    : "/content-opp";
 
   const analysisMeta =
     data?.analysis_from && data?.analysis_to
@@ -118,7 +118,7 @@ export default async function DecisionEnginePage({
     <section>
       <PageHeader
         title="Decision Engine"
-        description="Recommended Growth Actions for this period. Content opportunities live on Watch List → Content Opp."
+        description="Recommended Growth Actions for this period. Content opportunities live under Content Opp."
         meta={
           <>
             <span>
