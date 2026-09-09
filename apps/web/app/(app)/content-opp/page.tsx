@@ -41,7 +41,7 @@ export default async function ContentOppPage({
     <section>
       <PageHeader
         title="Content Opp"
-        description="Striking-distance content opportunities from Search Console for strategist review."
+        description="Striking-distance content opportunities from Search Console. Showing the top 25 by default — search or load more as needed."
         meta={
           <span>
             Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
@@ -62,7 +62,7 @@ export default async function ContentOppPage({
           <SearchOpportunitiesTable
             items={contentOpps}
             title="Content Opp"
-            description="Striking-distance rankings for content planning."
+            description="Top opportunities by impressions. Use search to find a page, or load 25 more."
           />
         ) : null}
       </section>

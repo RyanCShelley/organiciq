@@ -130,6 +130,23 @@ export async function updateClientSettingsAction(formData: FormData) {
   return { ok: true as const };
 }
 
+export async function runDecisionEngineAction(formData: FormData) {
+  const clientId = String(formData.get("clientId") || "");
+  const from = String(formData.get("from") || "");
+  const to = String(formData.get("to") || "");
+  if (!clientId || !from || !to) {
+    throw new Error("Missing client or date range");
+  }
+
+  await apiFetch("/decisions/evaluate", {
+    method: "POST",
+    clientId,
+    body: { from, to },
+  });
+  revalidatePath("/decision-engine");
+  revalidatePath("/content-opp");
+}
+
 export async function updateDecisionStatusAction(formData: FormData) {
   const clientId = String(formData.get("clientId") || "");
   const decisionId = String(formData.get("decisionId") || "");

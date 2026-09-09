@@ -1,10 +1,10 @@
-import { revalidatePath } from "next/cache";
 import Link from "next/link";
 
 import { AdditionalFindingsPanel } from "@/components/DecisionEngine/AdditionalFindingsPanel";
 import { GrowthActionFilter } from "@/components/DecisionEngine/GrowthActionFilter";
 import { GrowthActionGrid } from "@/components/DecisionEngine/GrowthActionGrid";
 import { RecommendedActionCard } from "@/components/DecisionEngine/RecommendedActionCard";
+import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { SummaryStrip } from "@/components/DecisionEngine/SummaryStrip";
 import { Alert } from "@/components/ui/Alert";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,22 +24,6 @@ function readinessLabel(key: string): string {
   if (key === "search_console") return "Search Console";
   if (key === "crawl_audit") return "Crawl / Audit";
   return key;
-}
-
-async function evaluateDecisions(formData: FormData) {
-  "use server";
-
-  const clientId = String(formData.get("clientId") || "");
-  const from = String(formData.get("from") || "");
-  const to = String(formData.get("to") || "");
-  if (!clientId || !from || !to) return;
-
-  await apiFetch("/decisions/evaluate", {
-    method: "POST",
-    clientId,
-    body: { from, to },
-  });
-  revalidatePath("/decision-engine");
 }
 
 export default async function DecisionEnginePage({
@@ -145,22 +129,11 @@ export default async function DecisionEnginePage({
           </>
         }
         actions={
-          clientId ? (
-            <form action={evaluateDecisions}>
-              <input type="hidden" name="clientId" value={clientId} />
-              <input type="hidden" name="from" value={from} />
-              <input type="hidden" name="to" value={to} />
-              <button type="submit" className="btn btn-primary btn-sm">
-                Evaluate period
-              </button>
-            </form>
-          ) : null
+          clientId ? <RunEngineButton clientId={clientId} from={from} to={to} /> : null
         }
       />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
-
-      {data?.partial_message ? <Alert variant="info">{data.partial_message}</Alert> : null}
 
       {data && !data.ready ? (
         <Alert variant="info">

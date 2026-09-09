@@ -144,9 +144,50 @@ def test_diagnose_uses_available_overlap_when_range_extends(db, client_a):
     assert result.ready is True
     assert result.analysis_from == fact_start
     assert result.analysis_to == fact_end
-    assert result.partial_message is not None
-    assert "validated search console data" in result.partial_message.lower()
-    assert "sync more history" in result.partial_message.lower()
+    assert result.partial_message is None
+
+
+def test_diagnose_typical_gsc_lag_has_no_partial_banner(db, client_a):
+    start = date(2026, 8, 11)
+    end = date(2026, 9, 9)
+    fact_end = date(2026, 9, 6)
+    _watermark(db, client_a.id, "gsc_pages", fact_end)
+    db.add(
+        FactGscPage(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=start,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            country="usa",
+            device="DESKTOP",
+            impressions=Decimal("100"),
+            clicks=Decimal("1"),
+            ctr=Decimal("0.01"),
+            average_position=Decimal("10"),
+        )
+    )
+    db.add(
+        FactGscPage(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=fact_end,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            country="usa",
+            device="DESKTOP",
+            impressions=Decimal("200"),
+            clicks=Decimal("2"),
+            ctr=Decimal("0.01"),
+            average_position=Decimal("9"),
+        )
+    )
+    db.commit()
+
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+    assert result.ready is True
+    assert result.analysis_to == fact_end
+    assert result.partial_message is None
 
 
 def test_diagnose_not_ready_when_range_has_no_overlap(db, client_a):

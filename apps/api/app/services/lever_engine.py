@@ -222,27 +222,8 @@ def _resolve_gsc_analysis_period(
             None,
         )
 
-    partial_message = None
-    if analysis_from > from_date or analysis_to < to_date:
-        def _fmt(value: date) -> str:
-            return value.strftime("%b %d, %Y").replace(" 0", " ")
-
-        selected = f"{_fmt(from_date)} – {_fmt(to_date)}"
-        if analysis_from == analysis_to:
-            covered = _fmt(analysis_from)
-            partial_message = (
-                f"Validated Search Console data is only available for {covered} so far "
-                f"(you selected {selected}). Sync more history to analyze a longer range."
-            )
-        else:
-            covered = f"{_fmt(analysis_from)} – {_fmt(analysis_to)}"
-            partial_message = (
-                f"Validated Search Console data covers {covered} "
-                f"(you selected {selected}). Recommendations use that overlapping window — "
-                f"sync more history to widen coverage."
-            )
-
-    return (analysis_from, analysis_to), None, partial_message
+    # Apply coverage gaps (including normal GSC lag) to analysis_from/to silently.
+    return (analysis_from, analysis_to), None, None
 
 
 def _load_page_demand(
@@ -616,7 +597,7 @@ def _search_opportunities(
         int(thresholds["gsc_striking_distance_min_impressions"]),
         int(thresholds.get("content_planning_min_impressions", 200)),
     )
-    top_n = int(thresholds.get("content_planning_top_n", 10))
+    top_n = int(thresholds.get("content_planning_top_n", 50))
     candidates: list[tuple[float, LeverFinding]] = []
 
     for page in pages:

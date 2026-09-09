@@ -22,7 +22,7 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     "meaningful_gsc_impressions": 100,
     "meaningful_ga4_sessions": 10,
     "content_planning_min_impressions": 200,
-    "content_planning_top_n": 10,
+    "content_planning_top_n": 50,
 }
 
 
