@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DeleteClientButton } from "@/components/DeleteClientButton";
 import { apiFetch, type Client } from "@/lib/api";
 
 export default async function ClientsIndexPage({
@@ -47,15 +48,17 @@ export default async function ClientsIndexPage({
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         {clients.map((client) => (
-          <Link
+          <div
             key={client.id}
-            href={`/clients/${client.id}`}
-            className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 hover:border-[var(--accent)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
           >
-            <div className="text-lg font-semibold">{client.client_name}</div>
-            <div className="text-sm text-[var(--muted)]">{client.domain}</div>
-            <div className="mt-3 text-sm text-[var(--accent)]">Open workspace →</div>
-          </Link>
+            <Link href={`/clients/${client.id}`} className="block hover:opacity-90">
+              <div className="text-lg font-semibold">{client.client_name}</div>
+              <div className="text-sm text-[var(--muted)]">{client.domain}</div>
+              <div className="mt-3 text-sm text-[var(--accent)]">Open workspace →</div>
+            </Link>
+            <DeleteClientButton clientId={client.id} clientName={client.client_name} />
+          </div>
         ))}
       </div>
 

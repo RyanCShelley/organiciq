@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client, user_can_access_client
@@ -66,6 +66,17 @@ def update_client(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     updated = client_service.update_client(db, client, payload)
     return ClientOut.model_validate(updated)
+
+
+@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def delete_client(
+    client_id: UUID,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    if not client_service.delete_client(db, client_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{client_id}/baseline/preview", response_model=BaselineSnapshotPreviewOut)

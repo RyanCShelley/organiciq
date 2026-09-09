@@ -38,6 +38,14 @@ export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/platform/settings", label: "Settings" },
 ];
 
+/** Platform surfaces: hide client switcher + Account nav (All clients + /platform/*). */
+export function isPlatformContext(pathname: string): boolean {
+  if (pathname === "/clients") return true;
+  if (pathname.startsWith("/platform")) return true;
+  if (pathname.startsWith("/admin")) return true;
+  return false;
+}
+
 export function isNavActive(
   pathname: string,
   href: string,

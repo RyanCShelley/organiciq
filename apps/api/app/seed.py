@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
@@ -13,6 +12,7 @@ from app.models.client import Client, ClientStatus, Tier
 from app.models.config import ConversionDefinition
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.user import User, UserClient, UserRole
+from app.services.clients import delete_client
 
 DEFAULT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")  # Launch
 LIFT_TIER_ID = uuid.UUID("11111111-1111-1111-1111-111111111112")
@@ -23,53 +23,6 @@ SMA_CLIENT_ID = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 BEACON_CLIENT_ID = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 ADMIN_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 TEAM_ID = uuid.UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-
-
-def _delete_client_cascade(db: Session, client_id: uuid.UUID) -> None:
-    """Remove a client and client-scoped rows (FKs have no ON DELETE CASCADE)."""
-    tables = [
-        "staging_ser_ai_checks",
-        "staging_ser_ai_prompts",
-        "facts_ser_ai_checks",
-        "facts_ser_ai_presence",
-        "facts_ser_ai_tracker_stats",
-        "facts_ser_ai_prompts",
-        "staging_ser_competitors",
-        "staging_ser_site_summary",
-        "facts_ser_site_summary",
-        "staging_ser_positions",
-        "staging_ser_keywords",
-        "facts_ser_competitors",
-        "facts_ser_rankings",
-        "facts_ser_keywords",
-        "staging_ga4_events",
-        "staging_ga4_traffic",
-        "facts_ga4_events",
-        "facts_ga4_traffic",
-        "staging_gsc_query_pages",
-        "staging_gsc_pages",
-        "staging_gsc_daily",
-        "facts_gsc_query_pages",
-        "facts_gsc_pages",
-        "facts_gsc_daily",
-        "facts_crawl_page_snapshots",
-        "staging_ser_audit_pages",
-        "sync_jobs",
-        "data_watermarks",
-        "decisions",
-        "decision_thresholds",
-        "annotations",
-        "integrations",
-        "conversion_definitions",
-        "topics",
-        "user_clients",
-        "clients",
-    ]
-    for table in tables:
-        if table == "clients":
-            db.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
-        else:
-            db.execute(text(f"DELETE FROM {table} WHERE client_id = :id"), {"id": client_id})
 
 
 def seed(db: Session) -> None:
@@ -85,13 +38,13 @@ def seed(db: Session) -> None:
 
     for legacy_id in ():
         if db.query(Client).filter(Client.id == legacy_id).one_or_none() is not None:
-            _delete_client_cascade(db, legacy_id)
+            delete_client(db, legacy_id)
 
     # Drop stray demo-named clients that are not part of the local multi-client seed set.
     seeded_ids = {SMA_CLIENT_ID, BEACON_CLIENT_ID}
     for row in db.query(Client).filter(Client.client_name.in_(["Acme Manufacturing"])).all():
         if row.id not in seeded_ids:
-            _delete_client_cascade(db, row.id)
+            delete_client(db, row.id)
 
     def _ensure_client(
         *,

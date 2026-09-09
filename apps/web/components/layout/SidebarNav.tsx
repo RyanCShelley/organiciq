@@ -13,6 +13,7 @@ import {
   PLATFORM_NAV_ITEMS,
   accountNavGroups,
   isNavActive,
+  isPlatformContext,
   withNavContext,
 } from "@/lib/navigation";
 
@@ -43,87 +44,95 @@ export function SidebarNav({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tab = searchParams.get("tab");
+  const platformOnly = isPlatformContext(pathname);
   const groups = accountNavGroups(clientId);
+  const logoHref = platformOnly
+    ? withNavContext("/clients", clientId, from, to)
+    : withNavContext("/dashboard", clientId, from, to);
 
   return (
     <aside className="sticky top-0 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
       <div className="border-b border-[var(--border)] px-3 py-3">
-        <Logo href={withNavContext("/dashboard", clientId, from, to)} />
+        <Logo href={logoHref} />
       </div>
 
-      <div className="border-b border-[var(--border)] px-3 py-3">
-        <p className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
-          Client
-        </p>
-        <Suspense fallback={<div className="h-10 rounded-lg bg-[var(--surface-muted)]" />}>
-          <ClientSwitcher clients={clients} clientId={clientId} from={from} to={to} />
-        </Suspense>
-      </div>
+      {!platformOnly ? (
+        <div className="border-b border-[var(--border)] px-3 py-3">
+          <p className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+            Client
+          </p>
+          <Suspense fallback={<div className="h-10 rounded-lg bg-[var(--surface-muted)]" />}>
+            <ClientSwitcher clients={clients} clientId={clientId} from={from} to={to} />
+          </Suspense>
+        </div>
+      ) : null}
 
       <nav className="flex-1 overflow-y-auto px-2 py-3">
-        {groups.map((group) => (
-          <div key={group.label} className="mb-4 last:mb-0">
-            <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
-              {group.label}
-            </p>
-            <ul className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = isNavActive(pathname, item.href, item.exact, {
-                  tab,
-                  contentOpp: item.contentOpp,
-                });
-                const Icon = ACCOUNT_ICONS[item.label] ?? Settings;
-                return (
-                  <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
-                    <Link
-                      href={withNavContext(item.href, clientId, from, to, {
-                        tab: item.tab,
-                      })}
-                      className={cn(
-                        "relative flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] leading-tight transition-colors",
-                        active
-                          ? "sidebar-link-active"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0 opacity-75" aria-hidden />
-                      <span>{item.label}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+        {!platformOnly
+          ? groups.map((group) => (
+              <div key={group.label} className="mb-4 last:mb-0">
+                <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                  {group.label}
+                </p>
+                <ul className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const active = isNavActive(pathname, item.href, item.exact, {
+                      tab,
+                      contentOpp: item.contentOpp,
+                    });
+                    const Icon = ACCOUNT_ICONS[item.label] ?? Settings;
+                    return (
+                      <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
+                        <Link
+                          href={withNavContext(item.href, clientId, from, to, {
+                            tab: item.tab,
+                          })}
+                          className={cn(
+                            "relative flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] leading-tight transition-colors",
+                            active
+                              ? "sidebar-link-active"
+                              : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0 opacity-75" aria-hidden />
+                          <span>{item.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          : null}
+
+        <div className={platformOnly ? undefined : "mt-2 border-t border-[var(--border)] pt-3"}>
+          <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+            Platform
+          </p>
+          <ul className="space-y-0.5">
+            {PLATFORM_NAV_ITEMS.map((item) => {
+              const active = isNavActive(pathname, item.href, item.exact);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={withNavContext(item.href, clientId, from, to)}
+                    className={cn(
+                      "flex items-center rounded-md px-2 py-1.5 text-[0.8125rem] leading-tight transition-colors",
+                      active
+                        ? "sidebar-link-active relative"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </nav>
 
-      <div className="mt-auto border-t border-[var(--border)] px-2 py-3">
-        <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
-          Platform
-        </p>
-        <ul className="space-y-0.5">
-          {PLATFORM_NAV_ITEMS.map((item) => {
-            const active = isNavActive(pathname, item.href, item.exact);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={withNavContext(item.href, clientId, from, to)}
-                  className={cn(
-                    "flex items-center rounded-md px-2 py-1 text-[0.75rem] leading-tight transition-colors",
-                    active
-                      ? "sidebar-link-active relative"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
-                  )}
-                >
-                  {item.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-
-      <div className="border-t border-[var(--border)] px-3 py-3">
+      <div className="mt-auto border-t border-[var(--border)] px-3 py-3">
         {userEmail ? (
           <p className="truncate text-[0.75rem] text-[var(--text-secondary)]" title={userEmail}>
             {userEmail}
