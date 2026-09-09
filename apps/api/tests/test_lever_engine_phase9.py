@@ -145,7 +145,8 @@ def test_diagnose_uses_available_overlap_when_range_extends(db, client_a):
     assert result.analysis_from == fact_start
     assert result.analysis_to == fact_end
     assert result.partial_message is not None
-    assert "available facts only" in result.partial_message.lower()
+    assert "validated search console data" in result.partial_message.lower()
+    assert "sync more history" in result.partial_message.lower()
 
 
 def test_diagnose_not_ready_when_range_has_no_overlap(db, client_a):

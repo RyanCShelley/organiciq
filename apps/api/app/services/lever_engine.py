@@ -222,18 +222,25 @@ def _resolve_gsc_analysis_period(
             None,
         )
 
-    partial_parts: list[str] = []
-    if analysis_from > from_date:
-        partial_parts.append(
-            f"starts {analysis_from.isoformat()} (you selected {from_date.isoformat()})"
-        )
-    if analysis_to < to_date:
-        partial_parts.append(
-            f"ends {analysis_to.isoformat()} (you selected {to_date.isoformat()})"
-        )
     partial_message = None
-    if partial_parts:
-        partial_message = f"Analysis uses available facts only: {'; '.join(partial_parts)}."
+    if analysis_from > from_date or analysis_to < to_date:
+        def _fmt(value: date) -> str:
+            return value.strftime("%b %d, %Y").replace(" 0", " ")
+
+        selected = f"{_fmt(from_date)} – {_fmt(to_date)}"
+        if analysis_from == analysis_to:
+            covered = _fmt(analysis_from)
+            partial_message = (
+                f"Validated Search Console data is only available for {covered} so far "
+                f"(you selected {selected}). Sync more history to analyze a longer range."
+            )
+        else:
+            covered = f"{_fmt(analysis_from)} – {_fmt(analysis_to)}"
+            partial_message = (
+                f"Validated Search Console data covers {covered} "
+                f"(you selected {selected}). Recommendations use that overlapping window — "
+                f"sync more history to widen coverage."
+            )
 
     return (analysis_from, analysis_to), None, partial_message
 

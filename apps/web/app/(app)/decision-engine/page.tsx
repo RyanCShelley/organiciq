@@ -107,11 +107,13 @@ export default async function DecisionEnginePage({
     ? withNavContext("/content-opp", clientId, from, to)
     : "/content-opp";
 
-  const analysisMeta =
+  const analysisWindow =
     data?.analysis_from && data?.analysis_to
       ? data.analysis_from === from && data.analysis_to === to
         ? null
-        : `Analyzing ${data.analysis_from} to ${data.analysis_to}`
+        : data.analysis_from === data.analysis_to
+          ? data.analysis_from
+          : `${data.analysis_from} → ${data.analysis_to}`
       : null;
 
   return (
@@ -125,14 +127,12 @@ export default async function DecisionEnginePage({
               Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
               <strong className="text-[var(--text-primary)]">{to}</strong>
             </span>
-            {data?.ready ? (
+            {analysisWindow ? (
               <>
                 <span className="text-[var(--text-tertiary)]">·</span>
                 <span>
-                  Ranked by{" "}
-                  <span className="text-[var(--text-secondary)]">
-                    {data.formula ?? "impact-weighted score"}
-                  </span>
+                  Analyzing{" "}
+                  <strong className="text-[var(--text-primary)]">{analysisWindow}</strong>
                 </span>
               </>
             ) : null}
@@ -140,12 +140,6 @@ export default async function DecisionEnginePage({
               <>
                 <span className="text-[var(--text-tertiary)]">·</span>
                 <span>Plan floor: {planMin} Growth Actions</span>
-              </>
-            ) : null}
-            {analysisMeta ? (
-              <>
-                <span className="text-[var(--text-tertiary)]">·</span>
-                <span>{analysisMeta}</span>
               </>
             ) : null}
           </>
@@ -166,7 +160,7 @@ export default async function DecisionEnginePage({
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      {data?.partial_message ? <Alert variant="warning">{data.partial_message}</Alert> : null}
+      {data?.partial_message ? <Alert variant="info">{data.partial_message}</Alert> : null}
 
       {data && !data.ready ? (
         <Alert variant="info">
