@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { accountToolHref, requireAccountClient } from "@/lib/account-routes";
+import { accountToolHref } from "@/lib/account-routes";
+import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 
 /** /{slug} → /{slug}/dashboard */

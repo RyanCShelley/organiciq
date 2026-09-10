@@ -2,7 +2,7 @@ import { SearchOpportunitiesTable } from "@/components/DecisionEngine/SearchOppo
 import { Alert } from "@/components/ui/Alert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { apiFetch } from "@/lib/api";
-import { requireAccountClient } from "@/lib/account-routes";
+import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 import {
   normalizeDiagnoseResponse,

@@ -1,4 +1,4 @@
-import { redirectLegacyAccountTool } from "@/lib/account-routes";
+import { redirectLegacyAccountTool } from "@/lib/account-routes.server";
 
 export default async function LegacyWatchListRedirect({
   searchParams,

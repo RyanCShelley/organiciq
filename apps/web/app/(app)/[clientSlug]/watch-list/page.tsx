@@ -6,7 +6,8 @@ import { Alert } from "@/components/ui/Alert";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
-import { accountToolHref, requireAccountClient } from "@/lib/account-routes";
+import { accountToolHref } from "@/lib/account-routes";
+import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 import { withNavContext } from "@/lib/navigation";
 

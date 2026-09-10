@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader, SubsectionTitle } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
-import { requireAccountClient } from "@/lib/account-routes";
+import { requireAccountClient } from "@/lib/account-routes.server";
 import { clientHref } from "@/lib/client-path";
 import { resolveDateRange } from "@/lib/context";
 import { normalizeDashboardResponse, type DashboardResponse } from "@/lib/dashboard";
