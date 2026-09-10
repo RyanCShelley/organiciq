@@ -62,9 +62,6 @@ export default async function LoginPage({
             and client delivery.
           </p>
         </div>
-        <p className="relative z-10 mt-8 text-xs uppercase tracking-[0.18em] text-[var(--base)]/70 md:mt-0">
-          Semantic SEO · Content · Data-driven decisions
-        </p>
       </section>
 
       <section className="flex items-center justify-center bg-[var(--background)] p-6 sm:p-10">
