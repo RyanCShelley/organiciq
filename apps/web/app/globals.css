@@ -573,36 +573,8 @@ h6 {
 }
 
 .brand-panel {
-  background: var(--gradient-1);
+  background: var(--brand-dark-2);
   color: var(--base-2);
-  isolation: isolate;
-}
-
-.brand-panel::before,
-.brand-panel::after {
-  content: "";
-  position: absolute;
-  border-radius: 999px;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.brand-panel::before {
-  width: 22rem;
-  height: 22rem;
-  right: -6rem;
-  top: -8rem;
-  background: rgb(0 169 157 / 22%);
-  filter: blur(48px);
-}
-
-.brand-panel::after {
-  width: 18rem;
-  height: 18rem;
-  left: -5rem;
-  bottom: -6rem;
-  background: rgb(170 228 55 / 16%);
-  filter: blur(40px);
 }
 
 .brand-panel h1,
