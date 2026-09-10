@@ -24,7 +24,6 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
         { href: tool("watch-list"), label: "Watch List" },
         { href: tool("content-opp"), label: "Content Opp" },
         { href: tool("decision-engine"), label: "Decision Engine" },
-        { href: tool("annotations"), label: "Annotations" },
         { href: settingsHref, label: "Client settings" },
       ],
     },
@@ -33,11 +32,31 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
 
 export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/clients", label: "All clients", exact: true },
-  { href: "/platform", label: "Overview", exact: true },
   { href: "/platform/data-health", label: "Data health" },
   { href: "/platform/jobs", label: "Sync jobs" },
-  { href: "/platform/settings", label: "Settings" },
 ];
+
+export const ACCOUNT_TOOL_SEGMENTS = [
+  "dashboard",
+  "watch-list",
+  "content-opp",
+  "decision-engine",
+  "annotations",
+] as const;
+
+/**
+ * The client encoded in the URL, if any. The layout only knows the cookie
+ * client, so anything client-scoped in the chrome (nav links, data export)
+ * must prefer the slug actually being viewed.
+ */
+export function clientSlugFromPath(pathname: string): string | null {
+  const tools = ACCOUNT_TOOL_SEGMENTS.join("|");
+  const accountTool = pathname.match(new RegExp(`^/([^/]+)/(?:${tools})(?:/|$)`));
+  if (accountTool) return accountTool[1];
+  const workspace = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
+  if (workspace) return workspace[1];
+  return null;
+}
 
 /** Platform surfaces: hide client switcher + Account nav (All clients + /platform/*). */
 export function isPlatformContext(pathname: string): boolean {

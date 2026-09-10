@@ -1,8 +1,13 @@
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { EnqueueJobForm } from "@/components/EnqueueJobForm";
+import { DataTable } from "@/components/analytics/DataTable";
+import { Alert } from "@/components/ui/Alert";
+import { Badge } from "@/components/ui/Badge";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type SyncJob } from "@/lib/api";
 import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
+import { jobBadgeVariant, jobStatusLabel } from "@/lib/jobs";
 
 export default async function ClientJobsPage({
   params,
@@ -25,54 +30,73 @@ export default async function ClientJobsPage({
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "jobs")} />
-      <h1 className="text-2xl font-semibold">Sync Jobs</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Enqueue ingestion for {client.client_name}. All clients are visible on Platform → Sync Jobs.
-      </p>
 
-      <div className="mt-4">
-        <EnqueueJobForm clientId={clientId} />
-      </div>
+      <section className="workspace-section">
+        <SectionHeader
+          title="Enqueue a sync"
+          description={`Queue ingestion for ${client.client_name}. All clients are visible on Platform → Sync jobs.`}
+        />
+        <div className="workspace-panel">
+          <EnqueueJobForm clientId={clientId} />
+        </div>
+      </section>
 
       {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+        <Alert variant="danger" className="mt-4">
           {error}
-        </p>
+        </Alert>
       ) : null}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--border)]">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-[var(--muted)]">
-            <tr>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">Window</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Error</th>
-              <th className="px-4 py-3 font-medium">Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-t border-[var(--border)]">
-                <td className="px-4 py-3">{row.source}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">
+      <section className="workspace-section">
+        <SectionHeader title="Recent jobs" description="Newest ingestion runs for this client." />
+        <DataTable
+          columns={[
+            {
+              key: "source",
+              header: "Source",
+              render: (row) => <span className="font-medium">{row.source}</span>,
+            },
+            {
+              key: "window",
+              header: "Window",
+              render: (row) => (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
                   {row.start_date} → {row.end_date}
-                </td>
-                <td className="px-4 py-3">{row.status}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.error_message ?? "—"}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.created_at}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && !error ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-[var(--muted)]">
-                  No jobs yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+                </span>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (row) => (
+                <Badge variant={jobBadgeVariant(row.status)}>{jobStatusLabel(row.status)}</Badge>
+              ),
+            },
+            {
+              key: "error",
+              header: "Error",
+              render: (row) =>
+                row.error_message ? (
+                  <span className="text-[var(--danger)]">{row.error_message}</span>
+                ) : (
+                  <span className="text-[var(--text-tertiary)]">—</span>
+                ),
+            },
+            {
+              key: "created",
+              header: "Created",
+              render: (row) => (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                  {row.created_at}
+                </span>
+              ),
+            },
+          ]}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          emptyMessage="No jobs yet."
+        />
+      </section>
     </section>
   );
 }

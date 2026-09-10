@@ -120,7 +120,7 @@ export function ConversionDefinitionsPanel({
               required
               value={eventName}
               onChange={(e) => setEventName(e.target.value)}
-              className="rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
+              className="field-control"
               placeholder="generate_lead"
             />
             <datalist id="ga4-event-options">
@@ -139,7 +139,7 @@ export function ConversionDefinitionsPanel({
               required
               value={conversionName}
               onChange={(e) => setConversionName(e.target.value)}
-              className="rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
+              className="field-control"
               placeholder="Lead Form Submission"
             />
           </label>
@@ -148,7 +148,7 @@ export function ConversionDefinitionsPanel({
             <select
               value={conversionType}
               onChange={(e) => setConversionType(e.target.value)}
-              className="rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
+              className="field-control"
             >
               <option value="lead">Lead</option>
               <option value="secondary">Secondary</option>
@@ -189,38 +189,40 @@ export function ConversionDefinitionsPanel({
             {events.length > 5 ? "…" : ""}
           </p>
         ) : (
-          <p className="mt-3 text-xs text-amber-200/80">
+          <p className="mt-3 text-xs text-[var(--warning)]">
             No GA4 events in facts yet — sync GA4 first, or enter an event name manually.
           </p>
         )}
       </form>
 
-      <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-[var(--muted)]">
+      <div className="table-shell overflow-x-auto">
+        <table>
+          <thead>
             <tr>
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium">Event</th>
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Primary</th>
-              <th className="px-4 py-3 font-medium">Active</th>
-              <th className="px-4 py-3 font-medium"> </th>
+              <th>Name</th>
+              <th>Event</th>
+              <th>Type</th>
+              <th>Primary</th>
+              <th>Active</th>
+              <th> </th>
             </tr>
           </thead>
           <tbody>
             {conversions.map((conversion) => (
-              <tr key={conversion.id} className="border-t border-[var(--border)]">
-                <td className="px-4 py-3">{conversion.conversion_name}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{conversion.event_name}</td>
-                <td className="px-4 py-3">{conversion.conversion_type}</td>
-                <td className="px-4 py-3">{conversion.is_primary ? "yes" : "no"}</td>
-                <td className="px-4 py-3">{conversion.active ? "yes" : "no"}</td>
-                <td className="px-4 py-3 text-right">
+              <tr key={conversion.id}>
+                <td className="font-medium">{conversion.conversion_name}</td>
+                <td className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                  {conversion.event_name}
+                </td>
+                <td>{conversion.conversion_type}</td>
+                <td>{conversion.is_primary ? "Yes" : "No"}</td>
+                <td>{conversion.active ? "Yes" : "No"}</td>
+                <td className="text-right">
                   <button
                     type="button"
                     disabled={deletePending && removingId === conversion.id}
                     onClick={() => onRemove(conversion)}
-                    className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
+                    className="btn btn-sm btn-ghost text-[var(--danger)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
                   >
                     {deletePending && removingId === conversion.id ? "Removing…" : "Remove"}
                   </button>
@@ -229,7 +231,7 @@ export function ConversionDefinitionsPanel({
             ))}
             {conversions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-[var(--muted)]">
+                <td colSpan={6} className="py-6 text-center text-xs text-[var(--text-secondary)]">
                   No conversion definitions yet.
                 </td>
               </tr>

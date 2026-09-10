@@ -7,7 +7,6 @@ import { RecommendedActionCard } from "@/components/DecisionEngine/RecommendedAc
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { SummaryStrip } from "@/components/DecisionEngine/SummaryStrip";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type Client, type Tier } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
@@ -113,30 +112,20 @@ export default async function DecisionEnginePage({
 
   return (
     <section>
-      <PageHeader
-        title="Decision Engine"
-        description="Hard recommendations from your thresholds, optional suggestions, and full findings for review."
-        meta={
-          <>
-            <span>
-              Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
-              <strong className="text-[var(--text-primary)]">{to}</strong>
-            </span>
-            {analysisWindow ? (
-              <>
-                <span className="text-[var(--text-tertiary)]">·</span>
-                <span>
-                  Analyzing{" "}
-                  <strong className="text-[var(--text-primary)]">{analysisWindow}</strong>
-                </span>
-              </>
-            ) : null}
-          </>
-        }
-        actions={
-          clientId ? <RunEngineButton clientId={clientId} from={from} to={to} /> : null
-        }
-      />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-[var(--text-tertiary)]">
+          Period:{" "}
+          <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
+          <strong className="text-[var(--text-primary)]">{to}</strong>
+          {analysisWindow ? (
+            <>
+              {" "}
+              · Analyzing <strong className="text-[var(--text-primary)]">{analysisWindow}</strong>
+            </>
+          ) : null}
+        </div>
+        {clientId ? <RunEngineButton clientId={clientId} from={from} to={to} /> : null}
+      </div>
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 

@@ -4,29 +4,9 @@ import { PlatformNav } from "@/components/PlatformNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type PlatformJobRow } from "@/lib/api";
-
-function jobBadgeVariant(status: string): "neutral" | "success" | "warning" | "accent" {
-  switch (status) {
-    case "completed":
-    case "succeeded":
-      return "success";
-    case "failed":
-    case "error":
-      return "warning";
-    case "queued":
-    case "running":
-    case "fetching":
-    case "staging":
-    case "normalizing":
-    case "validating":
-      return "accent";
-    default:
-      return "neutral";
-  }
-}
+import { jobBadgeVariant, jobStatusLabel } from "@/lib/jobs";
 
 export default async function PlatformJobsPage() {
   let rows: PlatformJobRow[] = [];
@@ -41,14 +21,10 @@ export default async function PlatformJobsPage() {
   return (
     <section>
       <PlatformNav active="/platform/jobs" />
-      <PageHeader
-        title="Sync Jobs"
-        description="Recent ingestion jobs across all clients. Enqueue new jobs from a client workspace."
-      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <section className="mt-4 workspace-section">
+      <section className="workspace-section">
         <SectionHeader title="Recent jobs" description="Newest jobs across the platform." />
         <div className="workspace-panel">
           <DataTable
@@ -76,7 +52,7 @@ export default async function PlatformJobsPage() {
                 header: "Status",
                 render: (row) => (
                   <Badge variant={jobBadgeVariant(row.status)}>
-                    {row.status.replaceAll("_", " ")}
+                    {jobStatusLabel(row.status)}
                   </Badge>
                 ),
               },

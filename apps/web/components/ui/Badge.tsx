@@ -2,12 +2,13 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 
-type BadgeVariant = "neutral" | "success" | "warning" | "accent";
+type BadgeVariant = "neutral" | "success" | "warning" | "danger" | "accent";
 
 const variantClass: Record<BadgeVariant, string> = {
   neutral: "badge badge-neutral",
   success: "badge badge-success",
   warning: "badge badge-warning",
+  danger: "badge badge-danger",
   accent: "badge badge-accent",
 };
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Suspense } from "react";
 
-import { DateRangeControls } from "@/components/layout/DateRangeControls";
+import { AppTopBar } from "@/components/layout/AppTopBar";
 import { SidebarNav } from "@/components/layout/SidebarNav";
 import type { Client } from "@/lib/api";
 
@@ -34,16 +34,14 @@ export function AppShell({
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-[var(--border)] bg-[var(--surface)]">
-          <div className="page-gutter-x app-topbar flex items-center">
-            <Suspense
-              fallback={
-                <div className="text-xs text-[var(--text-secondary)]">Loading date range…</div>
-              }
-            >
-              <DateRangeControls clientId={clientId} from={from} to={to} />
-            </Suspense>
-          </div>
+        <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--surface)] px-7 py-3.5">
+          <Suspense
+            fallback={
+              <div className="text-xs text-[var(--text-secondary)]">Loading workspace…</div>
+            }
+          >
+            <AppTopBar clients={clients} clientId={clientId} from={from} to={to} />
+          </Suspense>
         </header>
 
         <main className="flex-1">{children}</main>

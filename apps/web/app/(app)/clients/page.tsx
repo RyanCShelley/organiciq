@@ -1,7 +1,12 @@
 import Link from "next/link";
 
 import { DeleteClientButton } from "@/components/DeleteClientButton";
-import { apiFetch, type Client } from "@/lib/api";
+import { DataTable } from "@/components/analytics/DataTable";
+import { StatusBadge } from "@/components/analytics/StatusBadge";
+import { Alert } from "@/components/ui/Alert";
+import { apiFetch, type Client, type PlatformOverviewRow } from "@/lib/api";
+
+type ClientRow = Client & { overview?: PlatformOverviewRow };
 
 export default async function ClientsIndexPage({
   searchParams,
@@ -13,58 +18,112 @@ export default async function ClientsIndexPage({
   const oauthMessage = typeof params.message === "string" ? params.message : null;
 
   let clients: Client[] = [];
+  let overview: PlatformOverviewRow[] = [];
   let error: string | null = null;
 
   try {
     clients = await apiFetch<Client[]>("/clients");
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to load clients";
-    if (message.toLowerCase().includes("invalid or expired token")) {
-      error = "Your API session expired. Refresh the page or sign in again.";
-    } else {
-      error = message;
-    }
+    error = message.toLowerCase().includes("invalid or expired token")
+      ? "Your API session expired. Refresh the page or sign in again."
+      : message;
   }
+
+  // Source health is a nice-to-have column — never fail the list over it.
+  try {
+    overview = await apiFetch<PlatformOverviewRow[]>("/admin/platform/overview");
+  } catch {
+    overview = [];
+  }
+
+  const overviewById = new Map(overview.map((row) => [row.client_id, row]));
+  const rows: ClientRow[] = clients.map((client) => ({
+    ...client,
+    overview: overviewById.get(client.id),
+  }));
 
   return (
     <section>
-      <h1 className="text-2xl font-semibold">Clients</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Open one client workspace at a time to connect integrations, map properties, and configure
-        conversions. Use Platform for cross-client data health and sync monitoring.
-      </p>
-
       {oauth === "error" ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <Alert variant="danger" className="mb-4">
           OAuth failed{oauthMessage ? `: ${oauthMessage}` : ""}
-        </p>
+        </Alert>
       ) : null}
 
       {error ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <Alert variant="danger" className="mb-4">
           {error}
-        </p>
+        </Alert>
       ) : null}
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        {clients.map((client) => (
-          <div
-            key={client.id}
-            className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4"
-          >
-            <Link href={`/clients/${client.slug}`} className="block hover:opacity-90">
-              <div className="text-lg font-semibold">{client.client_name}</div>
-              <div className="text-sm text-[var(--muted)]">{client.domain}</div>
-              <div className="mt-3 text-sm text-[var(--accent)]">Open workspace →</div>
-            </Link>
-            <DeleteClientButton clientId={client.id} clientName={client.client_name} />
-          </div>
-        ))}
-      </div>
-
-      {clients.length === 0 && !error ? (
-        <p className="mt-6 text-sm text-[var(--muted)]">No clients yet.</p>
-      ) : null}
+      <DataTable
+        columns={[
+          {
+            key: "client",
+            header: "Client",
+            render: (row) => (
+              <Link
+                href={`/clients/${row.slug}`}
+                className="block min-w-0 transition-colors hover:text-[var(--brand-teal-hover)]"
+              >
+                <span className="block font-semibold">{row.client_name}</span>
+                <span className="block font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+                  {row.domain}
+                </span>
+              </Link>
+            ),
+          },
+          {
+            key: "lead_goal",
+            header: "Monthly lead goal",
+            align: "right",
+            render: (row) =>
+              row.monthly_lead_goal != null ? row.monthly_lead_goal.toLocaleString() : "—",
+          },
+          {
+            key: "status",
+            header: "Status",
+            render: (row) => (
+              <StatusBadge
+                available={row.status === "active"}
+                availableLabel={row.status}
+                unavailableLabel={row.status}
+              />
+            ),
+          },
+          {
+            key: "health",
+            header: "Data health",
+            render: (row) =>
+              row.overview ? (
+                <StatusBadge
+                  available={row.overview.sources_healthy === row.overview.sources_total}
+                  availableLabel={`${row.overview.sources_healthy}/${row.overview.sources_total} healthy`}
+                  unavailableLabel={`${row.overview.sources_healthy}/${row.overview.sources_total} healthy`}
+                />
+              ) : (
+                <span className="text-[var(--text-tertiary)]">—</span>
+              ),
+          },
+          {
+            key: "actions",
+            header: "",
+            align: "right",
+            render: (row) => (
+              <span className="inline-flex items-center gap-2">
+                <Link href={`/clients/${row.slug}`} className="btn btn-secondary btn-sm">
+                  Open workspace
+                </Link>
+                <DeleteClientButton clientId={row.id} clientName={row.client_name} />
+              </span>
+            ),
+          },
+        ]}
+        rows={rows}
+        getRowKey={(row) => row.id}
+        emptyMessage="No clients yet."
+      />
     </section>
   );
 }

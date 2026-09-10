@@ -1,4 +1,8 @@
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
+import { DataTable } from "@/components/analytics/DataTable";
+import { StatusBadge } from "@/components/analytics/StatusBadge";
+import { Alert } from "@/components/ui/Alert";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type DataHealthRow } from "@/lib/api";
 import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
@@ -21,45 +25,77 @@ export default async function ClientDataHealthPage({
     error = e instanceof Error ? e.message : "Failed to load data health";
   }
 
+  const healthy = rows.filter((row) => row.status === "Healthy").length;
+
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "data-health")} />
-      <h1 className="text-2xl font-semibold">Data Health</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Freshness and validation for {client.client_name}. Cross-client view is on Platform → Data
-        Health.
-      </p>
 
-      {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--border)]">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-[var(--muted)]">
-            <tr>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Fact Through</th>
-              <th className="px-4 py-3 font-medium">Last Sync</th>
-              <th className="px-4 py-3 font-medium">Validation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.source} className="border-t border-[var(--border)]">
-                <td className="px-4 py-3">{row.source}</td>
-                <td className="px-4 py-3">{row.status}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.fact_through ?? "—"}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.last_sync ?? "—"}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.validation ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <section className="workspace-section">
+        <SectionHeader
+          title="Sources"
+          description={`Freshness and validation for ${client.client_name}. Cross-client view is on Platform → Data health.`}
+          actions={
+            rows.length > 0 ? (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {healthy}/{rows.length} sources healthy
+              </span>
+            ) : null
+          }
+        />
+        <DataTable
+          columns={[
+            {
+              key: "source",
+              header: "Source",
+              render: (row) => (
+                <span className="font-medium">{row.source.replaceAll("_", " ")}</span>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (row) => (
+                <StatusBadge
+                  available={row.status === "Healthy"}
+                  availableLabel={row.status}
+                  unavailableLabel={row.status}
+                />
+              ),
+            },
+            {
+              key: "fact_through",
+              header: "Fact through",
+              render: (row) => (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                  {row.fact_through ?? "—"}
+                </span>
+              ),
+            },
+            {
+              key: "last_sync",
+              header: "Last sync",
+              render: (row) => (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                  {row.last_sync ?? "—"}
+                </span>
+              ),
+            },
+            {
+              key: "validation",
+              header: "Validation",
+              render: (row) => (
+                <span className="text-[var(--text-secondary)]">{row.validation ?? "—"}</span>
+              ),
+            },
+          ]}
+          rows={rows}
+          getRowKey={(row) => row.source}
+          emptyMessage="No watermark data yet."
+        />
+      </section>
     </section>
   );
 }

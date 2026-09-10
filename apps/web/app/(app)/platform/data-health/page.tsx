@@ -4,7 +4,6 @@ import { PlatformNav } from "@/components/PlatformNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type PlatformDataHealthRow } from "@/lib/api";
 
@@ -21,14 +20,10 @@ export default async function PlatformDataHealthPage() {
   return (
     <section>
       <PlatformNav active="/platform/data-health" />
-      <PageHeader
-        title="Data Health"
-        description="Freshness and validation for every client and source. Never treat stale data as current."
-      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <section className="mt-4 workspace-section">
+      <section className="workspace-section">
         <SectionHeader title="Sources" description="Per-client watermark and validation status." />
         <div className="workspace-panel">
           <DataTable

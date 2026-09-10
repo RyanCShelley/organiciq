@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Inter_Tight } from "next/font/google";
+import { Inter, Nunito_Sans } from "next/font/google";
 
 import { BRAND } from "@/lib/brand";
 
@@ -11,10 +11,10 @@ const inter = Inter({
   display: "swap",
 });
 
-const interTight = Inter_Tight({
+const nunitoSans = Nunito_Sans({
   subsets: ["latin"],
-  weight: ["700", "800"],
-  variable: "--font-inter-tight",
+  weight: ["600", "700", "800", "900"],
+  variable: "--font-nunito-sans",
   display: "swap",
 });
 
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
+    <html lang="en" className={`${inter.variable} ${nunitoSans.variable}`}>
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );

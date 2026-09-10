@@ -41,16 +41,18 @@ export function DeleteClientButton({
   }
 
   return (
-    <div className="mt-3">
+    <span className="inline-flex flex-col items-end gap-1">
       <button
         type="button"
         onClick={onDelete}
         disabled={pending}
-        className="text-sm text-red-600 hover:text-red-700 disabled:opacity-60"
+        className="btn btn-sm btn-ghost text-[var(--danger)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
       >
-        {pending ? "Deleting…" : "Delete client"}
+        {pending ? "Deleting…" : "Delete"}
       </button>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
-    </div>
+      {error ? (
+        <span className="text-[11px] text-[var(--danger)]">{error}</span>
+      ) : null}
+    </span>
   );
 }

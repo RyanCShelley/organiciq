@@ -1,7 +1,6 @@
 import { PlatformNav } from "@/components/PlatformNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type ChannelRule, type Tier } from "@/lib/api";
 
@@ -20,14 +19,10 @@ export default async function PlatformSettingsPage() {
   return (
     <section>
       <PlatformNav active="/platform/settings" />
-      <PageHeader
-        title="Platform Settings"
-        description="Global tiers and channel rules. Client-specific conversion definitions live in each client workspace."
-      />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <div className="mt-4 space-y-[var(--section-gap)]">
+      <div className="space-y-[var(--section-gap)]">
         <section className="workspace-section">
           <SectionHeader
             title="Tiers"

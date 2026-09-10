@@ -54,7 +54,7 @@ export function EnqueueJobForm({ clientId }: { clientId: string }) {
       <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
         Source
         <select
-          className="rounded-lg border border-[var(--border)] bg-[#0b1220] px-3 py-2 text-sm text-white"
+          className="field-control"
           value={source}
           onChange={(e) => setSource(e.target.value)}
         >

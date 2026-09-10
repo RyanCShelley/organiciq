@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
@@ -120,12 +119,7 @@ export default async function WatchListPage({
 
   return (
     <section>
-      <PageHeader
-        title="Watch List"
-        description="Search keywords and AI prompts from SE Ranking."
-      />
-
-      <div className="mt-4 flex flex-wrap gap-2 text-sm">
+      <div className="segmented" role="tablist" aria-label="Watch List tabs">
         {tabs.map((item) => {
           const href = withNavContext(watchHref, clientId, from, to, {
             tab: item.id === "search" ? undefined : item.id,
@@ -135,7 +129,7 @@ export default async function WatchListPage({
             <Link
               key={item.id}
               href={href}
-              className={active ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"}
+              className={active ? "segmented-item segmented-item-active" : "segmented-item"}
             >
               {item.label}
             </Link>

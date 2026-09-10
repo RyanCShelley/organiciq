@@ -4,7 +4,6 @@ import {
 } from "@/components/Annotations/AnnotationForms";
 import { AnnotationsTable } from "@/components/Annotations/AnnotationsTable";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
@@ -31,11 +30,6 @@ export default async function AnnotationsPage({
 
   return (
     <section>
-      <PageHeader
-        title="Annotations"
-        description="Causal history for the account — Growth Actions, content, technical changes, and measured impact."
-      />
-
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
       {clientId && !error ? (

@@ -12,7 +12,7 @@ export function ContentContainer({
   return (
     <div
       className={cn(
-        "page-gutter-x mx-auto w-full max-w-7xl py-5",
+        "page-gutter-x mx-auto w-full max-w-[var(--content-max)] py-6",
         className,
       )}
     >
