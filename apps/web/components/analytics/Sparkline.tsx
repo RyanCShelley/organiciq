@@ -1,6 +1,11 @@
 import { cn } from "@/lib/cn";
 
-function buildPath(values: number[], width: number, height: number, pad = 1): string | null {
+function buildPaths(
+  values: number[],
+  width: number,
+  height: number,
+  pad = 1,
+): { line: string; area: string } | null {
   if (values.length < 2) return null;
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -8,21 +13,29 @@ function buildPath(values: number[], width: number, height: number, pad = 1): st
   const usableH = height - pad * 2;
   const stepX = width / (values.length - 1);
 
-  return values
-    .map((value, index) => {
-      const x = index * stepX;
-      const y = pad + usableH - ((value - min) / span) * usableH;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
+  const points = values.map((value, index) => {
+    const x = index * stepX;
+    const y = pad + usableH - ((value - min) / span) * usableH;
+    return { x, y };
+  });
+
+  const line = points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
     .join(" ");
+  const last = points[points.length - 1];
+  const first = points[0];
+  const area = `${line} L${last.x.toFixed(2)} ${height} L${first.x.toFixed(2)} ${height} Z`;
+  return { line, area };
 }
 
 export function Sparkline({
   values,
   className,
-  width = 72,
-  height = 28,
+  width = 86,
+  height = 30,
   invert = false,
+  stroke,
+  fill,
 }: {
   values?: number[] | null;
   className?: string;
@@ -30,6 +43,9 @@ export function Sparkline({
   height?: number;
   /** When true (e.g. position), falling values color as positive. */
   invert?: boolean;
+  /** Override stroke color (e.g. lime on glass cards). */
+  stroke?: string;
+  fill?: string;
 }) {
   const series = (values ?? []).filter((v) => typeof v === "number" && !Number.isNaN(v));
   if (series.length < 2) {
@@ -44,8 +60,8 @@ export function Sparkline({
     );
   }
 
-  const path = buildPath(series, width, height);
-  if (!path) return null;
+  const paths = buildPaths(series, width, height);
+  if (!paths) return null;
 
   const first = series[0];
   const last = series[series.length - 1];
@@ -53,11 +69,19 @@ export function Sparkline({
   const falling = last < first;
   const positive = invert ? falling : rising;
   const negative = invert ? rising : falling;
-  const stroke = positive
+  const autoStroke = positive
     ? "var(--success)"
     : negative
       ? "var(--danger)"
       : "var(--text-tertiary)";
+  const resolvedStroke = stroke ?? autoStroke;
+  const resolvedFill =
+    fill ??
+    (positive
+      ? "rgb(0 169 157 / 14%)"
+      : negative
+        ? "rgb(192 57 43 / 10%)"
+        : "rgb(122 131 140 / 10%)");
 
   return (
     <svg
@@ -67,7 +91,15 @@ export function Sparkline({
       className={cn("shrink-0 overflow-visible", className)}
       aria-hidden
     >
-      <path d={path} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={paths.area} fill={resolvedFill} stroke="none" />
+      <path
+        d={paths.line}
+        fill="none"
+        stroke={resolvedStroke}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

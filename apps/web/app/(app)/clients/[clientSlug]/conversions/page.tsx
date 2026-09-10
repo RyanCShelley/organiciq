@@ -1,5 +1,7 @@
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
+import { Alert } from "@/components/ui/Alert";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type ConversionDefinition } from "@/lib/api";
 import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
@@ -27,21 +29,22 @@ export default async function ClientConversionsPage({
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "conversions")} />
-      <h1 className="text-2xl font-semibold">Conversions</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Define which GA4 events count as leads for {client.client_name}. Dashboard conversion KPIs
-        use only active lead definitions here.
-      </p>
 
       {error ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <Alert variant="danger" className="mb-4">
           {error}
-        </p>
+        </Alert>
       ) : null}
 
-      <div className="mt-6">
-        <ConversionDefinitionsPanel clientId={clientId} conversions={conversions} />
-      </div>
+      <section className="workspace-section">
+        <SectionHeader
+          title="Lead definitions"
+          description={`Which GA4 events count as leads for ${client.client_name}. Dashboard conversion KPIs use only active lead definitions here.`}
+        />
+        <div className="workspace-panel">
+          <ConversionDefinitionsPanel clientId={clientId} conversions={conversions} />
+        </div>
+      </section>
     </section>
   );
 }

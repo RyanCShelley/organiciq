@@ -1,6 +1,5 @@
 import { SearchOpportunitiesTable } from "@/components/DecisionEngine/SearchOpportunitiesTable";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { apiFetch } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
@@ -40,20 +39,9 @@ export default async function ContentOppPage({
 
   return (
     <section>
-      <PageHeader
-        title="Content Opp"
-        description="Striking-distance content opportunities from Search Console. Showing the top 25 by default — search or load more as needed."
-        meta={
-          <span>
-            Period: <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
-            <strong className="text-[var(--text-primary)]">{to}</strong>
-          </span>
-        }
-      />
+      {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      {error ? <Alert variant="danger" className="mt-4">{error}</Alert> : null}
-
-      <section className="mt-4 workspace-section">
+      <section className="workspace-section">
         {!error && contentOpps.length === 0 ? (
           <Alert variant="info">
             No Content Opp rows for this period. Confirm GSC is synced and Decision Engine is ready.

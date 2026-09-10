@@ -15,8 +15,21 @@ ACTIVE_JOB_STATUSES = (
     SyncJobStatus.VALIDATING,
 )
 
+# Statuses that mean a worker actually picked the job up.
+RUNNING_JOB_STATUSES = (
+    SyncJobStatus.FETCHING,
+    SyncJobStatus.STAGING,
+    SyncJobStatus.NORMALIZING,
+    SyncJobStatus.VALIDATING,
+)
+
 # Audit pulls can be large; still fail jobs that clearly hung after a deploy/crash.
 STALE_ACTIVE_JOB_MINUTES = 45
+
+# A queued job has not run yet, so it must not be aged off the same clock: a
+# full daily cycle (35 clients x 6 sources) legitimately sits in the queue for
+# hours. This ceiling only catches a queue that never drained at all.
+STALE_QUEUED_JOB_HOURS = 24
 
 
 class OverlappingJobError(Exception):
@@ -82,23 +95,39 @@ def cancel_active_jobs(
     return jobs
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def fail_stale_active_jobs(
     db: Session,
     *,
     max_age_minutes: int = STALE_ACTIVE_JOB_MINUTES,
+    max_queued_hours: int = STALE_QUEUED_JOB_HOURS,
 ) -> list[SyncJob]:
-    """Mark hung active jobs failed so Sync All / enqueue can proceed after worker crashes."""
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
-    jobs = list_active_jobs(db)
-    stale: list[SyncJob] = []
+    """
+    Mark hung jobs failed so Sync All / enqueue can proceed after worker crashes.
+
+    Running and queued jobs are aged on separate clocks. Previously both used
+    the 45-minute rule against created_at, which failed every queued job once a
+    daily cycle took longer than 45 minutes to drain — at 35 clients that is
+    most of the queue, silently, without ever having run.
+    """
     now = datetime.now(timezone.utc)
-    for job in jobs:
-        anchor = job.started_at or job.updated_at or job.created_at
-        if anchor is None:
-            continue
-        if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=timezone.utc)
-        if anchor > cutoff:
+    running_cutoff = now - timedelta(minutes=max_age_minutes)
+    queued_cutoff = now - timedelta(hours=max_queued_hours)
+    stale: list[SyncJob] = []
+
+    running = (
+        db.query(SyncJob)
+        .filter(SyncJob.status.in_(RUNNING_JOB_STATUSES))
+        .all()
+    )
+    for job in running:
+        anchor = _as_utc(job.started_at) or _as_utc(job.updated_at) or _as_utc(job.created_at)
+        if anchor is None or anchor > running_cutoff:
             continue
         job.status = SyncJobStatus.FAILED
         job.error_message = (
@@ -106,6 +135,22 @@ def fail_stale_active_jobs(
         )
         job.completed_at = now
         stale.append(job)
+
+    queued = (
+        db.query(SyncJob)
+        .filter(SyncJob.status == SyncJobStatus.QUEUED)
+        .filter(SyncJob.created_at < queued_cutoff)
+        .all()
+    )
+    for job in queued:
+        job.status = SyncJobStatus.FAILED
+        job.error_message = (
+            f"Never started — still queued after {max_queued_hours}h "
+            "(worker backlog or worker not running)"
+        )
+        job.completed_at = now
+        stale.append(job)
+
     if stale:
         db.commit()
         for job in stale:

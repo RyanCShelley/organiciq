@@ -11,6 +11,7 @@ from app.core.db import Base
 
 class StagingSerKeyword(Base):
     __tablename__ = "staging_ser_keywords"
+    __table_args__ = (Index("ix_staging_ser_keywords_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -27,6 +28,7 @@ class StagingSerKeyword(Base):
 
 class StagingSerPosition(Base):
     __tablename__ = "staging_ser_positions"
+    __table_args__ = (Index("ix_staging_ser_positions_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -46,6 +48,7 @@ class StagingSerPosition(Base):
 
 class StagingSerCompetitor(Base):
     __tablename__ = "staging_ser_competitors"
+    __table_args__ = (Index("ix_staging_ser_competitors_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -62,6 +65,7 @@ class StagingSerCompetitor(Base):
 
 class StagingSerSiteSummary(Base):
     __tablename__ = "staging_ser_site_summary"
+    __table_args__ = (Index("ix_staging_ser_site_summary_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -184,6 +188,7 @@ class FactSerCompetitor(Base):
 
 class StagingSerAiPrompt(Base):
     __tablename__ = "staging_ser_ai_prompts"
+    __table_args__ = (Index("ix_staging_ser_ai_prompts_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -203,6 +208,7 @@ class StagingSerAiPrompt(Base):
 
 class StagingSerAiCheck(Base):
     __tablename__ = "staging_ser_ai_checks"
+    __table_args__ = (Index("ix_staging_ser_ai_checks_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -222,6 +228,7 @@ class StagingSerAiCheck(Base):
 
 class StagingSerAiPresence(Base):
     __tablename__ = "staging_ser_ai_presence"
+    __table_args__ = (Index("ix_staging_ser_ai_presence_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -239,6 +246,7 @@ class StagingSerAiPresence(Base):
 
 class StagingSerAiTrackerStats(Base):
     __tablename__ = "staging_ser_ai_tracker_stats"
+    __table_args__ = (Index("ix_staging_ser_ai_tracker_stats_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)

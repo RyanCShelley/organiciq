@@ -6,8 +6,8 @@ const WORKSPACE_LINKS = [
   { segment: "", label: "Settings" },
   { segment: "integrations", label: "Integrations" },
   { segment: "conversions", label: "Conversions" },
-  { segment: "data-health", label: "Data Health" },
-  { segment: "jobs", label: "Sync Jobs" },
+  { segment: "data-health", label: "Data health" },
+  { segment: "jobs", label: "Sync jobs" },
 ];
 
 export function ClientWorkspaceNav({
@@ -18,7 +18,7 @@ export function ClientWorkspaceNav({
   active: string;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap gap-2">
+    <div className="segmented mb-4" role="group" aria-label="Client workspace sections">
       {WORKSPACE_LINKS.map((link) => {
         const href = clientHref(clientSlug, link.segment);
         const isActive = active === href;
@@ -26,11 +26,8 @@ export function ClientWorkspaceNav({
           <Link
             key={href}
             href={href}
-            className={`rounded-lg px-3 py-1.5 text-sm ${
-              isActive
-                ? "nav-link-active"
-                : "btn btn-ghost btn-sm"
-            }`}
+            aria-current={isActive ? "page" : undefined}
+            className={isActive ? "segmented-item segmented-item-active" : "segmented-item"}
           >
             {link.label}
           </Link>
@@ -48,16 +45,19 @@ export function ClientWorkspaceHeader({
   domain: string;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-white/5 px-4 py-3">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Client workspace</p>
-        <p className="text-lg font-semibold">{clientName}</p>
-        <p className="text-sm text-[var(--muted)]">{domain}</p>
+    <div className="card mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+          Client workspace
+        </p>
+        <p className="mt-1 font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
+          {clientName}
+        </p>
+        <p className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+          {domain}
+        </p>
       </div>
-      <Link
-        href="/clients"
-        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-white/5"
-      >
+      <Link href="/clients" className="btn btn-secondary">
         All clients
       </Link>
     </div>

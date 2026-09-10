@@ -21,3 +21,12 @@ out/
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code local state — worktrees are full nested repo checkouts
+.claude/worktrees/
+
+# Claude Design exports (re-exportable from the design project)
+*.dc.html
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

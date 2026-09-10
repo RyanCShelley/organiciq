@@ -1,14 +1,26 @@
 "use client";
 
-import { Bookmark, Eye, FileSearch, Gauge, LayoutDashboard, Settings, type LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Bookmark,
+  Eye,
+  FileSearch,
+  Gauge,
+  LayoutDashboard,
+  LayoutGrid,
+  RefreshCw,
+  Settings2,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
-import { Logo } from "@/components/brand/Logo";
+import { LogoWordmark } from "@/components/brand/Logo";
 import { ClientSwitcher } from "@/components/layout/ClientSwitcher";
 import { accountToolHref } from "@/lib/account-routes";
 import type { Client } from "@/lib/api";
+import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import {
   PLATFORM_NAV_ITEMS,
@@ -24,7 +36,15 @@ const ACCOUNT_ICONS: Record<string, LucideIcon> = {
   "Content Opp": FileSearch,
   "Decision Engine": Gauge,
   Annotations: Bookmark,
-  "Client settings": Settings,
+  "Client settings": Settings2,
+};
+
+const PLATFORM_ICONS: Record<string, LucideIcon> = {
+  "All clients": LayoutGrid,
+  Overview: LayoutGrid,
+  "Data health": Activity,
+  "Sync jobs": RefreshCw,
+  Settings: Settings2,
 };
 
 export function SidebarNav({
@@ -65,33 +85,44 @@ export function SidebarNav({
       );
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
-      <div className="border-b border-[var(--border)] px-3 py-3">
-        <Logo href={logoHref} />
+    <aside className="sticky top-0 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)]">
+      <div className="border-b border-[var(--sidebar-border)] px-[18px] pb-3.5 pt-[18px]">
+        <Link href={logoHref} className="inline-flex flex-col" aria-label={`${BRAND.logoWordmark} home`}>
+          <LogoWordmark inverse className="text-[19px] font-black" />
+          <span className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--sidebar-fg-muted)]">
+            {BRAND.companyName}
+          </span>
+        </Link>
       </div>
 
       {!platformOnly ? (
-        <div className="border-b border-[var(--border)] px-3 py-3">
-          <p className="mb-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+        <div className="border-b border-[var(--sidebar-border)] px-3.5 py-3.5">
+          <p className="mb-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
             Client
           </p>
-          <Suspense fallback={<div className="h-10 rounded-lg bg-[var(--surface-muted)]" />}>
-            <ClientSwitcher clients={clients} clientId={effectiveClientId} from={from} to={to} />
+          <Suspense fallback={<div className="h-11 rounded-[10px] bg-[var(--sidebar-field)]" />}>
+            <ClientSwitcher
+              clients={clients}
+              clientId={effectiveClientId}
+              from={from}
+              to={to}
+              tone="dark"
+            />
           </Suspense>
         </div>
       ) : null}
 
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
+      <nav className="flex flex-1 flex-col gap-[18px] overflow-y-auto px-2.5 py-3.5">
         {!platformOnly
           ? groups.map((group) => (
-              <div key={group.label} className="mb-4 last:mb-0">
-                <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+              <div key={group.label}>
+                <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
                   {group.label}
                 </p>
                 <ul className="space-y-0.5">
                   {group.items.map((item) => {
                     const active = isNavActive(pathname, item.href, item.exact);
-                    const Icon = ACCOUNT_ICONS[item.label] ?? Settings;
+                    const Icon = ACCOUNT_ICONS[item.label] ?? Settings2;
                     return (
                       <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
                         <Link
@@ -99,13 +130,13 @@ export function SidebarNav({
                             tab: item.tab,
                           })}
                           className={cn(
-                            "relative flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] leading-tight transition-colors",
+                            "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
                             active
                               ? "sidebar-link-active"
-                              : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
+                              : "text-white hover:bg-[var(--sidebar-field)]",
                           )}
                         >
-                          <Icon className="h-3.5 w-3.5 shrink-0 opacity-75" aria-hidden />
+                          <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
                           <span>{item.label}</span>
                         </Link>
                       </li>
@@ -116,25 +147,31 @@ export function SidebarNav({
             ))
           : null}
 
-        <div className={platformOnly ? undefined : "mt-2 border-t border-[var(--border)] pt-3"}>
-          <p className="mb-1 px-2 text-[0.625rem] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+        <div
+          className={cn(
+            !platformOnly && "mt-auto border-t border-[var(--sidebar-border)] pt-3.5",
+          )}
+        >
+          <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
             Platform
           </p>
           <ul className="space-y-0.5">
             {PLATFORM_NAV_ITEMS.map((item) => {
               const active = isNavActive(pathname, item.href, item.exact);
+              const Icon = PLATFORM_ICONS[item.label] ?? LayoutGrid;
               return (
                 <li key={item.href}>
                   <Link
                     href={withNavContext(item.href, clientId, from, to)}
                     className={cn(
-                      "flex items-center rounded-md px-2 py-1.5 text-[0.8125rem] leading-tight transition-colors",
+                      "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
                       active
-                        ? "sidebar-link-active relative"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)]",
+                        ? "sidebar-link-active"
+                        : "text-white hover:bg-[var(--sidebar-field)]",
                     )}
                   >
-                    {item.label}
+                    <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                    <span>{item.label}</span>
                   </Link>
                 </li>
               );
@@ -143,14 +180,20 @@ export function SidebarNav({
         </div>
       </nav>
 
-      <div className="mt-auto border-t border-[var(--border)] px-3 py-3">
+      <div className="mt-auto border-t border-[var(--sidebar-border)] px-3.5 py-3.5">
         {userEmail ? (
-          <p className="truncate text-[0.75rem] text-[var(--text-secondary)]" title={userEmail}>
+          <p
+            className="truncate text-xs text-[var(--sidebar-fg-muted)]"
+            title={userEmail}
+          >
             {userEmail}
           </p>
         ) : null}
-        <form action={signOutAction} className="mt-2">
-          <button type="submit" className="btn btn-secondary btn-sm w-full">
+        <form action={signOutAction} className="mt-2.5">
+          <button
+            type="submit"
+            className="w-full rounded-lg border border-[var(--sidebar-border-strong)] bg-transparent px-2.5 py-2 text-[12.5px] font-semibold text-[var(--sidebar-fg)] transition-colors duration-[120ms] hover:bg-[var(--sidebar-field)]"
+          >
             Sign out
           </button>
         </form>

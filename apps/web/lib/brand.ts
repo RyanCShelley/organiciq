@@ -23,11 +23,11 @@ export const BRAND = {
   },
   typography: {
     body: "Inter",
-    headline: "Inter Tight",
+    headline: "Nunito Sans",
   },
   layout: {
-    sidebarWidth: "14rem",
-    maxContentWidth: "80rem",
+    sidebarWidth: "15.75rem",
+    maxContentWidth: "88.75rem",
   },
 } as const;
 

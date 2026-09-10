@@ -22,6 +22,7 @@ from app.core.db import Base
 
 class StagingGscDaily(Base):
     __tablename__ = "staging_gsc_daily"
+    __table_args__ = (Index("ix_staging_gsc_daily_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -38,6 +39,7 @@ class StagingGscDaily(Base):
 
 class StagingGscPage(Base):
     __tablename__ = "staging_gsc_pages"
+    __table_args__ = (Index("ix_staging_gsc_pages_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -62,6 +64,7 @@ class StagingGscQueryPage(Base):
             "query IS NULL OR length(trim(query)) > 0",
             name="ck_staging_gsc_query_pages_query_nonblank",
         ),
+        Index("ix_staging_gsc_query_pages_job", "job_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

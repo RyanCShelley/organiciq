@@ -5,7 +5,6 @@ import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
 import { Alert } from "@/components/ui/Alert";
-import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import {
   apiFetch,
@@ -54,14 +53,10 @@ export default async function ClientSettingsPage({
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug)} />
-      <PageHeader
-        title="Client settings"
-        description="Account record for tier allowances, contract date, lead goal, conversions, and strategy sheet."
-      />
 
       {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
 
-      <div className="mt-4 space-y-[var(--section-gap)]">
+      <div className="space-y-[var(--section-gap)]">
         <section className="workspace-section">
           <SectionHeader title="Account record" description="Core fields for this Organic IQ client." />
           <div className="workspace-panel">

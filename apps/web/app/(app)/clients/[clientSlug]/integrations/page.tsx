@@ -1,4 +1,8 @@
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
+import { DataTable } from "@/components/analytics/DataTable";
+import { StatusBadge } from "@/components/analytics/StatusBadge";
+import { Alert } from "@/components/ui/Alert";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Ga4ConnectPanel } from "@/components/Ga4ConnectPanel";
 import { GscConnectPanel } from "@/components/GscConnectPanel";
 import { SeRankingConnectPanel } from "@/components/SeRankingConnectPanel";
@@ -38,60 +42,79 @@ export default async function ClientIntegrationsPage({
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "integrations")} />
-      <h1 className="text-2xl font-semibold">Integrations</h1>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        Connect each source, confirm it shows connected with a property, then run one{" "}
-        <strong>Sync 90 days</strong> for this client.
-      </p>
 
       {oauth === "connected" ? (
-        <p className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+        <Alert variant="success" className="mb-4">
           Google connected for all clients. Load properties and select a GSC site and a GA4 property
           for {client.client_name}.
-        </p>
+        </Alert>
       ) : null}
       {oauth === "error" ? (
-        <p className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <Alert variant="danger" className="mb-4">
           OAuth failed{oauthMessage ? `: ${oauthMessage}` : ""}
-        </p>
+        </Alert>
       ) : null}
-
       {error ? (
-        <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+        <Alert variant="danger" className="mb-4">
           {error}
-        </p>
+        </Alert>
       ) : null}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--border)]">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-white/5 text-[var(--muted)]">
-            <tr>
-              <th className="px-4 py-3 font-medium">Provider</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Property</th>
-              <th className="px-4 py-3 font-medium">Last sync</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="border-t border-[var(--border)]">
-                <td className="px-4 py-3 uppercase">{row.provider}</td>
-                <td className="px-4 py-3">{formatStatus(row.connection_status)}</td>
-                <td className="px-4 py-3 text-[var(--muted)]">
-                  {row.external_property_id
-                    ? `${row.external_property_id}${
-                        row.provider === "gsc" && (row.gsc_secondary_site_urls?.length ?? 0) > 0
-                          ? ` (+${row.gsc_secondary_site_urls!.length} secondary)`
-                          : ""
-                      }`
-                    : "—"}
-                </td>
-                <td className="px-4 py-3 text-[var(--muted)]">{row.last_successful_sync ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <section className="workspace-section">
+        <SectionHeader
+          title="Property mapping"
+          description="Connect each source, confirm it shows connected with a property, then run one Sync 90 days for this client."
+        />
+        <DataTable
+          columns={[
+            {
+              key: "provider",
+              header: "Provider",
+              render: (row) => (
+                <span className="font-medium uppercase">{row.provider.replaceAll("_", " ")}</span>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (row) => (
+                <StatusBadge
+                  available={row.connection_status === "connected"}
+                  availableLabel={formatStatus(row.connection_status)}
+                  unavailableLabel={formatStatus(row.connection_status)}
+                />
+              ),
+            },
+            {
+              key: "property",
+              header: "Property",
+              render: (row) =>
+                row.external_property_id ? (
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                    {row.external_property_id}
+                    {row.provider === "gsc" && (row.gsc_secondary_site_urls?.length ?? 0) > 0
+                      ? ` (+${row.gsc_secondary_site_urls!.length} secondary)`
+                      : ""}
+                  </span>
+                ) : (
+                  <span className="text-[var(--text-tertiary)]">—</span>
+                ),
+            },
+            {
+              key: "last_sync",
+              header: "Last sync",
+              render: (row) => (
+                <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--text-secondary)]">
+                  {row.last_successful_sync ?? "—"}
+                </span>
+              ),
+            },
+          ]}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          emptyMessage="No integrations configured yet."
+        />
+      </section>
 
       <GscConnectPanel
         clientId={clientId}

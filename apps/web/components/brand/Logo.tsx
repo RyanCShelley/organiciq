@@ -16,18 +16,18 @@ export function LogoWordmark({
   return (
     <span
       className={cn(
-        "inline-flex items-start font-[family-name:var(--font-display)] text-[1.0625rem] font-bold leading-none tracking-tight",
-        inverse ? "text-[var(--base-2)]" : "text-[var(--text-primary)]",
+        "inline-flex items-start font-[family-name:var(--font-display)] text-[1.0625rem] font-black leading-none tracking-[-0.02em]",
+        inverse ? "text-[var(--sidebar-fg)]" : "text-[var(--text-primary)]",
         className,
       )}
     >
       <span>
-        Organic<span className={inverse ? "brand-gradient-text" : "text-[var(--brand-teal)]"}>IQ</span>
+        Organic<span className="brand-gradient-text">IQ</span>
       </span>
       <sup
         className={cn(
           "ml-0.5 text-[0.5em] font-semibold leading-none",
-          inverse ? "text-[var(--base)]" : "text-[var(--text-tertiary)]",
+          inverse ? "text-[var(--sidebar-fg-muted)]" : "text-[var(--text-tertiary)]",
         )}
         aria-hidden
       >

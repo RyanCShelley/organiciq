@@ -7,6 +7,7 @@ export function TrendIndicator({
   comparisonValue,
   className,
   compact = false,
+  tone = "light",
 }: {
   changePct: number | null;
   invert?: boolean;
@@ -15,6 +16,7 @@ export function TrendIndicator({
   comparisonValue?: string | null;
   className?: string;
   compact?: boolean;
+  tone?: "light" | "glass";
 }) {
   const comparisonText =
     comparisonValue && comparisonValue !== "—"
@@ -23,10 +25,28 @@ export function TrendIndicator({
 
   if (changePct === null || Number.isNaN(changePct)) {
     return (
-      <div className={cn(compact ? "text-xs" : "text-sm", "text-[var(--text-tertiary)]", className)}>
-        <span>—</span>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2",
+          compact ? "text-xs" : "text-sm",
+          tone === "glass" ? "text-[var(--brand-on-dark)]" : "text-[var(--text-tertiary)]",
+          className,
+        )}
+      >
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 text-[11.5px] font-bold",
+            tone === "glass"
+              ? "bg-white/10 text-[var(--brand-on-dark)]"
+              : "bg-[#F1F2F3] text-[var(--text-tertiary)]",
+          )}
+        >
+          —
+        </span>
         {comparisonText ? (
-          <span className={cn(compact ? "ml-1.5" : "mt-0.5 block text-xs")}>{comparisonText}</span>
+          <span className={cn(tone === "glass" ? "text-[var(--brand-on-dark)]" : "text-[var(--text-tertiary)]")}>
+            {comparisonText}
+          </span>
         ) : null}
       </div>
     );
@@ -38,19 +58,33 @@ export function TrendIndicator({
 
   const sign = changePct > 0 ? "+" : "";
   const arrow = isPositive ? "↑" : isNegative ? "↓" : "→";
-  const tone = isNeutral
-    ? "text-[var(--text-tertiary)]"
+
+  const pillClass = isNeutral
+    ? tone === "glass"
+      ? "bg-white/10 text-[var(--brand-on-dark)]"
+      : "bg-[#F1F2F3] text-[var(--text-tertiary)]"
     : isPositive
-      ? "text-[var(--success)]"
-      : "text-[var(--danger)]";
+      ? tone === "glass"
+        ? "bg-transparent text-[var(--brand-lime)]"
+        : "bg-[var(--success-soft)] text-[var(--success)]"
+      : tone === "glass"
+        ? "bg-transparent text-[#ff8f8f]"
+        : "bg-[var(--danger-soft)] text-[var(--danger)]";
 
   return (
-    <div className={cn(compact ? "text-xs leading-tight" : "text-sm", className)}>
-      <span className={cn("font-medium", tone)}>
+    <div className={cn("flex flex-wrap items-center gap-2", className)}>
+      <span className={cn("rounded-full px-2.5 py-0.5 text-[11.5px] font-bold", pillClass)}>
         {arrow} {sign}
         {Math.abs(changePct).toFixed(1)}%
       </span>
-      <span className="ml-1.5 text-[var(--text-tertiary)]">{comparisonText}</span>
+      <span
+        className={cn(
+          "text-xs",
+          tone === "glass" ? "text-[var(--brand-on-dark)]" : "text-[var(--text-tertiary)]",
+        )}
+      >
+        {comparisonText}
+      </span>
     </div>
   );
 }

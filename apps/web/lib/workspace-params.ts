@@ -3,48 +3,31 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useTransition } from "react";
 
-export type RangeKey = "today" | "7d" | "14d" | "30d" | "90d" | "6m" | "12m" | "custom";
+import {
+  COMPARE_OPTIONS,
+  RANGE_OPTIONS,
+  TOPBAR_RANGE_OPTIONS,
+  comparisonLabelFor,
+  detectRangeKey,
+  formatDateLabel,
+  isoDaysAgo,
+  parseCompareMode,
+  type CompareMode,
+  type RangeKey,
+} from "@/lib/date-range";
 
-export const RANGE_OPTIONS: { key: RangeKey; label: string; days?: number }[] = [
-  { key: "today", label: "Today", days: 1 },
-  { key: "7d", label: "Last 7 days", days: 7 },
-  { key: "14d", label: "Last 14 days", days: 14 },
-  { key: "30d", label: "Last 30 days", days: 30 },
-  { key: "90d", label: "Last 90 days", days: 90 },
-  { key: "6m", label: "Last 6 months", days: 182 },
-  { key: "12m", label: "Last 12 months", days: 365 },
-  { key: "custom", label: "Custom" },
-];
-
-export function isoDaysAgo(days: number): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date();
-  from.setUTCDate(to.getUTCDate() - (days - 1));
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
-
-export function detectRangeKey(from: string, to: string, explicit?: string | null): RangeKey {
-  if (explicit === "custom") return "custom";
-  if (explicit && RANGE_OPTIONS.some((o) => o.key === explicit)) {
-    return explicit as RangeKey;
-  }
-
-  for (const option of RANGE_OPTIONS) {
-    if (!option.days) continue;
-    const expected = isoDaysAgo(option.days);
-    if (expected.from === from && expected.to === to) return option.key;
-  }
-  return "custom";
-}
-
-export function formatDateLabel(iso: string): string {
-  const date = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
+// Re-exported so client components keep a single import site.
+export {
+  COMPARE_OPTIONS,
+  RANGE_OPTIONS,
+  TOPBAR_RANGE_OPTIONS,
+  comparisonLabelFor,
+  detectRangeKey,
+  formatDateLabel,
+  isoDaysAgo,
+  parseCompareMode,
+};
+export type { CompareMode, RangeKey };
 
 export function useWorkspaceParams({
   clientId,
@@ -72,6 +55,8 @@ export function useWorkspaceParams({
     () => detectRangeKey(activeFrom, activeTo, searchParams.get("range")),
     [activeFrom, activeTo, searchParams],
   );
+
+  const compareMode = parseCompareMode(searchParams.get("compare") ?? undefined);
 
   useEffect(() => {
     if (!persistDefault) return;
@@ -107,12 +92,14 @@ export function useWorkspaceParams({
     from?: string;
     to?: string;
     range?: RangeKey;
+    compare?: CompareMode;
   }) {
     const params = new URLSearchParams(searchParams.toString());
     const nextClientId = next.clientId ?? clientId;
     const nextFrom = next.from ?? activeFrom;
     const nextTo = next.to ?? activeTo;
     const nextRange = next.range ?? rangeKey;
+    const nextCompare = next.compare ?? compareMode;
 
     params.delete("clientId");
     // Prefer slug in the path for account tools and /clients/* — do not put clientId in the query.
@@ -126,11 +113,13 @@ export function useWorkspaceParams({
     params.set("from", nextFrom);
     params.set("to", nextTo);
     params.set("range", nextRange);
+    params.set("compare", nextCompare);
 
     document.cookie = `oiq_client_id=${nextClientId}; path=/; max-age=31536000`;
     document.cookie = `oiq_from=${nextFrom}; path=/; max-age=31536000`;
     document.cookie = `oiq_to=${nextTo}; path=/; max-age=31536000`;
     document.cookie = `oiq_range=${nextRange}; path=/; max-age=31536000`;
+    document.cookie = `oiq_compare=${nextCompare}; path=/; max-age=31536000`;
 
     let nextPath = pathname;
     if (next.clientSlug) {
@@ -153,6 +142,7 @@ export function useWorkspaceParams({
     activeFrom,
     activeTo,
     rangeKey,
+    compareMode,
     apply,
   };
 }

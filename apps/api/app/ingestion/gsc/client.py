@@ -7,6 +7,7 @@ from urllib.parse import quote
 import httpx
 
 from app.ingestion.google_auth import credentials_from_tokens, ensure_access_token
+from app.ingestion.google_http import get as http_get, post_json
 
 SEARCH_ANALYTICS_URL = "https://www.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"
 SITES_LIST_URL = "https://www.googleapis.com/webmasters/v3/sites"
@@ -14,11 +15,12 @@ SITES_LIST_URL = "https://www.googleapis.com/webmasters/v3/sites"
 
 def list_sites(access_token: str) -> list[dict[str, Any]]:
     with httpx.Client(timeout=60.0) as client:
-        res = client.get(
+        res = http_get(
+            client,
             SITES_LIST_URL,
             headers={"Authorization": f"Bearer {access_token}"},
+            description="GSC sites.list",
         )
-        res.raise_for_status()
         data = res.json()
     return list(data.get("siteEntry") or [])
 
@@ -47,15 +49,16 @@ def query_search_analytics(
                 "rowLimit": row_limit,
                 "startRow": start_row,
             }
-            res = client.post(
+            res = post_json(
+                client,
                 url,
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
                 },
                 json=body,
+                description=f"GSC searchAnalytics.query startRow={start_row}",
             )
-            res.raise_for_status()
             batch = list((res.json() or {}).get("rows") or [])
             if not batch:
                 break
