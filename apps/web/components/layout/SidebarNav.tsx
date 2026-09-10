@@ -7,6 +7,7 @@ import { Suspense } from "react";
 
 import { Logo } from "@/components/brand/Logo";
 import { ClientSwitcher } from "@/components/layout/ClientSwitcher";
+import { accountToolHref } from "@/lib/account-routes";
 import type { Client } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
@@ -43,11 +44,25 @@ export function SidebarNav({
 }) {
   const pathname = usePathname();
   const platformOnly = isPlatformContext(pathname);
-  const selected = clients.find((client) => client.id === clientId);
+  const accountToolMatch = pathname.match(
+    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|annotations)(\/|$)/,
+  );
+  const clientsWorkspaceMatch = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
+  const pathSlug = accountToolMatch?.[1] || clientsWorkspaceMatch?.[1];
+  const pathClient = pathSlug
+    ? clients.find((client) => client.slug === pathSlug)
+    : undefined;
+  const effectiveClientId = pathClient?.id || clientId;
+  const selected = clients.find((client) => client.id === effectiveClientId);
   const groups = accountNavGroups(selected?.slug ?? "");
   const logoHref = platformOnly
-    ? withNavContext("/clients", clientId, from, to)
-    : withNavContext("/dashboard", clientId, from, to);
+    ? withNavContext("/clients", effectiveClientId, from, to)
+    : withNavContext(
+        selected?.slug ? accountToolHref(selected.slug, "dashboard") : "/dashboard",
+        effectiveClientId,
+        from,
+        to,
+      );
 
   return (
     <aside className="sticky top-0 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)]">
@@ -61,7 +76,7 @@ export function SidebarNav({
             Client
           </p>
           <Suspense fallback={<div className="h-10 rounded-lg bg-[var(--surface-muted)]" />}>
-            <ClientSwitcher clients={clients} clientId={clientId} from={from} to={to} />
+            <ClientSwitcher clients={clients} clientId={effectiveClientId} from={from} to={to} />
           </Suspense>
         </div>
       ) : null}
@@ -80,7 +95,7 @@ export function SidebarNav({
                     return (
                       <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
                         <Link
-                          href={withNavContext(item.href, clientId, from, to, {
+                          href={withNavContext(item.href, effectiveClientId, from, to, {
                             tab: item.tab,
                           })}
                           className={cn(

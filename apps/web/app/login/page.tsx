@@ -75,12 +75,6 @@ export default async function LoginPage({
           <p className="mt-3 text-[var(--muted)]">
             Use your @{BRAND.hostedDomain} Google Workspace account to continue.
           </p>
-          <p className="mt-2 text-xs text-[var(--muted)]">
-            Local login URL:{" "}
-            <a className="underline" href={`${LOGIN_ORIGIN}/login`}>
-              {LOGIN_ORIGIN}/login
-            </a>
-          </p>
 
           {message ? <div className="alert alert-danger mt-4 text-sm leading-relaxed">{message}</div> : null}
 

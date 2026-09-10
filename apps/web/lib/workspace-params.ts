@@ -79,7 +79,7 @@ export function useWorkspaceParams({
     didPersistDefault.current = true;
     document.cookie = `oiq_client_id=${clientId}; path=/; max-age=31536000`;
     const params = new URLSearchParams(searchParams.toString());
-    // Keep date range in the URL; persist client via cookie (and path under /clients/).
+    // Keep date range in the URL; client lives in the path (or cookie).
     params.delete("clientId");
     if (activeFrom) params.set("from", activeFrom);
     if (activeTo) params.set("to", activeTo);
@@ -115,7 +115,12 @@ export function useWorkspaceParams({
     const nextRange = next.range ?? rangeKey;
 
     params.delete("clientId");
-    if (nextClientId && !pathname.startsWith("/clients/")) {
+    // Prefer slug in the path for account tools and /clients/* — do not put clientId in the query.
+    const onClientsPath = pathname.startsWith("/clients/");
+    const accountMatch = pathname.match(
+      /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|annotations)(\/|$)/,
+    );
+    if (nextClientId && !onClientsPath && !accountMatch) {
       params.set("clientId", nextClientId);
     }
     params.set("from", nextFrom);
@@ -127,10 +132,14 @@ export function useWorkspaceParams({
     document.cookie = `oiq_to=${nextTo}; path=/; max-age=31536000`;
     document.cookie = `oiq_range=${nextRange}; path=/; max-age=31536000`;
 
-    const nextPath =
-      next.clientSlug && pathname.startsWith("/clients/")
-        ? pathname.replace(/^\/clients\/[^/]+/, `/clients/${next.clientSlug}`)
-        : pathname;
+    let nextPath = pathname;
+    if (next.clientSlug) {
+      if (onClientsPath) {
+        nextPath = pathname.replace(/^\/clients\/[^/]+/, `/clients/${next.clientSlug}`);
+      } else if (accountMatch) {
+        nextPath = pathname.replace(/^\/[^/]+/, `/${next.clientSlug}`);
+      }
+    }
 
     const qs = params.toString();
     startTransition(() => {

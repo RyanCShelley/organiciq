@@ -3,12 +3,12 @@ import Link from "next/link";
 import { GROWTH_ACTION_FILTERS } from "@/lib/decision-engine";
 
 export function GrowthActionFilter({
-  clientId,
+  hrefBase,
   from,
   to,
   active,
 }: {
-  clientId: string;
+  hrefBase: string;
   from: string;
   to: string;
   active: string;
@@ -16,13 +16,9 @@ export function GrowthActionFilter({
   return (
     <div className="flex flex-wrap gap-1.5">
       {GROWTH_ACTION_FILTERS.map((option) => {
-        const params = new URLSearchParams({
-          clientId,
-          from,
-          to,
-        });
+        const params = new URLSearchParams({ from, to });
         if (option.value !== "all") params.set("lever", option.value);
-        const href = `/decision-engine?${params.toString()}`;
+        const href = `${hrefBase}?${params.toString()}`;
         const isActive = active === option.value;
         return (
           <Link

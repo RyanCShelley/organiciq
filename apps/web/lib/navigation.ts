@@ -1,3 +1,5 @@
+import { accountToolHref } from "@/lib/account-routes";
+
 export type NavItem = {
   href: string;
   label: string;
@@ -13,15 +15,16 @@ export type NavGroup = {
 
 export function accountNavGroups(clientSlug: string): NavGroup[] {
   const settingsHref = clientSlug ? `/clients/${clientSlug}` : "/clients";
+  const tool = (path: string) => (clientSlug ? accountToolHref(clientSlug, path) : `/${path}`);
   return [
     {
       label: "Account",
       items: [
-        { href: "/dashboard", label: "Dashboard", exact: true },
-        { href: "/watch-list", label: "Watch List" },
-        { href: "/content-opp", label: "Content Opp" },
-        { href: "/decision-engine", label: "Decision Engine" },
-        { href: "/annotations", label: "Annotations" },
+        { href: tool("dashboard"), label: "Dashboard", exact: true },
+        { href: tool("watch-list"), label: "Watch List" },
+        { href: tool("content-opp"), label: "Content Opp" },
+        { href: tool("decision-engine"), label: "Decision Engine" },
+        { href: tool("annotations"), label: "Annotations" },
         { href: settingsHref, label: "Client settings" },
       ],
     },
@@ -45,8 +48,21 @@ export function isPlatformContext(pathname: string): boolean {
 }
 
 export function isNavActive(pathname: string, href: string, exact = false): boolean {
-  if (href === "/dashboard" || exact) return pathname === href;
+  if (exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function pathEncodesClient(href: string): boolean {
+  if (href.startsWith("/clients/")) return true;
+  // /{slug}/dashboard|watch-list|…
+  const parts = href.split("/").filter(Boolean);
+  if (parts.length >= 2) {
+    const tool = parts[1];
+    return ["dashboard", "watch-list", "content-opp", "decision-engine", "annotations"].includes(
+      tool,
+    );
+  }
+  return false;
 }
 
 export function withNavContext(
@@ -57,8 +73,8 @@ export function withNavContext(
   extra?: { tab?: string },
 ): string {
   const params = new URLSearchParams();
-  // Client workspace paths already encode the client; skip redundant clientId query.
-  if (clientId && !href.startsWith("/clients/")) {
+  // Client is already in the path for workspace + account-tool URLs.
+  if (clientId && !pathEncodesClient(href)) {
     params.set("clientId", clientId);
   }
   if (from) params.set("from", from);
