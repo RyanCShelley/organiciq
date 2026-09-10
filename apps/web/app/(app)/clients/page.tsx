@@ -1,10 +1,11 @@
 import Link from "next/link";
 
+import { AddClientForm } from "@/components/AddClientForm";
 import { DeleteClientButton } from "@/components/DeleteClientButton";
 import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
-import { apiFetch, type Client, type PlatformOverviewRow } from "@/lib/api";
+import { apiFetch, type Client, type PlatformOverviewRow, type Tier } from "@/lib/api";
 
 type ClientRow = Client & { overview?: PlatformOverviewRow };
 
@@ -19,6 +20,7 @@ export default async function ClientsIndexPage({
 
   let clients: Client[] = [];
   let overview: PlatformOverviewRow[] = [];
+  let tiers: Tier[] = [];
   let error: string | null = null;
 
   try {
@@ -37,6 +39,13 @@ export default async function ClientsIndexPage({
     overview = [];
   }
 
+  // Tiers populate the Add client form; its own empty state covers a failure.
+  try {
+    tiers = await apiFetch<Tier[]>("/admin/tiers");
+  } catch {
+    tiers = [];
+  }
+
   const overviewById = new Map(overview.map((row) => [row.client_id, row]));
   const rows: ClientRow[] = clients.map((client) => ({
     ...client,
@@ -45,6 +54,10 @@ export default async function ClientsIndexPage({
 
   return (
     <section>
+      <div className="mb-4 flex justify-end">
+        <AddClientForm tiers={tiers} />
+      </div>
+
       {oauth === "error" ? (
         <Alert variant="danger" className="mb-4">
           OAuth failed{oauthMessage ? `: ${oauthMessage}` : ""}
