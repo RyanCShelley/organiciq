@@ -45,14 +45,14 @@ export default async function LoginPage({
   return (
     <main className="min-h-screen md:grid md:grid-cols-[1.1fr_0.9fr]">
       <LoginHostGuard />
-      <section className="brand-panel relative flex min-h-[16rem] flex-col gap-10 overflow-hidden px-8 py-10 md:min-h-screen md:justify-center md:gap-16 md:p-12">
-        <div className="relative z-10">
+      <section className="brand-panel relative flex min-h-[16rem] flex-col justify-center overflow-hidden px-8 py-10 md:min-h-screen md:p-12">
+        <div className="absolute left-8 top-10 z-10 md:left-12 md:top-12">
           <LogoWordmark inverse className="text-2xl md:text-[1.75rem]" />
           <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--base)]">
             {BRAND.companyName}
           </p>
         </div>
-        <div className="relative z-10 max-w-lg">
+        <div className="relative z-10 max-w-lg pt-20 md:pt-0">
           <p className="badge badge-accent mb-4 w-fit">{BRAND.productName}</p>
           <h1 className="font-[family-name:var(--font-display)] text-4xl font-bold leading-[1.05] tracking-tight text-[var(--base-2)] md:text-5xl">
             Predictable organic growth, powered by validated data.
