@@ -62,13 +62,18 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive",
             )
-        # Early product phases: any SMA Workspace login is treated as admin.
-        # Tighten to SMA_ADMIN_EMAILS / team assignments before client portal.
+        # An SMA Workspace login is provisioned at the lowest useful role.
+        # Admin comes only from SMA_ADMIN_EMAILS — never from the domain alone,
+        # or every staff address would silently hold full cross-client access.
         user = User(
             email=email,
             name=payload.get("name"),
             google_sub=payload.get("sub"),
-            role=UserRole.SMA_ADMIN,
+            role=(
+                UserRole.SMA_ADMIN
+                if email in settings.admin_email_set
+                else UserRole.SMA_TEAM
+            ),
             is_active=True,
         )
         db.add(user)

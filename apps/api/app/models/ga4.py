@@ -12,6 +12,7 @@ from app.models.config import OrganicChannel
 
 class StagingGa4Traffic(Base):
     __tablename__ = "staging_ga4_traffic"
+    __table_args__ = (Index("ix_staging_ga4_traffic_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)
@@ -30,6 +31,7 @@ class StagingGa4Traffic(Base):
 
 class StagingGa4Event(Base):
     __tablename__ = "staging_ga4_events"
+    __table_args__ = (Index("ix_staging_ga4_events_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)

@@ -10,6 +10,7 @@ from app.core.db import Base
 
 class StagingSerAuditPage(Base):
     __tablename__ = "staging_ser_audit_pages"
+    __table_args__ = (Index("ix_staging_ser_audit_pages_job", "job_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sync_jobs.id"), nullable=False)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -11,6 +13,20 @@ from app.models.client import Client
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 
 _GOOGLE_PROVIDERS = (IntegrationProvider.GSC, IntegrationProvider.GA4)
+
+# Google access tokens live ~1h. Cache per refresh token (the grant is shared
+# workspace-wide) so a daily cycle spends one token request instead of one per
+# fetch call, and refresh a little early to avoid mid-job expiry.
+_TOKEN_EXPIRY_SKEW = timedelta(minutes=5)
+_FALLBACK_TOKEN_TTL = timedelta(minutes=45)
+_token_cache: dict[str, tuple[str, datetime]] = {}
+_token_lock = threading.Lock()
+
+
+def reset_access_token_cache() -> None:
+    """Drop cached access tokens (tests, and after a reconnect)."""
+    with _token_lock:
+        _token_cache.clear()
 
 
 def _integration_row(db: Session, client_id: UUID, provider: IntegrationProvider) -> Integration | None:
@@ -33,13 +49,15 @@ def _refresh_token_from_row(integration: Integration | None) -> str | None:
 
 def workspace_google_refresh_token(db: Session) -> str | None:
     """Any client's Google Data OAuth grant — shared across the workspace."""
+    # Streamed, not .all(): every row holds the same grant, so the first hit
+    # wins and we avoid decrypting ~70 blobs to answer one question.
     rows = (
         db.query(Integration)
         .filter(
             Integration.provider.in_(_GOOGLE_PROVIDERS),
             Integration.credentials.isnot(None),
         )
-        .all()
+        .yield_per(20)
     )
     for row in rows:
         refresh_token = _refresh_token_from_row(row)
@@ -106,28 +124,12 @@ def propagate_google_credentials(db: Session, cred_payload: dict) -> None:
     for client_id in client_ids:
         upsert_google_credentials_for_client(db, client_id, cred_payload, commit=False)
     db.commit()
+    # A reconnect may replace the grant; never serve a token from the old one.
+    reset_access_token_cache()
 
 
-def persist_google_tokens(db: Session, client_id: UUID, *, refresh_token: str, access_token: str) -> None:
-    """Keep GSC + GA4 rows on the same refreshed credential payload (workspace-wide)."""
-    propagate_google_credentials(
-        db,
-        {
-            "refresh_token": refresh_token,
-            "token": access_token,
-            "token_type": "Bearer",
-            "scope": " ".join(DATA_OAUTH_SCOPES),
-        },
-    )
-
-
-def access_token_for_client(db: Session, client_id: UUID) -> str:
-    """Always mint a fresh Google access token for ingestion jobs."""
+def _mint_access_token(refresh_token: str) -> tuple[str, datetime]:
     settings = get_settings()
-    if not settings.google_data_oauth_client_id or not settings.google_data_oauth_client_secret:
-        raise RuntimeError("GOOGLE_DATA_OAUTH_CLIENT_ID/SECRET not configured")
-
-    refresh_token = load_google_refresh_token(db, client_id)
     creds = credentials_from_tokens(
         refresh_token=refresh_token,
         client_id=settings.google_data_oauth_client_id,
@@ -143,5 +145,40 @@ def access_token_for_client(db: Session, client_id: UUID) -> str:
                 "Google OAuth refresh failed — reconnect Google in Clients → Integrations"
             ) from exc
         raise
-    persist_google_tokens(db, client_id, refresh_token=refresh_token, access_token=token)
+
+    expiry = getattr(creds, "expiry", None)
+    if expiry is None:
+        expiry = datetime.now(timezone.utc) + _FALLBACK_TOKEN_TTL
+    elif expiry.tzinfo is None:
+        # google-auth returns a naive UTC datetime.
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return token, expiry
+
+
+def access_token_for_client(db: Session, client_id: UUID) -> str:
+    """
+    Return a Google access token for ingestion, reusing a cached one when valid.
+
+    Previously this refreshed on every call and then rewrote the encrypted
+    credential blob for *every* client (2 rows each). At 35 clients that was
+    ~140 token requests and ~9,800 encrypted writes per daily cycle, growing
+    with the square of the client count. The stored access token is never read
+    back — only `refresh_token` is — so persisting it here bought nothing.
+    """
+    settings = get_settings()
+    if not settings.google_data_oauth_client_id or not settings.google_data_oauth_client_secret:
+        raise RuntimeError("GOOGLE_DATA_OAUTH_CLIENT_ID/SECRET not configured")
+
+    refresh_token = load_google_refresh_token(db, client_id)
+    now = datetime.now(timezone.utc)
+
+    with _token_lock:
+        cached = _token_cache.get(refresh_token)
+        if cached is not None and cached[1] - _TOKEN_EXPIRY_SKEW > now:
+            return cached[0]
+
+    token, expiry = _mint_access_token(refresh_token)
+
+    with _token_lock:
+        _token_cache[refresh_token] = (token, expiry)
     return token

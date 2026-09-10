@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from app.ingestion.google_http import post_json, request_with_retry
+
 ACCOUNT_SUMMARIES_URL = "https://analyticsadmin.googleapis.com/v1beta/accountSummaries"
 RUN_REPORT_URL = "https://analyticsdata.googleapis.com/v1beta/{property}:runReport"
 
@@ -17,12 +19,14 @@ def list_ga4_properties(access_token: str) -> list[dict[str, str]]:
             params: dict[str, Any] = {"pageSize": 200}
             if page_token:
                 params["pageToken"] = page_token
-            res = client.get(
-                ACCOUNT_SUMMARIES_URL,
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params,
+            res = request_with_retry(
+                lambda: client.get(
+                    ACCOUNT_SUMMARIES_URL,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                ),
+                description="GA4 accountSummaries.list",
             )
-            res.raise_for_status()
             data = res.json()
             for account in data.get("accountSummaries") or []:
                 account_name = account.get("displayName") or ""
@@ -69,15 +73,16 @@ def run_report(
                 "limit": str(limit),
                 "offset": str(offset),
             }
-            res = client.post(
+            res = post_json(
+                client,
                 url,
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
                 },
                 json=body,
+                description=f"GA4 runReport offset={offset}",
             )
-            res.raise_for_status()
             data = res.json()
             batch = list(data.get("rows") or [])
             if not batch:

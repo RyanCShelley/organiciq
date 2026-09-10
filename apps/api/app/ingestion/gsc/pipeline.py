@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.ingestion.gsc.fetch import fetch_gsc_daily, fetch_gsc_pages, fetch_gsc_queries
 from app.ingestion.gsc.publish import publish_gsc_daily, publish_gsc_pages, publish_gsc_queries
 from app.ingestion.gsc.validate import ValidationError, validate_gsc_pages, validate_gsc_queries
+from app.ingestion.staging_cleanup import purge_staging_for_job
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
 
@@ -133,6 +134,7 @@ def run_gsc_pages_job(db: Session, job: SyncJob) -> SyncJob:
                 validation_status=ValidationStatus.PASSED,
             )
             _touch_integration(db, job.client_id, success=True, fact_date=job.end_date, error=None)
+            purge_staging_for_job(db, job_id=job.id, source=job.source)
             return job
 
         if max_date is None:
@@ -167,6 +169,7 @@ def run_gsc_pages_job(db: Session, job: SyncJob) -> SyncJob:
             fact_date=max_date,
             error=job.error_message,
         )
+        purge_staging_for_job(db, job_id=job.id, source=job.source)
         return job
     except Exception as exc:  # noqa: BLE001 — durable job failure boundary
         return _fail_gsc_job(db, job, source="gsc_pages", exc=exc)
@@ -209,6 +212,7 @@ def run_gsc_queries_job(db: Session, job: SyncJob) -> SyncJob:
                 validation_status=ValidationStatus.PASSED,
             )
             _touch_integration(db, job.client_id, success=True, fact_date=job.end_date, error=None)
+            purge_staging_for_job(db, job_id=job.id, source=job.source)
             return job
 
         if max_date is None:
@@ -243,6 +247,7 @@ def run_gsc_queries_job(db: Session, job: SyncJob) -> SyncJob:
             fact_date=max_date,
             error=job.error_message,
         )
+        purge_staging_for_job(db, job_id=job.id, source=job.source)
         return job
     except Exception as exc:  # noqa: BLE001
         return _fail_gsc_job(db, job, source="gsc_queries", exc=exc)

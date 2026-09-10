@@ -42,9 +42,15 @@ async function mintApiToken(input: {
   if (!secret || !input.email) return undefined;
 
   try {
+    // Shared secret gating the upsert: it mints staff users, so the API must
+    // only accept it from this app. Required in production on both sides.
+    const internalSecret = process.env.INTERNAL_API_SECRET;
     const res = await fetch(`${apiUrl}/auth/upsert`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(internalSecret ? { "X-OrganicIQ-Internal-Secret": internalSecret } : {}),
+      },
       body: JSON.stringify({
         email: input.email,
         name: input.name,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -90,13 +91,27 @@ def maybe_run_daily_sync(db: Session) -> bool:
         return False
 
     today = now.date()
-    checkpoint = db.get(SchedulerCheckpoint, DAILY_CHECKPOINT)
+    # Lock the checkpoint row: with more than one worker, an unlocked
+    # read-then-write lets two of them both decide the run is due and enqueue
+    # the whole cycle twice.
+    checkpoint = (
+        db.query(SchedulerCheckpoint)
+        .filter(SchedulerCheckpoint.name == DAILY_CHECKPOINT)
+        .with_for_update()
+        .one_or_none()
+    )
     if checkpoint is None:
         checkpoint = SchedulerCheckpoint(name=DAILY_CHECKPOINT, last_run_date=None)
         db.add(checkpoint)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # Another worker created it first; it owns this run.
+            db.rollback()
+            return False
 
     if checkpoint.last_run_date == today:
+        db.rollback()
         return False
 
     stats = enqueue_daily_syncs(db)

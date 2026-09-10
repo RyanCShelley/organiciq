@@ -11,10 +11,21 @@ logger = logging.getLogger("organiciq.worker")
 
 
 def _jobs_module():
-    """Reload job dispatch each cycle so worker picks up code changes without a manual restart."""
+    """
+    Return the job dispatch module.
+
+    In development each cycle hot-reloads ingestion code so edits land without a
+    worker restart. That must never run in production: reloading modules that
+    define SQLAlchemy models and enums re-creates those classes mid-process,
+    which breaks identity checks and mapper registration in ways that surface as
+    sporadic job failures — and it burns CPU on every poll.
+    """
     import sys
 
     from app.services import jobs
+
+    if get_settings().is_production:
+        return jobs
 
     importlib.reload(jobs)
     for module_name in (
