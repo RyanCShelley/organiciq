@@ -168,6 +168,16 @@ def _baseline_comparison(
     return {
         "configured": has_baseline,
         "as_of": client.baseline_as_of.isoformat() if client.baseline_as_of else None,
+        # The window the snapshot was measured over — distinct from
+        # current_window, which is the period being viewed.
+        "period_start": (
+            client.baseline_period_start.isoformat() if client.baseline_period_start else None
+        ),
+        "period_end": (
+            client.baseline_period_end.isoformat()
+            if client.baseline_period_end
+            else (client.baseline_as_of.isoformat() if client.baseline_as_of else None)
+        ),
         "source": client.baseline_source,
         "notes": client.baseline_notes,
         "tier_name": tier_name,

@@ -439,3 +439,60 @@ def test_google_clients_no_longer_call_raise_for_status_directly():
         assert "raise_for_status" not in inspect.getsource(module), (
             f"{module.__name__} must route through google_http retry"
         )
+
+
+# --- Baseline hero copy: the snapshot's own window, not the viewed period ---
+
+
+def test_baseline_payload_exposes_its_measured_window(db, client_a):
+    """
+    The hero says what the snapshot is frozen between. That has to come from
+    the baseline's own window — `current_window` is the period being viewed.
+    """
+    from datetime import date as date_cls
+
+    from app.services.dashboard import _baseline_comparison
+
+    client_a.baseline_as_of = date_cls(2026, 9, 9)
+    client_a.baseline_period_start = date_cls(2026, 8, 11)
+    client_a.baseline_period_end = date_cls(2026, 9, 9)
+    client_a.baseline_monthly_sessions = 2863
+    client_a.baseline_monthly_leads = 19
+    db.commit()
+
+    payload = _baseline_comparison(
+        client_a,
+        current_sessions=1000,
+        current_leads=10,
+        current_lead_rate=1.0,
+        current_window=(date_cls(2026, 6, 12), date_cls(2026, 9, 9)),
+    )
+
+    assert payload["period_start"] == "2026-08-11"
+    assert payload["period_end"] == "2026-09-09"
+    # The viewed period stays separate and must not leak into the frozen line.
+    assert payload["current_window"]["from"] == "2026-06-12"
+
+
+def test_baseline_period_end_falls_back_to_as_of(db, client_a):
+    """Manual snapshots record no window; the hero still reports a true date."""
+    from datetime import date as date_cls
+
+    from app.services.dashboard import _baseline_comparison
+
+    client_a.baseline_as_of = date_cls(2026, 9, 9)
+    client_a.baseline_period_start = None
+    client_a.baseline_period_end = None
+    client_a.baseline_monthly_sessions = 2863
+    db.commit()
+
+    payload = _baseline_comparison(
+        client_a,
+        current_sessions=None,
+        current_leads=None,
+        current_lead_rate=None,
+        current_window=None,
+    )
+
+    assert payload["period_start"] is None
+    assert payload["period_end"] == "2026-09-09"

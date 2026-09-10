@@ -60,6 +60,10 @@ class Client(Base):
     custom_watchlist_cadence: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Dashboard baseline snapshot (calculator / contract start)
     baseline_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # The window the snapshot was measured over. Previously only the end date
+    # (baseline_as_of) was kept and the start survived as free text in notes.
+    baseline_period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    baseline_period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     baseline_monthly_sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     baseline_monthly_leads: Mapped[int | None] = mapped_column(Integer, nullable=True)
     baseline_lead_rate_pct: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)

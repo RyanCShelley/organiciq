@@ -15,7 +15,12 @@ import {
   type DashboardBaseline,
   type DashboardResponse,
 } from "@/lib/dashboard";
-import { comparisonLabelFor, parseCompareMode, type CompareMode } from "@/lib/date-range";
+import {
+  comparisonLabelFor,
+  formatDateLabel,
+  parseCompareMode,
+  type CompareMode,
+} from "@/lib/date-range";
 
 function formatNum(value: number | null): string {
   if (value === null || Number.isNaN(value)) return "—";
@@ -28,42 +33,22 @@ function leadGoalLabel(periodDays: number | null): string {
   return `Lead Goal (${periodDays} days)`;
 }
 
-/** Headline for the baseline hero, driven by how many core metrics beat the snapshot. */
-function baselineHeadline(baseline: DashboardBaseline): string {
-  const deltas = [
-    baseline.vs_current.sessions.change_pct,
-    baseline.vs_current.leads.change_pct,
-    baseline.vs_current.lead_rate.change_pct,
-  ];
-  const measured = deltas.filter((value): value is number => value !== null);
-  if (measured.length === 0) {
-    return "Not enough data yet to compare against the frozen kickoff snapshot.";
-  }
-  const ahead = measured.filter((value) => value > 0).length;
-  if (ahead === measured.length) {
-    return "Every core metric is ahead of the frozen kickoff snapshot.";
-  }
-  if (ahead === 0) {
-    return "No core metric is ahead of the frozen kickoff snapshot yet.";
-  }
-  return `${ahead} of ${measured.length} core metrics are ahead of the frozen kickoff snapshot.`;
-}
+/**
+ * "Snapshot frozen between X and Y" from the window the baseline was measured
+ * over. Falls back to the single date when only `as_of` is known (manual
+ * snapshots), and to nothing when no date was ever recorded.
+ */
+function baselineFrozenLine(baseline: DashboardBaseline): string | null {
+  const start = baseline.period_start;
+  const end = baseline.period_end ?? baseline.as_of;
 
-/** Provenance line: when the snapshot was frozen and which window it is compared against. */
-function baselineSnapshotLine(baseline: DashboardBaseline): string | null {
-  const parts: string[] = [];
-  if (baseline.as_of) parts.push(`Snapshot as of ${baseline.as_of}`);
-  if (baseline.source) parts.push(baseline.source);
-  if (baseline.tier_name) parts.push(baseline.tier_name);
-
-  const window = baseline.current_window;
-  const period = window
-    ? `period ${window.from}\u2192${window.to}${window.days ? ` (${window.days}d \u2192 monthly)` : ""}`
-    : null;
-
-  if (parts.length === 0) return period;
-  const prefix = parts.join(" \u00b7 ");
-  return period ? `${prefix} \u2014 ${period}` : prefix;
+  if (start && end && start !== end) {
+    return `Snapshot frozen between ${formatDateLabel(start)} and ${formatDateLabel(end)}`;
+  }
+  if (end) {
+    return `Snapshot frozen ${formatDateLabel(end)}`;
+  }
+  return null;
 }
 
 function channelBarColor(label: string): string {
@@ -109,7 +94,7 @@ export default async function DashboardPage({
 
   const baselineConfigured = Boolean(data?.baseline.configured);
   const snapshotLine =
-    data && baselineConfigured ? baselineSnapshotLine(data.baseline) : null;
+    data && baselineConfigured ? baselineFrozenLine(data.baseline) : null;
 
   return (
     <section>
@@ -123,14 +108,8 @@ export default async function DashboardPage({
                 <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--brand-lime)]">
                   Baseline
                 </div>
-                {baselineConfigured ? (
-                  <h2 className="mt-2.5 max-w-[24ch] text-pretty font-[family-name:var(--font-display)] text-[27px] font-black leading-[1.15] tracking-[-0.02em] text-white">
-                    {baselineHeadline(data.baseline)}
-                  </h2>
-                ) : null}
-                <p className="mt-2.5 max-w-[62ch] text-[13.5px] leading-relaxed text-[var(--brand-on-dark)]">
-                  Selected period scaled to monthly vs the frozen kickoff /
-                  calculator snapshot.
+                <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
+                  How your data stacks up against your baseline metrics.
                 </p>
               </div>
               {clientId ? (

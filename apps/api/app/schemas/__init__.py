@@ -70,6 +70,8 @@ class ClientCreate(BaseModel):
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
     baseline_as_of: Date | None = None
+    baseline_period_start: Date | None = None
+    baseline_period_end: Date | None = None
     baseline_monthly_sessions: int | None = None
     baseline_monthly_leads: int | None = None
     baseline_lead_rate_pct: float | None = None
@@ -95,6 +97,8 @@ class ClientUpdate(BaseModel):
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
     baseline_as_of: Date | None = None
+    baseline_period_start: Date | None = None
+    baseline_period_end: Date | None = None
     baseline_monthly_sessions: int | None = None
     baseline_monthly_leads: int | None = None
     baseline_lead_rate_pct: float | None = None
@@ -121,6 +125,8 @@ class ClientOut(ORMModel):
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
     baseline_as_of: Date | None = None
+    baseline_period_start: Date | None = None
+    baseline_period_end: Date | None = None
     baseline_monthly_sessions: int | None = None
     baseline_monthly_leads: int | None = None
     baseline_lead_rate_pct: float | None = None
@@ -204,6 +210,8 @@ class AnnotationImportResponse(BaseModel):
 
 class BaselineUpdate(BaseModel):
     baseline_as_of: Date | None = None
+    baseline_period_start: Date | None = None
+    baseline_period_end: Date | None = None
     baseline_monthly_sessions: int | None = None
     baseline_monthly_leads: int | None = None
     baseline_lead_rate_pct: float | None = None

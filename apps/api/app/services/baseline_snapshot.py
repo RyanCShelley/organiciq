@@ -132,6 +132,8 @@ def apply_baseline_from_ga4(
         client,
         ClientUpdate(
             baseline_as_of=date.fromisoformat(preview["baseline_as_of"]),
+            baseline_period_start=date.fromisoformat(preview["window"]["from"]),
+            baseline_period_end=date.fromisoformat(preview["window"]["to"]),
             baseline_monthly_sessions=preview["baseline_monthly_sessions"],
             baseline_monthly_leads=preview["baseline_monthly_leads"],
             baseline_lead_rate_pct=preview["baseline_lead_rate_pct"],
