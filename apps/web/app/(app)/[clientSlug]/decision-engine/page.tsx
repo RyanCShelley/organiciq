@@ -23,10 +23,15 @@ import {
 import { resolvePlanAllowances } from "@/lib/plan-allowances";
 import { withNavContext } from "@/lib/navigation";
 
+const READINESS_LABELS: Record<string, string> = {
+  search_console: "Search Console",
+  analytics: "GA4 conversions",
+  crawl_audit: "Site crawl",
+  ai_visibility: "AI visibility",
+};
+
 function readinessLabel(key: string): string {
-  if (key === "search_console") return "Search Console";
-  if (key === "crawl_audit") return "Crawl / Audit";
-  return key;
+  return READINESS_LABELS[key] ?? key.replaceAll("_", " ");
 }
 
 export default async function DecisionEnginePage({
@@ -136,12 +141,22 @@ export default async function DecisionEnginePage({
       ) : null}
 
       {data ? (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {Object.entries(data.readiness).map(([key, ready]) => (
-            <span key={key} className={`badge ${ready ? "badge-success" : "badge-warning"}`}>
-              {readinessLabel(key)}
-            </span>
-          ))}
+        <div className="mt-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            Data feeding this run
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {Object.entries(data.readiness).map(([key, ready]) => (
+              <span key={key} className={`badge ${ready ? "badge-success" : "badge-neutral"}`}>
+                {readinessLabel(key)}
+                {ready ? "" : " · no data"}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-[var(--text-tertiary)]">
+            Each source powers different levers. Sources without data are skipped — the
+            rest still run.
+          </p>
         </div>
       ) : null}
 

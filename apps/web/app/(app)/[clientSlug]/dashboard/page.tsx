@@ -109,7 +109,7 @@ export default async function DashboardPage({
                   Baseline
                 </div>
                 <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
-                  How your data stacks up against your baseline metrics.
+                  How we&rsquo;ve progressed since we started.
                 </p>
               </div>
               {clientId ? (
@@ -141,12 +141,13 @@ export default async function DashboardPage({
               <div className="metric-grid mt-[18px]">
                 <MetricCard
                   tone="glass"
-                  label="Monthly sessions vs baseline"
-                  metric={data.baseline.vs_current.sessions}
+                  label="Lead rate vs baseline"
+                  metric={data.baseline.vs_current.lead_rate}
+                  unit="pct"
                   comparisonLabel="vs baseline"
                   hint={
-                    data.baseline.monthly_sessions != null
-                      ? `Baseline ${data.baseline.monthly_sessions.toLocaleString()}/mo`
+                    data.baseline.lead_rate != null
+                      ? `Baseline ${formatNum(data.baseline.lead_rate)}%`
                       : undefined
                   }
                 />
@@ -163,13 +164,12 @@ export default async function DashboardPage({
                 />
                 <MetricCard
                   tone="glass"
-                  label="Lead rate vs baseline"
-                  metric={data.baseline.vs_current.lead_rate}
-                  unit="pct"
+                  label="Monthly sessions vs baseline"
+                  metric={data.baseline.vs_current.sessions}
                   comparisonLabel="vs baseline"
                   hint={
-                    data.baseline.lead_rate != null
-                      ? `Baseline ${formatNum(data.baseline.lead_rate)}%`
+                    data.baseline.monthly_sessions != null
+                      ? `Baseline ${data.baseline.monthly_sessions.toLocaleString()}/mo`
                       : undefined
                   }
                 />

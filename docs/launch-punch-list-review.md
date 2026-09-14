@@ -161,11 +161,18 @@ averaging over a shorter span and reporting it as 90 days.
 5. **W2, W4** — export and distribution chart; both reuse what exists.
 6. **W5, C2, W6** — post-launch.
 
-## Open questions
+## Decisions (2026-09-14)
 
-- **D4**: top-by-conversion only, or top-by-sessions with conversion columns?
-- **W1**: remove the date picker from Watch List, or build the historical view
-  on `facts_ser_rankings`?
-- **S5**: should saved projections be recalculated when the baseline is rebuilt,
-  or frozen as a point-in-time benchmark to measure against? The note's framing
-  ("know if we're hitting our benchmarks over time") implies frozen.
+**D4 — top pages.** Not ranked by conversions alone. Pages with conversion
+impact rank higher, but pages that could move traffic and visibility stay
+visible. So: a blended rank that weights key events above sessions rather than
+filtering to converters, with GA4 columns added alongside the GSC ones the page
+shows today.
+
+**W1 — Watch List dates.** Remove the picker. The ranking distribution chart
+carries the over-time story instead, so no historical view is needed on this
+page.
+
+**S5 — projections.** Freeze the checkpoints at the point the baseline is built,
+and re-run them annually. Stored projections therefore need their own
+`generated_on` date so a stale set is visible as stale.

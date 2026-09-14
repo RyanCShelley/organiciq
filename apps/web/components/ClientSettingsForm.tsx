@@ -1,5 +1,6 @@
 "use client";
 
+import { ExternalLink } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { updateClientSettingsAction } from "@/app/(app)/actions";
@@ -125,14 +126,27 @@ export function ClientSettingsForm({
         </FieldLabel>
       </div>
 
-      <FieldLabel label="Google Sheet account record">
-        <Input
-          name="account_sheet_url"
-          type="url"
-          defaultValue={client.account_sheet_url ?? ""}
-          placeholder="https://docs.google.com/spreadsheets/..."
-        />
-      </FieldLabel>
+      <div className="flex flex-col gap-1">
+        <FieldLabel label="Google Sheet account record">
+          <Input
+            name="account_sheet_url"
+            type="url"
+            defaultValue={client.account_sheet_url ?? ""}
+            placeholder="https://docs.google.com/spreadsheets/..."
+          />
+        </FieldLabel>
+        {client.account_sheet_url ? (
+          <a
+            href={client.account_sheet_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex w-fit items-center gap-1.5 text-xs font-semibold text-[var(--brand-teal-hover)] hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" aria-hidden />
+            Open account record
+          </a>
+        ) : null}
+      </div>
 
       <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
         <div>

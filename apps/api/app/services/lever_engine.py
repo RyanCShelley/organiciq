@@ -1263,9 +1263,28 @@ def diagnose(
         or 0
     ) > 0
 
+    # GA4 drives the Conversion Path lever, which needs no Search Console data.
+    ga4_period = _effective_range(from_date, to_date, watermarks.get("ga4"))
+    ga4_rows = 0
+    if ga4_period is not None:
+        ga4_start, ga4_end = ga4_period
+        ga4_rows = (
+            db.query(func.count())
+            .select_from(FactGa4Traffic)
+            .filter(
+                FactGa4Traffic.client_id == client.id,
+                FactGa4Traffic.date >= ga4_start,
+                FactGa4Traffic.date <= ga4_end,
+            )
+            .scalar()
+            or 0
+        )
+
     readiness = {
         "search_console": gsc_rows > 0,
+        "analytics": ga4_rows > 0,
         "crawl_audit": crawl_ready,
+        "ai_visibility": ai_period is not None,
     }
     base_result = {
         "requested_from": from_date,
@@ -1274,11 +1293,19 @@ def diagnose(
         "analysis_to": gsc_period[1] if gsc_period else None,
         "partial_message": partial_message,
     }
-    if gsc_rows == 0:
+    # Run whatever the available data supports rather than requiring Search
+    # Console for everything. Page-level levers (internal linking, SERP CTR,
+    # technical) need GSC demand and simply produce nothing without it, but
+    # Conversion Path runs off GA4 alone and AI visibility off SE Ranking —
+    # gating all of them on GSC left GA4-only clients with an empty engine.
+    if not any(readiness.values()):
         return DiagnoseResult(
             ready=False,
             message=block_message
-            or "Search Console page facts are required before the Decision Engine can run.",
+            or (
+                "No validated facts yet. Connect and sync at least one source "
+                "(Search Console, GA4, SE Ranking, or a site crawl)."
+            ),
             readiness=readiness,
             formula=SCORE_FORMULA,
             levers=_lever_summaries([], []),
@@ -1291,7 +1318,6 @@ def diagnose(
     issues_by_url, site_issue_codes = _load_audit_issues(db, client.id)
 
     lead_events = _lead_event_names(db, client.id)
-    ga4_period = _effective_range(from_date, to_date, watermarks.get("ga4"))
     site_period = ga4_period or gsc_period
     site = load_site_business_context(
         db,
@@ -1301,12 +1327,18 @@ def diagnose(
         dashboard=dashboard,
     )
     page_urls = [page.normalized_url for page in pages]
-    page_contexts = load_page_business_contexts(
-        db,
-        client_id=client.id,
-        period=gsc_period,
-        lead_events=lead_events,
-        normalized_urls=page_urls,
+    # gsc_period can be None now that GSC is no longer a hard prerequisite;
+    # with no GSC there are no page URLs to build contexts for either.
+    page_contexts = (
+        load_page_business_contexts(
+            db,
+            client_id=client.id,
+            period=gsc_period,
+            lead_events=lead_events,
+            normalized_urls=page_urls,
+        )
+        if gsc_period is not None and page_urls
+        else {}
     )
     site = with_p90_sessions(site, page_contexts)
     thresholds = _load_thresholds(db, client.id)

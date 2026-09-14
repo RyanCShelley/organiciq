@@ -318,3 +318,57 @@ def test_serp_ctr_page_rule(db, client_a):
     result = diagnose(db, client_a, from_date=start, to_date=end)
     serp = [row for row in result.findings if row.lever == "serp_ctr"]
     assert len(serp) == 1
+
+
+def test_diagnose_runs_on_ga4_without_search_console(db, client_a):
+    """
+    GA4-only clients must still get an engine run.
+
+    Search Console used to be a hard prerequisite, so a client with good
+    conversion data but no GSC got ready=False and zero findings — including
+    from Conversion Path, which reads GA4 alone.
+    """
+    start = date(2026, 8, 2)
+    end = date(2026, 8, 31)
+    _watermark(db, client_a.id, "ga4", end)
+    db.add(
+        ConversionDefinition(
+            id=uuid4(),
+            client_id=client_a.id,
+            event_name="generate_lead",
+            conversion_name="Lead",
+            conversion_type="lead",
+            is_primary=True,
+            active=True,
+        )
+    )
+    db.add(
+        FactGa4Traffic(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            session_source="google",
+            session_medium="organic",
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            sessions=Decimal("500"),
+            active_users=Decimal("500"),
+            views=Decimal("600"),
+        )
+    )
+    db.commit()
+
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+
+    assert result.ready is True, "GA4 facts alone must not be treated as unusable"
+    assert result.readiness["analytics"] is True
+    assert result.readiness["search_console"] is False
+
+
+def test_diagnose_blocked_only_when_every_source_is_empty(db, client_a):
+    start, end = date_window(7)
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+
+    assert result.ready is False
+    assert not any(result.readiness.values())

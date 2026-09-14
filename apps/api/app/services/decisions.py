@@ -53,7 +53,12 @@ def run_diagnose(
         return DiagnoseResult(
             ready=False,
             message="Decision Engine is disabled.",
-            readiness={"search_console": False, "crawl_audit": False},
+            readiness={
+                "search_console": False,
+                "analytics": False,
+                "crawl_audit": False,
+                "ai_visibility": False,
+            },
             formula="",
             requested_from=from_date,
             requested_to=to_date,
