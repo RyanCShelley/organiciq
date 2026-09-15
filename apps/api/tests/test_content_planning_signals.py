@@ -133,3 +133,49 @@ def test_opportunity_types_are_not_all_identical():
         for pos, mult in [(6.0, 0.1), (4.5, 1.0), (14.0, 1.0)]
     }
     assert len(labels) == 3, "the label must distinguish work types, not paint one constant"
+
+
+# --- C2: SE Ranking cross-reference on content opportunities ----------------
+
+
+def test_tracked_keywords_join_matches_on_normalized_url(db, client_a):
+    """
+    Opportunities are page-level and carry no query, so a query-to-keyword text
+    match is impossible. The join is on ranking URL instead, which is exact.
+    """
+    from uuid import uuid4
+
+    from app.models.seranking import FactSerKeyword
+    from app.services.lever_engine import _tracked_keywords_by_url
+
+    for keyword, url in [
+        ("seo services", "https://example.com/services/seo"),
+        ("seo agency", "https://example.com/services/seo/"),  # trailing slash
+        ("pricing", "https://example.com/pricing"),
+        ("untracked page", None),
+    ]:
+        db.add(
+            FactSerKeyword(
+                id=uuid4(),
+                client_id=client_a.id,
+                keyword_id=str(uuid4()),
+                keyword=keyword,
+                site_engine_id="1",
+                ranking_url=url,
+            )
+        )
+    db.commit()
+
+    counts = _tracked_keywords_by_url(db, client_a.id)
+
+    # Both spellings of the services URL collapse to one normalized key.
+    assert counts["https://example.com/services/seo"] == 2
+    assert counts["https://example.com/pricing"] == 1
+    assert None not in counts
+
+
+def test_tracked_keywords_defaults_to_zero_when_unmatched(db, client_a):
+    from app.services.lever_engine import _tracked_keywords_by_url
+
+    counts = _tracked_keywords_by_url(db, client_a.id)
+    assert counts.get("https://example.com/never-seen", 0) == 0

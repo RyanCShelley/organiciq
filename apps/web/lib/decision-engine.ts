@@ -42,6 +42,8 @@ export type SearchOpportunity = {
   average_position: number | null;
   page_type: string | null;
   opportunity_type: string;
+  /** Tracked SE Ranking keywords already ranking on this page. */
+  tracked_keywords: number;
   diagnosis: string;
 };
 

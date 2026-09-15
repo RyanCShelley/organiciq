@@ -456,6 +456,8 @@ class SearchOpportunityOut(BaseModel):
     average_position: float | None = None
     page_type: str | None = None
     opportunity_type: str
+    # Tracked SE Ranking keywords already ranking on this page.
+    tracked_keywords: int = 0
     diagnosis: str
 
 

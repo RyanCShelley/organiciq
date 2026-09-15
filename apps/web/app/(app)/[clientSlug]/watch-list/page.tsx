@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Download } from "lucide-react";
 
 import { DataTable } from "@/components/analytics/DataTable";
+import { AiPresenceSummary } from "@/components/analytics/AiPresenceSummary";
 import { PositionDistribution } from "@/components/analytics/PositionDistribution";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -54,6 +55,24 @@ function formatNum(value: number | null): string {
 function formatBool(value: boolean | null): string {
   if (value === null) return "—";
   return value ? "Yes" : "No";
+}
+
+/**
+ * checked_at arrives as a full ISO timestamp. Rendered raw it is ~32 characters
+ * in a narrow column, which is what made the dates look cramped. Show the date,
+ * keep the exact time in the tooltip.
+ */
+function CheckedAt({ value }: { value: string | null }) {
+  if (!value) return <span className="text-[var(--text-tertiary)]">—</span>;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return <span className="whitespace-nowrap">{value}</span>;
+  }
+  return (
+    <span className="whitespace-nowrap text-[var(--text-secondary)]" title={value}>
+      {parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+    </span>
+  );
 }
 
 function formatSerpFeatures(features: string[]): string {
@@ -171,6 +190,10 @@ export default async function WatchListPage({
         />
       ) : null}
 
+      {tab === "ai" && aiRows.length > 0 ? (
+        <AiPresenceSummary className="mt-4" rows={aiRows} />
+      ) : null}
+
       {tab === "search" ? (
         <section className="mt-4 workspace-section">
           <SectionHeader
@@ -194,7 +217,11 @@ export default async function WatchListPage({
                   {
                     key: "keyword",
                     header: "Keyword",
-                    render: (row) => row.keyword,
+                    render: (row) => (
+                      <span className="block max-w-[22rem] truncate" title={row.keyword}>
+                        {row.keyword}
+                      </span>
+                    ),
                   },
                   {
                     key: "group",
@@ -228,7 +255,7 @@ export default async function WatchListPage({
                   {
                     key: "checked",
                     header: "Checked",
-                    render: (row) => row.checked_at ?? "—",
+                    render: (row) => <CheckedAt value={row.checked_at} />,
                   },
                 ]}
                 rows={searchRows}
@@ -263,7 +290,13 @@ export default async function WatchListPage({
                   {
                     key: "prompt",
                     header: "Prompt",
-                    render: (row) => row.prompt,
+                    render: (row) => (
+                      // Unconstrained free text was squeezing every other
+                      // column on this tab.
+                      <span className="block max-w-[26rem] truncate" title={row.prompt}>
+                        {row.prompt}
+                      </span>
+                    ),
                   },
                   {
                     key: "engine",
@@ -300,7 +333,7 @@ export default async function WatchListPage({
                   {
                     key: "checked",
                     header: "Checked",
-                    render: (row) => row.checked_at ?? "—",
+                    render: (row) => <CheckedAt value={row.checked_at} />,
                   },
                 ]}
                 rows={aiRows}

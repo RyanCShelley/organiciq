@@ -58,6 +58,7 @@ def _serialize_search_opportunity(row) -> SearchOpportunityOut:
         opportunity_type=str(
             evidence.get("opportunity_type") or "Striking-Distance Opportunity"
         ),
+        tracked_keywords=int(evidence.get("tracked_keywords") or 0),
         diagnosis=row.diagnosis,
     )
 

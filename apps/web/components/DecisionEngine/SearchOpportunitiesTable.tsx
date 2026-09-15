@@ -154,6 +154,22 @@ export function SearchOpportunitiesTable({
                   ),
               },
               {
+                key: "tracked_keywords",
+                header: "Tracked KWs",
+                align: "right",
+                render: (row) =>
+                  row.tracked_keywords > 0 ? (
+                    <span
+                      className="font-semibold text-[var(--brand-teal-hover)]"
+                      title="Tracked SE Ranking keywords already ranking on this page"
+                    >
+                      {row.tracked_keywords}
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text-tertiary)]">—</span>
+                  ),
+              },
+              {
                 key: "opportunity_type",
                 header: "Opportunity Type",
                 render: (row) => (

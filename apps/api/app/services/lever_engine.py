@@ -24,6 +24,7 @@ from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
+from app.core.urls import normalize_url
 from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
 from app.services.action_promotion import promote_findings
 from app.services.dashboard import (
@@ -822,12 +823,40 @@ def _classify_opportunity(*, average_position: float, ctr_percent: float) -> str
     return "Striking distance"
 
 
+def _tracked_keywords_by_url(db: Session, client_id: UUID) -> dict[str, int]:
+    """
+    Tracked SE Ranking keywords per ranking URL.
+
+    Content opportunities are page-level — they carry no query — so a
+    query-to-keyword text match is not possible. Joining on the ranking URL is
+    exact instead of fuzzy, and answers the more useful question: does this page
+    already rank for keywords we track?
+    """
+    rows = (
+        db.query(FactSerKeyword.ranking_url, func.count())
+        .filter(
+            FactSerKeyword.client_id == client_id,
+            FactSerKeyword.ranking_url.isnot(None),
+        )
+        .group_by(FactSerKeyword.ranking_url)
+        .all()
+    )
+    counts: dict[str, int] = {}
+    for raw_url, count in rows:
+        if not raw_url:
+            continue
+        key = normalize_url(raw_url)
+        counts[key] = counts.get(key, 0) + int(count)
+    return counts
+
+
 def _search_opportunities(
     pages: list[PageDemand],
     *,
     actioned_urls: set[str],
     classifications: dict[str, PageClassification],
     thresholds: dict[str, float | int],
+    tracked_by_url: dict[str, int] | None = None,
 ) -> list[LeverFinding]:
     # GEO Grader / structured-data enrichment for Content Opportunities is deferred.
     min_pos = int(thresholds["gsc_striking_distance_min_pos"])
@@ -875,6 +904,7 @@ def _search_opportunities(
                 "ctr_percent": round(page.ctr_percent, 2),
                 "page_type": classification.page_type.value,
                 "priority_topic": classification.priority_topic,
+                "tracked_keywords": (tracked_by_url or {}).get(page.normalized_url, 0),
             },
             baseline_metrics_json={
                 "impressions": page.impressions,
@@ -1424,6 +1454,7 @@ def diagnose(
         actioned_urls=actioned_urls,
         classifications=classifications,
         thresholds=thresholds,
+        tracked_by_url=_tracked_keywords_by_url(db, client.id),
     )
 
     return DiagnoseResult(

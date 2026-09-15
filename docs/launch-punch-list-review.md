@@ -72,10 +72,10 @@ conversions") arguably wants both.
 |---|------|--------|-------|
 | W1 | ~~Date range does nothing → remove it~~ **done** | XS–M | Confirmed. See below. |
 | W2 | ~~Export / download~~ **done** | S | Reuse the CSV route added for the dashboard. |
-| W3 | Cramped dates on the AI tab | XS | Column widths. Still open — needs a look at real rendering. |
+| W3 | ~~Cramped dates on the AI tab~~ **done** | XS | Cause was `checked_at` rendered as a raw ISO timestamp on **both** tabs, plus unconstrained Prompt/Keyword text. |
 | W4 | ~~Position-distribution chart~~ **done** | S | Computed from the rows already on the page, so chart and table cannot disagree. |
-| W5 | AI mention/link presence chart | S–M | Presence metrics exist; needs a time series. |
-| W6 | Flag untracked keywords/prompts | L | New ingestion + new UI. |
+| W5 | ~~AI mention/link presence chart~~ **done** | S–M | Computed from the rows on the page, matching W4. A time series over `facts_ser_ai_checks` remains possible later. |
+| W6 | Flag untracked keywords/prompts | L | **Deferred — see below.** |
 
 **W1 — the note is right, and the reason matters.** The page resolves `from`/`to`
 and then never passes them: `apiFetch("/watch-list/search", { clientId })`. The
@@ -94,9 +94,12 @@ you want before touching it.
 payload under `visibility.search.keyword_distribution`. The chart needs the
 number surfaced on Watch List, not new data.
 
-**W6.** SE Ranking has no insights API, as the note says. The AI-search endpoint
-could surface related prompts/keywords, but this is a new fetch, new staging and
-facts, new UI, and ongoing quota. Genuinely post-launch.
+**W6 — deferred, deliberately.** SE Ranking has no insights API, as the note
+says. The AI-search endpoint could surface related prompts and keywords, but it
+needs a new fetch, new staging and fact tables, new UI, and it adds recurring
+quota against a limit that is already the binding constraint on running more
+than one worker. Nothing else on this list depends on it. Revisit once the
+daily cycle has been timed at 35 clients and there is known quota headroom.
 
 ---
 
@@ -105,7 +108,19 @@ facts, new UI, and ongoing quota. Genuinely post-launch.
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | C1 | ~~Colour-code page type and opportunity type~~ **done** | S | The design defines the chips (`tagBg`/`tagFg` per type: CTR gap, Striking, Topic gap, Near win); the implementation renders no type chip. Straight port. |
-| C2 | Cross-reference SE Ranking | M–L | Needs a join key between GSC queries and SE Ranking keywords — exact-match text is the obvious one and will be lossy. Worth scoping separately. |
+| C2 | Cross-reference SE Ranking | M–L | **Core shipped.** See below. |
+
+**C2 — the planned join was impossible; a better one existed.** The scoping
+assumed matching GSC queries to SE Ranking keyword text. Content opportunities
+are page-level and never carry a query, so that join could not be built at all.
+`FactSerKeyword.ranking_url` gives an exact join instead: each opportunity now
+reports how many tracked keywords already rank on that page, which is the more
+useful question anyway — a striking-distance page that already carries tracked
+keywords is a different bet from one that carries none.
+
+What is *not* shipped is the richer reading of "related opportunities could live
+here": surfacing which specific keywords those are, and pulling SE Ranking
+volume onto the row. Both are additive on top of the join now in place.
 
 ---
 
