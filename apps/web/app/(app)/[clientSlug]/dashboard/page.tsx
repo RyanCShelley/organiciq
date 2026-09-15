@@ -313,6 +313,28 @@ export default async function DashboardPage({
                         </span>
                       ),
                     },
+                    {
+                      key: "lead_rate",
+                      header: "Lead rate",
+                      align: "right",
+                      render: (row) =>
+                        row.lead_rate === null ? (
+                          <span className="text-[var(--text-tertiary)]">—</span>
+                        ) : (
+                          `${row.lead_rate.toFixed(2)}%`
+                        ),
+                    },
+                    {
+                      key: "goal_contribution_pct",
+                      header: "Of goal",
+                      align: "right",
+                      render: (row) =>
+                        row.goal_contribution_pct === null ? (
+                          <span className="text-[var(--text-tertiary)]">—</span>
+                        ) : (
+                          `${row.goal_contribution_pct.toFixed(1)}%`
+                        ),
+                    },
                   ]}
                   rows={data.conversions.leads_by_channel}
                   getRowKey={(row) => row.channel}
@@ -567,6 +589,42 @@ export default async function DashboardPage({
                       ),
                     },
                     {
+                      key: "ga4_sessions",
+                      header: "Sessions",
+                      align: "right",
+                      render: (row) => formatNum(row.ga4_sessions),
+                    },
+                    {
+                      key: "ga4_key_events",
+                      header: "Key events",
+                      align: "right",
+                      render: (row) =>
+                        row.ga4_key_events > 0 ? (
+                          <span className="rounded-full bg-[var(--success-soft)] px-2 py-0.5 text-[11.5px] font-bold text-[var(--success)]">
+                            {formatNum(row.ga4_key_events)}
+                          </span>
+                        ) : (
+                          <span className="text-[var(--text-tertiary)]">0</span>
+                        ),
+                    },
+                    {
+                      key: "session_key_event_rate",
+                      header: "Session → key event",
+                      align: "right",
+                      render: (row) =>
+                        row.session_key_event_rate === null ? (
+                          <span className="text-[var(--text-tertiary)]">—</span>
+                        ) : (
+                          `${row.session_key_event_rate.toFixed(2)}%`
+                        ),
+                    },
+                    {
+                      key: "ga4_views",
+                      header: "Views",
+                      align: "right",
+                      render: (row) => formatNum(row.ga4_views),
+                    },
+                    {
                       key: "gsc_impressions",
                       header: "GSC impr.",
                       align: "right",
@@ -578,24 +636,13 @@ export default async function DashboardPage({
                       align: "right",
                       render: (row) => formatNum(row.gsc_clicks),
                     },
-                    {
-                      key: "ga4_sessions",
-                      header: "GA4 sessions",
-                      align: "right",
-                      render: (row) => formatNum(row.ga4_sessions),
-                    },
-                    {
-                      key: "ga4_views",
-                      header: "GA4 views",
-                      align: "right",
-                      render: (row) => formatNum(row.ga4_views),
-                    },
                   ]}
                   rows={data.traffic.top_pages}
                   getRowKey={(row) => row.page}
                 />
                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                  Ranked by GSC clicks · {data.traffic.top_pages.length} URLs
+                  Ranked by contribution to leads, then traffic and visibility ·{" "}
+                  {data.traffic.top_pages.length} URLs
                   shown
                 </p>
               </div>

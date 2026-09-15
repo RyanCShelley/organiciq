@@ -48,10 +48,10 @@ GA4 and treating GSC as the optional join.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| D1 | Baseline copy → "how we've progressed since we started" | XS | One string. Replaces the line added on 2026-09-10. |
-| D2 | Flip KPI order to lead rate → leads → sessions | XS | Baseline hero cards are currently sessions, leads, lead rate. Reorder three JSX blocks. |
-| D3 | Channels: add lead rate and % of monthly goal | S | Needs `sessions` per channel alongside leads. `FactGa4Traffic.channel` and `FactGa4Event.channel` both exist, so it is one wider query. % of goal = channel leads ÷ `period_lead_goal`. |
-| D4 | Top pages from GA4 | M | See above. Columns: sessions, key events, views, session-to-key-event rate. Rank by key events. |
+| D1 | ~~Baseline copy~~ **done** | XS | One string. Replaces the line added on 2026-09-10. |
+| D2 | ~~Flip KPI order~~ **done** | XS | Baseline hero cards are currently sessions, leads, lead rate. Reorder three JSX blocks. |
+| D3 | ~~Channels: add lead rate and % of monthly goal~~ **done** | S | Needs `sessions` per channel alongside leads. `FactGa4Traffic.channel` and `FactGa4Event.channel` both exist, so it is one wider query. % of goal = channel leads ÷ `period_lead_goal`. |
+| D4 | ~~Top pages from GA4~~ **done** | M | See above. Columns: sessions, key events, views, session-to-key-event rate. Rank by key events. |
 
 **D3 detail.** `leads_by_channel` currently returns `{channel, label, leads}`.
 Adding `sessions` gives lead rate per channel for free; `period_lead_goal` is
@@ -70,7 +70,7 @@ conversions") arguably wants both.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| W1 | Date range does nothing → remove it | XS–M | Confirmed. See below. |
+| W1 | ~~Date range does nothing → remove it~~ **done** | XS–M | Confirmed. See below. |
 | W2 | Export / download | S | Reuse the CSV route added for the dashboard. |
 | W3 | Cramped dates on the AI tab | XS | Column widths. |
 | W4 | Position-distribution chart | S | **Data already exists.** |
@@ -113,8 +113,8 @@ facts, new UI, and ongoing quota. Genuinely post-launch.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| E1 | GSC hard-gate blocks GA4-only levers | M | **Highest-value item on this list.** See top of doc. |
-| E2 | Readiness strip is confusing / omits GA4 | S | Add `ga4` to the readiness dict and label the keys in plain language. Do this with E1 so the strip reflects real behaviour. |
+| E1 | ~~GSC hard-gate blocks GA4-only levers~~ **done** | M | **Highest-value item on this list.** See top of doc. |
+| E2 | ~~Readiness strip confusing / omits GA4~~ **done** | S | Add `ga4` to the readiness dict and label the keys in plain language. Do this with E1 so the strip reflects real behaviour. |
 
 ---
 
@@ -122,7 +122,7 @@ facts, new UI, and ongoing quota. Genuinely post-launch.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| S1 | Sheet URL renders as a link once saved | XS | Currently a bare input. |
+| S1 | ~~Sheet URL renders as a link~~ **done** | XS | Currently a bare input. |
 | S2 | "Build snapshot from GA4", not "preview" | S | Naming + making apply the primary action. |
 | S3 | Baseline date is settable; window anchors to it | M | Today `to_date` is hardcoded to the GA4 watermark and `from_date = to − 29d`. No way to anchor to Aug 1. |
 | S4 | 90-day lookback averaged to monthly | S | Once S3 makes the window a parameter, this is a default change plus the existing `_scale_to_monthly`. |
@@ -173,6 +173,8 @@ shows today.
 carries the over-time story instead, so no historical view is needed on this
 page.
 
-**S5 — projections.** Freeze the checkpoints at the point the baseline is built,
-and re-run them annually. Stored projections therefore need their own
-`generated_on` date so a stale set is visible as stale.
+**S5 — projections.** Freeze the checkpoints at the point the baseline is
+built. Re-running is **manual and on demand** — a "Set / re-run projections"
+control in Client settings — with an annual cadence as the expectation rather
+than an automatic job. Stored projections therefore carry a `generated_on`
+date so a stale set reads as stale and prompts the re-run.

@@ -498,7 +498,14 @@ def _leads_by_channel(
     client_id: UUID,
     event_names: list[str],
     period: tuple[date, date] | None,
+    *,
+    period_goal: int | None = None,
 ) -> list[dict[str, Any]]:
+    """
+    Leads per channel, with the lead rate and each channel's contribution to
+    the period goal — so the table answers "which channel is producing leads,
+    and how efficiently", not just raw counts.
+    """
     if not event_names or period is None:
         return []
     start, end = period
@@ -514,15 +521,40 @@ def _leads_by_channel(
         .all()
     )
     by_channel = {channel: int(total) for channel, total in rows}
-    return [
-        {
-            "channel": channel.value,
-            "label": CHANNEL_LABELS[channel],
-            "leads": by_channel.get(channel, 0),
-        }
-        for channel in OrganicChannel
-        if by_channel.get(channel, 0) > 0
-    ]
+
+    session_rows = (
+        db.query(FactGa4Traffic.channel, func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+        )
+        .group_by(FactGa4Traffic.channel)
+        .all()
+    )
+    sessions_by_channel = {channel: float(total or 0) for channel, total in session_rows}
+
+    out: list[dict[str, Any]] = []
+    for channel in OrganicChannel:
+        leads = by_channel.get(channel, 0)
+        if leads <= 0:
+            continue
+        sessions = sessions_by_channel.get(channel, 0.0)
+        out.append(
+            {
+                "channel": channel.value,
+                "label": CHANNEL_LABELS[channel],
+                "leads": leads,
+                "sessions": sessions,
+                "lead_rate": round((leads / sessions) * 100, 2) if sessions > 0 else None,
+                "goal_contribution_pct": (
+                    round((leads / period_goal) * 100, 1)
+                    if period_goal and period_goal > 0
+                    else None
+                ),
+            }
+        )
+    return out
 
 
 def _gsc_property_metrics(
@@ -894,41 +926,39 @@ def _traffic_by_channel(
     return out
 
 
+# Top pages ranks on a blend rather than conversions alone: a page that
+# converts should outrank an equally-trafficked page that does not, but a
+# high-traffic or high-impression page with no conversions is often the most
+# actionable row on the table and must stay visible. Weights are shares of the
+# period total, so they are comparable across very different magnitudes.
+TOP_PAGE_WEIGHTS = {"key_events": 0.60, "sessions": 0.25, "impressions": 0.15}
+
+
+def _share(value: float, total: float) -> float:
+    return (value / total) if total > 0 else 0.0
+
+
 def _top_pages(
     db: Session,
     client_id: UUID,
     gsc_period: tuple[date, date] | None,
     ga4_period: tuple[date, date] | None,
     *,
+    lead_events: list[str] | None = None,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
-    if gsc_period is None:
-        return []
-    gsc_start, gsc_end = gsc_period
-    gsc_rows = (
-        db.query(
-            FactGscPage.normalized_url,
-            func.coalesce(func.sum(FactGscPage.impressions), 0),
-            func.coalesce(func.sum(FactGscPage.clicks), 0),
-        )
-        .filter(
-            FactGscPage.client_id == client_id,
-            FactGscPage.date >= gsc_start,
-            FactGscPage.date <= gsc_end,
-        )
-        .group_by(FactGscPage.normalized_url)
-        .order_by(func.sum(FactGscPage.clicks).desc())
-        .limit(limit)
-        .all()
-    )
-    if not gsc_rows:
-        return []
+    """
+    Pages ranked by contribution to leads, traffic and visibility.
 
-    urls = [row[0] for row in gsc_rows]
-    ga4_by_url: dict[str, tuple[float, float]] = {}
+    Previously this was GSC-led — top 10 by clicks, with GA4 joined on, and an
+    empty list whenever GSC had no rows. A leads-focused dashboard needs GA4 to
+    lead and GSC to be optional.
+    """
+    ga4_traffic: dict[str, tuple[float, float]] = {}
+    ga4_events: dict[str, float] = {}
     if ga4_period is not None:
         ga4_start, ga4_end = ga4_period
-        ga4_rows = (
+        for url, sessions, views in (
             db.query(
                 FactGa4Traffic.normalized_url,
                 func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
@@ -938,28 +968,84 @@ def _top_pages(
                 FactGa4Traffic.client_id == client_id,
                 FactGa4Traffic.date >= ga4_start,
                 FactGa4Traffic.date <= ga4_end,
-                FactGa4Traffic.normalized_url.in_(urls),
             )
             .group_by(FactGa4Traffic.normalized_url)
             .all()
-        )
-        ga4_by_url = {
-            url: (float(sessions or 0), float(views or 0)) for url, sessions, views in ga4_rows
-        }
+        ):
+            ga4_traffic[url] = (float(sessions or 0), float(views or 0))
+
+        if lead_events:
+            for url, events in (
+                db.query(
+                    FactGa4Event.normalized_url,
+                    func.coalesce(func.sum(FactGa4Event.event_count), 0),
+                )
+                .filter(
+                    FactGa4Event.client_id == client_id,
+                    FactGa4Event.date >= ga4_start,
+                    FactGa4Event.date <= ga4_end,
+                    FactGa4Event.event_name.in_(lead_events),
+                )
+                .group_by(FactGa4Event.normalized_url)
+                .all()
+            ):
+                ga4_events[url] = float(events or 0)
+
+    gsc_by_url: dict[str, tuple[float, float]] = {}
+    if gsc_period is not None:
+        gsc_start, gsc_end = gsc_period
+        for url, impressions, clicks in (
+            db.query(
+                FactGscPage.normalized_url,
+                func.coalesce(func.sum(FactGscPage.impressions), 0),
+                func.coalesce(func.sum(FactGscPage.clicks), 0),
+            )
+            .filter(
+                FactGscPage.client_id == client_id,
+                FactGscPage.date >= gsc_start,
+                FactGscPage.date <= gsc_end,
+            )
+            .group_by(FactGscPage.normalized_url)
+            .all()
+        ):
+            gsc_by_url[url] = (float(impressions or 0), float(clicks or 0))
+
+    urls = set(ga4_traffic) | set(ga4_events) | set(gsc_by_url)
+    if not urls:
+        return []
+
+    total_events = sum(ga4_events.values())
+    total_sessions = sum(sessions for sessions, _ in ga4_traffic.values())
+    total_impressions = sum(impressions for impressions, _ in gsc_by_url.values())
 
     pages: list[dict[str, Any]] = []
-    for url, impressions, clicks in gsc_rows:
-        sessions, views = ga4_by_url.get(url, (0.0, 0.0))
+    for url in urls:
+        sessions, views = ga4_traffic.get(url, (0.0, 0.0))
+        key_events = ga4_events.get(url, 0.0)
+        impressions, clicks = gsc_by_url.get(url, (0.0, 0.0))
+        score = (
+            TOP_PAGE_WEIGHTS["key_events"] * _share(key_events, total_events)
+            + TOP_PAGE_WEIGHTS["sessions"] * _share(sessions, total_sessions)
+            + TOP_PAGE_WEIGHTS["impressions"] * _share(impressions, total_impressions)
+        )
         pages.append(
             {
                 "page": url,
-                "gsc_impressions": float(impressions or 0),
-                "gsc_clicks": float(clicks or 0),
                 "ga4_sessions": sessions,
                 "ga4_views": views,
+                "ga4_key_events": key_events,
+                # Session-to-key-event rate: the page's actual conversion job.
+                "session_key_event_rate": (
+                    round((key_events / sessions) * 100, 2) if sessions > 0 else None
+                ),
+                "gsc_impressions": impressions,
+                "gsc_clicks": clicks,
+                "rank_score": round(score, 6),
             }
         )
-    return pages
+
+    pages.sort(key=lambda row: (row["rank_score"], row["ga4_sessions"]), reverse=True)
+    return pages[:limit]
 
 
 def build_dashboard(db: Session, client: Client, from_date: date, to_date: date) -> dict[str, Any]:
@@ -1055,7 +1141,9 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "lead_events": lead_events,
             "leads": _period_metric(current_leads, previous_leads, leads_series),
             "lead_rate": _period_metric(current_lead_rate, previous_lead_rate, lead_rate_series),
-            "leads_by_channel": _leads_by_channel(db, client.id, lead_events, ga4_current),
+            "leads_by_channel": _leads_by_channel(
+                db, client.id, lead_events, ga4_current, period_goal=period_goal
+            ),
             "monthly_lead_goal": monthly_goal,
             "period_lead_goal": period_goal,
             "goal_period_days": goal_period_days,
@@ -1122,6 +1210,8 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                 views_series,
             ),
             "by_channel": _traffic_by_channel(db, client.id, ga4_current, lead_events),
-            "top_pages": _top_pages(db, client.id, gsc_current, ga4_current),
+            "top_pages": _top_pages(
+                db, client.id, gsc_current, ga4_current, lead_events=lead_events
+            ),
         },
     }

@@ -607,3 +607,133 @@ def test_traffic_by_channel_includes_conversions_and_bounce(db, client_a):
     assert rows[0]["sessions"] == 100.0
     assert rows[0]["conversions"] == 4
     assert rows[0]["bounce_rate"] == 40.0
+
+
+# --- D3 / D4: leads-focused channels and top pages --------------------------
+
+
+def _ga4_page(db, client_id, *, url, day, sessions, views, channel=OrganicChannel.ORGANIC_SEARCH):
+    db.add(
+        FactGa4Traffic(
+            id=uuid4(),
+            client_id=client_id,
+            date=day,
+            raw_url=url,
+            normalized_url=url,
+            session_source="google",
+            session_medium="organic",
+            channel=channel,
+            sessions=Decimal(str(sessions)),
+            active_users=Decimal(str(sessions)),
+            views=Decimal(str(views)),
+        )
+    )
+
+
+def _ga4_lead(db, client_id, *, url, day, count, channel=OrganicChannel.ORGANIC_SEARCH):
+    db.add(
+        FactGa4Event(
+            id=uuid4(),
+            client_id=client_id,
+            date=day,
+            raw_url=url,
+            normalized_url=url,
+            session_source="google",
+            session_medium="organic",
+            channel=channel,
+            event_name="generate_lead",
+            event_count=count,
+        )
+    )
+
+
+def test_top_pages_keeps_high_traffic_non_converters(db, client_a):
+    """
+    Conversions rank a page higher, but a high-traffic page with no key events
+    must still appear — those are usually the actionable rows.
+    """
+    from app.services.dashboard import _top_pages
+
+    day = date(2026, 8, 15)
+    period = (date(2026, 8, 1), date(2026, 8, 31))
+
+    _ga4_page(db, client_a.id, url="https://example.com/converts", day=day, sessions=100, views=120)
+    _ga4_lead(db, client_a.id, url="https://example.com/converts", day=day, count=10)
+    # Far more traffic, zero conversions.
+    _ga4_page(db, client_a.id, url="https://example.com/busy", day=day, sessions=5000, views=6000)
+    db.commit()
+
+    pages = _top_pages(db, client_a.id, None, period, lead_events=["generate_lead"])
+    by_url = {p["page"]: p for p in pages}
+
+    assert "https://example.com/busy" in by_url, "zero-conversion traffic page was dropped"
+    assert "https://example.com/converts" in by_url
+    assert by_url["https://example.com/converts"]["ga4_key_events"] == 10
+    assert by_url["https://example.com/converts"]["session_key_event_rate"] == 10.0
+    assert by_url["https://example.com/busy"]["session_key_event_rate"] == 0.0
+
+
+def test_top_pages_ranks_converter_above_equal_traffic_page(db, client_a):
+    from app.services.dashboard import _top_pages
+
+    day = date(2026, 8, 15)
+    period = (date(2026, 8, 1), date(2026, 8, 31))
+
+    _ga4_page(db, client_a.id, url="https://example.com/a", day=day, sessions=500, views=600)
+    _ga4_lead(db, client_a.id, url="https://example.com/a", day=day, count=5)
+    _ga4_page(db, client_a.id, url="https://example.com/b", day=day, sessions=500, views=600)
+    db.commit()
+
+    pages = _top_pages(db, client_a.id, None, period, lead_events=["generate_lead"])
+
+    assert pages[0]["page"] == "https://example.com/a"
+
+
+def test_top_pages_works_without_search_console(db, client_a):
+    """GSC used to be required — no rows meant an empty table."""
+    from app.services.dashboard import _top_pages
+
+    day = date(2026, 8, 15)
+    _ga4_page(db, client_a.id, url="https://example.com/only-ga4", day=day, sessions=42, views=50)
+    db.commit()
+
+    pages = _top_pages(db, client_a.id, None, (date(2026, 8, 1), date(2026, 8, 31)))
+
+    assert [p["page"] for p in pages] == ["https://example.com/only-ga4"]
+    assert pages[0]["ga4_sessions"] == 42.0
+
+
+def test_leads_by_channel_reports_rate_and_goal_share(db, client_a):
+    from app.services.dashboard import _leads_by_channel
+
+    day = date(2026, 8, 15)
+    period = (date(2026, 8, 1), date(2026, 8, 31))
+
+    _ga4_page(db, client_a.id, url="https://example.com/", day=day, sessions=1000, views=1200)
+    _ga4_lead(db, client_a.id, url="https://example.com/", day=day, count=25)
+    db.commit()
+
+    rows = _leads_by_channel(
+        db, client_a.id, ["generate_lead"], period, period_goal=50
+    )
+    organic = next(r for r in rows if r["channel"] == OrganicChannel.ORGANIC_SEARCH.value)
+
+    assert organic["leads"] == 25
+    assert organic["sessions"] == 1000.0
+    assert organic["lead_rate"] == 2.5
+    assert organic["goal_contribution_pct"] == 50.0
+
+
+def test_leads_by_channel_handles_missing_goal(db, client_a):
+    from app.services.dashboard import _leads_by_channel
+
+    day = date(2026, 8, 15)
+    _ga4_page(db, client_a.id, url="https://example.com/", day=day, sessions=100, views=120)
+    _ga4_lead(db, client_a.id, url="https://example.com/", day=day, count=3)
+    db.commit()
+
+    rows = _leads_by_channel(
+        db, client_a.id, ["generate_lead"], (date(2026, 8, 1), date(2026, 8, 31)), period_goal=None
+    )
+
+    assert rows[0]["goal_contribution_pct"] is None

@@ -43,8 +43,14 @@ function buildSections(data: DashboardResponse): CsvSection[] {
     },
     {
       title: "Leads by channel",
-      headers: ["Channel", "Leads"],
-      rows: conversions.leads_by_channel.map((row) => [row.label, row.leads]),
+      headers: ["Channel", "Leads", "Sessions", "Lead rate %", "% of period goal"],
+      rows: conversions.leads_by_channel.map((row) => [
+        row.label,
+        row.leads,
+        row.sessions,
+        row.lead_rate ?? "",
+        row.goal_contribution_pct ?? "",
+      ]),
     },
     {
       title: "Visibility — search",
@@ -90,13 +96,23 @@ function buildSections(data: DashboardResponse): CsvSection[] {
     },
     {
       title: "Top pages",
-      headers: ["Page", "GSC impressions", "GSC clicks", "GA4 sessions", "GA4 views"],
+      headers: [
+        "Page",
+        "Sessions",
+        "Key events",
+        "Session to key event %",
+        "Views",
+        "GSC impressions",
+        "GSC clicks",
+      ],
       rows: traffic.top_pages.map((row) => [
         row.page,
+        row.ga4_sessions,
+        row.ga4_key_events,
+        row.session_key_event_rate ?? "",
+        row.ga4_views,
         row.gsc_impressions,
         row.gsc_clicks,
-        row.ga4_sessions,
-        row.ga4_views,
       ]),
     },
     {

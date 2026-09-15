@@ -45,7 +45,15 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       leads: periodMetric(conversions?.leads),
       lead_rate: periodMetric(conversions?.lead_rate),
       leads_by_channel: Array.isArray(conversions?.leads_by_channel)
-        ? conversions.leads_by_channel
+        ? conversions.leads_by_channel.map((row) => ({
+            channel: String(row.channel ?? ""),
+            label: String(row.label ?? row.channel ?? ""),
+            leads: typeof row.leads === "number" ? row.leads : 0,
+            sessions: typeof row.sessions === "number" ? row.sessions : 0,
+            lead_rate: typeof row.lead_rate === "number" ? row.lead_rate : null,
+            goal_contribution_pct:
+              typeof row.goal_contribution_pct === "number" ? row.goal_contribution_pct : null,
+          }))
         : [],
       monthly_lead_goal:
         typeof conversions?.monthly_lead_goal === "number" ? conversions.monthly_lead_goal : null,
@@ -103,7 +111,19 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
             bounce_rate: typeof row.bounce_rate === "number" ? row.bounce_rate : null,
           }))
         : [],
-      top_pages: Array.isArray(traffic?.top_pages) ? traffic.top_pages : [],
+      top_pages: Array.isArray(traffic?.top_pages)
+        ? traffic.top_pages.map((row) => ({
+            page: String(row.page ?? ""),
+            ga4_sessions: typeof row.ga4_sessions === "number" ? row.ga4_sessions : 0,
+            ga4_views: typeof row.ga4_views === "number" ? row.ga4_views : 0,
+            ga4_key_events: typeof row.ga4_key_events === "number" ? row.ga4_key_events : 0,
+            session_key_event_rate:
+              typeof row.session_key_event_rate === "number" ? row.session_key_event_rate : null,
+            gsc_impressions: typeof row.gsc_impressions === "number" ? row.gsc_impressions : 0,
+            gsc_clicks: typeof row.gsc_clicks === "number" ? row.gsc_clicks : 0,
+            rank_score: typeof row.rank_score === "number" ? row.rank_score : 0,
+          }))
+        : [],
     },
     baseline: normalizeBaseline(data.baseline),
   };
@@ -185,7 +205,14 @@ export type DashboardResponse = {
     lead_events: string[];
     leads: DashboardPeriodMetric;
     lead_rate: DashboardPeriodMetric;
-    leads_by_channel: { channel: string; label: string; leads: number }[];
+    leads_by_channel: {
+      channel: string;
+      label: string;
+      leads: number;
+      sessions: number;
+      lead_rate: number | null;
+      goal_contribution_pct: number | null;
+    }[];
     monthly_lead_goal: number | null;
     period_lead_goal: number | null;
     goal_period_days: number | null;
@@ -233,10 +260,14 @@ export type DashboardResponse = {
     }[];
     top_pages: {
       page: string;
-      gsc_impressions: number;
-      gsc_clicks: number;
       ga4_sessions: number;
       ga4_views: number;
+      ga4_key_events: number;
+      /** Session-to-key-event rate, already a percentage. */
+      session_key_event_rate: number | null;
+      gsc_impressions: number;
+      gsc_clicks: number;
+      rank_score: number;
     }[];
   };
   baseline: DashboardBaseline;
