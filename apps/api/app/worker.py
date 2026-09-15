@@ -98,11 +98,6 @@ def _maybe_daily_sync() -> None:
 
 def main() -> None:
     settings = get_settings()
-    logger.warning(
-        "Worker security posture: %s (app_env=%r)",
-        "PRODUCTION" if settings.is_production else "NON-PRODUCTION — hot reload active",
-        settings.app_env,
-    )
     logger.info(
         "Organic IQ worker started (poll=%.1fs, daily_sync=%s hour_utc=%s lookback=%sd)",
         settings.worker_poll_interval_seconds,
