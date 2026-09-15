@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="OrganicIQ">
+  <!--
+    The "IQ" from the wordmark on the navy app chrome, in the same teal -> lime
+    gradient. Drawn as geometry rather than <text>: favicon renderers cannot be
+    relied on to have Nunito Sans, and some skip <text> altogether.
+  -->
+  <defs>
+    <linearGradient id="oiq" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00A99D"/>
+      <stop offset="100%" stop-color="#AAE437"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#223540"/>
+
+  <!-- I -->
+  <rect x="14" y="17" width="8" height="30" rx="4" fill="#FFFFFF"/>
+
+  <!-- Q: ring plus tail, heavy enough to hold at 16px -->
+  <circle cx="40" cy="31" r="11" fill="none" stroke="url(#oiq)" stroke-width="8"/>
+  <rect
+    x="44" y="38" width="8" height="13" rx="4"
+    fill="#AAE437"
+    transform="rotate(-38 48 44)"
+  />
+</svg>

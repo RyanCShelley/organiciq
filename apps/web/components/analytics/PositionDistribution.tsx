@@ -1,83 +1,42 @@
 import { cn } from "@/lib/cn";
 
 /**
- * Where tracked keywords sit in the SERP, as a single stacked bar.
+ * Where tracked keywords sit in the SERP.
+ *
+ * Bands are **cumulative** (TOP 10 includes TOP 3), matching how SE Ranking
+ * reports it — "how many are on page one" is the question people actually ask,
+ * and exclusive buckets make you add them up yourself.
  *
  * Computed from the rows already on the page rather than a separate endpoint,
- * so the chart and the table below it can never disagree.
+ * so this and the table below it cannot disagree.
  */
 export type PositionBand = {
   key: string;
   label: string;
-  /** Inclusive lower bound; null means "not ranking". */
-  min: number | null;
+  /** Inclusive upper bound; null means "not ranking". */
   max: number | null;
-  className: string;
-  dotClassName: string;
 };
 
 export const POSITION_BANDS: PositionBand[] = [
-  {
-    key: "top_3",
-    label: "Top 3",
-    min: 1,
-    max: 3,
-    className: "bg-[var(--brand-teal)]",
-    dotClassName: "bg-[var(--brand-teal)]",
-  },
-  {
-    key: "top_10",
-    label: "4–10",
-    min: 4,
-    max: 10,
-    className: "bg-[var(--brand-lime)]",
-    dotClassName: "bg-[var(--brand-lime)]",
-  },
-  {
-    key: "top_20",
-    label: "11–20",
-    min: 11,
-    max: 20,
-    className: "bg-[#d97706]",
-    dotClassName: "bg-[#d97706]",
-  },
-  {
-    key: "beyond_20",
-    label: "21+",
-    min: 21,
-    max: null,
-    className: "bg-[#909a9f]",
-    dotClassName: "bg-[#909a9f]",
-  },
-  {
-    key: "not_ranking",
-    label: "Not ranking",
-    min: null,
-    max: null,
-    className: "bg-[#d3d7d9]",
-    dotClassName: "bg-[#d3d7d9]",
-  },
+  { key: "top_1", label: "Top 1", max: 1 },
+  { key: "top_3", label: "Top 3", max: 3 },
+  { key: "top_5", label: "Top 5", max: 5 },
+  { key: "top_10", label: "Top 10", max: 10 },
+  { key: "top_30", label: "Top 30", max: 30 },
+  { key: "not_ranking", label: "Not ranking", max: null },
 ];
 
-export function bandFor(position: number | null): PositionBand {
-  if (position === null || Number.isNaN(position) || position <= 0) {
-    return POSITION_BANDS[POSITION_BANDS.length - 1];
-  }
-  for (const band of POSITION_BANDS) {
-    if (band.min === null) continue;
-    if (position >= band.min && (band.max === null || position <= band.max)) {
-      return band;
-    }
-  }
-  return POSITION_BANDS[POSITION_BANDS.length - 1];
+function isRanking(position: number | null): position is number {
+  return position !== null && !Number.isNaN(position) && position > 0;
 }
 
-export function distributionOf(positions: (number | null)[]): Record<string, number> {
-  const counts: Record<string, number> = Object.fromEntries(
-    POSITION_BANDS.map((band) => [band.key, 0]),
-  );
-  for (const position of positions) {
-    counts[bandFor(position).key] += 1;
+export function countsFor(positions: (number | null)[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const band of POSITION_BANDS) {
+    counts[band.key] =
+      band.max === null
+        ? positions.filter((p) => !isRanking(p)).length
+        : positions.filter((p) => isRanking(p) && p <= band.max!).length;
   }
   return counts;
 }
@@ -92,7 +51,8 @@ export function PositionDistribution({
   const total = positions.length;
   if (total === 0) return null;
 
-  const counts = distributionOf(positions);
+  const counts = countsFor(positions);
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
 
   return (
     <div className={cn("card p-[var(--card-padding)]", className)}>
@@ -101,45 +61,59 @@ export function PositionDistribution({
           Position distribution
         </h3>
         <span className="text-xs text-[var(--text-tertiary)]">
-          {total.toLocaleString()} tracked keyword{total === 1 ? "" : "s"}
+          Bands are cumulative · {total.toLocaleString()} tracked keyword
+          {total === 1 ? "" : "s"}
         </span>
       </div>
 
-      <div className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-[#F1F2F3]">
-        {POSITION_BANDS.map((band) => {
-          const count = counts[band.key];
-          if (count === 0) return null;
-          return (
-            <div
-              key={band.key}
-              className={band.className}
-              style={{ width: `${(count / total) * 100}%` }}
-              title={`${band.label}: ${count}`}
-            />
-          );
-        })}
-      </div>
+      <div className="mt-3 overflow-x-auto">
+        <div className="flex min-w-[34rem]">
+          {/* ALL sits apart as the denominator the rest are read against. */}
+          <div className="flex min-w-[5.5rem] flex-col items-center justify-end rounded-l-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--brand-dark-3)] px-3 py-2">
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-white/60">
+              All
+            </span>
+            <span className="mt-0.5 font-[family-name:var(--font-display)] text-[17px] font-black leading-none text-white">
+              {total.toLocaleString()}
+            </span>
+          </div>
 
-      <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
-        {POSITION_BANDS.map((band) => {
-          const count = counts[band.key];
-          return (
-            <div key={band.key} className="flex items-center gap-2">
-              <span
-                className={cn("h-2.5 w-2.5 shrink-0 rounded-sm", band.dotClassName)}
-                aria-hidden
-              />
-              <dt className="text-xs text-[var(--text-secondary)]">{band.label}</dt>
-              <dd className="text-xs font-bold tabular-nums text-[var(--text-primary)]">
-                {count}
-                <span className="ml-1 font-normal text-[var(--text-tertiary)]">
-                  {((count / total) * 100).toFixed(0)}%
+          {POSITION_BANDS.map((band, index) => {
+            const count = counts[band.key];
+            const share = pct(count);
+            const last = index === POSITION_BANDS.length - 1;
+            return (
+              <div
+                key={band.key}
+                className={cn(
+                  "flex min-w-[5.5rem] flex-1 flex-col items-center justify-end border-y border-r border-[var(--border-strong)] bg-white px-3 py-2",
+                  last && "rounded-r-[var(--radius-md)]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "text-[11px] font-semibold tabular-nums",
+                    count > 0 ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]",
+                  )}
+                >
+                  {share.toFixed(share < 1 && share > 0 ? 1 : 0)}%
                 </span>
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
+                <span className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                  {band.label}
+                </span>
+                <span
+                  className={cn(
+                    "mt-0.5 font-[family-name:var(--font-display)] text-[17px] font-black leading-none tabular-nums",
+                    count > 0 ? "text-[var(--text-primary)]" : "text-[var(--text-tertiary)]",
+                  )}
+                >
+                  {count.toLocaleString()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

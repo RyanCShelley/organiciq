@@ -79,6 +79,15 @@ function CheckedAt({ value }: { value: string | null }) {
   );
 }
 
+/** Nothing fetched yet — the panel still renders so the button is reachable. */
+const EMPTY_UNTRACKED: UntrackedPayload = {
+  fetched_at: null,
+  domain_keywords: 0,
+  tracked_keywords: 0,
+  untracked_total: 0,
+  items: [],
+};
+
 function formatSerpFeatures(features: string[]): string {
   return features.length > 0 ? features.join(", ") : "—";
 }
@@ -120,7 +129,7 @@ export default async function WatchListPage({
   const { from, to } = await resolveDateRange(query);
 
   let searchRows: SearchRow[] = [];
-  let untracked: UntrackedPayload | null = null;
+  let untracked: UntrackedPayload = EMPTY_UNTRACKED;
   let aiRows: AiRow[] = [];
   let error: string | null = null;
 
@@ -199,7 +208,7 @@ export default async function WatchListPage({
         <AiPresenceSummary className="mt-4" rows={aiRows} />
       ) : null}
 
-      {tab === "search" && untracked ? (
+      {tab === "search" ? (
         <UntrackedKeywords clientId={clientId} data={untracked} />
       ) : null}
 
