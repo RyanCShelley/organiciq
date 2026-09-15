@@ -30,3 +30,4 @@ out/
 
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
+.vercel

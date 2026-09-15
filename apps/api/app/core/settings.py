@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     sma_admin_emails: str = ""
     sma_google_hosted_domain: str = "smamarketing.net"
     integration_token_key: str = INSECURE_TOKEN_KEY
+    # Set only while rotating; see app/rotate_integration_key.py.
+    integration_token_key_previous: str = ""
     # Shared secret the web app presents to POST /auth/upsert. Required in production.
     internal_api_secret: str = ""
     allowed_origins: str = "http://localhost:3000"
