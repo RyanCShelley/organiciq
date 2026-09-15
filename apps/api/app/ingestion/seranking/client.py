@@ -496,3 +496,73 @@ def list_domain_keywords(
             if isinstance(rows, list):
                 return [row for row in rows if isinstance(row, dict)]
     return []
+
+
+# --- AI Search (Data API) ---------------------------------------------------
+#
+# prompts-by-target is priced PER RETURNED PROMPT, not per request — 200 credits
+# each. The API's own default limit of 100 therefore costs 20,000 credits for a
+# single engine, which is 200x the whole domain-keywords lookup. Everything here
+# is built to make that cost explicit and bounded rather than incidental.
+AI_SEARCH_CREDITS_PER_PROMPT = 200
+AI_SEARCH_DEFAULT_LIMIT = 10
+# Not the API's 1000. At 200 credits each that ceiling is 200,000 credits in one
+# call; this cap keeps a single mistake survivable.
+AI_SEARCH_MAX_LIMIT = 50
+
+AI_SEARCH_ENGINES: tuple[str, ...] = (
+    "chatgpt",
+    "perplexity",
+    "gemini",
+    "ai-overview",
+    "ai-mode",
+)
+
+
+def ai_search_credit_cost(limit: int) -> int:
+    """Credits a run of this size will cost. Shown before anyone spends it."""
+    return max(0, int(limit)) * AI_SEARCH_CREDITS_PER_PROMPT
+
+
+def list_ai_search_prompts_by_target(
+    *,
+    api_key: str,
+    target: str,
+    engine: str,
+    source: str = "us",
+    limit: int = AI_SEARCH_DEFAULT_LIMIT,
+    scope: str = "base_domain",
+) -> dict[str, Any]:
+    """
+    Prompts where `target` appears in AI answers, highest volume first.
+
+    One engine per request — the API takes a single `engine`. Never paginated:
+    every extra row is another 200 credits.
+    """
+    if engine not in AI_SEARCH_ENGINES:
+        raise ValueError(f"Unsupported AI engine: {engine}")
+
+    capped = max(1, min(int(limit), AI_SEARCH_MAX_LIMIT))
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/ai-search/prompts-by-target",
+        params={
+            "target": target,
+            "engine": engine,
+            "source": source,
+            "scope": scope,
+            "limit": capped,
+            "offset": 0,
+            "sort": "volume",
+            "sort_order": "desc",
+        },
+    )
+    if not isinstance(data, dict):
+        return {"total": 0, "date": None, "prompts": []}
+    prompts = data.get("prompts")
+    return {
+        "total": int(data.get("total") or 0),
+        "date": data.get("date"),
+        "prompts": [p for p in prompts if isinstance(p, dict)] if isinstance(prompts, list) else [],
+    }

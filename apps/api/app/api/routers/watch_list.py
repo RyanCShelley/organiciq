@@ -11,7 +11,12 @@ from app.core.security import AuthUser, require_sma_staff
 from app.ingestion.seranking.engines import label_engine
 from app.ingestion.seranking.features import label_earned_serp_features
 from app.models.client import Client
-from app.models.seranking import FactSerDomainKeyword, FactSerAiPrompt, FactSerKeyword
+from app.models.seranking import (
+    FactSerAiPrompt,
+    FactSerAiSearchPrompt,
+    FactSerDomainKeyword,
+    FactSerKeyword,
+)
 
 router = APIRouter(prefix="/watch-list", tags=["watch-list"])
 
@@ -130,6 +135,58 @@ def untracked_keywords(
                 "traffic": float(row.traffic) if row.traffic is not None else None,
                 "ranking_url": row.ranking_url,
                 "serp_features": row.serp_features or [],
+            }
+            for row in untracked[:limit]
+        ],
+    }
+
+
+@router.get("/untracked-prompts")
+def untracked_prompts(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = 200,
+) -> dict:
+    """
+    Prompts the brand appears in that the watch list does not track.
+
+    Mirrors /untracked for keywords: the difference is computed here, so adding
+    a prompt to tracking drops it from this list without re-running a lookup
+    that costs 200 credits per prompt.
+    """
+    tracked = {
+        (row[0] or "").strip().lower()
+        for row in db.query(FactSerAiPrompt.prompt).filter(
+            FactSerAiPrompt.client_id == client.id
+        )
+    }
+
+    rows = (
+        db.query(FactSerAiSearchPrompt)
+        .filter(FactSerAiSearchPrompt.client_id == client.id)
+        .order_by(FactSerAiSearchPrompt.volume.desc().nullslast())
+        .all()
+    )
+
+    untracked = [row for row in rows if (row.prompt or "").strip().lower() not in tracked]
+    by_engine: dict[str, str | None] = {}
+    for row in rows:
+        if row.engine not in by_engine:
+            by_engine[row.engine] = row.fetched_at.isoformat() if row.fetched_at else None
+
+    return {
+        "engines_fetched": by_engine,
+        "discovered_prompts": len(rows),
+        "tracked_prompts": len(tracked),
+        "untracked_total": len(untracked),
+        "items": [
+            {
+                "prompt": row.prompt,
+                "engine": row.engine,
+                "volume": float(row.volume) if row.volume is not None else None,
+                "appearance_type": row.appearance_type,
+                "answer_links": row.answer_links or [],
             }
             for row in untracked[:limit]
         ],

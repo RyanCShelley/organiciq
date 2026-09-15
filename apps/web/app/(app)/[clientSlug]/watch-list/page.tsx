@@ -10,6 +10,10 @@ import {
   UntrackedKeywords,
   type UntrackedPayload,
 } from "@/components/analytics/UntrackedKeywords";
+import {
+  UntrackedPrompts,
+  type UntrackedPromptsPayload,
+} from "@/components/analytics/UntrackedPrompts";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
@@ -88,6 +92,14 @@ const EMPTY_UNTRACKED: UntrackedPayload = {
   items: [],
 };
 
+const EMPTY_UNTRACKED_PROMPTS: UntrackedPromptsPayload = {
+  engines_fetched: {},
+  discovered_prompts: 0,
+  tracked_prompts: 0,
+  untracked_total: 0,
+  items: [],
+};
+
 function formatSerpFeatures(features: string[]): string {
   return features.length > 0 ? features.join(", ") : "—";
 }
@@ -131,6 +143,8 @@ export default async function WatchListPage({
   let searchRows: SearchRow[] = [];
   let untracked: UntrackedPayload = EMPTY_UNTRACKED;
   let untrackedError: string | null = null;
+  let untrackedPrompts: UntrackedPromptsPayload = EMPTY_UNTRACKED_PROMPTS;
+  let untrackedPromptsError: string | null = null;
   let aiRows: AiRow[] = [];
   let error: string | null = null;
 
@@ -148,6 +162,16 @@ export default async function WatchListPage({
       aiRows = await apiFetch<AiRow[]>("/watch-list/ai", { clientId });
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load AI Watch List";
+    }
+    try {
+      untrackedPrompts = await apiFetch<UntrackedPromptsPayload>(
+        "/watch-list/untracked-prompts",
+        { clientId },
+      );
+    } catch (e) {
+      untrackedPrompts = EMPTY_UNTRACKED_PROMPTS;
+      untrackedPromptsError =
+        e instanceof Error ? e.message : "Failed to load untracked prompts";
     }
   }
 
@@ -364,6 +388,13 @@ export default async function WatchListPage({
               />
             )}
           </div>
+
+          {/* Supplementary to the tracked prompts above, not a headline. */}
+          <UntrackedPrompts
+            clientId={clientId}
+            data={untrackedPrompts}
+            loadError={untrackedPromptsError}
+          />
         </section>
       ) : null}
     </section>

@@ -53,6 +53,7 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     "se_ranking_audit": (StagingSerAuditPage, StagingSerAuditIssue),
     # Writes straight to facts; one page, nothing staged.
     "se_ranking_domain_keywords": (),
+    "se_ranking_ai_search": (),
 }
 
 

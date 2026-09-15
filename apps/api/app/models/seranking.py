@@ -405,3 +405,41 @@ class FactSerDomainKeyword(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerAiSearchPrompt(Base):
+    """
+    Prompts a target appears in, from SE Ranking's AI Search API.
+
+    Distinct from FactSerAiPrompt, which is the prompts *tracked* in the SE
+    Ranking project. This is the wider set the brand actually shows up for; the
+    untracked ones are the difference, computed at read time.
+
+    Expensive to populate — 200 credits per returned prompt — so rows are kept
+    per engine and only replaced when that engine is re-run.
+    """
+
+    __tablename__ = "facts_ser_ai_search_prompts"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id", "engine", "prompt", name="uq_facts_ser_ai_search_prompts_grain"
+        ),
+        Index("ix_facts_ser_ai_search_prompts_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    engine: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # SE Ranking's appearance type, e.g. Link or Brand.
+    appearance_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    answer_links: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    snapshot_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

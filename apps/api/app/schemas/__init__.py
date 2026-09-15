@@ -298,6 +298,7 @@ class SyncJobCreate(BaseModel):
     source: str = Field(min_length=1, max_length=64)
     start_date: Date
     end_date: Date
+    params: dict | None = None
 
 
 class SyncJobOut(ORMModel):
