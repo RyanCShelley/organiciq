@@ -177,6 +177,61 @@ export default async function DashboardPage({
             )}
           </section>
 
+          {data.baseline.projection && data.baseline.projection.checkpoints.length > 0 ? (
+            <section className="baseline-hero">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--brand-lime)]">
+                    Benchmarks
+                  </div>
+                  <p className="mt-2 text-[13.5px] text-[var(--brand-on-dark)]">
+                    Frozen {data.baseline.projection.generated_on} from the{" "}
+                    {data.baseline.projection.plan_label} curve. Monthly leads to hit at each
+                    checkpoint.
+                  </p>
+                </div>
+                {clientId ? (
+                  <Link
+                    href={clientPath}
+                    className="shrink-0 text-[12.5px] font-semibold text-[var(--brand-lime)] hover:underline"
+                  >
+                    Re-run projection
+                  </Link>
+                ) : null}
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {data.baseline.projection.checkpoints.map((checkpoint) => {
+                  const target = Math.round(checkpoint.monthly_leads);
+                  const current = data.baseline.vs_current.leads.current;
+                  const met = current !== null && current >= target;
+                  return (
+                    <div key={checkpoint.month} className="baseline-glass">
+                      <div className="text-[12.5px] font-semibold text-[var(--brand-on-dark)]">
+                        {checkpoint.label}
+                      </div>
+                      <div className="mt-1.5 font-[family-name:var(--font-display)] text-[24px] font-black leading-none tracking-[-0.02em] text-white">
+                        {target.toLocaleString()}
+                      </div>
+                      <div className="mt-1 text-[11.5px] text-[var(--brand-on-dark)]">
+                        leads/mo · {checkpoint.lead_rate_pct.toFixed(2)}% rate
+                      </div>
+                      {current !== null ? (
+                        <div
+                          className={`mt-1.5 text-[11.5px] font-bold ${
+                            met ? "text-[var(--brand-lime)]" : "text-[var(--brand-on-dark-muted)]"
+                          }`}
+                        >
+                          {met ? "On track" : `${Math.round(target - current)} to go`}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
           <section>
             <SectionHeader
               accent

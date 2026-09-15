@@ -67,6 +67,31 @@ export async function apiFetch<T>(
   return (await res.json()) as T;
 }
 
+export type BaselineProjectionRecord = {
+  generated_on: string;
+  baseline_as_of: string;
+  window: {
+    from: string;
+    to: string;
+    period_days: number;
+    scaled_to_days: number;
+    requested_from: string;
+    requested_days: number;
+    fully_covered: boolean;
+  };
+  plan: string;
+  plan_label: string;
+  goal_horizon_months: number;
+  suggested_monthly_lead_goal: number;
+  checkpoints: Array<{
+    label: string;
+    month: number;
+    monthly_sessions: number;
+    lead_rate_pct: number;
+    monthly_leads: number;
+  }>;
+};
+
 export type Client = {
   id: string;
   client_name: string;
@@ -79,6 +104,9 @@ export type Client = {
   monthly_lead_goal: number | null;
   account_sheet_url?: string | null;
   baseline_as_of?: string | null;
+  baseline_period_start?: string | null;
+  baseline_period_end?: string | null;
+  baseline_projection_json?: BaselineProjectionRecord | null;
   baseline_monthly_sessions?: number | null;
   baseline_monthly_leads?: number | null;
   baseline_lead_rate_pct?: number | null;

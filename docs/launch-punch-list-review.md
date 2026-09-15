@@ -123,11 +123,11 @@ facts, new UI, and ongoing quota. Genuinely post-launch.
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | S1 | ~~Sheet URL renders as a link~~ **done** | XS | Currently a bare input. |
-| S2 | "Build snapshot from GA4", not "preview" | S | Naming + making apply the primary action. |
-| S3 | Baseline date is settable; window anchors to it | M | Today `to_date` is hardcoded to the GA4 watermark and `from_date = to − 29d`. No way to anchor to Aug 1. |
-| S4 | 90-day lookback averaged to monthly | S | Once S3 makes the window a parameter, this is a default change plus the existing `_scale_to_monthly`. |
-| S5 | Persist 3/6/9/12-month projections | M | **Checkpoints already exist** — `growth_calculator.project_leads` returns Today / 3 / 6 / 9 / 12 with labels. They are returned in the preview and then thrown away. Needs a JSONB column on `clients` + migration. |
-| S6 | Show benchmarks on dashboard + account record | S | Depends on S5. |
+| S2 | ~~"Build snapshot from GA4"~~ **done** | S | Naming + making apply the primary action. |
+| S3 | ~~Baseline date settable; window anchors to it~~ **done** | M | Today `to_date` is hardcoded to the GA4 watermark and `from_date = to − 29d`. No way to anchor to Aug 1. |
+| S4 | ~~90-day lookback averaged to monthly~~ **done** | S | Once S3 makes the window a parameter, this is a default change plus the existing `_scale_to_monthly`. |
+| S5 | ~~Persist 3/6/9/12-month projections~~ **done** | M | **Checkpoints already exist** — `growth_calculator.project_leads` returns Today / 3 / 6 / 9 / 12 with labels. They are returned in the preview and then thrown away. Needs a JSONB column on `clients` + migration. |
+| S6 | ~~Show benchmarks on dashboard + account record~~ **done** | S | Depends on S5. |
 
 **S3 is the structural one.** `preview_baseline_from_ga4` derives its window
 entirely from the GA4 watermark:

@@ -11,6 +11,10 @@ export type BaselineSnapshotPreview = {
     to: string;
     period_days: number;
     scaled_to_days: number;
+    /** What was asked for, so partial coverage is visible. */
+    requested_from: string;
+    requested_days: number;
+    fully_covered: boolean;
   };
   lead_events: string[];
   tier_name: string | null;
@@ -35,13 +39,31 @@ export type BaselineSnapshotPreview = {
   disclaimer: string;
   current_monthly_lead_goal: number | null;
   applied_monthly_lead_goal?: number | null;
+  projection_generated_on?: string | null;
 };
 
-export async function previewBaselineFromGa4Action(clientId: string) {
+export type BaselineProjection = {
+  generated_on: string;
+  baseline_as_of: string;
+  window: BaselineSnapshotPreview["window"];
+  plan: string;
+  plan_label: string;
+  goal_horizon_months: number;
+  suggested_monthly_lead_goal: number;
+  checkpoints: BaselineSnapshotPreview["checkpoints"];
+};
+
+export async function previewBaselineFromGa4Action(
+  clientId: string,
+  options: { asOf?: string | null; lookbackDays?: number } = {},
+) {
   if (!clientId) return { ok: false as const, error: "Missing client" };
+  const params = new URLSearchParams();
+  if (options.asOf) params.set("as_of", options.asOf);
+  params.set("lookback_days", String(options.lookbackDays ?? 90));
   try {
     const preview = await apiFetch<BaselineSnapshotPreview>(
-      `/clients/${clientId}/baseline/preview`,
+      `/clients/${clientId}/baseline/preview?${params.toString()}`,
       { clientId },
     );
     return { ok: true as const, preview };
@@ -72,6 +94,8 @@ export async function applyBaselineFromGa4Action(formData: FormData) {
         body: {
           monthly_lead_goal: goal,
           notes: String(formData.get("notes") || "").trim() || null,
+          as_of: String(formData.get("as_of") || "").trim() || null,
+          lookback_days: Number(formData.get("lookback_days") || 90),
         },
       },
     );

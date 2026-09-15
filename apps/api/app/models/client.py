@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -69,6 +69,9 @@ class Client(Base):
     baseline_lead_rate_pct: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     baseline_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     baseline_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Frozen growth projection (3/6/9/12-month checkpoints) plus the inputs and
+    # the date it was generated, so a stale set reads as stale.
+    baseline_projection_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[ClientStatus] = mapped_column(
         Enum(ClientStatus, name="client_status", values_callable=lambda x: [e.value for e in x]),
         nullable=False,

@@ -1,7 +1,8 @@
+from datetime import date as DateType
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client, user_can_access_client
@@ -84,6 +85,8 @@ def preview_baseline_from_ga4(
     client_id: UUID,
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
+    as_of: DateType | None = Query(default=None),
+    lookback_days: int = Query(default=90, ge=7, le=365),
 ) -> BaselineSnapshotPreviewOut:
     if not user_can_access_client(db, user, client_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
@@ -91,7 +94,9 @@ def preview_baseline_from_ga4(
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     try:
-        preview = baseline_snapshot.preview_baseline_from_ga4(db, client)
+        preview = baseline_snapshot.preview_baseline_from_ga4(
+            db, client, as_of=as_of, lookback_days=lookback_days
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return BaselineSnapshotPreviewOut.model_validate(preview)
@@ -115,6 +120,8 @@ def apply_baseline_from_ga4(
             client,
             monthly_lead_goal=payload.monthly_lead_goal,
             notes=payload.notes,
+            as_of=payload.as_of,
+            lookback_days=payload.lookback_days,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

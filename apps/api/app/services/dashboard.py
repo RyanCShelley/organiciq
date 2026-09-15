@@ -181,6 +181,8 @@ def _baseline_comparison(
         "source": client.baseline_source,
         "notes": client.baseline_notes,
         "tier_name": tier_name,
+        # Frozen benchmarks, so the dashboard can show progress against them.
+        "projection": client.baseline_projection_json,
         "current_window": window_payload,
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,

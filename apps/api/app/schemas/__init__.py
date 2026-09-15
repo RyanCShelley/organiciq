@@ -77,6 +77,7 @@ class ClientCreate(BaseModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    baseline_projection_json: dict | None = None
     status: ClientStatus = ClientStatus.ONBOARDING
 
 
@@ -104,6 +105,7 @@ class ClientUpdate(BaseModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    baseline_projection_json: dict | None = None
     status: ClientStatus | None = None
 
 
@@ -132,6 +134,7 @@ class ClientOut(ORMModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    baseline_projection_json: dict | None = None
     status: ClientStatus
     created_at: DateTime
     updated_at: DateTime
@@ -217,12 +220,16 @@ class BaselineUpdate(BaseModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    baseline_projection_json: dict | None = None
     monthly_lead_goal: int | None = None
 
 
 class BaselineSnapshotApplyRequest(BaseModel):
     monthly_lead_goal: int | None = None
     notes: str | None = None
+    # Window anchor. Defaults to the GA4 watermark when omitted.
+    as_of: Date | None = None
+    lookback_days: int = 90
 
 
 class BaselineCheckpointOut(BaseModel):
@@ -248,6 +255,7 @@ class BaselineSnapshotPreviewOut(BaseModel):
     baseline_lead_rate_pct: float | None
     baseline_source: str
     suggested_monthly_lead_goal: int
+    projection_generated_on: str | None = None
     goal_horizon_months: int
     checkpoints: list[BaselineCheckpointOut]
     disclaimer: str

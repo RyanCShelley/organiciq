@@ -214,6 +214,8 @@ export function ClientSettingsForm({
           clientId={client.id}
           clientSlug={client.slug}
           hasLeadConversions={hasLeadConversions}
+          savedAsOf={client.baseline_as_of ?? null}
+          savedProjection={client.baseline_projection_json ?? null}
         />
       </div>
 

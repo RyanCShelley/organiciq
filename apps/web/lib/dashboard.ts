@@ -134,6 +134,7 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
     return {
       configured: false,
       as_of: null,
+      projection: null,
       period_start: null,
       period_end: null,
       source: null,
@@ -157,6 +158,10 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
   return {
     configured: baseline.configured === true,
     as_of: typeof baseline.as_of === "string" ? baseline.as_of : null,
+    projection:
+      baseline.projection && Array.isArray(baseline.projection.checkpoints)
+        ? baseline.projection
+        : null,
     period_start: typeof baseline.period_start === "string" ? baseline.period_start : null,
     period_end: typeof baseline.period_end === "string" ? baseline.period_end : null,
     source: typeof baseline.source === "string" ? baseline.source : null,
@@ -273,9 +278,28 @@ export type DashboardResponse = {
   baseline: DashboardBaseline;
 };
 
+export type BaselineCheckpoint = {
+  label: string;
+  month: number;
+  monthly_sessions: number;
+  lead_rate_pct: number;
+  monthly_leads: number;
+};
+
+export type BaselineProjectionPayload = {
+  generated_on: string;
+  baseline_as_of: string;
+  plan_label: string;
+  goal_horizon_months: number;
+  suggested_monthly_lead_goal: number;
+  checkpoints: BaselineCheckpoint[];
+};
+
 export type DashboardBaseline = {
   configured: boolean;
   as_of: string | null;
+  /** Frozen benchmarks from the last baseline build; null until one is saved. */
+  projection: BaselineProjectionPayload | null;
   /** Window the snapshot was measured over — not the period being viewed. */
   period_start: string | null;
   period_end: string | null;
