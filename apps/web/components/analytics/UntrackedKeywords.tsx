@@ -2,7 +2,7 @@
 
 import { Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
@@ -44,19 +44,78 @@ function formatFetched(iso: string | null): string | null {
   });
 }
 
+/** How long to keep watching a queued run before giving up on it. */
+const POLL_INTERVAL_MS = 4000;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+const ACTIVE_STATUSES = new Set([
+  "queued",
+  "fetching",
+  "staging",
+  "normalizing",
+  "validating",
+]);
+
 export function UntrackedKeywords({
   clientId,
   data,
+  loadError = null,
 }: {
   clientId: string;
   data: UntrackedPayload;
+  /** Read failed — distinct from "nothing fetched yet". */
+  loadError?: string | null;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [watching, setWatching] = useState(false);
+  const startedAt = useRef<number | null>(null);
 
   const fetchedAt = formatFetched(data.fetched_at);
+
+  /**
+   * Watch the queue rather than telling people to refresh. "Refresh in a
+   * moment" gave no way to tell a still-running job from a failed one from a
+   * genuinely empty result — all three looked like the untouched panel.
+   */
+  const checkJob = useCallback(async () => {
+    const res = await fetch(`/api/proxy/jobs?clientId=${encodeURIComponent(clientId)}`);
+    if (!res.ok) return;
+    const jobs: Array<{ source: string; status: string; error_message: string | null }> =
+      await res.json();
+    const latest = jobs.find((job) => job.source === "se_ranking_domain_keywords");
+    if (!latest) return;
+
+    if (ACTIVE_STATUSES.has(latest.status)) return;
+
+    setWatching(false);
+    startedAt.current = null;
+    if (latest.status === "failed") {
+      setMessage(null);
+      setError(latest.error_message || "The lookup failed. Check Sync jobs for details.");
+      return;
+    }
+    setError(null);
+    setMessage("Lookup finished.");
+    router.refresh();
+  }, [clientId, router]);
+
+  useEffect(() => {
+    if (!watching) return;
+    const timer = setInterval(() => {
+      if (startedAt.current && Date.now() - startedAt.current > POLL_TIMEOUT_MS) {
+        setWatching(false);
+        startedAt.current = null;
+        setMessage(null);
+        setError("Still running after 5 minutes — check Sync jobs.");
+        return;
+      }
+      void checkJob();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [watching, checkJob]);
 
   async function run() {
     setError(null);
@@ -80,10 +139,9 @@ export function UntrackedKeywords({
       setError((await res.text()) || "Failed to queue the lookup");
       return;
     }
-    setMessage(
-      "Queued. It runs in the sync queue — refresh in a moment to see results.",
-    );
-    router.refresh();
+    setMessage("Queued — watching for results…");
+    startedAt.current = Date.now();
+    setWatching(true);
   }
 
   return (
@@ -112,14 +170,25 @@ export function UntrackedKeywords({
           type="button"
           className="btn btn-secondary shrink-0 gap-2"
           onClick={run}
-          disabled={pending}
+          disabled={pending || watching}
           title={`Uses ${CREDITS_PER_RUN} SE Ranking credits`}
         >
           <Search className="h-3.5 w-3.5" aria-hidden />
-          {pending ? "Queueing…" : fetchedAt ? "Re-run" : "Find untracked keywords"}
+          {pending
+            ? "Queueing…"
+            : watching
+              ? "Running…"
+              : fetchedAt
+                ? "Re-run"
+                : "Find untracked keywords"}
         </button>
       </div>
 
+      {loadError ? (
+        <Alert variant="danger" className="mt-3">
+          Could not load untracked keywords: {loadError}
+        </Alert>
+      ) : null}
       {error ? (
         <Alert variant="danger" className="mt-3">
           {error}

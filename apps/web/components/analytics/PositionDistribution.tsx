@@ -68,8 +68,10 @@ export function PositionDistribution({
 
       <div className="mt-3 overflow-x-auto">
         <div className="flex min-w-[34rem]">
-          {/* ALL sits apart as the denominator the rest are read against. */}
-          <div className="flex min-w-[5.5rem] flex-col items-center justify-end rounded-l-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--brand-dark-3)] px-3 py-2">
+          {/* ALL sits apart as the denominator the rest are read against. It
+              carries two lines to the bands' three, so it centres rather than
+              bottom-aligns — otherwise it reads as sunk in its own cell. */}
+          <div className="flex min-w-[5.5rem] flex-col items-center justify-center rounded-l-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--brand-dark-3)] px-3 py-2">
             <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-white/60">
               All
             </span>

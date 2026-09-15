@@ -130,6 +130,7 @@ export default async function WatchListPage({
 
   let searchRows: SearchRow[] = [];
   let untracked: UntrackedPayload = EMPTY_UNTRACKED;
+  let untrackedError: string | null = null;
   let aiRows: AiRow[] = [];
   let error: string | null = null;
 
@@ -209,10 +210,6 @@ export default async function WatchListPage({
       ) : null}
 
       {tab === "search" ? (
-        <UntrackedKeywords clientId={clientId} data={untracked} />
-      ) : null}
-
-      {tab === "search" ? (
         <section className="mt-4 workspace-section">
           <SectionHeader
             title="Search keywords"
@@ -282,6 +279,13 @@ export default async function WatchListPage({
               />
             )}
           </div>
+
+          {/* Supplementary to the tracked list above, not a headline. */}
+          <UntrackedKeywords
+            clientId={clientId}
+            data={untracked}
+            loadError={untrackedError}
+          />
         </section>
       ) : null}
 
