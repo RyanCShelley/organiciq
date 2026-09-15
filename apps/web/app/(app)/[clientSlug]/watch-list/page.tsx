@@ -159,6 +159,15 @@ export default async function WatchListPage({
       error =
         e instanceof Error ? e.message : "Failed to load Search Watch List";
     }
+    try {
+      untracked = await apiFetch<UntrackedPayload>("/watch-list/untracked", {
+        clientId,
+      });
+    } catch (e) {
+      untracked = EMPTY_UNTRACKED;
+      untrackedError =
+        e instanceof Error ? e.message : "Failed to load untracked keywords";
+    }
   } else {
     try {
       aiRows = await apiFetch<AiRow[]>("/watch-list/ai", { clientId });
