@@ -19,8 +19,8 @@ from app.core.settings import get_settings
 from app.ingestion.seranking.client import (
     AI_SEARCH_DEFAULT_LIMIT,
     AI_SEARCH_ENGINES,
-    AI_SEARCH_MAX_LIMIT,
     ai_search_credit_cost,
+    ai_search_limit_for,
     list_ai_search_prompts_by_target,
 )
 from app.ingestion.seranking.pipeline_domain import _domain_for, resolve_source
@@ -74,15 +74,18 @@ def run_seranking_ai_search_job(db: Session, job: SyncJob) -> SyncJob:
                 f"An AI engine must be chosen (one of {', '.join(AI_SEARCH_ENGINES)})"
             )
 
-        try:
-            limit = int(params.get("limit") or AI_SEARCH_DEFAULT_LIMIT)
-        except (TypeError, ValueError):
-            limit = AI_SEARCH_DEFAULT_LIMIT
-        limit = max(1, min(limit, AI_SEARCH_MAX_LIMIT))
-
         client = db.query(Client).filter(Client.id == job.client_id).one_or_none()
         if client is None:
             raise RuntimeError("Client not found")
+
+        try:
+            requested = int(params.get("limit") or AI_SEARCH_DEFAULT_LIMIT)
+        except (TypeError, ValueError):
+            requested = AI_SEARCH_DEFAULT_LIMIT
+        # Enforce the client's ceiling here, not only in the UI — this is the
+        # boundary that actually spends money.
+        ceiling = ai_search_limit_for(client.ai_search_prompt_limit)
+        limit = max(1, min(requested, ceiling))
 
         integration = (
             db.query(Integration)

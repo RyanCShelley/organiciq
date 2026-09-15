@@ -219,3 +219,67 @@ def test_untracked_prompts_empty_before_any_run(client, client_a, admin_user):
 
     assert body["untracked_total"] == 0
     assert body["engines_fetched"] == {}
+
+
+# --- Per-client ceiling -----------------------------------------------------
+
+
+def test_default_client_ceiling_is_five():
+    """Five prompts = 1,000 credits. The starting point, not the API's 100."""
+    assert ser_client.ai_search_limit_for(None) == 5
+    assert ser_client.AI_SEARCH_DEFAULT_LIMIT == 5
+    assert ser_client.AI_SEARCH_DEFAULT_ENGINE == "chatgpt"
+
+
+def test_client_ceiling_can_be_raised_for_high_value_accounts():
+    assert ser_client.ai_search_limit_for(25) == 25
+
+
+def test_client_ceiling_cannot_exceed_the_global_cap():
+    """A per-client setting must not be a way around the absolute ceiling."""
+    assert ser_client.ai_search_limit_for(500) == ser_client.AI_SEARCH_MAX_LIMIT
+
+
+def test_client_ceiling_rejects_nonsense():
+    assert ser_client.ai_search_limit_for(0) == 5
+    assert ser_client.ai_search_limit_for(-10) == 1
+
+
+def test_job_clamps_a_request_above_the_client_ceiling(db, client_a, monkeypatch):
+    """
+    The UI bounds its options, but the job is what spends the money — a crafted
+    request must not be able to exceed the client's cap.
+    """
+    from datetime import date as date_cls
+
+    from app.ingestion.seranking import pipeline_ai_search as pipeline
+    from app.models.job import SyncJob, SyncJobStatus
+
+    client_a.ai_search_prompt_limit = 5
+    db.commit()
+
+    seen: dict = {}
+
+    def fake_fetch(**kwargs):
+        seen.update(kwargs)
+        return {"total": 0, "date": None, "prompts": []}
+
+    monkeypatch.setattr(pipeline, "list_ai_search_prompts_by_target", fake_fetch)
+    monkeypatch.setattr(
+        pipeline, "get_settings", lambda: type("S", (), {"se_ranking_api_key": "k"})()
+    )
+
+    job = SyncJob(
+        client_id=client_a.id,
+        source="se_ranking_ai_search",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+        params_json={"engine": "chatgpt", "limit": 50},
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_seranking_ai_search_job(db, job)
+
+    assert seen["limit"] == 5, "the client ceiling must bind, not the request"

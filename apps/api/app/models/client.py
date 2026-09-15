@@ -58,6 +58,10 @@ class Client(Base):
     custom_update_allowance: Mapped[int | None] = mapped_column(Integer, nullable=True)
     custom_growth_action_allowance: Mapped[int | None] = mapped_column(Integer, nullable=True)
     custom_watchlist_cadence: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Ceiling on prompts per AI-search run for this client. Billed at 200
+    # credits each, so the cap is per-client: most accounts stay small, a few
+    # high-value ones justify more.
+    ai_search_prompt_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Dashboard baseline snapshot (calculator / contract start)
     baseline_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     # The window the snapshot was measured over. Previously only the end date

@@ -93,6 +93,8 @@ const EMPTY_UNTRACKED: UntrackedPayload = {
 };
 
 const EMPTY_UNTRACKED_PROMPTS: UntrackedPromptsPayload = {
+  max_prompts: 5,
+  credits_per_prompt: 200,
   engines_fetched: {},
   discovered_prompts: 0,
   tracked_prompts: 0,

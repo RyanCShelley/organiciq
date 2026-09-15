@@ -505,10 +505,14 @@ def list_domain_keywords(
 # single engine, which is 200x the whole domain-keywords lookup. Everything here
 # is built to make that cost explicit and bounded rather than incidental.
 AI_SEARCH_CREDITS_PER_PROMPT = 200
-AI_SEARCH_DEFAULT_LIMIT = 10
-# Not the API's 1000. At 200 credits each that ceiling is 200,000 credits in one
-# call; this cap keeps a single mistake survivable.
+AI_SEARCH_DEFAULT_LIMIT = 5
+# Absolute ceiling, regardless of any per-client setting. Not the API's 1000:
+# at 200 credits each that would be 200,000 credits in one call.
 AI_SEARCH_MAX_LIMIT = 50
+# Applied when a client has no explicit ai_search_prompt_limit.
+AI_SEARCH_DEFAULT_CLIENT_LIMIT = 5
+
+AI_SEARCH_DEFAULT_ENGINE = "chatgpt"
 
 AI_SEARCH_ENGINES: tuple[str, ...] = (
     "chatgpt",
@@ -522,6 +526,17 @@ AI_SEARCH_ENGINES: tuple[str, ...] = (
 def ai_search_credit_cost(limit: int) -> int:
     """Credits a run of this size will cost. Shown before anyone spends it."""
     return max(0, int(limit)) * AI_SEARCH_CREDITS_PER_PROMPT
+
+
+def ai_search_limit_for(client_limit: int | None) -> int:
+    """
+    Effective ceiling for a client: their setting, bounded by the global cap.
+
+    A per-client value is how a few high-value accounts get more prompts
+    without raising the floor for everyone.
+    """
+    requested = client_limit if client_limit else AI_SEARCH_DEFAULT_CLIENT_LIMIT
+    return max(1, min(int(requested), AI_SEARCH_MAX_LIMIT))
 
 
 def list_ai_search_prompts_by_target(

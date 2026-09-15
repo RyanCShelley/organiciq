@@ -18,6 +18,14 @@ const STATUS_OPTIONS = [
   { value: "archived", label: "Archived" },
 ];
 
+/**
+ * Mirrors the API's own constants (ingestion/seranking/client.py). The server
+ * clamps independently — these only shape the form.
+ */
+const AI_SEARCH_DEFAULT_PROMPTS = 5;
+const AI_SEARCH_MAX_PROMPTS = 50;
+const AI_SEARCH_CREDITS_PER_PROMPT = 200;
+
 const CADENCE_OPTIONS = [
   { value: "monthly", label: "Monthly" },
   { value: "bi_weekly", label: "Bi-weekly" },
@@ -217,6 +225,38 @@ export function ClientSettingsForm({
           savedAsOf={client.baseline_as_of ?? null}
           savedProjection={client.baseline_projection_json ?? null}
         />
+      </div>
+
+      {/* Cost ceiling, not a plan allowance — this one spends SE Ranking credits
+          per prompt returned, so it lives outside the tier blocks. */}
+      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            AI prompt discovery
+          </p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Caps how many prompts one &ldquo;Find untracked prompts&rdquo; lookup on Watch List
+            can buy for this client. Billed at {AI_SEARCH_CREDITS_PER_PROMPT} credits per prompt
+            returned, so raise it only for accounts that justify the spend.
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldLabel label="Max prompts per lookup">
+            <Input
+              name="ai_search_prompt_limit"
+              type="number"
+              min={1}
+              max={AI_SEARCH_MAX_PROMPTS}
+              defaultValue={client.ai_search_prompt_limit ?? ""}
+              placeholder={`${AI_SEARCH_DEFAULT_PROMPTS} (default)`}
+            />
+          </FieldLabel>
+          <p className="self-center text-xs text-[var(--text-secondary)]">
+            Blank uses the default of {AI_SEARCH_DEFAULT_PROMPTS} prompts (
+            {(AI_SEARCH_DEFAULT_PROMPTS * AI_SEARCH_CREDITS_PER_PROMPT).toLocaleString()}{" "}
+            credits). The ceiling is {AI_SEARCH_MAX_PROMPTS}.
+          </p>
+        </div>
       </div>
 
       {selectedTier && !enterprise ? (

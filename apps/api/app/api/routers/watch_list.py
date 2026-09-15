@@ -10,6 +10,10 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.ingestion.seranking.engines import label_engine
 from app.ingestion.seranking.features import label_earned_serp_features
+from app.ingestion.seranking.client import (
+    AI_SEARCH_CREDITS_PER_PROMPT,
+    ai_search_limit_for,
+)
 from app.models.client import Client
 from app.models.seranking import (
     FactSerAiPrompt,
@@ -176,6 +180,9 @@ def untracked_prompts(
             by_engine[row.engine] = row.fetched_at.isoformat() if row.fetched_at else None
 
     return {
+        # The UI bounds its prompt-count options to this rather than guessing.
+        "max_prompts": ai_search_limit_for(client.ai_search_prompt_limit),
+        "credits_per_prompt": AI_SEARCH_CREDITS_PER_PROMPT,
         "engines_fetched": by_engine,
         "discovered_prompts": len(rows),
         "tracked_prompts": len(tracked),

@@ -50,6 +50,9 @@ export async function updateClientSettingsAction(formData: FormData) {
   const customRefresh = parseOptionalInt("custom_update_allowance");
   const customGrowth = parseOptionalInt("custom_growth_action_allowance");
   const customCadence = String(formData.get("custom_watchlist_cadence") || "").trim() || null;
+  // A per-client cost ceiling, not an allowance: it bounds what one untracked-prompt
+  // lookup can spend. The API clamps it again before any credits are spent.
+  const aiPromptLimit = parseOptionalInt("ai_search_prompt_limit");
 
   if (
     [customKeyword, customPrompt, customContent, customRefresh, customGrowth].some((value) =>
@@ -57,6 +60,12 @@ export async function updateClientSettingsAction(formData: FormData) {
     )
   ) {
     return { ok: false as const, error: "Custom allowances must be numbers." };
+  }
+  if (Number.isNaN(aiPromptLimit)) {
+    return { ok: false as const, error: "AI prompt limit must be a number." };
+  }
+  if (aiPromptLimit != null && (aiPromptLimit < 1 || aiPromptLimit > 50)) {
+    return { ok: false as const, error: "AI prompt limit must be between 1 and 50." };
   }
   if (
     [baselineSessions, baselineLeads, baselineRate].some(
@@ -102,6 +111,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     custom_update_allowance: isEnterprise ? customRefresh : null,
     custom_growth_action_allowance: isEnterprise ? customGrowth : null,
     custom_watchlist_cadence: isEnterprise ? customCadence || "monthly" : null,
+    ai_search_prompt_limit: aiPromptLimit,
   };
 
   if (!body.client_name || !body.domain || !body.tier_id) {

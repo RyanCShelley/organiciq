@@ -69,6 +69,7 @@ class ClientCreate(BaseModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    ai_search_prompt_limit: int | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None
@@ -97,6 +98,7 @@ class ClientUpdate(BaseModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    ai_search_prompt_limit: int | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None
@@ -126,6 +128,7 @@ class ClientOut(ORMModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    ai_search_prompt_limit: int | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None

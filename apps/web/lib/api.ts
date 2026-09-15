@@ -126,6 +126,8 @@ export type Client = {
   custom_update_allowance?: number | null;
   custom_growth_action_allowance?: number | null;
   custom_watchlist_cadence?: string | null;
+  /** Max prompts one untracked-prompt lookup may buy. Null = default (5). */
+  ai_search_prompt_limit?: number | null;
   status: string;
   created_at: string;
   updated_at: string;

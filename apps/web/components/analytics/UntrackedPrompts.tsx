@@ -17,6 +17,9 @@ export type UntrackedPrompt = {
 };
 
 export type UntrackedPromptsPayload = {
+  /** This client's ceiling, set in Client settings. */
+  max_prompts: number;
+  credits_per_prompt: number;
   /** engine -> when it was last fetched. Each engine is billed separately. */
   engines_fetched: Record<string, string | null>;
   discovered_prompts: number;
@@ -29,8 +32,12 @@ export type UntrackedPromptsPayload = {
  * Priced per *returned prompt*, not per request — unlike every other lookup in
  * the app. The API's own default of 100 is 20,000 credits, so the count is a
  * deliberate choice here and the cost is stated before the button is pressed.
+ *
+ * The selectable counts are bounded by the client's own ceiling, which the
+ * server enforces independently.
  */
-const CREDITS_PER_PROMPT = 200;
+const FALLBACK_CREDITS_PER_PROMPT = 200;
+const COUNT_STEPS = [5, 10, 25, 50];
 
 const ENGINES = [
   { value: "chatgpt", label: "ChatGPT" },
@@ -39,8 +46,6 @@ const ENGINES = [
   { value: "ai-overview", label: "AI Overview" },
   { value: "ai-mode", label: "AI Mode" },
 ];
-
-const COUNTS = [10, 25, 50];
 
 const POLL_INTERVAL_MS = 4000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -71,15 +76,21 @@ export function UntrackedPrompts({
   loadError?: string | null;
 }) {
   const router = useRouter();
+  const maxPrompts = data.max_prompts || 5;
+  const creditsPerPrompt = data.credits_per_prompt || FALLBACK_CREDITS_PER_PROMPT;
+  // Never offer more than this client is allowed to spend.
+  const counts = COUNT_STEPS.filter((n) => n <= maxPrompts);
+  const options = counts.length > 0 ? counts : [maxPrompts];
+
   const [engine, setEngine] = useState(ENGINES[0].value);
-  const [count, setCount] = useState(COUNTS[0]);
+  const [count, setCount] = useState(options[0]);
   const [pending, setPending] = useState(false);
   const [watching, setWatching] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const startedAt = useRef<number | null>(null);
 
-  const cost = count * CREDITS_PER_PROMPT;
+  const cost = count * creditsPerPrompt;
   const fetchedEngines = Object.keys(data.engines_fetched);
 
   const checkJob = useCallback(async () => {
@@ -161,7 +172,8 @@ export function UntrackedPrompts({
           ) : (
             <>
               Finds prompts the brand appears in that aren&rsquo;t on the watch list. One
-              engine per run.
+              engine per run, up to {maxPrompts} prompts — raise that per client in
+              Client settings.
             </>
           )}
         </p>
@@ -183,7 +195,7 @@ export function UntrackedPrompts({
         <label className="field-label">
           Prompts
           <Select value={String(count)} onChange={(e) => setCount(Number(e.target.value))}>
-            {COUNTS.map((n) => (
+            {options.map((n) => (
               <option key={n} value={n}>
                 {n}
               </option>
@@ -204,7 +216,7 @@ export function UntrackedPrompts({
         {/* Stated in full before the click: this is billed per prompt returned,
             which is unlike every other lookup in the app. */}
         <span className="pb-1.5 text-[12.5px] font-semibold text-[var(--warning)]">
-          ≈{cost.toLocaleString()} credits ({count} × {CREDITS_PER_PROMPT})
+          ≈{cost.toLocaleString()} credits ({count} × {creditsPerPrompt})
         </span>
       </div>
 
