@@ -92,6 +92,14 @@ export type BaselineProjectionRecord = {
   }>;
 };
 
+export type User = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  is_active: boolean;
+};
+
 export type Client = {
   id: string;
   client_name: string;

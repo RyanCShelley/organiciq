@@ -557,3 +557,50 @@ def test_startup_states_the_security_posture():
 
     source = inspect.getsource(main)
     assert "Security posture" in source
+
+
+# --- Workspace domain migration (.net -> .com) ------------------------------
+
+
+# Explicit rather than relying on the default: a developer's local .env sets
+# this, and test outcomes must not depend on it.
+BOTH_DOMAINS = "smamarketing.com,smamarketing.net"
+
+
+def test_code_default_covers_both_domains():
+    """What production falls back to if SMA_GOOGLE_HOSTED_DOMAIN is unset."""
+    default = Settings.model_fields["sma_google_hosted_domain"].default
+    assert "smamarketing.com" in default
+    assert "smamarketing.net" in default
+
+
+def test_both_workspace_domains_are_accepted():
+    """Staff accounts are still on .net while the org moves to .com."""
+    settings = Settings(sma_google_hosted_domain=BOTH_DOMAINS)
+    assert settings.is_workspace_email("ryan@smamarketing.com")
+    assert settings.is_workspace_email("ryan@smamarketing.net")
+
+
+def test_workspace_check_is_case_and_whitespace_insensitive():
+    settings = Settings(sma_google_hosted_domain=BOTH_DOMAINS)
+    assert settings.is_workspace_email("  Ryan@SMAMarketing.COM ")
+
+
+def test_outside_domains_are_still_rejected():
+    settings = Settings(sma_google_hosted_domain=BOTH_DOMAINS)
+    for email in (
+        "someone@gmail.com",
+        "attacker@notsmamarketing.com",
+        # Suffix matching would have accepted this one.
+        "evil@evilsmamarketing.com",
+        "",
+        "no-at-sign",
+    ):
+        assert not settings.is_workspace_email(email), email
+
+
+def test_hosted_domains_are_configurable():
+    settings = Settings(sma_google_hosted_domain="example.com, @other.org")
+    assert settings.hosted_domains == {"example.com", "other.org"}
+    assert settings.is_workspace_email("a@other.org")
+    assert not settings.is_workspace_email("a@smamarketing.com")

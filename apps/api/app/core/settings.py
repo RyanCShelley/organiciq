@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://organiciq:organiciq@localhost:5432/organiciq"
     auth_secret: str = INSECURE_AUTH_SECRET
     sma_admin_emails: str = ""
-    sma_google_hosted_domain: str = "smamarketing.net"
+    # Comma-separated. Both are accepted through the .com migration; existing
+    # staff accounts and Google Workspace aliases are still on .net.
+    sma_google_hosted_domain: str = "smamarketing.com,smamarketing.net"
     integration_token_key: str = INSECURE_TOKEN_KEY
     # Set only while rotating; see app/rotate_integration_key.py.
     integration_token_key_previous: str = ""
@@ -112,6 +114,18 @@ class Settings(BaseSettings):
                 + "; ".join(problems)
                 + ". Generate secrets with: python -c \"import secrets;print(secrets.token_urlsafe(48))\""
             )
+
+    @property
+    def hosted_domains(self) -> set[str]:
+        return {
+            d.strip().lower().lstrip("@")
+            for d in self.sma_google_hosted_domain.split(",")
+            if d.strip()
+        }
+
+    def is_workspace_email(self, email: str) -> bool:
+        domain = email.strip().lower().rpartition("@")[2]
+        return bool(domain) and domain in self.hosted_domains
 
     @property
     def admin_email_set(self) -> set[str]:

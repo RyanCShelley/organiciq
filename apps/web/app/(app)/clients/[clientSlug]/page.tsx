@@ -3,6 +3,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
+import { ClientTeamPanel } from "@/components/ClientTeamPanel";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -12,7 +13,9 @@ import {
   type ConversionDefinition,
   type DataHealthRow,
   type Tier,
+  type User,
 } from "@/lib/api";
+import type { ClientTeamMember } from "@/app/(app)/team-actions";
 import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
 
@@ -28,6 +31,10 @@ export default async function ClientSettingsPage({
   let tiers: Tier[] = [];
   let health: DataHealthRow[] = [];
   let conversions: ConversionDefinition[] = [];
+  let team: ClientTeamMember[] = [];
+  let users: User[] = [];
+  // These endpoints are admin-only; a 403 means "cannot manage", not an error.
+  let canManageTeam = true;
   let loadError: string | null = null;
 
   try {
@@ -43,6 +50,15 @@ export default async function ClientSettingsPage({
     Object.assign(client, freshClient);
   } catch (e) {
     loadError = e instanceof Error ? e.message : "Failed to load client settings";
+  }
+
+  try {
+    [team, users] = await Promise.all([
+      apiFetch<ClientTeamMember[]>(`/admin/clients/${clientId}/team`, { clientId }),
+      apiFetch<User[]>("/admin/users", { clientId }),
+    ]);
+  } catch {
+    canManageTeam = false;
   }
 
   const hasLeadConversions = conversions.some(
@@ -80,6 +96,22 @@ export default async function ClientSettingsPage({
           />
           <div className="workspace-panel">
             <ConversionDefinitionsPanel clientId={clientId} conversions={conversions} />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Team access"
+            description="Who can see this client. Team members see nothing until they are added here; admins see every client."
+          />
+          <div className="workspace-panel">
+            <ClientTeamPanel
+              clientId={clientId}
+              clientName={client.client_name}
+              team={team}
+              users={users}
+              canManage={canManageTeam}
+            />
           </div>
         </section>
 

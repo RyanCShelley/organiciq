@@ -56,8 +56,7 @@ def get_current_user(
     user = db.query(User).filter(User.email == email).one_or_none()
     if user is None:
         settings = get_settings()
-        hosted = settings.sma_google_hosted_domain.lower()
-        if not email.endswith(f"@{hosted}"):
+        if not settings.is_workspace_email(email):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive",

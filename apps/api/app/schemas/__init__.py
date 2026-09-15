@@ -378,6 +378,21 @@ class UserClientAssign(BaseModel):
     role: UserRole = UserRole.SMA_TEAM
 
 
+class UserClientRemove(BaseModel):
+    user_id: UUID
+    client_id: UUID
+
+
+class ClientTeamMemberOut(BaseModel):
+    user_id: UUID
+    email: str
+    name: str | None
+    role: UserRole
+    is_active: bool
+    # True when access comes from the SMA_ADMIN role rather than an assignment.
+    via_admin: bool = False
+
+
 class HealthOut(BaseModel):
     status: str
     service: str

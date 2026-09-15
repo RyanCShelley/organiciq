@@ -13,13 +13,14 @@ from app.models.config import ChannelRule, ConversionDefinition, Topic
 from app.models.ga4 import FactGa4Event
 from app.models.integration import Integration
 from app.models.job import SyncJob
-from app.models.user import User, UserClient
+from app.models.user import User, UserClient, UserRole
 from app.services.data_health import (
     WATERMARK_SOURCES,
     integration_status_label,
     load_client_data_health,
 )
 from app.schemas import (
+    ClientTeamMemberOut,
     ChannelRuleOut,
     ConversionDefinitionCreate,
     ConversionDefinitionOut,
@@ -28,6 +29,8 @@ from app.schemas import (
     TopicCreate,
     TopicOut,
     UserClientAssign,
+    UserClientRemove,
+    UserOut,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -287,3 +290,84 @@ def data_health(
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict]:
     return load_client_data_health(db, client.id)
+
+
+@router.get("/users", response_model=list[UserOut])
+def list_users(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[UserOut]:
+    """Staff users, for assigning client access."""
+    rows = db.query(User).order_by(User.email.asc()).all()
+    return [UserOut.model_validate(row) for row in rows]
+
+
+@router.get("/clients/{client_id}/team", response_model=list[ClientTeamMemberOut])
+def client_team(
+    client_id: UUID,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[ClientTeamMemberOut]:
+    """
+    Who can see this client.
+
+    Admins are included because they can see every client without an
+    assignment — leaving them out would make the list read as "nobody has
+    access" when in fact several people do.
+    """
+    out: list[ClientTeamMemberOut] = []
+
+    for user in db.query(User).filter(User.role == UserRole.SMA_ADMIN).all():
+        out.append(
+            ClientTeamMemberOut(
+                user_id=user.id,
+                email=user.email,
+                name=user.name,
+                role=user.role,
+                is_active=user.is_active,
+                via_admin=True,
+            )
+        )
+
+    assigned = (
+        db.query(UserClient, User)
+        .join(User, User.id == UserClient.user_id)
+        .filter(UserClient.client_id == client_id)
+        .all()
+    )
+    admin_ids = {row.user_id for row in out}
+    for link, user in assigned:
+        if user.id in admin_ids:
+            continue
+        out.append(
+            ClientTeamMemberOut(
+                user_id=user.id,
+                email=user.email,
+                name=user.name,
+                role=link.role,
+                is_active=user.is_active,
+                via_admin=False,
+            )
+        )
+
+    return sorted(out, key=lambda row: (not row.via_admin, row.email))
+
+
+@router.delete("/user-clients", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+def unassign_user_client(
+    payload: UserClientRemove,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    link = (
+        db.query(UserClient)
+        .filter(
+            UserClient.user_id == payload.user_id,
+            UserClient.client_id == payload.client_id,
+        )
+        .one_or_none()
+    )
+    if link is not None:
+        db.delete(link)
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,7 +3,7 @@ export const BRAND = {
   logoWordmark: "OrganicIQ",
   companyName: "SMA Marketing",
   tagline: "Operating system for predictable organic growth",
-  hostedDomain: "smamarketing.net",
+  hostedDomain: "smamarketing.com",
   styleGuideUrl: "https://smamarketing.com/style-guide/",
   logoPath: "/brand/sma-marketing-logo.svg",
   colors: {

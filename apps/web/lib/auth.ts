@@ -4,15 +4,26 @@ import Google from "next-auth/providers/google";
 import { SignJWT, jwtVerify } from "jose";
 import type { Session } from "next-auth";
 
-/** SMA Workspace login domain — keep in sync with login page copy. */
-const HOSTED_DOMAIN = "smamarketing.net";
+/**
+ * SMA Workspace login domains — keep in sync with login page copy.
+ *
+ * Both are accepted through the .com migration: staff accounts and Workspace
+ * aliases are still on .net. Override with SMA_GOOGLE_HOSTED_DOMAIN
+ * (comma-separated) to change this without a deploy.
+ */
+const HOSTED_DOMAINS = (
+  process.env.SMA_GOOGLE_HOSTED_DOMAIN || "smamarketing.com,smamarketing.net"
+)
+  .split(",")
+  .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+  .filter(Boolean);
 const ACCESS_TOKEN_TTL = "7d";
 const ACCESS_TOKEN_REFRESH_SKEW_SEC = 5 * 60;
 
 function isSmaWorkspaceAccount(email: string, hd?: string | null): boolean {
-  const normalized = email.trim().toLowerCase();
-  if (normalized.endsWith(`@${HOSTED_DOMAIN}`)) return true;
-  if ((hd ?? "").toLowerCase() === HOSTED_DOMAIN) return true;
+  const domain = email.trim().toLowerCase().split("@").pop() ?? "";
+  if (HOSTED_DOMAINS.includes(domain)) return true;
+  if (HOSTED_DOMAINS.includes((hd ?? "").toLowerCase())) return true;
   return false;
 }
 
@@ -120,7 +131,10 @@ export const authConfig = {
       checks: ["state"],
       authorization: {
         params: {
-          hd: HOSTED_DOMAIN,
+          // `hd` takes a single domain and would lock out the other one, so it
+          // is only sent when there is exactly one. The signIn callback is the
+          // actual boundary either way; this is just the account-chooser hint.
+          ...(HOSTED_DOMAINS.length === 1 ? { hd: HOSTED_DOMAINS[0] } : {}),
           prompt: "select_account",
           access_type: "online",
         },
