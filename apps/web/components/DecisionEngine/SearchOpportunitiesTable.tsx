@@ -9,6 +9,35 @@ import { formatNum, type SearchOpportunity } from "@/lib/decision-engine";
 
 const PAGE_SIZE = 25;
 
+/**
+ * Page type says what the page is for; opportunity type says what work it
+ * needs. Different palettes so the two columns stay distinguishable at a
+ * glance rather than reading as one band of colour.
+ */
+const PAGE_TYPE_STYLES: Record<string, string> = {
+  conversion: "bg-[var(--success-soft)] text-[var(--success)]",
+  commercial: "bg-[rgb(0_169_157_/_12%)] text-[var(--brand-teal-hover)]",
+  consideration: "bg-[rgb(170_228_55_/_28%)] text-[#4d6b0a]",
+  informational: "bg-[var(--surface-muted)] text-[var(--text-secondary)]",
+  utility: "bg-[#F1F2F3] text-[var(--text-tertiary)]",
+};
+
+const OPPORTUNITY_TYPE_STYLES: Record<string, string> = {
+  "CTR gap": "bg-[var(--warning-soft)] text-[var(--warning)]",
+  "Near win": "bg-[rgb(170_228_55_/_28%)] text-[#4d6b0a]",
+  "Striking distance": "bg-[var(--accent-soft)] text-[var(--brand-teal-hover)]",
+};
+
+const CHIP = "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold tracking-[0.02em]";
+
+function Chip({ value, styles }: { value: string; styles: Record<string, string> }) {
+  return (
+    <span className={`${CHIP} ${styles[value] ?? "bg-[#F1F2F3] text-[var(--text-secondary)]"}`}>
+      {value}
+    </span>
+  );
+}
+
 export function SearchOpportunitiesTable({
   items,
   title = "Search Opportunities",
@@ -117,14 +146,19 @@ export function SearchOpportunitiesTable({
               {
                 key: "page_type",
                 header: "Page Type",
-                render: (row) => (
-                  <span className="text-[var(--text-secondary)]">{row.page_type ?? "—"}</span>
-                ),
+                render: (row) =>
+                  row.page_type ? (
+                    <Chip value={row.page_type} styles={PAGE_TYPE_STYLES} />
+                  ) : (
+                    <span className="text-[var(--text-tertiary)]">—</span>
+                  ),
               },
               {
                 key: "opportunity_type",
                 header: "Opportunity Type",
-                render: (row) => row.opportunity_type,
+                render: (row) => (
+                  <Chip value={row.opportunity_type} styles={OPPORTUNITY_TYPE_STYLES} />
+                ),
               },
             ]}
             rows={visible}

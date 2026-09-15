@@ -87,3 +87,49 @@ def test_content_planning_requires_minimum_impressions(db, client_a):
         signal.page_url != "https://example.com/blog/low-demand-post"
         for signal in result.search_opportunities
     )
+
+
+# --- C1: opportunity types are derived, not a single constant ---------------
+
+
+def test_opportunity_type_flags_a_ctr_gap():
+    """Ranking well but under-clicked is a different job from ranking poorly."""
+    from app.services.lever_engine import _classify_opportunity
+    from app.decisions.ctr_curve import expected_ctr_percent
+
+    expected = expected_ctr_percent(6.0)
+    assert (
+        _classify_opportunity(average_position=6.0, ctr_percent=expected * 0.1) == "CTR gap"
+    )
+
+
+def test_opportunity_type_flags_a_near_win():
+    from app.services.lever_engine import _classify_opportunity
+    from app.decisions.ctr_curve import expected_ctr_percent
+
+    # Healthy CTR for the position, just outside the top few.
+    assert (
+        _classify_opportunity(average_position=4.5, ctr_percent=expected_ctr_percent(4.5))
+        == "Near win"
+    )
+
+
+def test_opportunity_type_defaults_to_striking_distance():
+    from app.services.lever_engine import _classify_opportunity
+    from app.decisions.ctr_curve import expected_ctr_percent
+
+    assert (
+        _classify_opportunity(average_position=14.0, ctr_percent=expected_ctr_percent(14.0))
+        == "Striking distance"
+    )
+
+
+def test_opportunity_types_are_not_all_identical():
+    from app.services.lever_engine import _classify_opportunity
+    from app.decisions.ctr_curve import expected_ctr_percent
+
+    labels = {
+        _classify_opportunity(average_position=pos, ctr_percent=expected_ctr_percent(pos) * mult)
+        for pos, mult in [(6.0, 0.1), (4.5, 1.0), (14.0, 1.0)]
+    }
+    assert len(labels) == 3, "the label must distinguish work types, not paint one constant"

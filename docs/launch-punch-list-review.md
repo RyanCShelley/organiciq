@@ -71,9 +71,9 @@ conversions") arguably wants both.
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | W1 | ~~Date range does nothing → remove it~~ **done** | XS–M | Confirmed. See below. |
-| W2 | Export / download | S | Reuse the CSV route added for the dashboard. |
-| W3 | Cramped dates on the AI tab | XS | Column widths. |
-| W4 | Position-distribution chart | S | **Data already exists.** |
+| W2 | ~~Export / download~~ **done** | S | Reuse the CSV route added for the dashboard. |
+| W3 | Cramped dates on the AI tab | XS | Column widths. Still open — needs a look at real rendering. |
+| W4 | ~~Position-distribution chart~~ **done** | S | Computed from the rows already on the page, so chart and table cannot disagree. |
 | W5 | AI mention/link presence chart | S–M | Presence metrics exist; needs a time series. |
 | W6 | Flag untracked keywords/prompts | L | New ingestion + new UI. |
 
@@ -104,7 +104,7 @@ facts, new UI, and ongoing quota. Genuinely post-launch.
 
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| C1 | Colour-code page type and opportunity type | S | The design defines the chips (`tagBg`/`tagFg` per type: CTR gap, Striking, Topic gap, Near win); the implementation renders no type chip. Straight port. |
+| C1 | ~~Colour-code page type and opportunity type~~ **done** | S | The design defines the chips (`tagBg`/`tagFg` per type: CTR gap, Striking, Topic gap, Near win); the implementation renders no type chip. Straight port. |
 | C2 | Cross-reference SE Ranking | M–L | Needs a join key between GSC queries and SE Ranking keywords — exact-match text is the obvious one and will be lossy. Worth scoping separately. |
 
 ---

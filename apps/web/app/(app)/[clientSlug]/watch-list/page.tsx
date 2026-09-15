@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Download } from "lucide-react";
+
 import { DataTable } from "@/components/analytics/DataTable";
+import { PositionDistribution } from "@/components/analytics/PositionDistribution";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
@@ -99,9 +102,12 @@ export default async function WatchListPage({
 
   if (tab === "search") {
     try {
-      searchRows = await apiFetch<SearchRow[]>("/watch-list/search", { clientId });
+      searchRows = await apiFetch<SearchRow[]>("/watch-list/search", {
+        clientId,
+      });
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load Search Watch List";
+      error =
+        e instanceof Error ? e.message : "Failed to load Search Watch List";
     }
   } else {
     try {
@@ -119,25 +125,51 @@ export default async function WatchListPage({
 
   return (
     <section>
-      <div className="segmented" role="tablist" aria-label="Watch List tabs">
-        {tabs.map((item) => {
-          const href = withNavContext(watchHref, clientId, from, to, {
-            tab: item.id === "search" ? undefined : item.id,
-          });
-          const active = tab === item.id;
-          return (
-            <Link
-              key={item.id}
-              href={href}
-              className={active ? "segmented-item segmented-item-active" : "segmented-item"}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="segmented" role="tablist" aria-label="Watch List tabs">
+          {tabs.map((item) => {
+            const href = withNavContext(watchHref, clientId, from, to, {
+              tab: item.id === "search" ? undefined : item.id,
+            });
+            const active = tab === item.id;
+            return (
+              <Link
+                key={item.id}
+                href={href}
+                className={
+                  active
+                    ? "segmented-item segmented-item-active"
+                    : "segmented-item"
+                }
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+
+        <a
+          className="btn btn-secondary gap-2"
+          href={`/api/export/watch-list?clientId=${encodeURIComponent(clientId)}&tab=${tab}`}
+          download
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden />
+          Export {tab === "ai" ? "prompts" : "keywords"}
+        </a>
       </div>
 
-      {error ? <Alert variant="danger" className="mt-4">{error}</Alert> : null}
+      {error ? (
+        <Alert variant="danger" className="mt-4">
+          {error}
+        </Alert>
+      ) : null}
+
+      {tab === "search" && searchRows.length > 0 ? (
+        <PositionDistribution
+          className="mt-4"
+          positions={searchRows.map((row) => row.current_position)}
+        />
+      ) : null}
 
       {tab === "search" ? (
         <section className="mt-4 workspace-section">
@@ -153,13 +185,17 @@ export default async function WatchListPage({
           <div className="workspace-panel">
             {!error && searchRows.length === 0 ? (
               <Alert variant="info">
-                No Search Watch List rows yet. Map an SE Ranking project in Client settings →
-                Integrations and run Sync Search 14 days.
+                No Search Watch List rows yet. Map an SE Ranking project in
+                Client settings → Integrations and run Sync Search 14 days.
               </Alert>
             ) : (
               <DataTable
                 columns={[
-                  { key: "keyword", header: "Keyword", render: (row) => row.keyword },
+                  {
+                    key: "keyword",
+                    header: "Keyword",
+                    render: (row) => row.keyword,
+                  },
                   {
                     key: "group",
                     header: "Group",
@@ -186,7 +222,8 @@ export default async function WatchListPage({
                   {
                     key: "serp",
                     header: "SERP Features",
-                    render: (row) => formatSerpFeatures(row.earned_serp_features),
+                    render: (row) =>
+                      formatSerpFeatures(row.earned_serp_features),
                   },
                   {
                     key: "checked",
@@ -217,14 +254,22 @@ export default async function WatchListPage({
           <div className="workspace-panel">
             {!error && aiRows.length === 0 ? (
               <Alert variant="info">
-                No AI Watch List rows yet. Map an SE Ranking project in Client settings →
-                Integrations and run Sync AI 14 days.
+                No AI Watch List rows yet. Map an SE Ranking project in Client
+                settings → Integrations and run Sync AI 14 days.
               </Alert>
             ) : (
               <DataTable
                 columns={[
-                  { key: "prompt", header: "Prompt", render: (row) => row.prompt },
-                  { key: "engine", header: "Engine", render: (row) => row.engine },
+                  {
+                    key: "prompt",
+                    header: "Prompt",
+                    render: (row) => row.prompt,
+                  },
+                  {
+                    key: "engine",
+                    header: "Engine",
+                    render: (row) => row.engine,
+                  },
                   {
                     key: "group",
                     header: "Group",

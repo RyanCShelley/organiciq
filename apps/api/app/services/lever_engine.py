@@ -802,6 +802,26 @@ def _per_page_cascade(
     return findings
 
 
+# Opportunity types, derived rather than a single constant.
+#
+# Every row used to carry "Striking-Distance Opportunity", which made the label
+# decorative. These split the same band into the three shapes that call for
+# different work: a page that already ranks well but is under-clicked, a page
+# on the cusp of page one, and the broad middle.
+CTR_GAP_RATIO = 0.5
+NEAR_WIN_MAX_POSITION = 5.0
+
+
+def _classify_opportunity(*, average_position: float, ctr_percent: float) -> str:
+    expected = expected_ctr_percent(average_position)
+    if expected > 0 and ctr_percent < expected * CTR_GAP_RATIO:
+        # Ranking is fine; the listing is not earning the clicks it should.
+        return "CTR gap"
+    if average_position <= NEAR_WIN_MAX_POSITION:
+        return "Near win"
+    return "Striking distance"
+
+
 def _search_opportunities(
     pages: list[PageDemand],
     *,
@@ -845,7 +865,10 @@ def _search_opportunities(
             recommended_action="",
             success_metric="",
             evidence_json={
-                "opportunity_type": "Striking-Distance Opportunity",
+                "opportunity_type": _classify_opportunity(
+                    average_position=page.average_position,
+                    ctr_percent=page.ctr_percent,
+                ),
                 "impressions": int(page.impressions),
                 "average_position": round(page.average_position, 1),
                 "clicks": int(page.clicks),
