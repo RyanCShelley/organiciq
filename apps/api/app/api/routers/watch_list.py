@@ -11,7 +11,7 @@ from app.core.security import AuthUser, require_sma_staff
 from app.ingestion.seranking.engines import label_engine
 from app.ingestion.seranking.features import label_earned_serp_features
 from app.models.client import Client
-from app.models.seranking import FactSerAiPrompt, FactSerKeyword
+from app.models.seranking import FactSerDomainKeyword, FactSerAiPrompt, FactSerKeyword
 
 router = APIRouter(prefix="/watch-list", tags=["watch-list"])
 
@@ -83,3 +83,54 @@ def ai_watch_list(
         }
         for r in rows
     ]
+
+
+@router.get("/untracked")
+def untracked_keywords(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = 200,
+) -> dict:
+    """
+    Keywords the domain ranks for that the watch list does not track.
+
+    The difference is computed here rather than stored, so adding a keyword to
+    tracking removes it from this list without re-running the fetch — which
+    costs 100 SE Ranking credits.
+    """
+    tracked = {
+        (row[0] or "").strip().lower()
+        for row in db.query(FactSerKeyword.keyword).filter(
+            FactSerKeyword.client_id == client.id
+        )
+    }
+
+    rows = (
+        db.query(FactSerDomainKeyword)
+        .filter(FactSerDomainKeyword.client_id == client.id)
+        .order_by(FactSerDomainKeyword.volume.desc().nullslast())
+        .all()
+    )
+
+    untracked = [row for row in rows if (row.keyword or "").strip().lower() not in tracked]
+    fetched_at = rows[0].fetched_at.isoformat() if rows and rows[0].fetched_at else None
+
+    return {
+        "fetched_at": fetched_at,
+        "domain_keywords": len(rows),
+        "tracked_keywords": len(tracked),
+        "untracked_total": len(untracked),
+        "items": [
+            {
+                "keyword": row.keyword,
+                "position": float(row.position) if row.position is not None else None,
+                "volume": float(row.volume) if row.volume is not None else None,
+                "difficulty": float(row.difficulty) if row.difficulty is not None else None,
+                "traffic": float(row.traffic) if row.traffic is not None else None,
+                "ranking_url": row.ranking_url,
+                "serp_features": row.serp_features or [],
+            }
+            for row in untracked[:limit]
+        ],
+    }

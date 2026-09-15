@@ -445,3 +445,54 @@ def list_airt_prompt_rankings_paginated(
         if offset >= total or not batch:
             break
     return rows
+
+
+# --- Domain Analysis (Data API) ---------------------------------------------
+#
+# Same host and Token auth as project-management, but metered in credits rather
+# than rate-limited: /domain/keywords costs 100 credits PER REQUEST, so each
+# extra page is another 100. One page at the maximum limit, ordered by volume,
+# buys the 1000 most valuable keywords for a flat 100 credits — which is why
+# this deliberately does not paginate.
+DOMAIN_KEYWORDS_CREDITS_PER_REQUEST = 100
+DOMAIN_KEYWORDS_MAX_LIMIT = 1000
+
+
+def list_domain_keywords(
+    *,
+    api_key: str,
+    domain: str,
+    source: str = "us",
+    limit: int = DOMAIN_KEYWORDS_MAX_LIMIT,
+    order_field: str = "volume",
+    order_type: str = "desc",
+) -> list[dict[str, Any]]:
+    """
+    Organic keywords the domain ranks for, highest volume first.
+
+    Single request by design — see the credit note above. The response is a
+    bare JSON array.
+    """
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/domain/keywords",
+        params={
+            "domain": domain,
+            "source": source,
+            "type": "organic",
+            "limit": min(int(limit), DOMAIN_KEYWORDS_MAX_LIMIT),
+            "page": 1,
+            "order_field": order_field,
+            "order_type": order_type,
+        },
+    )
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    # Defensive: docs describe a bare array, but tolerate a wrapper.
+    if isinstance(data, dict):
+        for key in ("keywords", "data", "items"):
+            rows = data.get(key)
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
+    return []

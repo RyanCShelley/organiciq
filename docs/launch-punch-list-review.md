@@ -75,7 +75,7 @@ conversions") arguably wants both.
 | W3 | ~~Cramped dates on the AI tab~~ **done** | XS | Cause was `checked_at` rendered as a raw ISO timestamp on **both** tabs, plus unconstrained Prompt/Keyword text. |
 | W4 | ~~Position-distribution chart~~ **done** | S | Computed from the rows already on the page, so chart and table cannot disagree. |
 | W5 | ~~AI mention/link presence chart~~ **done** | S–M | Computed from the rows on the page, matching W4. A time series over `facts_ser_ai_checks` remains possible later. |
-| W6 | Flag untracked keywords/prompts | L | **Deferred — see below.** |
+| W6 | ~~Flag untracked keywords/prompts~~ **done** | L | Built on Domain Analysis, not AI-search. See below. |
 
 **W1 — the note is right, and the reason matters.** The page resolves `from`/`to`
 and then never passes them: `apiFetch("/watch-list/search", { clientId })`. The
@@ -94,12 +94,24 @@ you want before touching it.
 payload under `visibility.search.keyword_distribution`. The chart needs the
 number surfaced on Watch List, not new data.
 
-**W6 — deferred, deliberately.** SE Ranking has no insights API, as the note
-says. The AI-search endpoint could surface related prompts and keywords, but it
-needs a new fetch, new staging and fact tables, new UI, and it adds recurring
-quota against a limit that is already the binding constraint on running more
-than one worker. Nothing else on this list depends on it. Revisit once the
-daily cycle has been timed at 35 clients and there is known quota headroom.
+**W6 — shipped, on a different endpoint than scoped.** My deferral reasoning
+was partly wrong: I said it would eat the 5 rps rate limit that constrains
+worker concurrency. The Data API is metered in *credits*, separately from the
+project-management API's rate limit, so it does not compete with the daily sync
+at all.
+
+`GET /v1/domain/keywords` (same host, same Token auth, 100 credits per request)
+returns the organic keywords a domain ranks for. The untracked set is the
+difference against `facts_ser_keywords`, computed at read time so adding a
+keyword to tracking drops it from the list without re-spending credits.
+
+Cost is controlled in three places, each with a test:
+- One request per run, never paginated — each extra page is another 100 credits.
+  A single page at the 1000 maximum, ordered by volume, buys the most valuable
+  keywords for a flat 100.
+- Absent from `daily_sync._PROVIDER_SOURCES`. A test asserts this: at 35 clients
+  a daily schedule would be ~105,000 credits a month.
+- The button states the cost before you click it.
 
 ---
 

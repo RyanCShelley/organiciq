@@ -6,6 +6,10 @@ import { Download } from "lucide-react";
 import { DataTable } from "@/components/analytics/DataTable";
 import { AiPresenceSummary } from "@/components/analytics/AiPresenceSummary";
 import { PositionDistribution } from "@/components/analytics/PositionDistribution";
+import {
+  UntrackedKeywords,
+  type UntrackedPayload,
+} from "@/components/analytics/UntrackedKeywords";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
@@ -116,6 +120,7 @@ export default async function WatchListPage({
   const { from, to } = await resolveDateRange(query);
 
   let searchRows: SearchRow[] = [];
+  let untracked: UntrackedPayload | null = null;
   let aiRows: AiRow[] = [];
   let error: string | null = null;
 
@@ -192,6 +197,10 @@ export default async function WatchListPage({
 
       {tab === "ai" && aiRows.length > 0 ? (
         <AiPresenceSummary className="mt-4" rows={aiRows} />
+      ) : null}
+
+      {tab === "search" && untracked ? (
+        <UntrackedKeywords clientId={clientId} data={untracked} />
       ) : null}
 
       {tab === "search" ? (

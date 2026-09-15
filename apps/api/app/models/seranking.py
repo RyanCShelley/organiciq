@@ -369,3 +369,39 @@ class FactSerAiPresence(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerDomainKeyword(Base):
+    """
+    Organic keywords the domain ranks for, from SE Ranking Domain Analysis.
+
+    Distinct from FactSerKeyword, which is the *tracked* watch list. This is the
+    wider universe the domain already ranks for; the untracked set is the
+    difference between the two, computed at read time so adding a keyword to
+    tracking updates the list without re-spending credits.
+    """
+
+    __tablename__ = "facts_ser_domain_keywords"
+    __table_args__ = (
+        UniqueConstraint("client_id", "keyword", name="uq_facts_ser_domain_keywords_grain"),
+        Index("ix_facts_ser_domain_keywords_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    previous_position: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    difficulty: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cpc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    traffic: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    ranking_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    serp_features: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

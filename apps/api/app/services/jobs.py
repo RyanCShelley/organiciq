@@ -191,6 +191,7 @@ def _job_handlers() -> dict[str, object]:
     from app.ingestion.seranking.pipeline import run_seranking_search_job
     from app.ingestion.seranking.pipeline_ai import run_seranking_ai_job
     from app.ingestion.seranking.pipeline_audit import run_seranking_audit_job
+    from app.ingestion.seranking.pipeline_domain import run_seranking_domain_keywords_job
 
     return {
         "gsc_pages": run_gsc_pages_job,
@@ -199,6 +200,9 @@ def _job_handlers() -> dict[str, object]:
         "se_ranking_search": run_seranking_search_job,
         "se_ranking_ai": run_seranking_ai_job,
         "se_ranking_audit": run_seranking_audit_job,
+        # On-demand only — 100 SE Ranking credits per run, so it is deliberately
+        # absent from daily_sync._PROVIDER_SOURCES.
+        "se_ranking_domain_keywords": run_seranking_domain_keywords_job,
     }
 
 
