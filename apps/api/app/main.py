@@ -1,10 +1,26 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import admin, annotations, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, watch_list
 from app.core.settings import get_settings
 
+logger = logging.getLogger("organiciq.api")
+
 settings = get_settings()
+
+# State the security posture on every boot. The hardening shipped inert once
+# because APP_ENV was never set and nothing said so; silence is not evidence
+# the guard passed.
+if settings.is_production:
+    logger.warning("Security posture: PRODUCTION — secret validation active.")
+else:
+    logger.warning(
+        "Security posture: NON-PRODUCTION (app_env=%r) — secret validation is OFF "
+        "and /auth/upsert is unauthenticated. Set APP_ENV=production for a live deploy.",
+        settings.app_env,
+    )
 
 app = FastAPI(title="Organic IQ API", version="0.1.0")
 

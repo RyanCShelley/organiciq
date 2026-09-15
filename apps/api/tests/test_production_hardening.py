@@ -496,3 +496,64 @@ def test_baseline_period_end_falls_back_to_as_of(db, client_a):
 
     assert payload["period_start"] is None
     assert payload["period_end"] == "2026-09-09"
+
+
+# --- The guard must not be silently inert -----------------------------------
+#
+# It shipped inert on the first production deploy: APP_ENV was never set, so
+# is_production was False, so nothing validated and nothing said so.
+
+
+def test_railway_production_environment_engages_the_guard():
+    """Railway sets RAILWAY_ENVIRONMENT_NAME itself — APP_ENV is not required."""
+    settings = Settings(
+        railway_environment_name="production",
+        auth_secret=STRONG,
+        integration_token_key=STRONG,
+        internal_api_secret=STRONG,
+        allowed_origins="https://app.example.com",
+    )
+    assert settings.is_production is True
+
+
+def test_railway_production_still_rejects_a_missing_internal_secret():
+    with pytest.raises(RuntimeError, match="INTERNAL_API_SECRET"):
+        Settings(
+            railway_environment_name="production",
+            auth_secret=STRONG,
+            integration_token_key=STRONG,
+            internal_api_secret="",
+            allowed_origins="https://app.example.com",
+        )
+
+
+def test_non_production_railway_environment_does_not_engage_the_guard():
+    settings = Settings(railway_environment_name="preview")
+    assert settings.is_production is False
+
+
+def test_explicit_app_env_production_still_wins():
+    settings = Settings(
+        app_env="production",
+        auth_secret=STRONG,
+        integration_token_key=STRONG,
+        internal_api_secret=STRONG,
+        allowed_origins="https://app.example.com",
+    )
+    assert settings.is_production is True
+
+
+def test_local_dev_is_unaffected():
+    """No Railway signal, no APP_ENV — defaults must stay usable."""
+    settings = Settings(auth_secret=INSECURE_AUTH_SECRET)
+    assert settings.is_production is False
+
+
+def test_startup_states_the_security_posture():
+    """Silence is not evidence the guard passed."""
+    import inspect
+
+    from app import main
+
+    source = inspect.getsource(main)
+    assert "Security posture" in source
