@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { apiFetch, type Client } from "@/lib/api";
 import { clientHref, isClientUuid } from "@/lib/client-path";
-import { defaultDateRange } from "@/lib/dates";
+import { resolveStoredRange } from "@/lib/date-range";
 
 export async function resolveClientId(
   searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>,
@@ -31,18 +31,19 @@ export async function resolveDateRange(
   const params = searchParams instanceof Promise ? await searchParams : searchParams;
   const fromQuery = typeof params?.from === "string" ? params.from : null;
   const toQuery = typeof params?.to === "string" ? params.to : null;
+  const rangeQuery = typeof params?.range === "string" ? params.range : undefined;
   if (fromQuery && toQuery) {
-    return { from: fromQuery, to: toQuery };
+    // A shared or reloaded link carries the dates the range meant when it was
+    // built, so re-resolve a relative one the same way the cookie is resolved.
+    return resolveStoredRange(rangeQuery, fromQuery, toQuery);
   }
 
   const cookieStore = await cookies();
-  const fromCookie = cookieStore.get("oiq_from")?.value;
-  const toCookie = cookieStore.get("oiq_to")?.value;
-  if (fromCookie && toCookie) {
-    return { from: fromCookie, to: toCookie };
-  }
-
-  return defaultDateRange(30);
+  return resolveStoredRange(
+    cookieStore.get("oiq_range")?.value,
+    cookieStore.get("oiq_from")?.value,
+    cookieStore.get("oiq_to")?.value,
+  );
 }
 
 export async function loadClientById(clientId: string): Promise<Client | null> {

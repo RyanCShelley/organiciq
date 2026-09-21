@@ -5,7 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ContentContainer } from "@/components/ui/ContentContainer";
 import { apiFetch, type Client } from "@/lib/api";
 import { auth } from "@/lib/auth";
-import { defaultDateRange } from "@/lib/dates";
+import { resolveStoredRange } from "@/lib/date-range";
 
 import { signOutAction } from "./actions";
 
@@ -16,7 +16,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const cookieStore = await cookies();
-  const ranges = defaultDateRange(30);
+  // Same resolution the pages use, so the toolbar shows the window the data came from.
+  const ranges = resolveStoredRange(
+    cookieStore.get("oiq_range")?.value,
+    cookieStore.get("oiq_from")?.value,
+    cookieStore.get("oiq_to")?.value,
+  );
 
   let clients: Client[] = [];
   try {
@@ -26,8 +31,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const selectedClientId = cookieStore.get("oiq_client_id")?.value || clients[0]?.id || "";
-  const from = cookieStore.get("oiq_from")?.value || ranges.from;
-  const to = cookieStore.get("oiq_to")?.value || ranges.to;
+  const from = ranges.from;
+  const to = ranges.to;
 
   return (
     <AppShell

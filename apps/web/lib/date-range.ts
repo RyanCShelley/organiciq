@@ -66,6 +66,47 @@ export function isoDaysAgo(days: number): { from: string; to: string } {
   };
 }
 
+/**
+ * Re-resolve a timeframe that was persisted earlier.
+ *
+ * The toolbar stores the chosen key alongside the absolute dates it resolved to
+ * on the day it was chosen, and the cookie lives a year. Only the key is
+ * durable: "Last 30 days" picked on the 19th stays 2026-08-21..2026-09-19
+ * forever, so the window drifts further into the past every day.
+ *
+ * That is invisible for GA4 and Search Console, which have months of daily
+ * history behind the window. It is fatal for SE Ranking, whose visibility,
+ * tracked positions and AI stats are current-state rows stamped with the day
+ * they were synced — a newly onboarded client has exactly one such date, today,
+ * and a drifted window excludes it. The dashboard then shows nothing while
+ * every sync reports success.
+ */
+export function resolveStoredRange(
+  range: string | undefined,
+  from: string | undefined,
+  to: string | undefined,
+): { from: string; to: string } {
+  const option = RANGE_OPTIONS.find((o) => o.key === range && o.days);
+  if (option?.days) return isoDaysAgo(option.days);
+
+  // A custom range means those exact dates, and stays put.
+  if (range === "custom" && from && to) return { from, to };
+
+  if (from && to) {
+    // Stored before the key was recorded: keep the window's length, end it today.
+    const today = isoDaysAgo(1).to;
+    if (to < today) {
+      const start = Date.parse(`${from}T00:00:00Z`);
+      const end = Date.parse(`${to}T00:00:00Z`);
+      const days = Math.round((end - start) / 86_400_000) + 1;
+      if (Number.isFinite(days) && days > 0) return isoDaysAgo(days);
+    }
+    return { from, to };
+  }
+
+  return isoDaysAgo(30);
+}
+
 export function detectRangeKey(from: string, to: string, explicit?: string | null): RangeKey {
   if (explicit === "custom") return "custom";
   if (explicit && RANGE_OPTIONS.some((o) => o.key === explicit)) {
