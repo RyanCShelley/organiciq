@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { DataTable } from "@/components/analytics/DataTable";
 import { MetricCard } from "@/components/analytics/MetricCard";
+import { ProgressPanel } from "@/components/analytics/ProgressPanel";
 import { Sparkline } from "@/components/analytics/Sparkline";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -31,24 +32,6 @@ function leadGoalLabel(periodDays: number | null): string {
   if (periodDays === null) return "Lead Goal";
   if (periodDays >= 28 && periodDays <= 31) return "Monthly Lead Goal";
   return `Lead Goal (${periodDays} days)`;
-}
-
-/**
- * "Snapshot frozen between X and Y" from the window the baseline was measured
- * over. Falls back to the single date when only `as_of` is known (manual
- * snapshots), and to nothing when no date was ever recorded.
- */
-function baselineFrozenLine(baseline: DashboardBaseline): string | null {
-  const start = baseline.period_start;
-  const end = baseline.period_end ?? baseline.as_of;
-
-  if (start && end && start !== end) {
-    return `Snapshot frozen between ${formatDateLabel(start)} and ${formatDateLabel(end)}`;
-  }
-  if (end) {
-    return `Snapshot frozen ${formatDateLabel(end)}`;
-  }
-  return null;
 }
 
 function channelBarColor(label: string): string {
@@ -93,8 +76,6 @@ export default async function DashboardPage({
   }
 
   const baselineConfigured = Boolean(data?.baseline.configured);
-  const snapshotLine =
-    data && baselineConfigured ? baselineFrozenLine(data.baseline) : null;
 
   return (
     <section>
@@ -102,135 +83,7 @@ export default async function DashboardPage({
 
       {data ? (
         <div className="space-y-[30px]">
-          <section className="baseline-hero">
-            <div className="flex flex-wrap items-start justify-between gap-5">
-              <div className="min-w-0">
-                <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--brand-lime)]">
-                  Baseline
-                </div>
-                <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
-                  How we&rsquo;ve progressed since we started.
-                </p>
-              </div>
-              {clientId ? (
-                <Link
-                  href={clientPath}
-                  className="shrink-0 rounded-[10px] border-[1.5px] border-white/35 bg-transparent px-[15px] py-[9px] text-[12.5px] font-semibold text-white transition-colors duration-[120ms] hover:bg-white/10"
-                >
-                  Edit baseline
-                </Link>
-              ) : null}
-            </div>
-
-            {snapshotLine ? (
-              <p className="mt-4 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--brand-on-dark-muted)]">
-                {snapshotLine}
-              </p>
-            ) : null}
-
-            {!baselineConfigured ? (
-              <Alert variant="info" className="mt-4">
-                No baseline snapshot yet. Set monthly sessions, leads, and lead
-                rate in{" "}
-                <Link href={clientPath} className="font-medium underline">
-                  Client settings
-                </Link>
-                .
-              </Alert>
-            ) : (
-              <div className="metric-grid mt-[18px]">
-                <MetricCard
-                  tone="glass"
-                  label="Lead rate vs baseline"
-                  metric={data.baseline.vs_current.lead_rate}
-                  unit="pct"
-                  comparisonLabel="vs baseline"
-                  hint={
-                    data.baseline.lead_rate != null
-                      ? `Baseline ${formatNum(data.baseline.lead_rate)}%`
-                      : undefined
-                  }
-                />
-                <MetricCard
-                  tone="glass"
-                  label="Monthly leads vs baseline"
-                  metric={data.baseline.vs_current.leads}
-                  comparisonLabel="vs baseline"
-                  hint={
-                    data.baseline.monthly_leads != null
-                      ? `Baseline ${data.baseline.monthly_leads.toLocaleString()}/mo`
-                      : undefined
-                  }
-                />
-                <MetricCard
-                  tone="glass"
-                  label="Monthly sessions vs baseline"
-                  metric={data.baseline.vs_current.sessions}
-                  comparisonLabel="vs baseline"
-                  hint={
-                    data.baseline.monthly_sessions != null
-                      ? `Baseline ${data.baseline.monthly_sessions.toLocaleString()}/mo`
-                      : undefined
-                  }
-                />
-              </div>
-            )}
-          </section>
-
-          {data.baseline.projection && data.baseline.projection.checkpoints.length > 0 ? (
-            <section className="baseline-hero">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--brand-lime)]">
-                    Benchmarks
-                  </div>
-                  <p className="mt-2 text-[13.5px] text-[var(--brand-on-dark)]">
-                    Frozen {data.baseline.projection.generated_on} from the{" "}
-                    {data.baseline.projection.plan_label} curve. Monthly leads to hit at each
-                    checkpoint.
-                  </p>
-                </div>
-                {clientId ? (
-                  <Link
-                    href={clientPath}
-                    className="shrink-0 text-[12.5px] font-semibold text-[var(--brand-lime)] hover:underline"
-                  >
-                    Re-run projection
-                  </Link>
-                ) : null}
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                {data.baseline.projection.checkpoints.map((checkpoint) => {
-                  const target = Math.round(checkpoint.monthly_leads);
-                  const current = data.baseline.vs_current.leads.current;
-                  const met = current !== null && current >= target;
-                  return (
-                    <div key={checkpoint.month} className="baseline-glass">
-                      <div className="text-[12.5px] font-semibold text-[var(--brand-on-dark)]">
-                        {checkpoint.label}
-                      </div>
-                      <div className="mt-1.5 font-[family-name:var(--font-display)] text-[24px] font-black leading-none tracking-[-0.02em] text-white">
-                        {target.toLocaleString()}
-                      </div>
-                      <div className="mt-1 text-[11.5px] text-[var(--brand-on-dark)]">
-                        leads/mo · {checkpoint.lead_rate_pct.toFixed(2)}% rate
-                      </div>
-                      {current !== null ? (
-                        <div
-                          className={`mt-1.5 text-[11.5px] font-bold ${
-                            met ? "text-[var(--brand-lime)]" : "text-[var(--brand-on-dark-muted)]"
-                          }`}
-                        >
-                          {met ? "On track" : `${Math.round(target - current)} to go`}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
+          <ProgressPanel baseline={data.baseline} editHref={clientId ? clientPath : null} />
 
           <section>
             <SectionHeader

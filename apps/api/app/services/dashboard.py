@@ -129,6 +129,7 @@ def _baseline_comparison(
     sessions_series: list[float] | None = None,
     leads_series: list[float] | None = None,
     lead_rate_series: list[float] | None = None,
+    monthly_actuals: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compare the selected window (scaled to monthly) against the frozen baseline snapshot."""
     has_baseline = (
@@ -184,6 +185,8 @@ def _baseline_comparison(
         # Frozen benchmarks, so the dashboard can show progress against them.
         "projection": client.baseline_projection_json,
         "current_window": window_payload,
+        # Monthly lead history behind the projection curve.
+        "monthly_actuals": monthly_actuals or [],
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
@@ -195,6 +198,55 @@ def _baseline_comparison(
             "lead_rate": _period_metric(current_lead_rate, baseline_rate, lead_rate_series),
         },
     }
+
+
+def _monthly_lead_actuals(
+    db: Session,
+    client_id: UUID,
+    event_names: list[str],
+    *,
+    since: date | None,
+) -> list[dict[str, Any]]:
+    """
+    Recorded lead events per calendar month, for the progress chart.
+
+    The chart plots months, but every other series on the dashboard is scoped to
+    the viewing window, so this is read separately and spans the whole history
+    from the baseline forward.
+
+    The month in progress is included and flagged `partial`: hiding it loses the
+    most recent data, and plotting it unmarked reads as a collapse that is an
+    artifact of the calendar rather than of performance.
+    """
+    if not event_names:
+        return []
+
+    month = func.date_trunc("month", FactGa4Event.date)
+    query = (
+        db.query(month.label("month"), func.coalesce(func.sum(FactGa4Event.event_count), 0))
+        .filter(
+            FactGa4Event.client_id == client_id,
+            FactGa4Event.event_name.in_(event_names),
+        )
+        .group_by(month)
+        .order_by(month)
+    )
+    if since is not None:
+        query = query.filter(FactGa4Event.date >= since.replace(day=1))
+
+    today = date.today()
+    current_month = today.replace(day=1)
+    rows: list[dict[str, Any]] = []
+    for value, leads in query.all():
+        start = value.date() if hasattr(value, "date") else value
+        rows.append(
+            {
+                "month": start.isoformat()[:7],
+                "leads": int(leads or 0),
+                "partial": start >= current_month,
+            }
+        )
+    return rows
 
 
 def _load_watermarks(db: Session, client_id: UUID) -> dict[str, DataWatermark]:
@@ -1127,6 +1179,12 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         sessions_series=sessions_series,
         leads_series=leads_series,
         lead_rate_series=lead_rate_series,
+        monthly_actuals=_monthly_lead_actuals(
+            db,
+            client.id,
+            lead_events,
+            since=client.baseline_period_start or client.baseline_as_of,
+        ),
     )
 
     return {

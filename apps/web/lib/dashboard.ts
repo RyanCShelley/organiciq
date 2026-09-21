@@ -141,6 +141,7 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       notes: null,
       tier_name: null,
       current_window: null,
+      monthly_actuals: [],
       monthly_sessions: null,
       monthly_leads: null,
       lead_rate: null,
@@ -167,6 +168,15 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
     source: typeof baseline.source === "string" ? baseline.source : null,
     notes: typeof baseline.notes === "string" ? baseline.notes : null,
     tier_name: typeof baseline.tier_name === "string" ? baseline.tier_name : null,
+    monthly_actuals: Array.isArray(baseline.monthly_actuals)
+      ? baseline.monthly_actuals
+          .filter((row) => !!row && typeof row.month === "string" && Number.isFinite(Number(row.leads)))
+          .map((row) => ({
+            month: row.month,
+            leads: Number(row.leads),
+            partial: row.partial === true,
+          }))
+      : [],
     current_window:
       window &&
       typeof window === "object" &&
@@ -295,6 +305,14 @@ export type BaselineProjectionPayload = {
   checkpoints: BaselineCheckpoint[];
 };
 
+export type BaselineMonthlyActual = {
+  /** YYYY-MM */
+  month: string;
+  leads: number;
+  /** The month in progress — plotted, but marked so it doesn't read as a drop. */
+  partial: boolean;
+};
+
 export type DashboardBaseline = {
   configured: boolean;
   as_of: string | null;
@@ -307,6 +325,8 @@ export type DashboardBaseline = {
   notes: string | null;
   tier_name: string | null;
   current_window: { from: string; to: string; days: number | null } | null;
+  /** Monthly lead history behind the projection curve, oldest first. */
+  monthly_actuals: BaselineMonthlyActual[];
   monthly_sessions: number | null;
   monthly_leads: number | null;
   lead_rate: number | null;
