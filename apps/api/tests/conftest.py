@@ -227,3 +227,108 @@ def date_window(days: int = 14) -> tuple[date, date]:
     end = date.today()
     start = end - timedelta(days=days - 1)
     return start, end
+
+
+def seed_required_sources(
+    db: Session,
+    client_id: uuid.UUID,
+    through: date,
+    *,
+    skip: tuple[str, ...] = (),
+) -> None:
+    """
+    Make every Decision Engine source report ready.
+
+    The engine refuses to run unless all four are present, so a test about one
+    lever still has to satisfy the other three. `skip` leaves a source out, for
+    tests that assert the refusal itself.
+    """
+    import uuid as _uuid
+    from decimal import Decimal
+
+    from app.models.config import OrganicChannel
+    from app.models.crawl import FactCrawlPageSnapshot
+    from app.models.ga4 import FactGa4Traffic
+    from app.models.gsc import FactGscPage
+    from app.models.job import DataWatermark, ValidationStatus
+
+    def _watermark(source: str) -> None:
+        row = (
+            db.query(DataWatermark)
+            .filter(DataWatermark.client_id == client_id, DataWatermark.source == source)
+            .one_or_none()
+        )
+        if row is None:
+            db.add(
+                DataWatermark(
+                    id=_uuid.uuid4(),
+                    client_id=client_id,
+                    source=source,
+                    fact_through_date=through,
+                    validation_status=ValidationStatus.PASSED,
+                )
+            )
+        else:
+            row.fact_through_date = through
+            row.validation_status = ValidationStatus.PASSED
+
+    def _has(model) -> bool:
+        return db.query(model).filter(model.client_id == client_id).first() is not None
+
+    if "search_console" not in skip:
+        _watermark("gsc_pages")
+        if not _has(FactGscPage):
+            db.add(
+                FactGscPage(
+                    id=_uuid.uuid4(),
+                    client_id=client_id,
+                    date=through,
+                    raw_url="https://example.com/baseline",
+                    normalized_url="https://example.com/baseline",
+                    country="",
+                    device="",
+                    impressions=Decimal("10"),
+                    clicks=Decimal("1"),
+                    ctr=Decimal("0.1"),
+                    average_position=Decimal("10"),
+                )
+            )
+
+    if "analytics" not in skip:
+        _watermark("ga4")
+        if not _has(FactGa4Traffic):
+            db.add(
+                FactGa4Traffic(
+                    id=_uuid.uuid4(),
+                    client_id=client_id,
+                    date=through,
+                    channel=OrganicChannel.ORGANIC_SEARCH,
+                    raw_url="https://example.com/baseline",
+                    normalized_url="https://example.com/baseline",
+                    sessions=Decimal("10"),
+                    active_users=Decimal("8"),
+                    views=Decimal("12"),
+                    engaged_sessions=Decimal("6"),
+                )
+            )
+
+    if "crawl_audit" not in skip and not _has(FactCrawlPageSnapshot):
+        db.add(
+            FactCrawlPageSnapshot(
+                id=_uuid.uuid4(),
+                client_id=client_id,
+                snapshot_date=through,
+                raw_url="https://example.com/baseline",
+                normalized_url="https://example.com/baseline",
+                indexable=True,
+                status_code=200,
+                inbound_internal_links=3,
+                word_count=600,
+                in_sitemap=True,
+            )
+        )
+
+    if "ai_visibility" not in skip:
+        _watermark("se_ranking_ai")
+
+    db.commit()

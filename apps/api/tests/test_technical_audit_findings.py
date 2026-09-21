@@ -6,7 +6,7 @@ from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.lever_engine import detect_technical_signal, diagnose
-from tests.conftest import date_window
+from tests.conftest import date_window, seed_required_sources
 
 
 def _crawl(**overrides) -> FactCrawlPageSnapshot:
@@ -134,6 +134,7 @@ def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     technical = [row for row in result.findings if row.lever == "technical_seo"]
     signals = {row.evidence_json.get("audit_signal") for row in technical}

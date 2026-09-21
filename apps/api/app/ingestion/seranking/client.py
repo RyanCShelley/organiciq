@@ -256,31 +256,23 @@ def list_airt_prompts_paginated(
     return rows
 
 
-def list_site_audits(
-    *,
-    api_key: str,
-    limit: int = 100,
-    offset: int = 0,
-    search: str | None = None,
-    date_start: date | None = None,
-    date_end: date | None = None,
-) -> dict[str, Any]:
-    params: dict[str, Any] = {"limit": limit, "offset": offset}
-    if search:
-        params["search"] = search
-    if date_start is not None:
-        params["date_start"] = date_start.isoformat()
-    if date_end is not None:
-        params["date_end"] = date_end.isoformat()
-    data = _request(api_key=api_key, method="GET", path="/site-audit/audits", params=params)
-    return data if isinstance(data, dict) else {"items": [], "total": 0}
-
-
 def get_audit_status(*, api_key: str, audit_id: int | str) -> dict[str, Any]:
+    """Crawl state for a project's audit. `audit_id` is the SE Ranking project id."""
     data = _request(
         api_key=api_key,
         method="GET",
-        path="/site-audit/audits/status",
+        path="/project-management/audits/status",
+        params={"audit_id": audit_id},
+    )
+    return data if isinstance(data, dict) else {}
+
+
+def get_audit_report(*, api_key: str, audit_id: int | str) -> dict[str, Any]:
+    """Section-by-section audit report, including the health score."""
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/project-management/audits/report",
         params={"audit_id": audit_id},
     )
     return data if isinstance(data, dict) else {}
@@ -312,7 +304,7 @@ def list_audit_pages_paginated(
         data = _request(
             api_key=api_key,
             method="GET",
-            path="/site-audit/audits/pages",
+            path="/project-management/audits/pages",
             params={"audit_id": audit_id, "limit": page_size, "offset": offset},
         )
         requests_made += 1
@@ -381,7 +373,7 @@ def list_issue_pages_paginated(
         data = _request(
             api_key=api_key,
             method="GET",
-            path="/site-audit/audits/issue-pages",
+            path="/project-management/audits/issue-pages",
             params={
                 "audit_id": audit_id,
                 "code": code,
@@ -398,11 +390,18 @@ def list_issue_pages_paginated(
             break
         if not isinstance(data, dict):
             break
-        batch = data.get("items") or data.get("pages") or []
+        batch = data.get("urls")
+        if batch is None:
+            batch = data.get("items") or data.get("pages") or []
         if not isinstance(batch, list):
             break
-        rows.extend(item for item in batch if isinstance(item, dict))
-        total = int(data.get("total") or 0)
+        # `urls_type: simple_urls_array` means bare URL strings, not objects.
+        rows.extend(
+            {"url": item} if isinstance(item, str) else item
+            for item in batch
+            if isinstance(item, (str, dict))
+        )
+        total = int(data.get("total_urls") or data.get("total") or 0)
         offset += len(batch)
         if offset >= total or not batch:
             break

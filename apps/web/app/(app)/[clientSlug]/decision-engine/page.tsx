@@ -135,7 +135,7 @@ export default async function DecisionEnginePage({
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
       {data && !data.ready ? (
-        <Alert variant="info">
+        <Alert variant="danger">
           {data.message ?? "Decision Engine is not ready for this client and date range."}
         </Alert>
       ) : null}
@@ -147,15 +147,15 @@ export default async function DecisionEnginePage({
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {Object.entries(data.readiness).map(([key, ready]) => (
-              <span key={key} className={`badge ${ready ? "badge-success" : "badge-neutral"}`}>
+              <span key={key} className={`badge ${ready ? "badge-success" : "badge-danger"}`}>
                 {readinessLabel(key)}
-                {ready ? "" : " · no data"}
+                {ready ? "" : " · missing"}
               </span>
             ))}
           </div>
           <p className="mt-1.5 text-xs text-[var(--text-tertiary)]">
-            Each source powers different levers. Sources without data are skipped — the
-            rest still run.
+            All four sources are required. A score built from a partial set is not
+            comparable to a full one, so the engine stops until every source reports.
           </p>
         </div>
       ) : null}

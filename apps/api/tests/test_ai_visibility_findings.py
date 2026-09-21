@@ -6,7 +6,7 @@ from app.models.job import DataWatermark, ValidationStatus
 from app.models.gsc import FactGscPage
 from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
 from app.services.lever_engine import detect_keyword_rank_signal, diagnose
-from tests.conftest import date_window
+from tests.conftest import date_window, seed_required_sources
 
 
 def test_detect_keyword_fell_top5_and_top10():
@@ -120,6 +120,7 @@ def test_diagnose_ai_visibility_keyword_and_prompt_rules(db, client_a):
         )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     ai = [row for row in result.findings if row.lever == "structured_data_ai"]
     signals = {row.evidence_json.get("audit_signal") for row in ai}

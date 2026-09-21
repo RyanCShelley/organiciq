@@ -56,74 +56,41 @@ def parse_audit_page(page: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _host_matches(a: str, b: str) -> bool:
-    left = (urlparse(a if "://" in a else f"https://{a}").hostname or a).lower().removeprefix("www.")
-    right = (urlparse(b if "://" in b else f"https://{b}").hostname or b).lower().removeprefix("www.")
-    return left == right or left.endswith(f".{right}") or right.endswith(f".{left}")
+def resolve_project_audit(*, api_key: str, site_id: str) -> tuple[int, date]:
+    """
+    Return (audit_id, snapshot_date) for the audit attached to an SE Ranking project.
 
-
-def resolve_latest_finished_audit(
-    *,
-    api_key: str,
-    site_id: str,
-    client_domain: str,
-    search: str | None = None,
-) -> tuple[int, date]:
-    """Return the newest finished Website Audit for the mapped SE Ranking project."""
-    site_id_text = str(site_id).strip()
-    domain = client_domain.strip()
-    search_term = (search or domain).strip()
-
-    candidates: list[dict[str, Any]] = []
-    offset = 0
-    page_size = 100
-    while True:
-        payload = ser_client.list_site_audits(
-            api_key=api_key,
-            limit=page_size,
-            offset=offset,
-            search=search_term or None,
-        )
-        items = payload.get("items") or []
-        if not isinstance(items, list):
-            break
-        candidates.extend(item for item in items if isinstance(item, dict))
-        total = int(payload.get("total") or 0)
-        offset += len(items)
-        if offset >= total or not items:
-            break
-
-    finished: list[tuple[date, int]] = []
-    for item in candidates:
-        status = str(item.get("status") or "").strip().lower()
-        if status != "finished":
-            continue
-        audit_site_id = item.get("site_id")
-        audit_url = str(item.get("url") or "").strip()
-        if audit_site_id is not None and str(audit_site_id) == site_id_text:
-            matched = True
-        elif audit_site_id is None and audit_url and domain and _host_matches(audit_url, domain):
-            matched = True
-        else:
-            matched = False
-        if not matched:
-            continue
-        audit_id = item.get("id")
-        last_update = str(item.get("last_update") or "").strip()
-        if audit_id is None or not last_update:
-            continue
-        try:
-            snapshot_date = date.fromisoformat(last_update[:10])
-        except ValueError:
-            continue
-        finished.append((snapshot_date, int(audit_id)))
-
-    if not finished:
+    Our clients' audits live on their projects, addressed by the project id — not in
+    the standalone Site Audit tool, which is a separate product with its own list.
+    Searching that list by domain found nothing and failed every audit sync, so the
+    project id from the integration mapping is the identifier to use.
+    """
+    audit_id = _parse_int(site_id)
+    if audit_id is None:
         raise RuntimeError(
-            "No finished SE Ranking Website Audit found for this project. "
-            "Run an audit in SE Ranking, wait until it completes, then retry."
+            "SE Ranking project id is missing or not numeric; reconnect the integration"
         )
 
-    finished.sort(key=lambda row: (row[0], row[1]), reverse=True)
-    snapshot_date, audit_id = finished[0]
+    status = ser_client.get_audit_status(api_key=api_key, audit_id=audit_id)
+    state = str(status.get("status") or "").strip().lower()
+    if not state:
+        raise RuntimeError(
+            f"SE Ranking project {audit_id} has no website audit. "
+            "Run an audit in SE Ranking, wait for it to finish, then retry."
+        )
+    if state != "finished":
+        raise RuntimeError(
+            f"SE Ranking website audit for project {audit_id} is {state}; "
+            "wait for it to finish, then retry."
+        )
+
+    audit_time = str(status.get("audit_time") or "").strip()
+    try:
+        snapshot_date = date.fromisoformat(audit_time[:10])
+    except ValueError as exc:
+        raise RuntimeError(
+            f"SE Ranking website audit for project {audit_id} reported an unreadable "
+            f"completion time ({audit_time!r})"
+        ) from exc
+
     return audit_id, snapshot_date

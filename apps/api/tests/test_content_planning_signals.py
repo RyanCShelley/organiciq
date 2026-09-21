@@ -5,7 +5,7 @@ from uuid import uuid4
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.lever_engine import diagnose
-from tests.conftest import date_window
+from tests.conftest import date_window, seed_required_sources
 
 
 def _watermark(db, client_id, source: str, fact_through: date) -> None:
@@ -55,6 +55,7 @@ def test_content_planning_excludes_commercial_striking_distance(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
     urls = {signal.page_url for signal in result.search_opportunities}
@@ -82,6 +83,7 @@ def test_content_planning_requires_minimum_impressions(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert all(
         signal.page_url != "https://example.com/blog/low-demand-post"

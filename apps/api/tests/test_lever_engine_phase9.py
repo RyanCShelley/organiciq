@@ -10,7 +10,7 @@ from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.models.seranking import FactSerAiTrackerStats, FactSerSiteSummary
 from app.services.lever_engine import diagnose, score_finding
-from tests.conftest import date_window
+from tests.conftest import date_window, seed_required_sources
 
 
 def _watermark(db, client_id, source: str, fact_through: date) -> None:
@@ -53,9 +53,11 @@ def test_expected_ctr_curve():
 
 def test_diagnose_not_ready_without_gsc(db, client_a):
     start, end = date_window(7)
+    seed_required_sources(db, client_a.id, end, skip=("search_console",))
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert result.ready is False
     assert result.readiness["search_console"] is False
+    assert "Search Console" in (result.message or "")
 
 
 def test_internal_linking_cascade(db, client_a):
@@ -94,6 +96,7 @@ def test_internal_linking_cascade(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
     assert result.readiness["crawl_audit"] is True
@@ -142,6 +145,7 @@ def test_diagnose_uses_available_overlap_when_range_extends(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
     assert result.analysis_from == fact_start
@@ -186,6 +190,7 @@ def test_diagnose_typical_gsc_lag_has_no_partial_banner(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
     assert result.analysis_to == fact_end
@@ -286,6 +291,7 @@ def test_conversion_portfolio_rule(db, client_a):
             )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     conversion = [row for row in result.recommendations if row.lever == "conversion_path"]
     assert len(conversion) == 1
@@ -315,60 +321,56 @@ def test_serp_ctr_page_rule(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
     serp = [row for row in result.findings if row.lever == "serp_ctr"]
     assert len(serp) == 1
 
 
-def test_diagnose_runs_on_ga4_without_search_console(db, client_a):
+def test_diagnose_is_blocked_when_only_ga4_has_data(db, client_a):
     """
-    GA4-only clients must still get an engine run.
+    A partial source set stops the run.
 
-    Search Console used to be a hard prerequisite, so a client with good
-    conversion data but no GSC got ready=False and zero findings — including
-    from Conversion Path, which reads GA4 alone.
+    This used to be the opposite: GA4-only clients got a run so Conversion Path
+    could report something. But a score built from one source is not comparable
+    to one built from four, so the ranking between levers came out wrong while
+    looking authoritative. Naming what is missing is more useful than a plan
+    derived from a quarter of the inputs.
     """
     start = date(2026, 8, 2)
     end = date(2026, 8, 31)
-    _watermark(db, client_a.id, "ga4", end)
-    db.add(
-        ConversionDefinition(
-            id=uuid4(),
-            client_id=client_a.id,
-            event_name="generate_lead",
-            conversion_name="Lead",
-            conversion_type="lead",
-            is_primary=True,
-            active=True,
-        )
+    seed_required_sources(
+        db, client_a.id, end, skip=("search_console", "crawl_audit", "ai_visibility")
     )
-    db.add(
-        FactGa4Traffic(
-            id=uuid4(),
-            client_id=client_a.id,
-            date=end,
-            raw_url="https://example.com/",
-            normalized_url="https://example.com/",
-            session_source="google",
-            session_medium="organic",
-            channel=OrganicChannel.ORGANIC_SEARCH,
-            sessions=Decimal("500"),
-            active_users=Decimal("500"),
-            views=Decimal("600"),
-        )
-    )
-    db.commit()
 
-    result = diagnose(db, client_a, from_date=start, to_date=end)
-
-    assert result.ready is True, "GA4 facts alone must not be treated as unusable"
-    assert result.readiness["analytics"] is True
-    assert result.readiness["search_console"] is False
-
-
-def test_diagnose_blocked_only_when_every_source_is_empty(db, client_a):
-    start, end = date_window(7)
     result = diagnose(db, client_a, from_date=start, to_date=end)
 
     assert result.ready is False
-    assert not any(result.readiness.values())
+    assert result.readiness["analytics"] is True
+    assert result.readiness["search_console"] is False
+    assert result.readiness["crawl_audit"] is False
+    assert result.readiness["ai_visibility"] is False
+    message = result.message or ""
+    assert "Search Console" in message
+    assert "site crawl" in message
+    assert "AI visibility" in message
+
+
+def test_diagnose_is_blocked_when_any_single_source_is_missing(db, client_a):
+    """Each source is individually required — not merely one of the four."""
+    start, end = date_window(7)
+
+    for missing in ("search_console", "analytics", "crawl_audit", "ai_visibility"):
+        # Readiness reads facts as well as watermarks, so clear both between cases.
+        for model in (DataWatermark, FactGscPage, FactGa4Traffic, FactCrawlPageSnapshot):
+            for row in db.query(model).filter(model.client_id == client_a.id):
+                db.delete(row)
+        db.commit()
+        seed_required_sources(db, client_a.id, end, skip=(missing,))
+
+        result = diagnose(db, client_a, from_date=start, to_date=end)
+
+        assert result.ready is False, f"{missing} missing should block the run"
+        assert result.readiness[missing] is False
+
+

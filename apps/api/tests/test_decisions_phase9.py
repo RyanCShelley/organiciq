@@ -9,7 +9,7 @@ from app.models.crawl import FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.decisions import evaluate_and_store, run_diagnose
-from tests.conftest import client_header, date_window
+from tests.conftest import client_header, date_window, seed_required_sources
 
 
 def _watermark(db, client_id, source: str, fact_through: date) -> None:
@@ -44,6 +44,7 @@ def test_diagnose_api(db, client, client_a, admin_user):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     res = client.get(
         f"/decisions/diagnose?from={start.isoformat()}&to={end.isoformat()}",
         headers=client_header(client_a.id, admin_user.email),
@@ -91,6 +92,7 @@ def test_evaluate_persists_scored_decisions(db, client_a):
     )
     db.commit()
 
+    seed_required_sources(db, client_a.id, end)
     created, skipped, result = evaluate_and_store(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
     assert len(created) >= 1
@@ -123,6 +125,7 @@ def test_decisions_api_evaluate_includes_diagnose(db, client, client_a, admin_us
     db.commit()
     headers = client_header(client_a.id, admin_user.email)
 
+    seed_required_sources(db, client_a.id, end)
     res = client.post(
         "/decisions/evaluate",
         headers=headers,

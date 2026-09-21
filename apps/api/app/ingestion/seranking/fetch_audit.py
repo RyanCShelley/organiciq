@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.core.urls import normalize_url
 from app.ingestion.seranking import client as ser_client
-from app.ingestion.seranking.audit_pages import parse_audit_page, resolve_latest_finished_audit
-from app.models.client import Client
+from app.ingestion.seranking.audit_pages import parse_audit_page, resolve_project_audit
 from app.models.crawl import StagingSerAuditIssue, StagingSerAuditPage
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import SyncJob
@@ -37,7 +36,9 @@ def _load_integration(db: Session, client_id: UUID) -> Integration:
     return integration
 
 
-def _issue_url(item: dict) -> str | None:
+def _issue_url(item: dict | str) -> str | None:
+    if isinstance(item, str):
+        return item.strip() or None
     for key in ("url", "page_url", "page", "path"):
         raw = str(item.get(key) or "").strip()
         if raw:
@@ -51,20 +52,13 @@ def fetch_seranking_audit(db: Session, job: SyncJob) -> tuple[int, int, int, str
     Returns (pages_fetched, pages_staged, issues_staged, audit_id, snapshot_date_iso).
     """
     integration = _load_integration(db, job.client_id)
-    client = db.query(Client).filter(Client.id == job.client_id).one()
     api_key = _api_key()
 
-    audit_id, snapshot_date = resolve_latest_finished_audit(
+    # Resolving checks the crawl state, so there is no second status call here.
+    audit_id, snapshot_date = resolve_project_audit(
         api_key=api_key,
         site_id=integration.external_property_id,
-        client_domain=client.domain,
     )
-    status = ser_client.get_audit_status(api_key=api_key, audit_id=audit_id)
-    audit_status = str(status.get("status") or "").strip().lower()
-    if audit_status and audit_status != "finished":
-        raise RuntimeError(
-            f"SE Ranking Website Audit {audit_id} is {audit_status or 'unknown'}; wait for it to finish"
-        )
 
     pages = ser_client.list_audit_pages_paginated(api_key=api_key, audit_id=audit_id)
     page_rows: list[StagingSerAuditPage] = []

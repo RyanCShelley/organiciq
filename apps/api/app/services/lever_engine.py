@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -1273,6 +1274,18 @@ def _lever_summaries(
     return summaries
 
 
+logger = logging.getLogger("organiciq.decision_engine")
+
+
+# Every source the Decision Engine requires, in the order it reports them.
+REQUIRED_SOURCE_LABELS: dict[str, str] = {
+    "search_console": "Search Console",
+    "analytics": "GA4 analytics",
+    "crawl_audit": "site crawl (SE Ranking website audit)",
+    "ai_visibility": "AI visibility (SE Ranking AI tracker)",
+}
+
+
 def diagnose(
     db: Session,
     client: Client,
@@ -1346,18 +1359,30 @@ def diagnose(
         "analysis_to": gsc_period[1] if gsc_period else None,
         "partial_message": partial_message,
     }
-    # Run whatever the available data supports rather than requiring Search
-    # Console for everything. Page-level levers (internal linking, SERP CTR,
-    # technical) need GSC demand and simply produce nothing without it, but
-    # Conversion Path runs off GA4 alone and AI visibility off SE Ranking —
-    # gating all of them on GSC left GA4-only clients with an empty engine.
-    if not any(readiness.values()):
+    # All four sources are required, and a missing one stops the run.
+    #
+    # An earlier version ran on whatever happened to be present, so a client
+    # with no site crawl still got a scored, confident-looking plan built from
+    # three sources — the Technical SEO lever silently contributed nothing and
+    # nothing on screen said so. Scores computed from a partial source set are
+    # not comparable to scores computed from a full one, which makes the
+    # ranking between levers wrong rather than merely incomplete. Refusing to
+    # run, and naming exactly what is missing, is the honest failure.
+    missing = [name for name, ok in readiness.items() if not ok]
+    if missing:
+        missing_labels = ", ".join(REQUIRED_SOURCE_LABELS[name] for name in missing)
+        logger.warning(
+            "Decision Engine blocked for client %s (%s): missing %s",
+            client.id,
+            client.domain,
+            ", ".join(missing),
+        )
         return DiagnoseResult(
             ready=False,
-            message=block_message
-            or (
-                "No validated facts yet. Connect and sync at least one source "
-                "(Search Console, GA4, SE Ranking, or a site crawl)."
+            message=(
+                f"Decision Engine needs all four data sources. Missing: {missing_labels}. "
+                "Fix the sync for those sources, then re-run."
+                + (f" {block_message}" if block_message else "")
             ),
             readiness=readiness,
             formula=SCORE_FORMULA,

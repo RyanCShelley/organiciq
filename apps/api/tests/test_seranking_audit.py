@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.ingestion.seranking.audit_pages import parse_audit_page, resolve_latest_finished_audit
+from app.ingestion.seranking.audit_pages import parse_audit_page, resolve_project_audit
 from app.ingestion.seranking.publish_audit import publish_seranking_audit
 from app.ingestion.seranking.pipeline_audit import run_seranking_audit_job
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot
@@ -65,92 +65,61 @@ def test_parse_audit_page_keeps_empty_meta_as_empty_string():
     assert parsed["description"] == ""
 
 
-def test_resolve_latest_finished_audit_prefers_site_id(monkeypatch):
-    audits = {
-        "items": [
-            {
-                "id": 100,
-                "site_id": 42,
-                "url": "https://old.example.com",
-                "status": "finished",
-                "last_update": "2026-08-01",
-            },
-            {
-                "id": 200,
-                "site_id": 42,
-                "url": "https://example.com",
-                "status": "finished",
-                "last_update": "2026-08-15",
-            },
-            {
-                "id": 300,
-                "site_id": 99,
-                "url": "https://example.com",
-                "status": "finished",
-                "last_update": "2026-09-01",
-            },
-        ],
-        "total": 3,
+def _status(**over):
+    payload = {
+        "status": "finished",
+        "audit_time": "2026-09-19 00:12:06",
+        "total_pages": 113,
     }
+    payload.update(over)
+    return payload
+
+
+def test_resolve_project_audit_uses_the_project_id(monkeypatch):
+    """
+    The audit is addressed by the SE Ranking project id from the integration
+    mapping. It is not looked up by domain in the standalone Site Audit tool,
+    which is a different product and does not contain our clients' audits.
+    """
+    seen: dict = {}
+
+    def fake_status(*, api_key, audit_id):
+        seen["audit_id"] = audit_id
+        return _status()
 
     monkeypatch.setattr(
-        "app.ingestion.seranking.audit_pages.ser_client.list_site_audits",
-        lambda **kwargs: audits,
+        "app.ingestion.seranking.audit_pages.ser_client.get_audit_status", fake_status
     )
-    audit_id, snapshot_date = resolve_latest_finished_audit(
-        api_key="test-key",
-        site_id="42",
-        client_domain="example.com",
-    )
-    assert audit_id == 200
-    assert snapshot_date == date(2026, 8, 15)
+
+    audit_id, snapshot_date = resolve_project_audit(api_key="test-key", site_id="10004360")
+
+    assert seen["audit_id"] == 10004360
+    assert audit_id == 10004360
+    assert snapshot_date == date(2026, 9, 19)
 
 
-def test_resolve_latest_finished_audit_falls_back_to_domain(monkeypatch):
-    audits = {
-        "items": [
-            {
-                "id": 500,
-                "url": "https://www.smamarketing.net",
-                "status": "finished",
-                "last_update": "2026-08-20",
-            }
-        ],
-        "total": 1,
-    }
-
+def test_resolve_project_audit_requires_a_finished_crawl(monkeypatch):
     monkeypatch.setattr(
-        "app.ingestion.seranking.audit_pages.ser_client.list_site_audits",
-        lambda **kwargs: audits,
+        "app.ingestion.seranking.audit_pages.ser_client.get_audit_status",
+        lambda **kwargs: _status(status="processing"),
     )
-    audit_id, snapshot_date = resolve_latest_finished_audit(
-        api_key="test-key",
-        site_id="12345",
-        client_domain="smamarketing.net",
-    )
-    assert audit_id == 500
-    assert snapshot_date == date(2026, 8, 20)
+    with pytest.raises(RuntimeError, match="is processing"):
+        resolve_project_audit(api_key="test-key", site_id="42")
 
 
-def test_resolve_latest_finished_audit_requires_finished(monkeypatch):
-    audits = {
-        "items": [
-            {
-                "id": 1,
-                "site_id": 42,
-                "url": "https://example.com",
-                "status": "processing",
-                "last_update": "2026-08-20",
-            }
-        ],
-        "total": 1,
-    }
+def test_resolve_project_audit_reports_a_project_with_no_audit(monkeypatch):
+    """An unrun audit must say so plainly — this is the fix-it message staff act on."""
     monkeypatch.setattr(
-        "app.ingestion.seranking.audit_pages.ser_client.list_site_audits",
-        lambda **kwargs: audits,
+        "app.ingestion.seranking.audit_pages.ser_client.get_audit_status",
+        lambda **kwargs: {},
     )
-    with pytest.raises(RuntimeError, match="No finished SE Ranking Website Audit"):
-        resolve_latest_finished_audit(api_key="test-key", site_id="42", client_domain="example.com")
+    with pytest.raises(RuntimeError, match="has no website audit"):
+        resolve_project_audit(api_key="test-key", site_id="42")
+
+
+def test_resolve_project_audit_rejects_a_non_numeric_project_id(monkeypatch):
+    with pytest.raises(RuntimeError, match="not numeric"):
+        resolve_project_audit(api_key="test-key", site_id="")
 
 
 def test_seranking_audit_pipeline_with_mocked_api(db, client_a, monkeypatch):
@@ -214,24 +183,13 @@ def test_seranking_audit_pipeline_with_mocked_api(db, client_a, monkeypatch):
         },
     ]
 
+    # One status call resolves the audit: the project id IS the audit id.
     monkeypatch.setattr(
-        "app.ingestion.seranking.audit_pages.ser_client.list_site_audits",
+        "app.ingestion.seranking.audit_pages.ser_client.get_audit_status",
         lambda **kwargs: {
-            "items": [
-                {
-                    "id": 700183831,
-                    "site_id": 10113599,
-                    "url": "https://example.com",
-                    "status": "finished",
-                    "last_update": end.isoformat(),
-                }
-            ],
-            "total": 1,
+            "status": "finished",
+            "audit_time": f"{end.isoformat()} 00:12:06",
         },
-    )
-    monkeypatch.setattr(
-        "app.ingestion.seranking.fetch_audit.ser_client.get_audit_status",
-        lambda **kwargs: {"status": "finished"},
     )
     monkeypatch.setattr(
         "app.ingestion.seranking.fetch_audit.ser_client.list_audit_pages_paginated",
