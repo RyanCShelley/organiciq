@@ -71,7 +71,25 @@ def run_once() -> bool:
         logger.info("Processing job %s source=%s client=%s", job_id, job.source, job.client_id)
         try:
             result = jobs.process_job(db, job)
-            logger.info("Job %s finished status=%s", job_id, result.status.value)
+            # Counts and watermark, not just the status: a job that succeeds
+            # having written nothing looks identical to a healthy one otherwise,
+            # which is exactly the case that is hard to diagnose after the fact.
+            logger.info(
+                "Job %s finished status=%s fetched=%s written=%s through=%s%s",
+                job_id,
+                result.status.value,
+                result.records_fetched,
+                result.records_written,
+                result.fact_watermark,
+                f" note={result.error_message}" if result.error_message else "",
+            )
+            if result.status.value in {"successful", "partial"} and not result.records_written:
+                logger.warning(
+                    "Job %s (%s) succeeded but wrote no rows for client %s",
+                    job_id,
+                    result.source,
+                    result.client_id,
+                )
         except Exception:  # noqa: BLE001 — worker must not crash on one bad job
             db.rollback()
             logger.exception("Job %s failed with unhandled exception", job_id)
