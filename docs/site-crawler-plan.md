@@ -258,11 +258,35 @@ to 146 and the no-schema list from 23 to 12 real pages.
 2. **Cutover.** Run both sources in parallel for a cycle and diff, or switch
    outright? Parallel costs nothing extra (the audit is already being fetched)
    and would have caught this bug.
-3. **Schema expectations per page type.** Partly answered 2026-09-22. Two
-   signals now ship: `invalid_schema` (present but unparseable — actionable) and
-   `missing_schema` (none at all — advisory). Both fire only for pages the
-   first-party crawl actually reached, so "no structured data" can never mean
-   "not crawled". Still open: whether a *wrong type for the template* is worth
-   flagging, which needs a rule for what each page should carry.
+3. ~~Schema expectations per page type.~~ **Answered 2026-09-22.** Three
+   checks ship, all firing only for pages the first-party crawl reached so that
+   "no structured data" can never mean "not crawled":
+
+   - `invalid_schema` — present but unparseable. Actionable.
+   - `missing_schema` — none at all. Advisory.
+   - `missing_schema` with `boilerplate_schema_only` — markup present, but every
+     type is the wrapper a plugin emits site-wide. Advisory.
+
+   **"Wrong type for the template" was rejected**, and the reason is worth
+   keeping. It needs to know what template a page is, and we have no template
+   classifier: `PageType` is *intent* (commercial / informational / …) from a URL
+   heuristic, and on Aquaman it labels 41 of 43 pages "informational", service
+   pages included. Building a schema expectation on that guess compounds two
+   uncertainties. It would also need a schema.org subtype map, or every properly
+   marked-up blog post reports as missing `Article` because it declares
+   `BlogPosting`.
+
+   Inverting the question avoids both problems. Rather than "is the type right",
+   ask "is anything here about this page at all" — which needs no classifier and
+   no subtype map, because one descriptive type of any kind satisfies it.
+
+   Measured on live crawls: **1 page flagged out of 140** across the three
+   clients — Element Six's homepage, carrying `ImageObject, Organization,
+   WebPage, WebSite` and nothing saying what the company makes. On the single
+   most important URL of a manufacturer whose AI visibility we track.
+
+   `Person` counts as boilerplate: author markup describes the author, not the
+   page. It changes nothing on these three sites, where every post also carries
+   `BlogPosting`, but it matters on a thinner one.
 4. **Retirement.** Does `se_ranking_audit` stay as a cross-check, or go? It
    still supplies issue codes the Technical lever reads.

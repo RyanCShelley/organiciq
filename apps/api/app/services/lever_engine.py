@@ -369,6 +369,30 @@ ROBOTS_ADVISORY_CODES = frozenset(
 )
 
 
+#: Types an SEO plugin emits on every page regardless of content. Their presence
+#: says a plugin is installed, not that the page is described. `Person` is here
+#: too: author markup describes the author, not the page.
+BOILERPLATE_SCHEMA_TYPES: frozenset[str] = frozenset(
+    {
+        "WebPage",
+        "WebSite",
+        "Organization",
+        "Corporation",
+        "BreadcrumbList",
+        "ListItem",
+        "ImageObject",
+        "SiteNavigationElement",
+        "WPHeader",
+        "WPFooter",
+        "WPSideBar",
+        "CollectionPage",
+        "SearchAction",
+        "ReadAction",
+        "Person",
+    }
+)
+
+
 @dataclass(frozen=True)
 class PageSchema:
     """Structured data found on a page by the first-party crawl."""
@@ -376,6 +400,11 @@ class PageSchema:
     blocks: int
     invalid: int
     types: frozenset[str] = frozenset()
+
+    @property
+    def descriptive_types(self) -> frozenset[str]:
+        """Types that say something about this page rather than the site."""
+        return self.types - BOILERPLATE_SCHEMA_TYPES
 
 
 @dataclass(frozen=True)
@@ -491,6 +520,22 @@ def detect_technical_signal(
                 audit_signal="missing_schema",
                 issue_code=None,
                 diagnosis=f"No structured data on page with demand: {page_url}",
+            )
+        if not found.descriptive_types:
+            # Markup is present, but all of it is the wrapper a plugin emits on
+            # every page. Nothing here says what this page is — which is the
+            # part an answer engine needs. Asking instead whether the type is
+            # "right" would need a template classifier we do not have, and a
+            # schema.org subtype map to avoid calling BlogPosting a missing
+            # Article.
+            present = ", ".join(sorted(found.types)) or "no recognisable types"
+            return DetectedTechnicalSignal(
+                audit_signal="missing_schema",
+                issue_code="boilerplate_schema_only",
+                diagnosis=(
+                    f"Only site-wide boilerplate structured data ({present}) on page "
+                    f"with demand: {page_url}"
+                ),
             )
     return None
 

@@ -132,13 +132,15 @@ def extract_json_ld(doc: Any) -> list[SchemaBlock]:
 
         types = _schema_types(payload)
         if not types:
+            # Parsed fine, says nothing. Recorded with no type so it counts as a
+            # block without contributing a descriptive type.
             blocks.append(
                 SchemaBlock(
                     syntax="json_ld",
                     schema_type=None,
                     raw=payload,
                     raw_text=None,
-                    parse_error="no @type",
+                    parse_error=None,
                 )
             )
             continue

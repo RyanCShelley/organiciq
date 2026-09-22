@@ -86,10 +86,13 @@ def test_unparseable_schema_outranks_missing_schema():
 
 
 def test_a_page_with_valid_schema_reports_nothing():
+    """`Organization` alone is boilerplate, so the page needs a descriptive type."""
     signal = detect_technical_signal(
         PAGE,
         _healthy(),
-        schema_by_url={PAGE: PageSchema(blocks=3, invalid=0, types=frozenset({"Organization"}))},
+        schema_by_url={
+            PAGE: PageSchema(blocks=3, invalid=0, types=frozenset({"Organization", "Service"}))
+        },
         schema_crawled_urls=frozenset({PAGE}),
     )
 
@@ -174,3 +177,80 @@ def test_no_first_party_crawl_means_no_coverage_at_all(db, client_a):
     by_url, covered = _load_page_schema(db, client_a.id)
     assert by_url == {}
     assert covered == frozenset()
+
+
+# --- Boilerplate-only schema -----------------------------------------------
+
+
+def test_only_plugin_boilerplate_counts_as_no_structured_data():
+    """
+    Element Six's homepage: ImageObject, Organization, WebPage, WebSite and
+    nothing saying what the company does. Markup is present, so a bare
+    "has schema" check passes it; nothing here is about the page.
+    """
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={
+            PAGE: PageSchema(
+                blocks=4,
+                invalid=0,
+                types=frozenset({"ImageObject", "Organization", "WebPage", "WebSite"}),
+            )
+        },
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.audit_signal == "missing_schema"
+    assert signal.issue_code == "boilerplate_schema_only"
+    assert "Organization" in signal.diagnosis
+
+
+def test_author_markup_alone_does_not_describe_the_page():
+    """Person describes the author, not the page, so it counts as boilerplate."""
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={PAGE: PageSchema(blocks=3, invalid=0, types=frozenset({"WebPage", "Person"}))},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.issue_code == "boilerplate_schema_only"
+
+
+def test_one_descriptive_type_is_enough():
+    """No subtype map needed: BlogPosting passes without knowing it IS-A Article."""
+    for descriptive in ("BlogPosting", "Service", "LocalBusiness", "FAQPage", "Product"):
+        signal = detect_technical_signal(
+            PAGE,
+            _healthy(),
+            schema_by_url={
+                PAGE: PageSchema(
+                    blocks=5,
+                    invalid=0,
+                    types=frozenset({"WebPage", "WebSite", "Person", descriptive}),
+                )
+            },
+            schema_crawled_urls=frozenset({PAGE}),
+        )
+        assert signal is None, f"{descriptive} should satisfy the check"
+
+
+def test_blocks_that_declare_no_type_read_as_boilerplate_not_broken():
+    """
+    A JSON-LD block that parses but declares no @type is not unparseable. It
+    describes nothing, which "only boilerplate" reports more usefully than
+    calling the markup broken.
+    """
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={PAGE: PageSchema(blocks=1, invalid=0, types=frozenset())},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.issue_code == "boilerplate_schema_only"
+    assert "no recognisable types" in signal.diagnosis
