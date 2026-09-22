@@ -361,7 +361,11 @@ def detect_technical_signal(
             issue_code="redirect_chain" if "redirect_chain" in codes else None,
             diagnosis=f"Redirect chain on page with demand: {page_url}",
         )
-    if not crawl.indexable:
+    # A working redirect is not a content defect. Broken ones and chains are
+    # already reported above, and a 301 is non-indexable by definition — without
+    # this, the `/page` that redirects to `/page/` reports itself as a
+    # "non-indexable page with demand" for doing the correct thing.
+    if not crawl.indexable and not is_redirect:
         return DetectedTechnicalSignal(
             audit_signal="non_indexable",
             issue_code=None,
