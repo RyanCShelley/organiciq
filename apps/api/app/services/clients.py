@@ -19,6 +19,7 @@ from app.schemas import ClientCreate, ClientUpdate, IntegrationCreate, Integrati
 
 # FKs have no ON DELETE CASCADE — delete client-scoped rows before clients.
 _CLIENT_CASCADE_TABLES = (
+    "facts_crawl_page_schema",
     "staging_ser_ai_checks",
     "staging_ser_ai_prompts",
     "staging_ser_ai_presence",

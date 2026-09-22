@@ -187,6 +187,7 @@ def mark_job_failed(db: Session, job: SyncJob, message: str) -> SyncJob:
 
 
 def _job_handlers() -> dict[str, object]:
+    from app.ingestion.crawler.pipeline import run_site_crawl_job
     from app.ingestion.ga4.pipeline import run_ga4_job
     from app.ingestion.gsc.pipeline import run_gsc_pages_job, run_gsc_queries_job
     from app.ingestion.seranking.pipeline import run_seranking_search_job
@@ -208,6 +209,10 @@ def _job_handlers() -> dict[str, object]:
         # On-demand only, and the most expensive source by far: 200 credits per
         # returned prompt. Never in daily_sync._PROVIDER_SOURCES.
         "se_ranking_ai_search": run_seranking_ai_search_job,
+        # First-party crawl. Runs monthly rather than daily, and writes under
+        # its own crawl source so it can be compared against the SE Ranking
+        # audit before anything reads it.
+        "site_crawl": run_site_crawl_job,
     }
 
 

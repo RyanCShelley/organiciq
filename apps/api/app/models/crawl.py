@@ -37,17 +37,29 @@ class StagingSerAuditPage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+#: Crawl sources that may write page snapshots. Both run during the parallel
+#: period so their output can be diffed before anything is switched over.
+CRAWL_SOURCE_SE_RANKING = "se_ranking_audit"
+CRAWL_SOURCE_FIRST_PARTY = "site_crawl"
+
+
 class FactCrawlPageSnapshot(Base):
-    """Latest crawl/audit snapshot per page (SE Ranking Website Audit or equivalent)."""
+    """Latest crawl snapshot per page, per crawl source."""
 
     __tablename__ = "facts_crawl_page_snapshots"
     __table_args__ = (
-        UniqueConstraint("client_id", "normalized_url", name="uq_facts_crawl_page_snapshots_grain"),
+        UniqueConstraint(
+            "client_id", "source", "normalized_url", name="uq_facts_crawl_page_snapshots_grain"
+        ),
         Index("ix_facts_crawl_page_snapshots_client", "client_id"),
+        Index("ix_facts_crawl_page_snapshots_client_source", "client_id", "source"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=CRAWL_SOURCE_SE_RANKING
+    )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     raw_url: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -103,6 +115,44 @@ class FactCrawlPageIssue(Base):
     normalized_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     severity: Mapped[str | None] = mapped_column(String(32), nullable=True)
     raw: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FactCrawlPageSchema(Base):
+    """
+    Structured data found on a page, one row per block.
+
+    The raw block is kept because the checks we run against schema will change
+    as we learn what to look for, and re-crawling every client to answer a new
+    question is exactly what owning the crawler is meant to avoid.
+
+    A block that failed to parse is still recorded, with the reason: schema that
+    is present but invalid is indistinguishable from absent to any consumer, and
+    is invisible in every report we have today.
+    """
+
+    __tablename__ = "facts_crawl_page_schema"
+    __table_args__ = (
+        Index("ix_facts_crawl_page_schema_client", "client_id"),
+        Index("ix_facts_crawl_page_schema_client_url", "client_id", "normalized_url"),
+        Index("ix_facts_crawl_page_schema_client_type", "client_id", "schema_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
+    #: json_ld | microdata | rdfa
+    syntax: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: schema.org @type, bare (e.g. "LocalBusiness"); null when unparseable.
+    schema_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The source text, kept only when parsing failed so it can be diagnosed.
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

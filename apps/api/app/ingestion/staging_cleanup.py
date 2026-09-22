@@ -54,6 +54,9 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     # Writes straight to facts; one page, nothing staged.
     "se_ranking_domain_keywords": (),
     "se_ranking_ai_search": (),
+    # The crawler holds its pages in memory for the run and writes facts
+    # directly; there is no staging table to purge.
+    "site_crawl": (),
 }
 
 

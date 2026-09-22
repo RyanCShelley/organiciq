@@ -20,7 +20,7 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
-from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot
+from app.models.crawl import CRAWL_SOURCE_SE_RANKING, FactCrawlPageIssue, FactCrawlPageSnapshot
 from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
@@ -289,7 +289,21 @@ def _load_page_demand(
 
 
 def _load_crawl_by_url(db: Session, client_id: UUID) -> dict[str, FactCrawlPageSnapshot]:
-    rows = db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == client_id).all()
+    """
+    Crawl snapshots for the source the engine currently trusts.
+
+    The table holds both the SE Ranking audit and the first-party crawl while
+    the two are being compared. Reading it unscoped would mix them and make the
+    row for a page depend on insert order.
+    """
+    rows = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_SE_RANKING,
+        )
+        .all()
+    )
     return {row.normalized_url: row for row in rows}
 
 

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.crawl import (
+    CRAWL_SOURCE_SE_RANKING,
     FactCrawlPageIssue,
     FactCrawlPageSnapshot,
     StagingSerAuditIssue,
@@ -62,12 +63,18 @@ def publish_seranking_audit(db: Session, job: SyncJob) -> tuple[int, int]:
     pages_written = 0
     if staging_rows:
         deduped = _dedupe_staging_rows(staging_rows)
-        db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == job.client_id).delete()
+        # Scoped to this source: the table also holds the first-party crawl,
+        # and an unscoped delete would wipe it on every audit sync.
+        db.query(FactCrawlPageSnapshot).filter(
+            FactCrawlPageSnapshot.client_id == job.client_id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_SE_RANKING,
+        ).delete()
         facts = [
             FactCrawlPageSnapshot(
                 client_id=job.client_id,
                 snapshot_date=snapshot_date,
                 raw_url=row.raw_url,
+                source=CRAWL_SOURCE_SE_RANKING,
                 normalized_url=row.normalized_url,
                 indexable=row.indexable,
                 status_code=row.status_code,
