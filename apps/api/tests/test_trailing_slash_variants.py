@@ -113,3 +113,24 @@ def test_publish_keeps_the_served_page_when_both_variants_are_crawled(client_a):
 
     assert _pick_better_row(redirecting, served) is served
     assert _pick_better_row(served, redirecting) is served
+
+
+def test_a_page_canonicalised_to_another_url_reports_as_such(client_a):
+    """
+    Real case from SMA: /blog/schema.org-vs-... is a 200 that permits indexing
+    and canonicalises to /blog/schema-org-vs-... (dot versus hyphen).
+
+    SE Ranking folds this into "not indexable". Keeping the two apart is more
+    useful — the page is not broken, it is a duplicate pointing at its original,
+    and "canonicalised elsewhere" is the finding someone can act on.
+    """
+    url = "https://smamarketing.com/blog/schema.org-vs-google-structured-data-rich-results"
+    canonical = "https://smamarketing.com/blog/schema-org-vs-google-structured-data-rich-results"
+
+    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
+    row.normalized_url = url
+
+    signal = detect_technical_signal(url, row)
+
+    assert signal is not None
+    assert signal.audit_signal == "canonical_elsewhere"

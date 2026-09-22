@@ -192,11 +192,17 @@ trying to get away from.
 Three clients, both sources, 2026-09-22. First-party crawls capped at 200 pages
 for the comparison, which is why SMA shows pages only SE Ranking found.
 
-| Client | SE Ranking | First-party | Shared | Indexability disagreements |
-|---|---|---|---|---|
-| Element Six | 57 | 203 | 46 | **18** |
-| Aquaman Leak Detection | 113 | 146 | 113 | 0 |
-| SMA Marketing | 427 | 203 (capped) | 203 | 0 |
+| Client | SE Ranking | First-party | Shared | Only SE Ranking | Indexability disagreements |
+|---|---|---|---|---|---|
+| Element Six | 57 | 203 | 46 | 11 | **18** |
+| Aquaman Leak Detection | 113 | 146 | 113 | 0 | 0 |
+| SMA Marketing | 427 | **467** | 427 | **0** | 1 |
+
+SMA was re-run uncapped on 2026-09-22: 467 pages in 2m26s. The 224 pages that
+appeared to be SE Ranking-only in the capped run were the cap, not coverage —
+uncapped, the crawl is a superset, with 40 pages SE Ranking never found. That
+also sizes the monthly job: the largest client takes about two and a half
+minutes, so 35 clients spread over a month is nothing.
 
 Every one of Element Six's 18 is the same defect: SE Ranking crawled a
 trailing-slash redirect and recorded a 301 where the page serves 200. Among
@@ -208,16 +214,26 @@ Element Six is genuinely miscrawled rather than merely crawled differently.
 The likely reason Element Six is the outlier: its internal links omit trailing
 slashes, so SE Ranking's crawler recorded the redirecting form of each URL.
 
+SMA's single disagreement is a definitional difference, not an error on either
+side. `/blog/schema.org-vs-...` is a 200 whose robots meta permits indexing, and
+whose canonical points at `/blog/schema-org-vs-...` — dot versus hyphen. SE
+Ranking folds that into "not indexable". We keep the two apart: the page permits
+indexing, and the canonical is its own signal. Checked against the engine, our
+row produces `canonical_elsewhere`, which is the more actionable finding — the
+page is not broken, it is a duplicate pointing at its original. Folding the two
+together is what produced the original Element Six false positive.
+
 ### Schema coverage
 
 | Client | Pages carrying schema | Invalid blocks |
 |---|---|---|
-| SMA Marketing | 203 of 203 | 0 |
+| SMA Marketing | 464 of 467 | 0 |
 | Aquaman | 131 of 146 | 0 |
 | Element Six | 31 of 43 | 0 |
 
-Aquaman's 12 uncovered pages are all on the `rs.` landing-page subdomain.
-Nothing in the stack reported any of this before.
+SMA's three uncovered pages are all non-indexable, so no indexable page on the
+site is missing schema. Aquaman's 12 uncovered pages are all on the `rs.`
+landing-page subdomain. Nothing in the stack reported any of this before.
 
 ### Fixed by these runs
 
