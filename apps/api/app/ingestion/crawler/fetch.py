@@ -18,7 +18,7 @@ from xml.etree import ElementTree
 import httpx
 
 from app.core.urls import normalize_url
-from app.ingestion.crawler.parse import ParsedPage, parse_page
+from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
 
@@ -45,6 +45,8 @@ class CrawledPage:
     blocked_by_robots: bool
     fetch_error: str | None
     parsed: ParsedPage | None
+    #: False when the response was a 2xx of some non-HTML type.
+    is_page: bool = True
     in_sitemap: bool = False
     inbound_internal_links: int = 0
 
@@ -142,7 +144,7 @@ async def _load_sitemap_urls(
                 queue.append(value)
             else:
                 parts = urlsplit(value)
-                if parts.hostname and _same_site(host, parts.hostname):
+                if parts.hostname and _same_site(host, parts.hostname) and is_page_url(value):
                     found.add(normalize_url(value))
             if len(found) >= budget:
                 break
@@ -199,6 +201,10 @@ async def crawl_site(
 
             for page in await asyncio.gather(*(fetch_one(url) for url in batch)):
                 if page.normalized_url in pages:
+                    continue
+                if not page.is_page:
+                    # An asset that slipped past the extension check. Not a page,
+                    # and not something the Technical lever should report on.
                     continue
                 pages[page.normalized_url] = page
 
@@ -294,9 +300,11 @@ async def _fetch_page(
             parsed=None,
         )
 
-    content_type = response.headers.get("content-type", "")
+    content_type = response.headers.get("content-type", "").lower()
+    served_ok = 200 <= response.status_code < 300
+    is_page = not (served_ok and content_type and "html" not in content_type)
     parsed = None
-    if "html" in content_type.lower() and 200 <= response.status_code < 300:
+    if "html" in content_type and served_ok:
         body = response.text[:MAX_BODY_BYTES]
         try:
             parsed = parse_page(
@@ -326,4 +334,5 @@ async def _fetch_page(
         blocked_by_robots=False,
         fetch_error=None,
         parsed=parsed,
+        is_page=is_page,
     )

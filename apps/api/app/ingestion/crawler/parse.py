@@ -22,6 +22,28 @@ from app.core.urls import normalize_url
 #: Elements whose text is markup or chrome, never page content.
 _NON_CONTENT_TAGS = ("script", "style", "noscript", "template", "svg")
 
+#: Extensions that are never a page. Crawling them wastes budget and, worse,
+#: they land in the page set as indexable URLs carrying no title and no schema —
+#: an image reported as a content defect.
+NON_PAGE_EXTENSIONS = frozenset(
+    """
+    jpg jpeg png gif webp avif svg ico bmp tif tiff
+    pdf doc docx xls xlsx ppt pptx csv rtf txt
+    zip gz tar rar 7z dmg exe pkg
+    mp3 mp4 m4a m4v mov avi wmv webm ogg wav
+    css js json xml rss atom kml woff woff2 ttf eot
+    """.split()
+)
+
+
+def is_page_url(url: str) -> bool:
+    """Whether a URL looks like an HTML page rather than an asset or feed."""
+    path = urlsplit(url).path.rsplit("/", 1)[-1]
+    if "." not in path:
+        return True
+    return path.rsplit(".", 1)[-1].lower() not in NON_PAGE_EXTENSIONS
+
+
 _WORD = re.compile(r"[\w'’-]+", re.UNICODE)
 _NOINDEX = re.compile(r"\bnone\b|\bnoindex\b", re.IGNORECASE)
 _NOFOLLOW = re.compile(r"\bnone\b|\bnofollow\b", re.IGNORECASE)
@@ -229,6 +251,8 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         if parts.scheme not in {"http", "https"}:
             continue
         if not parts.hostname or not _same_site(host, parts.hostname):
+            continue
+        if not is_page_url(absolute):
             continue
         if absolute not in seen:
             seen.add(absolute)

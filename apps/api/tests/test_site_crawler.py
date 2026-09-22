@@ -333,3 +333,69 @@ def test_site_crawl_is_not_in_the_daily_sync():
 
     scheduled = {s for sources in _PROVIDER_SOURCES.values() for s in sources}
     assert "site_crawl" not in scheduled
+
+
+# --- Assets are not pages ---------------------------------------------------
+
+
+def test_asset_urls_are_not_treated_as_pages():
+    from app.ingestion.crawler.parse import is_page_url
+
+    assert is_page_url("https://example.com/guide")
+    assert is_page_url("https://example.com/guide/")
+    assert is_page_url("https://example.com/2026/report.html")
+    assert not is_page_url("https://example.com/wp-content/uploads/diver.svg")
+    assert not is_page_url("https://example.com/locations.kml")
+    assert not is_page_url("https://example.com/brochure.pdf")
+    assert not is_page_url("https://example.com/app.js")
+
+
+def test_asset_links_are_not_followed():
+    """
+    Aquaman's crawl pulled in .kml, .svg, .png and .jpg URLs and reported them
+    as indexable pages carrying no schema — images filed as content defects.
+    """
+    parsed = parse_page(
+        url=PAGE,
+        body="""
+        <html><body>
+          <a href="/real-page">page</a>
+          <a href="/wp-content/uploads/diver.svg">image</a>
+          <a href="/locations.kml">map</a>
+          <a href="/brochure.pdf">pdf</a>
+        </body></html>
+        """,
+    )
+    assert parsed.internal_links == ["https://example.com/real-page"]
+
+
+def test_a_non_html_response_is_dropped_from_the_page_set():
+    """Extension checks miss extensionless asset URLs; the content type does not."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "image/png"}, content=b"\x89PNG")
+
+    async def run():
+        async with _client(handler) as client:
+            return await _fetch_page(client, "https://example.com/media/12345", None)
+
+    page = asyncio.run(run())
+
+    assert page.is_page is False
+
+
+def test_an_html_error_page_is_still_a_page():
+    """A 404 is a finding; it must not be filtered out with the assets."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, headers={"content-type": "text/html"}, text="<html>gone</html>")
+
+    async def run():
+        async with _client(handler) as client:
+            return await _fetch_page(client, PAGE, None)
+
+    page = asyncio.run(run())
+
+    assert page.is_page is True
+    assert page.status_code == 404
+    assert page.indexable is False

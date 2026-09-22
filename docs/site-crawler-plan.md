@@ -181,6 +181,48 @@ trying to get away from.
 
 ---
 
+## Parallel run — first results
+
+Three clients, both sources, 2026-09-22. First-party crawls capped at 200 pages
+for the comparison, which is why SMA shows pages only SE Ranking found.
+
+| Client | SE Ranking | First-party | Shared | Indexability disagreements |
+|---|---|---|---|---|
+| Element Six | 57 | 203 | 46 | **18** |
+| Aquaman Leak Detection | 113 | 146 | 113 | 0 |
+| SMA Marketing | 427 | 203 (capped) | 203 | 0 |
+
+Every one of Element Six's 18 is the same defect: SE Ranking crawled a
+trailing-slash redirect and recorded a 301 where the page serves 200. Among
+them `/contact`, `/blog`, `/what-is-carbon-fiber`,
+`/carbon-fiber-design-services`. The other two sites agree completely, which is
+the useful half of the result — the crawler is not inventing differences, and
+Element Six is genuinely miscrawled rather than merely crawled differently.
+
+The likely reason Element Six is the outlier: its internal links omit trailing
+slashes, so SE Ranking's crawler recorded the redirecting form of each URL.
+
+### Schema coverage
+
+| Client | Pages carrying schema | Invalid blocks |
+|---|---|---|
+| SMA Marketing | 203 of 203 | 0 |
+| Aquaman | 131 of 146 | 0 |
+| Element Six | 31 of 43 | 0 |
+
+Aquaman's 12 uncovered pages are all on the `rs.` landing-page subdomain.
+Nothing in the stack reported any of this before.
+
+### Fixed by these runs
+
+Aquaman's first diff listed `.kml`, `.svg`, `.png` and `.jpg` URLs as
+"indexable pages with no schema" — images filed as content defects. Asset URLs
+are now excluded by extension when links are collected, and any 2xx response
+that is not HTML is dropped from the page set. That took Aquaman from 185 pages
+to 146 and the no-schema list from 23 to 12 real pages.
+
+---
+
 ## Open questions
 
 1. ~~Rendering.~~ **Decided 2026-09-22:** crawl raw HTML deliberately;
