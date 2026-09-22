@@ -399,3 +399,34 @@ def test_an_html_error_page_is_still_a_page():
     assert page.is_page is True
     assert page.status_code == 404
     assert page.indexable is False
+
+
+# --- Crawl boundary ---------------------------------------------------------
+
+
+def test_subdomains_are_part_of_the_site():
+    """
+    Deliberate, confirmed 2026-09-22. Subdomain pages rank and can be missing
+    schema — Aquaman's twelve uncovered pages all live on `rs.`, and restricting
+    the crawl to the exact host would have hidden every one of them.
+
+    The cost is accepted: a client with a large unrelated subdomain spends crawl
+    budget on it, which the per-crawl page limit bounds.
+    """
+    parsed = parse_page(
+        url="https://example.com/",
+        body="""
+        <html><body>
+          <a href="https://rs.example.com/landing">subdomain</a>
+          <a href="https://www.example.com/page">www</a>
+          <a href="https://notexample.com/x">lookalike</a>
+          <a href="https://example.com.evil.test/x">suffix attack</a>
+        </body></html>
+        """,
+    )
+
+    assert "https://rs.example.com/landing" in parsed.internal_links
+    assert "https://www.example.com/page" in parsed.internal_links
+    # A name that merely ends with the domain is a different site.
+    assert not any("notexample.com" in link for link in parsed.internal_links)
+    assert not any("evil.test" in link for link in parsed.internal_links)

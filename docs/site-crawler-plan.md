@@ -148,6 +148,12 @@ trying to get away from.
 
 ## Crawl budget and cadence
 
+- **Subdomains are in scope.** Confirmed 2026-09-22. Subdomain pages rank and
+  can be missing schema — all twelve of Aquaman's uncovered pages live on `rs.`,
+  and an exact-host crawl would have hidden every one. The cost is accepted: a
+  client with a large unrelated subdomain spends budget on it, bounded by the
+  page limit. A name that merely ends with the domain (`notexample.com`, or
+  `example.com.evil.test`) is a different site and is not followed.
 - **Monthly per client**, staggered — roughly one client per day at 35 clients.
 - **Per-client page cap**, defaulting low (500) and raisable per client, like
   `ai_search_prompt_limit`. A runaway crawl on a faceted site is the failure
