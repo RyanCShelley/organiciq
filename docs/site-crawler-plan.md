@@ -154,10 +154,15 @@ trying to get away from.
   client with a large unrelated subdomain spends budget on it, bounded by the
   page limit. A name that merely ends with the domain (`notexample.com`, or
   `example.com.evil.test`) is a different site and is not followed.
-- **Monthly per client**, staggered — roughly one client per day at 35 clients.
-- **Per-client page cap**, defaulting low (500) and raisable per client, like
-  `ai_search_prompt_limit`. A runaway crawl on a faceted site is the failure
-  mode to design against.
+- **Monthly per client**, staggered — shipped 2026-09-22. Each client's day of
+  the 28-day cycle is derived from its id, so the slots are stable and spread
+  without any state tracking whose turn it is; 35 clients land on 21 distinct
+  days. A crawl older than 42 days is overdue and runs on the next tick
+  regardless of its slot, so a worker outage cannot cost a client a whole cycle.
+- **Per-client page cap** — shipped 2026-09-22 as `crawl_page_limit`, set in
+  Client settings. Default 500, ceiling 5000. The client's value is the ceiling
+  and a job may ask for less but not more: verified with a job requesting 5000
+  against a client capped at 15, which crawled 15.
 - **Politeness**: respect `robots.txt`, concurrency of 2–4 per host, identify
   ourselves in the user agent with a contact URL. We are crawling clients' own
   sites, but they should be able to see who we are in their logs.
@@ -253,7 +258,11 @@ to 146 and the no-schema list from 23 to 12 real pages.
 2. **Cutover.** Run both sources in parallel for a cycle and diff, or switch
    outright? Parallel costs nothing extra (the audit is already being fetched)
    and would have caught this bug.
-3. **Schema expectations per page type.** "Missing schema" needs a rule for what
-   a page *should* have. Tie it to the template, or set it per client?
+3. **Schema expectations per page type.** Partly answered 2026-09-22. Two
+   signals now ship: `invalid_schema` (present but unparseable — actionable) and
+   `missing_schema` (none at all — advisory). Both fire only for pages the
+   first-party crawl actually reached, so "no structured data" can never mean
+   "not crawled". Still open: whether a *wrong type for the template* is worth
+   flagging, which needs a rule for what each page should carry.
 4. **Retirement.** Does `se_ranking_audit` stay as a cross-check, or go? It
    still supplies issue codes the Technical lever reads.

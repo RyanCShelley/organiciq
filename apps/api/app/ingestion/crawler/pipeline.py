@@ -150,7 +150,10 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
             requested = int(params.get("page_limit") or 0) or None
         except (TypeError, ValueError):
             requested = None
-        limit = page_limit_for(requested)
+        # The client's setting is the ceiling; a job may ask for less but not
+        # more. This is the boundary that actually spends time on someone's site.
+        ceiling = page_limit_for(client.crawl_page_limit)
+        limit = min(page_limit_for(requested), ceiling) if requested else ceiling
 
         job.status = SyncJobStatus.FETCHING
         db.commit()

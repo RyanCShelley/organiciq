@@ -62,6 +62,8 @@ class Client(Base):
     # credits each, so the cap is per-client: most accounts stay small, a few
     # high-value ones justify more.
     ai_search_prompt_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Pages one site crawl may fetch. Null uses the default (500).
+    crawl_page_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Dashboard baseline snapshot (calculator / contract start)
     baseline_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     # The window the snapshot was measured over. Previously only the end date

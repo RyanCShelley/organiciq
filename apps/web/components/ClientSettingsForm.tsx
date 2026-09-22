@@ -26,6 +26,10 @@ const AI_SEARCH_DEFAULT_PROMPTS = 5;
 const AI_SEARCH_MAX_PROMPTS = 50;
 const AI_SEARCH_CREDITS_PER_PROMPT = 200;
 
+/** Mirrors ingestion/crawler/fetch.py. The server clamps independently. */
+const CRAWL_DEFAULT_PAGES = 500;
+const CRAWL_MAX_PAGES = 5000;
+
 const CADENCE_OPTIONS = [
   { value: "monthly", label: "Monthly" },
   { value: "bi_weekly", label: "Bi-weekly" },
@@ -255,6 +259,38 @@ export function ClientSettingsForm({
             Blank uses the default of {AI_SEARCH_DEFAULT_PROMPTS} prompts (
             {(AI_SEARCH_DEFAULT_PROMPTS * AI_SEARCH_CREDITS_PER_PROMPT).toLocaleString()}{" "}
             credits). The ceiling is {AI_SEARCH_MAX_PROMPTS}.
+          </p>
+        </div>
+      </div>
+
+      {/* Crawl budget, not a plan allowance: it bounds time spent on someone
+          else's server, so it sits with the other operational ceilings. */}
+      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            Site crawl
+          </p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            OrganicIQ crawls this site once a month for technical signals and
+            structured data. Sites are staggered across the month, so this one has its
+            own day.
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FieldLabel label="Max pages per crawl">
+            <Input
+              name="crawl_page_limit"
+              type="number"
+              min={1}
+              max={CRAWL_MAX_PAGES}
+              defaultValue={client.crawl_page_limit ?? ""}
+              placeholder={`${CRAWL_DEFAULT_PAGES} (default)`}
+            />
+          </FieldLabel>
+          <p className="self-center text-xs text-[var(--text-secondary)]">
+            Blank uses {CRAWL_DEFAULT_PAGES.toLocaleString()}. Raise it for large blogs
+            or catalogues; the ceiling is {CRAWL_MAX_PAGES.toLocaleString()}. A crawl
+            that stops at the limit says so on the sync job.
           </p>
         </div>
       </div>

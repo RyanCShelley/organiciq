@@ -1,0 +1,176 @@
+"""Structured data as a Decision Engine signal.
+
+Schema comes only from the first-party crawl, so the hard part is not detecting
+its absence — it is refusing to claim absence for a page nobody crawled.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from uuid import uuid4
+
+from app.models.crawl import (
+    CRAWL_SOURCE_FIRST_PARTY,
+    CRAWL_SOURCE_SE_RANKING,
+    FactCrawlPageSchema,
+    FactCrawlPageSnapshot,
+)
+from app.services.decision_impact import ADVISORY_AUDIT_SIGNALS
+from app.services.lever_engine import (
+    PageSchema,
+    _load_page_schema,
+    detect_technical_signal,
+)
+
+PAGE = "https://example.com/services"
+
+
+def _healthy(url: str = PAGE) -> FactCrawlPageSnapshot:
+    return FactCrawlPageSnapshot(
+        id=uuid4(),
+        client_id=uuid4(),
+        snapshot_date=date.today(),
+        raw_url=url,
+        normalized_url=url,
+        indexable=True,
+        status_code=200,
+        canonical_url=url,
+        inbound_internal_links=8,
+        word_count=900,
+        in_sitemap=True,
+        title="Services",
+        description="What we do.",
+        redirect_count=0,
+    )
+
+
+def test_a_crawled_page_with_no_schema_is_reported():
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.audit_signal == "missing_schema"
+
+
+def test_a_page_the_crawler_never_reached_makes_no_schema_claim():
+    """
+    The one that matters. Without the covered-URL set, every page on every
+    client that has not been crawled yet would report as missing schema.
+    """
+    assert detect_technical_signal(PAGE, _healthy(), schema_crawled_urls=frozenset()) is None
+    assert detect_technical_signal(PAGE, _healthy()) is None
+    # Covered set present, but not this page.
+    assert (
+        detect_technical_signal(
+            PAGE, _healthy(), schema_crawled_urls=frozenset({"https://example.com/other"})
+        )
+        is None
+    )
+
+
+def test_unparseable_schema_outranks_missing_schema():
+    """Markup that is present but broken reads as done, and no consumer can use it."""
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={PAGE: PageSchema(blocks=1, invalid=1)},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.audit_signal == "invalid_schema"
+
+
+def test_a_page_with_valid_schema_reports_nothing():
+    signal = detect_technical_signal(
+        PAGE,
+        _healthy(),
+        schema_by_url={PAGE: PageSchema(blocks=3, invalid=0, types=frozenset({"Organization"}))},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is None
+
+
+def test_schema_never_preempts_a_real_defect():
+    """A page returning 404 has a bigger problem than its markup."""
+    broken = _healthy()
+    broken.status_code = 404
+    broken.indexable = False
+
+    signal = detect_technical_signal(
+        PAGE,
+        broken,
+        schema_by_url={},
+        schema_crawled_urls=frozenset({PAGE}),
+    )
+
+    assert signal is not None
+    assert signal.audit_signal == "status_error"
+
+
+def test_missing_schema_is_advisory_and_invalid_schema_is_not():
+    """Absent schema is an enhancement; broken schema is a defect to fix."""
+    assert "missing_schema" in ADVISORY_AUDIT_SIGNALS
+    assert "invalid_schema" not in ADVISORY_AUDIT_SIGNALS
+
+
+# --- Loading ---------------------------------------------------------------
+
+
+def test_coverage_comes_from_the_first_party_crawl_only(db, client_a):
+    """
+    SE Ranking snapshots carry no schema, so counting them as covered would
+    report every page it found as having none.
+    """
+    ser = _healthy("https://example.com/from-se-ranking")
+    ser.client_id = client_a.id
+    ser.source = CRAWL_SOURCE_SE_RANKING
+    mine = _healthy()
+    mine.client_id = client_a.id
+    mine.source = CRAWL_SOURCE_FIRST_PARTY
+    db.add(ser)
+    db.add(mine)
+    db.commit()
+
+    by_url, covered = _load_page_schema(db, client_a.id)
+
+    assert covered == frozenset({PAGE})
+    assert by_url == {}
+
+
+def test_blocks_are_counted_and_invalid_ones_flagged(db, client_a):
+    snapshot = _healthy()
+    snapshot.client_id = client_a.id
+    snapshot.source = CRAWL_SOURCE_FIRST_PARTY
+    db.add(snapshot)
+    for schema_type, error in (("Organization", None), ("WebSite", None), (None, "invalid JSON")):
+        db.add(
+            FactCrawlPageSchema(
+                id=uuid4(),
+                client_id=client_a.id,
+                snapshot_date=date.today(),
+                normalized_url=PAGE,
+                syntax="json_ld",
+                schema_type=schema_type,
+                parse_error=error,
+            )
+        )
+    db.commit()
+
+    by_url, covered = _load_page_schema(db, client_a.id)
+
+    assert PAGE in covered
+    assert by_url[PAGE].blocks == 3
+    assert by_url[PAGE].invalid == 1
+    assert by_url[PAGE].types == frozenset({"Organization", "WebSite"})
+
+
+def test_no_first_party_crawl_means_no_coverage_at_all(db, client_a):
+    by_url, covered = _load_page_schema(db, client_a.id)
+    assert by_url == {}
+    assert covered == frozenset()

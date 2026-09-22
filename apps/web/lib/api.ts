@@ -128,6 +128,8 @@ export type Client = {
   custom_watchlist_cadence?: string | null;
   /** Max prompts one untracked-prompt lookup may buy. Null = default (5). */
   ai_search_prompt_limit?: number | null;
+  /** Max pages one monthly site crawl may fetch. Null = default (500). */
+  crawl_page_limit?: number | null;
   status: string;
   created_at: string;
   updated_at: string;

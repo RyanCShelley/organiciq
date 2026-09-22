@@ -53,6 +53,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   // A per-client cost ceiling, not an allowance: it bounds what one untracked-prompt
   // lookup can spend. The API clamps it again before any credits are spent.
   const aiPromptLimit = parseOptionalInt("ai_search_prompt_limit");
+  const crawlPageLimit = parseOptionalInt("crawl_page_limit");
 
   if (
     [customKeyword, customPrompt, customContent, customRefresh, customGrowth].some((value) =>
@@ -66,6 +67,12 @@ export async function updateClientSettingsAction(formData: FormData) {
   }
   if (aiPromptLimit != null && (aiPromptLimit < 1 || aiPromptLimit > 50)) {
     return { ok: false as const, error: "AI prompt limit must be between 1 and 50." };
+  }
+  if (Number.isNaN(crawlPageLimit)) {
+    return { ok: false as const, error: "Crawl page limit must be a number." };
+  }
+  if (crawlPageLimit != null && (crawlPageLimit < 1 || crawlPageLimit > 5000)) {
+    return { ok: false as const, error: "Crawl page limit must be between 1 and 5,000." };
   }
   if (
     [baselineSessions, baselineLeads, baselineRate].some(
@@ -112,6 +119,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     custom_growth_action_allowance: isEnterprise ? customGrowth : null,
     custom_watchlist_cadence: isEnterprise ? customCadence || "monthly" : null,
     ai_search_prompt_limit: aiPromptLimit,
+    crawl_page_limit: crawlPageLimit,
   };
 
   if (!body.client_name || !body.domain || !body.tier_id) {

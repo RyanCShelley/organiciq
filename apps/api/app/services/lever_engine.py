@@ -20,7 +20,13 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
-from app.models.crawl import CRAWL_SOURCE_SE_RANKING, FactCrawlPageIssue, FactCrawlPageSnapshot
+from app.models.crawl import (
+    CRAWL_SOURCE_FIRST_PARTY,
+    CRAWL_SOURCE_SE_RANKING,
+    FactCrawlPageIssue,
+    FactCrawlPageSchema,
+    FactCrawlPageSnapshot,
+)
 from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
@@ -307,6 +313,41 @@ def _load_crawl_by_url(db: Session, client_id: UUID) -> dict[str, FactCrawlPageS
     return {row.normalized_url: row for row in rows}
 
 
+def _load_page_schema(
+    db: Session, client_id: UUID
+) -> tuple[dict[str, PageSchema], frozenset[str]]:
+    """
+    Structured data per page, plus the URLs the first-party crawl covered.
+
+    The two are returned together on purpose. A page with no rows in the schema
+    table has either no structured data or was never crawled, and only the
+    covered set tells them apart.
+    """
+    covered = frozenset(
+        row[0]
+        for row in db.query(FactCrawlPageSnapshot.normalized_url).filter(
+            FactCrawlPageSnapshot.client_id == client_id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+        )
+    )
+    if not covered:
+        return {}, frozenset()
+
+    blocks: dict[str, list[FactCrawlPageSchema]] = {}
+    for row in db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client_id):
+        blocks.setdefault(row.normalized_url, []).append(row)
+
+    by_url = {
+        url: PageSchema(
+            blocks=len(rows),
+            invalid=sum(1 for r in rows if r.parse_error),
+            types=frozenset(r.schema_type for r in rows if r.schema_type),
+        )
+        for url, rows in blocks.items()
+    }
+    return by_url, covered
+
+
 def _load_audit_issues(
     db: Session, client_id: UUID
 ) -> tuple[dict[str, set[str]], set[str]]:
@@ -329,6 +370,15 @@ ROBOTS_ADVISORY_CODES = frozenset(
 
 
 @dataclass(frozen=True)
+class PageSchema:
+    """Structured data found on a page by the first-party crawl."""
+
+    blocks: int
+    invalid: int
+    types: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class DetectedTechnicalSignal:
     audit_signal: str
     issue_code: str | None
@@ -341,8 +391,15 @@ def detect_technical_signal(
     *,
     page_issue_codes: set[str] | None = None,
     crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
+    schema_by_url: dict[str, PageSchema] | None = None,
+    schema_crawled_urls: frozenset[str] | None = None,
 ) -> DetectedTechnicalSignal | None:
-    """Priority-ordered Technical SEO detector for a single page."""
+    """
+    Priority-ordered Technical SEO detector for a single page.
+
+    Structured data is checked last: it is an enhancement, and a page that is
+    also returning 404 has a bigger problem than its markup.
+    """
     codes = page_issue_codes or set()
     canonical = _normalize_canonical(crawl.canonical_url)
     page_norm = _normalize_canonical(page_url)
@@ -417,6 +474,24 @@ def detect_technical_signal(
             issue_code=issue_code,
             diagnosis=f"Duplicate meta on page with demand: {page_url}",
         )
+
+    # Only pages the first-party crawl actually reached can be said to lack
+    # schema. Without that evidence, "no structured data" would really mean
+    # "not crawled", which is a different statement and a false one.
+    if schema_crawled_urls is not None and page_url in schema_crawled_urls:
+        found = (schema_by_url or {}).get(page_url, PageSchema(blocks=0, invalid=0))
+        if found.invalid:
+            return DetectedTechnicalSignal(
+                audit_signal="invalid_schema",
+                issue_code=None,
+                diagnosis=f"Structured data present but unparseable: {page_url}",
+            )
+        if found.blocks == 0:
+            return DetectedTechnicalSignal(
+                audit_signal="missing_schema",
+                issue_code=None,
+                diagnosis=f"No structured data on page with demand: {page_url}",
+            )
     return None
 
 
@@ -430,12 +505,16 @@ def _technical_finding(
     classification: PageClassification | None = None,
     page_issue_codes: set[str] | None = None,
     crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
+    schema_by_url: dict[str, PageSchema] | None = None,
+    schema_crawled_urls: frozenset[str] | None = None,
 ) -> LeverFinding | None:
     detected = detect_technical_signal(
         page.normalized_url,
         crawl,
         page_issue_codes=page_issue_codes,
         crawl_by_url=crawl_by_url,
+        schema_by_url=schema_by_url,
+        schema_crawled_urls=schema_crawled_urls,
     )
     if detected is None:
         return None
@@ -473,6 +552,9 @@ def _technical_finding(
             "redirect_count": crawl.redirect_count,
             "audit_signal": detected.audit_signal,
             "issue_code": detected.issue_code,
+            "schema_types": sorted(
+                (schema_by_url or {}).get(page.normalized_url, PageSchema(0, 0)).types
+            ),
             "promotion_class": (
                 "advisory" if detected.audit_signal in ADVISORY_AUDIT_SIGNALS else "actionable"
             ),
@@ -774,6 +856,10 @@ def _per_page_cascade(
     page_type_rates: dict[str, float],
     topic_rates: dict[str, float],
     issues_by_url: dict[str, set[str]] | None = None,
+    schema_by_url: dict[str, PageSchema] | None = None,
+    #: URLs the first-party crawl covered. None means it has never run, and no
+    #: schema claim can be made about any page.
+    schema_crawled_urls: frozenset[str] | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
@@ -798,6 +884,8 @@ def _per_page_cascade(
                 classification=classification,
                 page_issue_codes=issue_map.get(page.normalized_url),
                 crawl_by_url=crawl_by_url,
+                schema_by_url=schema_by_url,
+                schema_crawled_urls=schema_crawled_urls,
             )
             if finding is None:
                 finding = _internal_linking_finding(
@@ -1412,6 +1500,7 @@ def diagnose(
     pages = _load_page_demand(db, client_id=client.id, period=gsc_period)
     crawl_by_url = _load_crawl_by_url(db, client.id)
     issues_by_url, site_issue_codes = _load_audit_issues(db, client.id)
+    schema_by_url, schema_crawled_urls = _load_page_schema(db, client.id)
 
     lead_events = _lead_event_names(db, client.id)
     site_period = ga4_period or gsc_period
@@ -1454,6 +1543,8 @@ def diagnose(
             page_type_rates=page_type_rates,
             topic_rates=topic_rates,
             issues_by_url=issues_by_url,
+            schema_by_url=schema_by_url,
+            schema_crawled_urls=schema_crawled_urls,
         )
     )
     for site_finding in _site_technical_findings(

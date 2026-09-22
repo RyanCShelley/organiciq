@@ -343,6 +343,9 @@ ADVISORY_AUDIT_SIGNALS: frozenset[str] = frozenset(
         "duplicate_meta",
         "sitemap_missing",
         "robots_advisory",
+        # Absent structured data is an enhancement, not a breakage: the page
+        # still ranks, it is just less legible to answer engines.
+        "missing_schema",
     }
 )
 
@@ -357,6 +360,10 @@ _AUDIT_SIGNAL_SEVERITY: dict[str, tuple[float, str]] = {
     "sitemap_missing": (40.0, "sitemap_missing"),
     "robots_blocking": (88.0, "robots_blocking_crawl"),
     "robots_advisory": (45.0, "robots_txt_issue"),
+    # Markup that is present but unparseable is worse than none: it reads as
+    # done, and no consumer can use it.
+    "invalid_schema": (35.0, "unparseable_structured_data"),
+    "missing_schema": (25.0, "no_structured_data"),
 }
 
 

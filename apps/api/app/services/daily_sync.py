@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -7,7 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
+from app.models.client import Client, ClientStatus
 from app.models.integration import Integration, IntegrationProvider
+from app.models.job import DataWatermark
 from app.models.scheduler import SchedulerCheckpoint
 from app.schemas import SyncJobCreate
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
@@ -15,6 +18,13 @@ from app.services.jobs import OverlappingJobError, enqueue_sync_job
 logger = logging.getLogger("organiciq.daily_sync")
 
 DAILY_CHECKPOINT = "daily_client_sync"
+
+#: A full crawl per client roughly monthly. 28 gives every client the same day
+#: of the cycle regardless of month length.
+SITE_CRAWL_INTERVAL_DAYS = 28
+#: If a client's crawl is older than this, it is overdue and runs on the next
+#: tick regardless of its slot — a worker outage should not cost a whole cycle.
+SITE_CRAWL_STALE_DAYS = 42
 
 # Job sources per mapped integration provider.
 _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
@@ -76,6 +86,72 @@ def enqueue_daily_syncs(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "clients": len(mapped)}
 
 
+
+def _crawl_slot(client_id) -> int:
+    """
+    The day of the 28-day cycle a client crawls on.
+
+    Derived from the client id so it is stable and evenly spread: every client
+    gets its own day, nothing bunches, and no state is needed to remember whose
+    turn it is. Crawling all 35 clients on the same morning would be a spike of
+    outbound traffic for no reason.
+    """
+    digest = hashlib.sha256(str(client_id).encode("utf-8")).hexdigest()
+    return int(digest, 16) % SITE_CRAWL_INTERVAL_DAYS
+
+
+def _site_crawl_due(client_id, last_crawl: date | None, today: date) -> bool:
+    if last_crawl is None:
+        return today.toordinal() % SITE_CRAWL_INTERVAL_DAYS == _crawl_slot(client_id)
+    age = (today - last_crawl).days
+    if age >= SITE_CRAWL_STALE_DAYS:
+        return True
+    if age < SITE_CRAWL_INTERVAL_DAYS:
+        return False
+    return today.toordinal() % SITE_CRAWL_INTERVAL_DAYS == _crawl_slot(client_id)
+
+
+def enqueue_due_site_crawls(db: Session) -> dict[str, int]:
+    """Enqueue a full crawl for every client whose turn has come round."""
+    settings = get_settings()
+    if not settings.site_crawl_enabled:
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
+
+    today = date.today()
+    last_by_client = {
+        row.client_id: row.fact_through_date
+        for row in db.query(DataWatermark).filter(DataWatermark.source == "site_crawl")
+    }
+
+    clients = (
+        db.query(Client)
+        .filter(Client.status == ClientStatus.ACTIVE, Client.domain.isnot(None))
+        .all()
+    )
+
+    enqueued = skipped = errors = due = 0
+    for client in clients:
+        if not (client.domain or "").strip():
+            continue
+        if not _site_crawl_due(client.id, last_by_client.get(client.id), today):
+            continue
+        due += 1
+        try:
+            enqueue_sync_job(
+                db,
+                client.id,
+                SyncJobCreate(source="site_crawl", start_date=today, end_date=today),
+            )
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("Site crawl enqueue failed client=%s", client.id)
+
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
 def maybe_run_daily_sync(db: Session) -> bool:
     """
     If daily sync is due (UTC hour reached and not yet run today), enqueue jobs.
@@ -115,6 +191,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
         return False
 
     stats = enqueue_daily_syncs(db)
+    crawl_stats = enqueue_due_site_crawls(db)
     checkpoint.last_run_date = today
     checkpoint.updated_at = now
     db.commit()
@@ -128,4 +205,12 @@ def maybe_run_daily_sync(db: Session) -> bool:
         window_start,
         window_end,
     )
+    if crawl_stats["due"]:
+        logger.info(
+            "Site crawls due=%s enqueued=%s skipped=%s errors=%s",
+            crawl_stats["due"],
+            crawl_stats["enqueued"],
+            crawl_stats["skipped"],
+            crawl_stats["errors"],
+        )
     return True
