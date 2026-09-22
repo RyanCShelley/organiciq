@@ -72,6 +72,16 @@ function monthTick(key: MonthKey): string {
   return parsed.month === 0 ? `${label} \u2019${String(parsed.year).slice(2)}` : label;
 }
 
+function monthLabel(key: MonthKey): string {
+  const parsed = parseMonthKey(key);
+  if (!parsed) return key;
+  return new Date(Date.UTC(parsed.year, parsed.month, 1)).toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 /** Round the axis top to something a person would choose: 1, 2 or 5 × 10ⁿ. */
 function niceCeiling(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 10;
@@ -152,19 +162,30 @@ export function ProgressPanel({
 
   const currentLeads = baseline.vs_current.leads.current;
 
-  // ── Axis: baseline month (or the first month with data) → twelve past today ──
   const todayMonth = monthKeyOf(new Date());
   const baselineMonth = (baseline.period_start ?? baseline.as_of ?? "").slice(0, 7);
   const firstActualMonth = actuals[0]?.month ?? "";
-  const candidates = [baselineMonth, firstActualMonth].filter((key) => parseMonthKey(key) !== null);
-  const axisStart = candidates.length
-    ? candidates.reduce((a, b) => (monthsBetween(a, b) < 0 ? a : b))
-    : addMonths(todayMonth, -3);
-  const months = monthRange(axisStart, addMonths(todayMonth, 12));
+
+  /**
+   * The curve is anchored to the baseline, not to today.
+   *
+   * Checkpoints are computed from the baseline's own sessions and leads, so
+   * month 0 *is* the baseline month and month 12 is a year after it. Anchoring
+   * them on the current month would slide the whole curve forward by however
+   * long ago the baseline was taken, restating every target on a date it was
+   * never calculated for, and would leave the elapsed months with no curve
+   * above them — which is the comparison this chart exists to make.
+   */
+  const anchorCandidate = (
+    projection?.baseline_as_of ??
+    baseline.as_of ??
+    baseline.period_end ??
+    ""
+  ).slice(0, 7);
+  const anchorMonth = parseMonthKey(anchorCandidate) ? anchorCandidate : todayMonth;
 
   const actualByMonth = new Map(actuals.map((row) => [row.month, row]));
 
-  // ── The projection curve, month 0 anchored on the current month ──
   const checkpointByOffset = new Map(checkpoints.map((c) => [c.month, c]));
   const offsets = checkpoints.map((c) => c.month).sort((a, b) => a - b);
   const lastOffset = offsets.length ? offsets[offsets.length - 1] : 0;
@@ -191,6 +212,20 @@ export function ProgressPanel({
     return a.monthly_leads + (b.monthly_leads - a.monthly_leads) * ratio;
   }
 
+  // ── Axis: earliest of baseline/anchor/first actual → end of the curve, at least today ──
+  const starts = [baselineMonth, anchorMonth, firstActualMonth].filter(
+    (key) => parseMonthKey(key) !== null,
+  );
+  const axisStart = starts.length
+    ? starts.reduce((a, b) => (monthsBetween(a, b) < 0 ? b : a))
+    : addMonths(todayMonth, -3);
+  const lastActualMonth = actuals.length ? actuals[actuals.length - 1].month : todayMonth;
+  const ends = [addMonths(anchorMonth, lastOffset), todayMonth, lastActualMonth].filter(
+    (key) => parseMonthKey(key) !== null,
+  );
+  const axisEnd = ends.reduce((a, b) => (monthsBetween(a, b) > 0 ? b : a));
+  const months = monthRange(axisStart, axisEnd);
+
   const highestActual = actuals.reduce((max, row) => Math.max(max, row.leads), 0);
   const highestTarget = checkpoints.reduce((max, c) => Math.max(max, c.monthly_leads), 0);
   // Actuals count toward the ceiling too: a month that beats the plan must still fit.
@@ -202,7 +237,11 @@ export function ProgressPanel({
   const leftPct = (index: number) => (x(index) / VIEW_W) * 100;
   const topPct = (value: number) => (y(value) / VIEW_H) * 100;
 
-  const todayIndex = Math.max(0, monthsBetween(axisStart, todayMonth));
+  const anchorIndex = Math.max(0, monthsBetween(axisStart, anchorMonth));
+  /** Where the curve says we should be right now. */
+  const todayOffset = monthsBetween(anchorMonth, todayMonth);
+  const targetNow = projectedAt(Math.min(Math.max(todayOffset, 0), lastOffset));
+  const pastHorizon = todayOffset > lastOffset;
 
   const actualPoints = months
     .map((month, index) => {
@@ -215,7 +254,7 @@ export function ProgressPanel({
 
   const projectionPoints = months
     .map((month, index) => {
-      const value = projectedAt(monthsBetween(todayMonth, month));
+      const value = projectedAt(monthsBetween(anchorMonth, month));
       return value === null ? null : { index, value };
     })
     .filter((point): point is { index: number; value: number } => point !== null);
@@ -224,9 +263,41 @@ export function ProgressPanel({
   const latestActual = actualPoints.length ? actualPoints[actualPoints.length - 1] : null;
   const hasProjection = projectionPoints.length > 1;
 
-  const gapCards = GAP_CARD_MONTHS.map((offset) => checkpointByOffset.get(offset)).filter(
-    (checkpoint): checkpoint is NonNullable<typeof checkpoint> => checkpoint !== undefined,
-  );
+  /**
+   * "Today's target" is the curve read at today, not checkpoint 0 — that one is
+   * the baseline month, which may be a long way behind us. The rest are the
+   * frozen checkpoints, dated so it is clear which month each one lands in.
+   */
+  type GapCard = {
+    key: string;
+    label: string;
+    when: string | null;
+    target: number;
+    rate: number | null;
+  };
+
+  const gapCards: GapCard[] = [];
+  if (targetNow !== null) {
+    gapCards.push({
+      key: "now",
+      label: pastHorizon ? "Target at plan end" : "Today's target",
+      when: pastHorizon ? monthLabel(addMonths(anchorMonth, lastOffset)) : monthLabel(todayMonth),
+      target: targetNow,
+      rate: null,
+    });
+  }
+  for (const offset of GAP_CARD_MONTHS) {
+    const checkpoint = checkpointByOffset.get(offset);
+    // A checkpoint already behind us is history; the chart still plots it.
+    if (!checkpoint || offset <= todayOffset) continue;
+    gapCards.push({
+      key: `cp-${offset}`,
+      label: checkpoint.label,
+      when: monthLabel(addMonths(anchorMonth, offset)),
+      target: checkpoint.monthly_leads,
+      rate: checkpoint.lead_rate_pct,
+    });
+  }
 
   return (
     <section className="min-w-0 overflow-hidden rounded-2xl bg-[#22333d] text-white">
@@ -431,7 +502,7 @@ export function ProgressPanel({
                 />
 
                 {checkpoints.map((checkpoint) => {
-                  const index = todayIndex + checkpoint.month;
+                  const index = anchorIndex + checkpoint.month;
                   if (index < 0 || index >= months.length) return null;
                   return (
                     <g key={`cp-${checkpoint.month}`}>
@@ -477,7 +548,7 @@ export function ProgressPanel({
               })}
 
               {checkpoints.map((checkpoint) => {
-                const index = todayIndex + checkpoint.month;
+                const index = anchorIndex + checkpoint.month;
                 if (index < 0 || index >= months.length) return null;
                 return (
                   <span
@@ -543,17 +614,20 @@ export function ProgressPanel({
 
             {gapCards.length ? (
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {gapCards.map((checkpoint) => {
-                  const target = Math.round(checkpoint.monthly_leads);
+                {gapCards.map((card) => {
+                  const target = Math.round(card.target);
                   const met = currentLeads !== null && currentLeads >= target;
                   const gap = currentLeads !== null ? Math.round(target - currentLeads) : null;
                   return (
                     <div
-                      key={`gap-${checkpoint.month}`}
+                      key={card.key}
                       className="rounded-[12px] border border-white/12 bg-white/[0.06] px-4 py-3"
                     >
                       <div className="text-[11.5px] font-semibold text-[var(--brand-on-dark-muted)]">
-                        {checkpoint.month === 0 ? "Today's target" : checkpoint.label}
+                        {card.label}
+                        {card.when ? (
+                          <span className="font-normal"> · {card.when}</span>
+                        ) : null}
                       </div>
                       <div className="mt-1.5 font-[family-name:var(--font-display)] text-[22px] font-black leading-none tracking-[-0.02em] text-white">
                         {target.toLocaleString()}
@@ -567,8 +641,8 @@ export function ProgressPanel({
                           style={{ color: met ? LIME : "var(--brand-on-dark)" }}
                         >
                           {gap === null ? "—" : met ? "On track" : `${gap.toLocaleString()} to go`}
-                        </span>{" "}
-                        · {checkpoint.lead_rate_pct.toFixed(2)}% rate
+                        </span>
+                        {card.rate !== null ? ` · ${card.rate.toFixed(2)}% rate` : ""}
                       </div>
                     </div>
                   );
