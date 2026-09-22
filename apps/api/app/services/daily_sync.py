@@ -19,18 +19,26 @@ logger = logging.getLogger("organiciq.daily_sync")
 
 DAILY_CHECKPOINT = "daily_client_sync"
 
-#: A full crawl per client roughly monthly. 28 gives every client the same day
-#: of the cycle regardless of month length.
-SITE_CRAWL_INTERVAL_DAYS = 28
-#: If a client's crawl is older than this, it is overdue and runs on the next
-#: tick regardless of its slot — a worker outage should not cost a whole cycle.
-SITE_CRAWL_STALE_DAYS = 42
+#: A full crawl per client per week. Weekly rather than monthly because the
+#: engine now reads this crawl for technical findings: a page that starts
+#: returning 404 should not go unreported for a month. The crawl costs no API
+#: credits and no third-party rate limit — 35 clients at roughly five a day,
+#: and the largest took 2m26s — so frequency is close to free.
+SITE_CRAWL_INTERVAL_DAYS = 7
+#: Older than this and the crawl is overdue, running on the next tick regardless
+#: of its slot, so a worker outage cannot cost a client its turn.
+SITE_CRAWL_STALE_DAYS = 14
 
 # Job sources per mapped integration provider.
 _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
     IntegrationProvider.GSC: ("gsc_pages", "gsc_queries"),
     IntegrationProvider.GA4: ("ga4",),
-    IntegrationProvider.SE_RANKING: ("se_ranking_search", "se_ranking_ai", "se_ranking_audit"),
+    # se_ranking_audit is deliberately absent: the first-party crawl supplies
+    # these facts now, and re-fetching the audit daily cost ~13 requests per
+    # client per day for a crawl SE Ranking refreshes far less often. The job
+    # stays registered and runnable on demand — it is how we would catch our own
+    # crawler regressing.
+    IntegrationProvider.SE_RANKING: ("se_ranking_search", "se_ranking_ai"),
 }
 
 

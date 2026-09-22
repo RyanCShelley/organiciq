@@ -50,8 +50,12 @@ class Settings(BaseSettings):
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True
     daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)
-    #: Monthly full site crawl, staggered across clients by the scheduler.
+    #: Full site crawl, staggered across clients by the scheduler.
     site_crawl_enabled: bool = True
+    #: Which crawl the Decision Engine reads: "site_crawl" (ours) or
+    #: "se_ranking_audit". Both keep writing; this only chooses the reader, so a
+    #: bad crawl can be backed out by flipping one variable.
+    crawl_facts_source: str = "site_crawl"
     daily_sync_lookback_days: int = 3
 
     def model_post_init(self, __context) -> None:

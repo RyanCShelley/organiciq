@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from app.models.config import OrganicChannel
 from app.models.crawl import FactCrawlPageSnapshot
+from app.services.lever_engine import active_crawl_source
 from app.models.ga4 import FactGa4Traffic
 from app.models.crawl import FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
@@ -81,6 +82,7 @@ def test_evaluate_persists_scored_decisions(db, client_a):
         FactCrawlPageSnapshot(
             id=uuid4(),
             client_id=client_a.id,
+            source=active_crawl_source(),
             snapshot_date=end,
             raw_url=page,
             normalized_url=page,

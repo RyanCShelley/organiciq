@@ -248,6 +248,7 @@ def seed_required_sources(
 
     from app.models.config import OrganicChannel
     from app.models.crawl import FactCrawlPageSnapshot
+    from app.services.lever_engine import active_crawl_source
     from app.models.ga4 import FactGa4Traffic
     from app.models.gsc import FactGscPage
     from app.models.job import DataWatermark, ValidationStatus
@@ -317,6 +318,7 @@ def seed_required_sources(
             FactCrawlPageSnapshot(
                 id=_uuid.uuid4(),
                 client_id=client_id,
+                source=active_crawl_source(),
                 snapshot_date=through,
                 raw_url="https://example.com/baseline",
                 normalized_url="https://example.com/baseline",

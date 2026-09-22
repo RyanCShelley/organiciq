@@ -100,16 +100,20 @@ class StagingSerAuditIssue(Base):
 
 
 class FactCrawlPageIssue(Base):
-    """SE Ranking Website Audit issue codes (page-level or site-level)."""
+    """Crawl issue codes (page-level or site-level), per crawl source."""
 
     __tablename__ = "facts_crawl_page_issues"
     __table_args__ = (
         Index("ix_facts_crawl_page_issues_client", "client_id"),
         Index("ix_facts_crawl_page_issues_client_code", "client_id", "issue_code"),
+        Index("ix_facts_crawl_page_issues_client_source", "client_id", "source"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=CRAWL_SOURCE_SE_RANKING
+    )
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     issue_code: Mapped[str] = mapped_column(String(64), nullable=False)
     normalized_url: Mapped[str | None] = mapped_column(Text, nullable=True)

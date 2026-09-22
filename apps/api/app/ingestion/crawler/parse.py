@@ -20,7 +20,22 @@ from lxml import html as lxml_html
 from app.core.urls import normalize_url
 
 #: Elements whose text is markup or chrome, never page content.
-_NON_CONTENT_TAGS = ("script", "style", "noscript", "template", "svg")
+#:
+#: nav/header/footer/menu match the exclusions in the team's Screaming Frog
+#: content-audit config. Site-wide furniture appears on every page, so counting
+#: it inflates every word count by the same amount and makes a thin page look
+#: substantial — which is exactly the judgement the low-content threshold makes.
+_NON_CONTENT_TAGS = (
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "svg",
+    "nav",
+    "header",
+    "footer",
+    "menu",
+)
 
 #: Extensions that are never a page. Crawling them wastes budget and, worse,
 #: they land in the page set as indexable URLs carrying no title and no schema —

@@ -5,7 +5,7 @@ from uuid import uuid4
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.services.lever_engine import detect_technical_signal, diagnose
+from app.services.lever_engine import active_crawl_source, detect_technical_signal, diagnose
 from tests.conftest import date_window, seed_required_sources
 
 
@@ -110,6 +110,7 @@ def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
         FactCrawlPageSnapshot(
             id=uuid4(),
             client_id=client_a.id,
+            source=active_crawl_source(),
             snapshot_date=end,
             raw_url=page,
             normalized_url=page,
@@ -125,6 +126,7 @@ def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
         FactCrawlPageIssue(
             id=uuid4(),
             client_id=client_a.id,
+            source=active_crawl_source(),
             snapshot_date=end,
             issue_code="sitemap_missing",
             normalized_url=None,

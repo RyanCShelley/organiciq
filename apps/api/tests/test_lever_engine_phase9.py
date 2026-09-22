@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.decisions.ctr_curve import expected_ctr_percent
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.crawl import FactCrawlPageSnapshot
+from app.services.lever_engine import active_crawl_source
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
@@ -83,6 +84,7 @@ def test_internal_linking_cascade(db, client_a):
         FactCrawlPageSnapshot(
             id=uuid4(),
             client_id=client_a.id,
+            source=active_crawl_source(),
             snapshot_date=end,
             raw_url=page,
             normalized_url=page,

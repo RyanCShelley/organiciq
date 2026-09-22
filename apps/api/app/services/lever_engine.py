@@ -31,6 +31,7 @@ from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
+from app.core.settings import get_settings
 from app.core.urls import normalize_url
 from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
 from app.services.action_promotion import promote_findings
@@ -294,19 +295,29 @@ def _load_page_demand(
     return pages
 
 
+def active_crawl_source() -> str:
+    """
+    The crawl the engine reads. Both keep writing.
+
+    Settable so a bad crawl can be backed out by flipping one variable rather
+    than deploying, and so the two can be compared on the same data.
+    """
+    configured = (get_settings().crawl_facts_source or "").strip()
+    return configured if configured in {CRAWL_SOURCE_FIRST_PARTY, CRAWL_SOURCE_SE_RANKING} else CRAWL_SOURCE_FIRST_PARTY
+
+
 def _load_crawl_by_url(db: Session, client_id: UUID) -> dict[str, FactCrawlPageSnapshot]:
     """
-    Crawl snapshots for the source the engine currently trusts.
+    Crawl snapshots from the source the engine trusts.
 
-    The table holds both the SE Ranking audit and the first-party crawl while
-    the two are being compared. Reading it unscoped would mix them and make the
+    The table holds both crawls. Reading it unscoped would mix them and make the
     row for a page depend on insert order.
     """
     rows = (
         db.query(FactCrawlPageSnapshot)
         .filter(
             FactCrawlPageSnapshot.client_id == client_id,
-            FactCrawlPageSnapshot.source == CRAWL_SOURCE_SE_RANKING,
+            FactCrawlPageSnapshot.source == active_crawl_source(),
         )
         .all()
     )
@@ -352,7 +363,14 @@ def _load_audit_issues(
     db: Session, client_id: UUID
 ) -> tuple[dict[str, set[str]], set[str]]:
     """Return (page_url -> issue codes, site-level issue codes)."""
-    rows = db.query(FactCrawlPageIssue).filter(FactCrawlPageIssue.client_id == client_id).all()
+    rows = (
+        db.query(FactCrawlPageIssue)
+        .filter(
+            FactCrawlPageIssue.client_id == client_id,
+            FactCrawlPageIssue.source == active_crawl_source(),
+        )
+        .all()
+    )
     by_url: dict[str, set[str]] = {}
     site_codes: set[str] = set()
     for row in rows:
@@ -920,6 +938,10 @@ def _per_page_cascade(
         crawl = crawl_by_url.get(page.normalized_url)
         finding: LeverFinding | None = None
         if crawl_ready and crawl is not None:
+            # Schema is withheld from this pass on purpose. It is advisory, and
+            # a page whose only issue is thin markup should still be allowed to
+            # surface an internal-linking or CTR opportunity, which are things
+            # someone can act on for a return.
             finding = _technical_finding(
                 page,
                 crawl,
@@ -929,8 +951,6 @@ def _per_page_cascade(
                 classification=classification,
                 page_issue_codes=issue_map.get(page.normalized_url),
                 crawl_by_url=crawl_by_url,
-                schema_by_url=schema_by_url,
-                schema_crawled_urls=schema_crawled_urls,
             )
             if finding is None:
                 finding = _internal_linking_finding(
@@ -948,6 +968,21 @@ def _per_page_cascade(
                 site=site,
                 lead_rate_ctx=lead_rate_ctx,
                 classification=classification,
+            )
+        if finding is None and crawl_ready and crawl is not None:
+            # Last resort: nothing else to say about this page, so report the
+            # structured data if it is thin.
+            finding = _technical_finding(
+                page,
+                crawl,
+                page_ctx=page_ctx,
+                site=site,
+                lead_rate_ctx=lead_rate_ctx,
+                classification=classification,
+                page_issue_codes=issue_map.get(page.normalized_url),
+                crawl_by_url=crawl_by_url,
+                schema_by_url=schema_by_url,
+                schema_crawled_urls=schema_crawled_urls,
             )
         if finding is not None:
             _enrich_finding(finding, classification=classification, page_ctx=page_ctx)
@@ -1472,10 +1507,15 @@ def diagnose(
             .scalar()
             or 0
         )
+    # Scoped to the active source: a client with only the other crawl's rows
+    # would otherwise read as ready while the engine finds nothing to work with.
     crawl_ready = (
         db.query(func.count())
         .select_from(FactCrawlPageSnapshot)
-        .filter(FactCrawlPageSnapshot.client_id == client.id)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client.id,
+            FactCrawlPageSnapshot.source == active_crawl_source(),
+        )
         .scalar()
         or 0
     ) > 0

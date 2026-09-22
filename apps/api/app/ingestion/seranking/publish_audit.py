@@ -96,10 +96,14 @@ def publish_seranking_audit(db: Session, job: SyncJob) -> tuple[int, int]:
         db.bulk_save_objects(facts)
         pages_written = len(facts)
 
-    db.query(FactCrawlPageIssue).filter(FactCrawlPageIssue.client_id == job.client_id).delete()
+    db.query(FactCrawlPageIssue).filter(
+        FactCrawlPageIssue.client_id == job.client_id,
+        FactCrawlPageIssue.source == CRAWL_SOURCE_SE_RANKING,
+    ).delete()
     issue_facts = [
         FactCrawlPageIssue(
             client_id=job.client_id,
+            source=CRAWL_SOURCE_SE_RANKING,
             snapshot_date=row.snapshot_date,
             issue_code=row.issue_code,
             normalized_url=row.normalized_url,

@@ -25,6 +25,7 @@ from app.ingestion.crawler.fetch import (
 from app.models.client import Client
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
+    FactCrawlPageIssue,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
 )
@@ -108,6 +109,46 @@ def _schema_rows(client_id: Any, result: CrawlResult, *, snapshot_date: date) ->
     return rows
 
 
+def _site_issue_rows(
+    client_id: Any, result: CrawlResult, *, snapshot_date: date
+) -> list[dict[str, Any]]:
+    """
+    Site-level findings, in the same codes the Decision Engine already reads.
+
+    These were the only thing the SE Ranking audit supplied that the crawl did
+    not — every page-level code it returns is already a field on our snapshot.
+    The crawler sees all of this while planning the crawl; it simply was not
+    recording it.
+    """
+    codes: list[tuple[str, dict[str, Any]]] = []
+
+    if result.robots_txt_error:
+        codes.append(("robots_not_accessible", {"error": result.robots_txt_error}))
+    elif not result.robots_txt_found:
+        codes.append(("no_robots", {}))
+    elif result.robots_disallows_site:
+        codes.append(("robots_disallow_crawling", {}))
+
+    if result.sitemap_unreadable:
+        # Declared and broken, which is worse than absent: something references it.
+        codes.append(("robots_has_errors", {"reason": "sitemap declared but unreadable"}))
+    elif not result.sitemap_urls:
+        codes.append(("sitemap_missing", {}))
+
+    return [
+        {
+            "client_id": client_id,
+            "source": CRAWL_SOURCE_FIRST_PARTY,
+            "snapshot_date": snapshot_date,
+            "issue_code": code,
+            "normalized_url": None,
+            "severity": None,
+            "raw": raw,
+        }
+        for code, raw in codes
+    ]
+
+
 def _chunked(rows: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
     return [rows[i : i + size] for i in range(0, len(rows), size)]
 
@@ -188,7 +229,15 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         for batch in _chunked(schema_rows, UPSERT_BATCH_SIZE):
             db.execute(insert(FactCrawlPageSchema).values(batch))
 
-        job.records_written = len(rows) + len(schema_rows)
+        db.query(FactCrawlPageIssue).filter(
+            FactCrawlPageIssue.client_id == job.client_id,
+            FactCrawlPageIssue.source == CRAWL_SOURCE_FIRST_PARTY,
+        ).delete(synchronize_session=False)
+        issue_rows = _site_issue_rows(job.client_id, result, snapshot_date=snapshot_date)
+        if issue_rows:
+            db.execute(insert(FactCrawlPageIssue).values(issue_rows))
+
+        job.records_written = len(rows) + len(schema_rows) + len(issue_rows)
         job.fact_watermark = snapshot_date
         job.validation_status = ValidationStatus.PASSED
         job.status = SyncJobStatus.SUCCESSFUL

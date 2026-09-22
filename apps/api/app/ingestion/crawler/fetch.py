@@ -22,6 +22,10 @@ from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
 
+
+class RobotsUnreachable(Exception):
+    """robots.txt exists in principle but could not be fetched — not the same as absent."""
+
 USER_AGENT = "OrganicIQBot/1.0 (+https://smamarketing.com/organiciq; SEO monitoring)"
 
 DEFAULT_PAGE_LIMIT = 500
@@ -71,6 +75,12 @@ class CrawlResult:
     pages: list[CrawledPage] = field(default_factory=list)
     sitemap_urls: set[str] = field(default_factory=set)
     robots_txt_found: bool = False
+    #: Set when robots.txt could not be fetched at all, as opposed to absent.
+    robots_txt_error: str | None = None
+    #: robots.txt tells our agent not to crawl the site at all.
+    robots_disallows_site: bool = False
+    #: A sitemap was declared or found but could not be read.
+    sitemap_unreadable: bool = False
     hit_page_limit: bool = False
 
 
@@ -102,7 +112,7 @@ async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparse
         response = await client.get(urljoin(root, "/robots.txt"), follow_redirects=True)
     except httpx.HTTPError as exc:
         logger.info("robots.txt unreachable for %s: %s", root, exc)
-        return None, []
+        raise RobotsUnreachable(str(exc)) from exc
     if response.status_code >= 400:
         return None, []
     text = response.text
@@ -172,13 +182,24 @@ async def crawl_site(
         follow_redirects=False,
         limits=limits,
     ) as client:
-        robots, sitemap_locations = await _load_robots(client, root)
+        try:
+            robots, sitemap_locations = await _load_robots(client, root)
+        except RobotsUnreachable as exc:
+            robots, sitemap_locations = None, []
+            result.robots_txt_error = str(exc)[:300]
         result.robots_txt_found = robots is not None
+        if robots is not None and not robots.can_fetch(USER_AGENT, root):
+            result.robots_disallows_site = True
+
+        declared_sitemaps = bool(sitemap_locations)
         if not sitemap_locations:
             sitemap_locations = [urljoin(root, "/sitemap.xml")]
         result.sitemap_urls = await _load_sitemap_urls(
             client, sitemap_locations, host=host, budget=page_limit * 4
         )
+        # Declared in robots.txt but yielding nothing means it is broken, which
+        # is a different finding from having no sitemap at all.
+        result.sitemap_unreadable = declared_sitemaps and not result.sitemap_urls
 
         # Sitemap URLs are seeded alongside the root: a page nothing links to is
         # exactly the kind of page worth knowing about.

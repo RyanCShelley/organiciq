@@ -254,3 +254,52 @@ def test_blocks_that_declare_no_type_read_as_boilerplate_not_broken():
     assert signal is not None
     assert signal.issue_code == "boilerplate_schema_only"
     assert "no recognisable types" in signal.diagnosis
+
+
+# --- Schema must not crowd out work that pays -------------------------------
+
+
+def test_schema_does_not_preempt_an_internal_linking_finding(db, client_a):
+    """
+    Found while cutting over: putting schema in the technical detector made an
+    advisory "no structured data" note outrank an actionable internal-linking
+    opportunity on the same page, because the technical pass runs first and
+    wins. Schema is now the last resort across the whole cascade.
+    """
+    from decimal import Decimal
+
+    from app.models.gsc import FactGscPage
+    from app.services.lever_engine import active_crawl_source, diagnose
+    from tests.conftest import date_window, seed_required_sources
+
+    start, end = date_window(14)
+    page = "https://clienta.example/blog/a-long-post-about-something"
+
+    db.add(
+        FactGscPage(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url=page,
+            normalized_url=page,
+            country="usa",
+            device="DESKTOP",
+            impressions=Decimal("2911"),
+            clicks=Decimal("2"),
+            ctr=Decimal("0.0007"),
+            average_position=Decimal("14.2"),
+        )
+    )
+    snapshot = _healthy(page)
+    snapshot.client_id = client_a.id
+    snapshot.source = active_crawl_source()
+    snapshot.inbound_internal_links = 6
+    snapshot.word_count = 2500
+    db.add(snapshot)
+    db.commit()
+
+    seed_required_sources(db, client_a.id, end)
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+
+    levers = {f.lever for f in result.findings}
+    assert "internal_linking" in levers, "schema should not have taken this page's slot"

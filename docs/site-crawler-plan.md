@@ -250,6 +250,54 @@ to 146 and the no-schema list from 23 to 12 real pages.
 
 ---
 
+## Cutover — done 2026-09-22
+
+The Decision Engine now reads the first-party crawl. Both crawls keep writing;
+`CRAWL_FACTS_SOURCE` chooses the reader, so a bad crawl is backed out by
+flipping one variable rather than deploying.
+
+**Cadence went weekly, not monthly.** The engine reads this crawl for technical
+findings now, and a page that starts returning 404 cannot go unreported for a
+month. The crawl costs no API credits and no third-party rate limit, and the
+largest client took 2m26s, so frequency is nearly free: 35 clients at about five
+a day.
+
+**`se_ranking_audit` left the daily sync but kept its job.** It was ~13 requests
+per client per day — roughly 455 a day, 166,000 a year — re-fetching a crawl SE
+Ranking refreshes far less often. It stays registered and runnable on demand,
+which is how we would catch our own crawler regressing. Note it was never
+credit-metered: this buys rate-limit headroom and sync time, not credits.
+
+**Site-level signals are ours now.** Every page-level issue code the audit
+returned was already a field on our snapshot — the detector checked our field
+first and treated the code as a fallback. Only the site-level codes were unique,
+and the crawler sees all of them while planning a crawl: `no_robots`,
+`robots_not_accessible`, `robots_disallow_crawling`, `sitemap_missing`, and a
+sitemap declared but unreadable. It simply was not recording them.
+
+### Two problems the cutover surfaced
+
+**Schema was crowding out work that pays.** Putting the schema check inside the
+technical detector meant an advisory "no structured data" note outranked an
+actionable internal-linking opportunity on the same page, because the technical
+pass runs first and wins the page's slot. Schema is now the last resort across
+the whole cascade, not just within one detector.
+
+**Readiness was reading the wrong crawl.** `crawl_ready` counted snapshots for
+the client regardless of source, so a client holding only the other crawler's
+rows would report ready while the engine found nothing to work with.
+
+### Word count now excludes site furniture
+
+`nav`, `header`, `footer` and `menu` are excluded alongside script and style,
+matching the exclusions in the team's Screaming Frog content-audit config.
+Site-wide furniture appears on every page, so counting it inflates every page by
+the same amount and makes a thin page look substantial — which is exactly the
+judgement the low-content threshold makes. On these three clients the change is
+small, because they do not use semantic `nav`/`footer` elements much.
+
+---
+
 ## Open questions
 
 1. ~~Rendering.~~ **Decided 2026-09-22:** crawl raw HTML deliberately;
