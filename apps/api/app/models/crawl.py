@@ -26,6 +26,9 @@ class StagingSerAuditPage(Base):
     inbound_internal_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     in_sitemap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Inbound links that are neither navigation nor site-wide — whether anyone
+    #: actually references this page, as opposed to it sitting in a menu.
+    inbound_editorial_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     title_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -69,6 +72,9 @@ class FactCrawlPageSnapshot(Base):
     inbound_internal_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     in_sitemap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Inbound links that are neither navigation nor site-wide — whether anyone
+    #: actually references this page, as opposed to it sitting in a menu.
+    inbound_editorial_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     title_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -161,3 +167,37 @@ class FactCrawlPageSchema(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactCrawlInternalLink(Base):
+    """
+    One edge of a client's internal link graph.
+
+    The crawler always built this and then reduced it to a per-page count before
+    storing anything. A count cannot answer a question about clusters — "which
+    of these posts fail to link to their pillar" needs the edges, and the anchor
+    text that goes with them.
+    """
+
+    __tablename__ = "facts_crawl_internal_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id", "source", "from_url", "to_url", name="uq_facts_crawl_internal_links_grain"
+        ),
+        Index("ix_facts_crawl_internal_links_client_to", "client_id", "to_url"),
+        Index("ix_facts_crawl_internal_links_client_from", "client_id", "from_url"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default=CRAWL_SOURCE_FIRST_PARTY)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    from_url: Mapped[str] = mapped_column(Text, nullable=False)
+    to_url: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Outside nav/header/footer/menu/aside on the linking page.
+    in_content: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: Site furniture rather than an editorial reference.
+    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    occurrences: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

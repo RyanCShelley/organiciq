@@ -51,7 +51,7 @@ def test_extracts_the_signals_the_technical_lever_reads():
     # Body only: h1 (2) + paragraph (5) + link text (3). The title is not content.
     assert parsed.word_count == 10
     assert parsed.canonical_raw == "https://example.com/guide/"
-    assert parsed.internal_links == ["https://example.com/other"]
+    assert [link.target for link in parsed.internal_links] == ["https://example.com/other"]
 
 
 def test_script_and_style_text_is_not_content():
@@ -385,7 +385,7 @@ def test_asset_links_are_not_followed():
         </body></html>
         """,
     )
-    assert parsed.internal_links == ["https://example.com/real-page"]
+    assert [link.target for link in parsed.internal_links] == ["https://example.com/real-page"]
 
 
 def test_a_non_html_response_is_dropped_from_the_page_set():
@@ -444,8 +444,9 @@ def test_subdomains_are_part_of_the_site():
         """,
     )
 
-    assert "https://rs.example.com/landing" in parsed.internal_links
-    assert "https://www.example.com/page" in parsed.internal_links
+    targets = [link.target for link in parsed.internal_links]
+    assert "https://rs.example.com/landing" in targets
+    assert "https://www.example.com/page" in targets
     # A name that merely ends with the domain is a different site.
-    assert not any("notexample.com" in link for link in parsed.internal_links)
-    assert not any("evil.test" in link for link in parsed.internal_links)
+    assert not any("notexample.com" in target for target in targets)
+    assert not any("evil.test" in target for target in targets)

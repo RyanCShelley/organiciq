@@ -18,7 +18,7 @@ from xml.etree import ElementTree
 import httpx
 
 from app.core.urls import normalize_url
-from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
+from app.ingestion.crawler.parse import PageLink, ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
 
@@ -37,6 +37,29 @@ REQUEST_TIMEOUT = 20.0
 #: A redirect run longer than this is a loop as far as we are concerned.
 MAX_REDIRECT_HOPS = 5
 MAX_BODY_BYTES = 5_000_000
+#: A target linked from at least this share of crawled pages is template
+#: navigation, whatever markup it sits in. Position alone is not enough: on
+#: element6composites.com the navigation is plain divs, so every nav link looks
+#: editorial, while on smamarketing.com it is a <nav> and only 12% of inbound
+#: links are editorial. Prevalence catches both.
+TEMPLATE_LINK_PREVALENCE = 0.5
+#: Below this many pages, prevalence is meaningless — a five-page site links
+#: everything from everywhere for legitimate reasons.
+TEMPLATE_PREVALENCE_MIN_PAGES = 10
+
+
+@dataclass
+class InternalLink:
+    """One edge of the internal link graph."""
+
+    from_url: str
+    to_url: str
+    anchor: str
+    in_content: bool
+    occurrences: int
+    #: Site furniture rather than an editorial reference. Set after the crawl,
+    #: once prevalence across all pages is known.
+    is_template: bool = False
 
 
 @dataclass
@@ -53,6 +76,9 @@ class CrawledPage:
     is_page: bool = True
     in_sitemap: bool = False
     inbound_internal_links: int = 0
+    #: Inbound links that are neither navigation nor site-wide. This is the
+    #: number that says whether anyone actually references the page.
+    inbound_editorial_links: int = 0
 
     @property
     def indexable(self) -> bool:
@@ -82,6 +108,7 @@ class CrawlResult:
     #: A sitemap was declared or found but could not be read.
     sitemap_unreadable: bool = False
     hit_page_limit: bool = False
+    links: list[InternalLink] = field(default_factory=list)
 
 
 def page_limit_for(client_limit: int | None) -> int:
@@ -206,6 +233,7 @@ async def crawl_site(
         queue: list[str] = [root, *sorted(result.sitemap_urls)]
         queued: set[str] = {normalize_url(root)} | set(result.sitemap_urls)
         inbound: dict[str, int] = {}
+        edges: dict[tuple[str, str], InternalLink] = {}
         pages: dict[str, CrawledPage] = {}
         semaphore = asyncio.Semaphore(concurrency)
 
@@ -238,19 +266,67 @@ async def crawl_site(
                 if page.parsed is None:
                     continue
                 for link in page.parsed.internal_links:
-                    key = normalize_url(link)
+                    key = normalize_url(link.target)
                     inbound[key] = inbound.get(key, 0) + 1
+                    # Links are deduped per page by absolute URL, but `/x` and
+                    # `/x/` normalize to one target — so merge again on the
+                    # normalized pair, which is the grain we store.
+                    edge_key = (page.normalized_url, key)
+                    existing_edge = edges.get(edge_key)
+                    if existing_edge is None:
+                        edges[edge_key] = InternalLink(
+                            from_url=page.normalized_url,
+                            to_url=key,
+                            anchor=link.anchor,
+                            in_content=link.in_content,
+                            occurrences=link.occurrences,
+                        )
+                    else:
+                        existing_edge.occurrences += link.occurrences
+                        if link.in_content and not existing_edge.in_content:
+                            existing_edge.in_content = True
+                            existing_edge.anchor = link.anchor or existing_edge.anchor
+                        elif not existing_edge.anchor:
+                            existing_edge.anchor = link.anchor
                     if key not in queued and len(queued) < page_limit * 4:
                         queued.add(key)
-                        queue.append(link)
+                        queue.append(link.target)
 
         if queue:
             result.hit_page_limit = True
 
+        # Template links are decided once the whole crawl is in: a target linked
+        # from most pages is navigation, whatever element it sits in.
+        crawled = set(pages)
+        # Prevalence is measured over in-content links only. Counting every
+        # placement would mark a page that merely sits in the menu as fully
+        # templated, discarding a genuine body reference to it — and a body
+        # reference to a menu page is exactly the link worth knowing about.
+        all_edges = list(edges.values())
+        content_sources: dict[str, set[str]] = {}
+        for edge in all_edges:
+            if edge.in_content:
+                content_sources.setdefault(edge.to_url, set()).add(edge.from_url)
+
+        use_prevalence = len(crawled) >= TEMPLATE_PREVALENCE_MIN_PAGES
+        editorial: dict[str, int] = {}
+        for edge in all_edges:
+            templated_in_content = use_prevalence and (
+                len(content_sources.get(edge.to_url, ())) / len(crawled)
+                >= TEMPLATE_LINK_PREVALENCE
+            )
+            edge.is_template = templated_in_content or not edge.in_content
+            if not edge.is_template:
+                editorial[edge.to_url] = editorial.get(edge.to_url, 0) + 1
+
         for key, page in pages.items():
             page.inbound_internal_links = inbound.get(key, 0)
+            page.inbound_editorial_links = editorial.get(key, 0)
             page.in_sitemap = key in result.sitemap_urls
         result.pages = list(pages.values())
+        # Only edges between pages we actually crawled: an edge to a URL we never
+        # fetched cannot be reasoned about and would bloat the table.
+        result.links = [e for e in all_edges if e.to_url in crawled]
 
     return result
 

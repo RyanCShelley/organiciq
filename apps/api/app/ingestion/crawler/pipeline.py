@@ -25,6 +25,7 @@ from app.ingestion.crawler.fetch import (
 from app.models.client import Client
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
+    FactCrawlInternalLink,
     FactCrawlPageIssue,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
@@ -35,6 +36,10 @@ logger = logging.getLogger("organiciq.crawler")
 
 WATERMARK_SOURCE = "site_crawl"
 UPSERT_BATCH_SIZE = 500
+#: A ceiling on edges stored per crawl. A page template with a hundred links on
+#: every one of five thousand pages is half a million rows of navigation we have
+#: already classified as template and would never query.
+MAX_STORED_LINKS = 100_000
 
 
 def _duplicate_keys(pages: list[CrawledPage], attribute: str) -> set[str]:
@@ -69,6 +74,7 @@ def _snapshot_rows(
                 "status_code": page.status_code,
                 "canonical_url": parsed.canonical_url if parsed else None,
                 "inbound_internal_links": page.inbound_internal_links,
+                "inbound_editorial_links": page.inbound_editorial_links,
                 "word_count": parsed.word_count if parsed else 0,
                 "in_sitemap": page.in_sitemap,
                 # Empty string means "crawled and absent"; null would read as
@@ -146,6 +152,28 @@ def _site_issue_rows(
             "raw": raw,
         }
         for code, raw in codes
+    ]
+
+
+def _link_rows(client_id: Any, result: CrawlResult, *, snapshot_date: date) -> list[dict[str, Any]]:
+    """
+    The link graph, editorial edges first so the cap never discards the ones
+    worth having.
+    """
+    ordered = sorted(result.links, key=lambda e: e.is_template)
+    return [
+        {
+            "client_id": client_id,
+            "source": CRAWL_SOURCE_FIRST_PARTY,
+            "snapshot_date": snapshot_date,
+            "from_url": edge.from_url,
+            "to_url": edge.to_url,
+            "anchor_text": edge.anchor or None,
+            "in_content": edge.in_content,
+            "is_template": edge.is_template,
+            "occurrences": edge.occurrences,
+        }
+        for edge in ordered[:MAX_STORED_LINKS]
     ]
 
 
@@ -229,6 +257,14 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         for batch in _chunked(schema_rows, UPSERT_BATCH_SIZE):
             db.execute(insert(FactCrawlPageSchema).values(batch))
 
+        db.query(FactCrawlInternalLink).filter(
+            FactCrawlInternalLink.client_id == job.client_id,
+            FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY,
+        ).delete(synchronize_session=False)
+        link_rows = _link_rows(job.client_id, result, snapshot_date=snapshot_date)
+        for batch in _chunked(link_rows, UPSERT_BATCH_SIZE):
+            db.execute(insert(FactCrawlInternalLink).values(batch))
+
         db.query(FactCrawlPageIssue).filter(
             FactCrawlPageIssue.client_id == job.client_id,
             FactCrawlPageIssue.source == CRAWL_SOURCE_FIRST_PARTY,
@@ -237,7 +273,7 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         if issue_rows:
             db.execute(insert(FactCrawlPageIssue).values(issue_rows))
 
-        job.records_written = len(rows) + len(schema_rows) + len(issue_rows)
+        job.records_written = len(rows) + len(schema_rows) + len(issue_rows) + len(link_rows)
         job.fact_watermark = snapshot_date
         job.validation_status = ValidationStatus.PASSED
         job.status = SyncJobStatus.SUCCESSFUL
@@ -246,7 +282,8 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         job.error_message = (
             f"Crawled {len(result.pages)} pages "
             f"({sum(1 for p in result.pages if p.indexable)} indexable), "
-            f"{len(schema_rows)} schema blocks on {pages_with_schema} pages"
+            f"{len(schema_rows)} schema blocks on {pages_with_schema} pages, "
+            f"{sum(1 for r in link_rows if not r['is_template'])} editorial links"
             + (f"; stopped at the {limit}-page limit" if result.hit_page_limit else "")
         )
         db.commit()

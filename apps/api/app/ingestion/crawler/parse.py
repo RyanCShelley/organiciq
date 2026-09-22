@@ -64,6 +64,25 @@ _NOINDEX = re.compile(r"\bnone\b|\bnoindex\b", re.IGNORECASE)
 _NOFOLLOW = re.compile(r"\bnone\b|\bnofollow\b", re.IGNORECASE)
 
 
+#: Ancestors that make a link site furniture rather than editorial.
+_FURNITURE_ANCESTORS = frozenset({"nav", "header", "footer", "menu", "aside"})
+#: Anchor text longer than this is a paragraph, not an anchor.
+_MAX_ANCHOR = 300
+
+
+@dataclass
+class PageLink:
+    """One internal link, with what a cluster analysis needs to use it."""
+
+    target: str
+    anchor: str
+    #: Outside nav/header/footer/menu/aside. The primary template signal, though
+    #: it only works on sites that use those elements — see the prevalence pass
+    #: in the crawler for sites whose navigation is plain divs.
+    in_content: bool
+    occurrences: int = 1
+
+
 @dataclass
 class SchemaBlock:
     syntax: str
@@ -85,7 +104,7 @@ class ParsedPage:
     robots: str | None
     meta_noindex: bool
     meta_nofollow: bool
-    internal_links: list[str] = field(default_factory=list)
+    internal_links: list[PageLink] = field(default_factory=list)
     schema_blocks: list[SchemaBlock] = field(default_factory=list)
 
 
@@ -229,15 +248,6 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
     # strip below removes from the tree.
     schema_blocks = extract_json_ld(doc) + extract_microdata(doc) + extract_rdfa(doc)
 
-    # Word count over visible body content: <head> carries the title and meta,
-    # which are measured separately and would otherwise be counted twice.
-    for tag in _NON_CONTENT_TAGS:
-        for node in doc.xpath(f"//{tag}"):
-            if node.getparent() is not None:
-                node.getparent().remove(node)
-    body = doc.find("body")
-    word_count = len(_WORD.findall((body if body is not None else doc).text_content() or ""))
-
     canonical_raw = None
     for node in doc.xpath('//link[translate(@rel,"CANONICAL","canonical")="canonical"]'):
         href = (node.get("href") or "").strip()
@@ -257,8 +267,7 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
     robots = ", ".join(robots_values) or None
 
     host = urlsplit(url).hostname or ""
-    internal: list[str] = []
-    seen: set[str] = set()
+    internal: dict[str, PageLink] = {}
     for node in doc.xpath("//a[@href]"):
         href = (node.get("href") or "").strip()
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
@@ -271,9 +280,36 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
             continue
         if not is_page_url(absolute):
             continue
-        if absolute not in seen:
-            seen.add(absolute)
-            internal.append(absolute)
+
+        in_content = not any(
+            (ancestor.tag if isinstance(ancestor.tag, str) else "") in _FURNITURE_ANCESTORS
+            for ancestor in node.iterancestors()
+        )
+        anchor = " ".join((node.text_content() or "").split())[:_MAX_ANCHOR]
+
+        existing = internal.get(absolute)
+        if existing is None:
+            internal[absolute] = PageLink(
+                target=absolute, anchor=anchor, in_content=in_content
+            )
+        else:
+            existing.occurrences += 1
+            # One editorial placement is enough to make the link editorial, and
+            # a real anchor beats an empty one from an image link.
+            if in_content and not existing.in_content:
+                existing.in_content = True
+                existing.anchor = anchor or existing.anchor
+            elif not existing.anchor:
+                existing.anchor = anchor
+
+    # Destructive, so it runs last: removing these elements is what previously
+    # ate the JSON-LD blocks, and then the navigation links.
+    for tag in _NON_CONTENT_TAGS:
+        for node in doc.xpath(f"//{tag}"):
+            if node.getparent() is not None:
+                node.getparent().remove(node)
+    body = doc.find("body")
+    word_count = len(_WORD.findall((body if body is not None else doc).text_content() or ""))
 
     return ParsedPage(
         title=title,
@@ -285,6 +321,6 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         robots=robots,
         meta_noindex=bool(robots and _NOINDEX.search(robots)),
         meta_nofollow=bool(robots and _NOFOLLOW.search(robots)),
-        internal_links=internal,
+        internal_links=list(internal.values()),
         schema_blocks=schema_blocks,
     )

@@ -298,6 +298,59 @@ small, because they do not use semantic `nav`/`footer` elements much.
 
 ---
 
+## Internal link graph — 2026-09-22
+
+The crawler always built the graph and then reduced it to one number per page.
+Two consequences, both now fixed.
+
+**The graph is persisted.** `facts_crawl_internal_links` holds from, to, anchor
+text, position and occurrence count, replaced per crawl. Anchor text was being
+discarded too, and cluster work needs it.
+
+**The count was mostly navigation.** Measured before changing anything:
+
+| Site | Inbound counted | In body content | |
+|---|---|---|---|
+| SMA Marketing | 59 | 7 | 12% |
+| Element Six | 74 | 74 | 100% |
+
+Element Six's 100% was not health — its navigation is plain `div`s, so an
+element-based filter saw nothing, while `/contact` showed 27 inbound because
+every page links to it. Markup alone cannot classify a link.
+
+So classification uses two signals: position (outside nav/header/footer/menu/
+aside) and **prevalence measured over in-content links only**. Prevalence has to
+ignore navigation placements, or a page that merely sits in the menu is judged
+fully templated and a real body reference to it is thrown away — and a body
+reference to a menu page is exactly the link worth knowing about.
+
+After: Element Six `/contact` reads 28 inbound / **0 editorial**, correctly
+caught despite its `div` navigation, while genuine hubs survive — `/blog` 9/9,
+`/applications` 8/8. SMA's homepage reads 28/3 and `/blog` 28/1.
+
+**The lever compares against editorial links now.** The floor is 2/5/10 by word
+count; counting navigation put every page in a menu above it regardless of
+whether anything referenced it, so the lever was quietest on exactly the sites
+that needed it. 22 of 28 SMA pages have no editorial inbound link at all.
+
+### Found by running it
+
+- Collecting links after the word-count strip made every navigation link vanish
+  rather than be classified — the same trap that once ate the JSON-LD. All
+  extraction now happens before the destructive strip.
+- `/x` and `/x/` on one page are two links that normalize to one target, so the
+  crawl wrote two rows for one pair and the job died on the unique constraint.
+  Edges are merged on the grain they are stored at.
+
+### Still to scope: cluster rules
+
+Deliberately not built yet. Now that real graphs exist, the queries to try:
+cluster members that never link to their pillar, pages orphaned in content, and
+the actionable form — which specific page should add the link, chosen from pages
+already ranking for a related term.
+
+---
+
 ## Open questions
 
 1. ~~Rendering.~~ **Decided 2026-09-22:** crawl raw HTML deliberately;

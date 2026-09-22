@@ -810,7 +810,17 @@ def _internal_linking_finding(
     if page.average_position < 4 or page.average_position > 20:
         return None
     floor = _link_floor(crawl.word_count)
-    if crawl.inbound_internal_links >= floor:
+    # Editorial links only. Counting navigation put every page that sits in a
+    # menu above the floor regardless of whether anything references it — on
+    # smamarketing.com only 12% of inbound links are editorial, so the lever was
+    # quietest on exactly the sites that needed it. The audit has no such figure,
+    # so fall back to the total when reading that source.
+    inbound = (
+        crawl.inbound_editorial_links
+        if crawl.source == CRAWL_SOURCE_FIRST_PARTY
+        else crawl.inbound_internal_links
+    )
+    if inbound >= floor:
         return None
     impact, impact_evidence = score_internal_linking_impact(
         impressions=page.impressions,
@@ -831,6 +841,7 @@ def _internal_linking_finding(
         evidence_json={
             "position": round(page.average_position, 1),
             "inbound_internal_links": crawl.inbound_internal_links,
+            "inbound_editorial_links": crawl.inbound_editorial_links,
             "inlink_source": "se_ranking_audit",
             "link_floor": floor,
             "word_count": crawl.word_count,
