@@ -45,14 +45,34 @@ Yes, in three specific ways, and I want to be precise rather than enthusiastic:
 3. **We see every page we choose to see.** SE Ranking decided which variant to
    crawl. We decide.
 
-**The caveat that could undo all of it:** Scrapy fetches raw HTML. Any client
-whose content, canonical, or schema is injected by JavaScript will crawl wrong
-— and wrong in the worst way, because it will look like missing meta or missing
-schema rather than like a crawl failure. Before this ships, every client domain
-needs a raw-HTML-vs-rendered check. Where sites need rendering, the options are
-a headless browser for those clients only (expensive, and a second code path)
-or keeping SE Ranking for them. **This is the single biggest risk in the plan
-and it is not yet resolved.**
+**On JavaScript — raw HTML is the deliberate lens, not a limitation.**
+
+An earlier draft of this plan treated raw-HTML crawling as a risk to be
+mitigated with a rendering check. That was the wrong framing. If a page's
+structured data or canonical only exists after JavaScript runs, that is itself
+the finding, and one we want to make: it should be surfaced, taken to the
+client, and argued for moving server-side.
+
+The strength of that argument varies by consumer, and the finding has to say so
+or it will be wrong in front of a client:
+
+- **AI answer engines** — GPTBot, ClaudeBot, PerplexityBot, CCBot and friends
+  fetch HTML and do not execute JavaScript. Client-side schema is invisible to
+  them, full stop. Given AI visibility is a first-class lever here, this is the
+  case that matters most.
+- **`rel=canonical`** — Google's own guidance is to serve it in the HTML;
+  JS-injected canonicals are unreliable regardless of consumer.
+- **Google and JSON-LD** — Googlebot *does* render, and will generally pick up
+  JSON-LD injected by JavaScript. So a finding must not claim "Google cannot see
+  your schema". The honest wording is that it is absent from the HTML, invisible
+  to AI crawlers, and dependent on rendering for everyone else.
+
+What we give up by never rendering: we cannot tell "no schema at all" from
+"schema, but client-side only". That changes the *advice*, not the detection —
+"you have this, it is just invisible to AI crawlers, move it server-side" is a
+far easier conversation than "add schema". Recovering the distinction later
+costs one rendered fetch of a sample page per client, and can be added when a
+client case needs it. Not a blocker, and not part of the first build.
 
 ### Structured data and schema tests?
 
@@ -87,6 +107,13 @@ what a page is, and we already track AI visibility as a first-class lever — so
 ## How it fits what already exists
 
 The plumbing is in place, which is most of why this is worth doing in-house.
+
+**Engine: asyncio + `httpx`, not Scrapy.** Scrapy runs a Twisted reactor, and a
+reactor can only be started once per process — our worker is a long-lived
+polling loop that would invoke the crawler repeatedly, which fights that model
+directly. `httpx` is already a dependency and already carries our retry and
+timeout conventions. The only new dependency is an HTML/structured-data parser
+(`extruct` covers JSON-LD, microdata and RDFa in one, over `lxml`).
 
 - **Job source.** Add `site_crawl` to `_job_handlers()` in
   `app/services/jobs.py`. Deliberately *not* in `daily_sync._PROVIDER_SOURCES` —
@@ -156,8 +183,9 @@ trying to get away from.
 
 ## Open questions
 
-1. **Rendering.** Which client sites need JavaScript execution to yield correct
-   HTML? Blocking — see above.
+1. ~~Rendering.~~ **Decided 2026-09-22:** crawl raw HTML deliberately;
+   JS-dependent schema and canonicals are findings, not crawl failures. See
+   above for how the finding must be worded per consumer.
 2. **Cutover.** Run both sources in parallel for a cycle and diff, or switch
    outright? Parallel costs nothing extra (the audit is already being fetched)
    and would have caught this bug.
