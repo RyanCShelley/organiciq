@@ -261,6 +261,9 @@ export type CrawledPagesPayload = {
   crawled_at: string | null;
   total_pages: number;
   indexable_pages: number;
+  /** False when no sitemap was found — "missing from it" would then mean nothing. */
+  sitemap_found: boolean;
+  pages_in_sitemap: number;
   /** Indexable pages nothing links to from body content. */
   orphaned_pages: number;
   items: CrawledPageRow[];
@@ -284,4 +287,42 @@ export type StructuredDataPayload = {
   types: { type: string; count: number }[];
   gaps: SchemaGapRow[];
   truncated: boolean;
+};
+
+
+export type CrawlLinkRow = {
+  url: string;
+  anchor_text: string | null;
+  /** Navigation or site-wide, rather than an editorial reference. */
+  is_template: boolean;
+  in_content: boolean;
+  occurrences: number;
+};
+
+export type CrawlSchemaBlock = {
+  syntax: string;
+  schema_type: string | null;
+  parse_error: string | null;
+  raw: unknown;
+  raw_text: string | null;
+};
+
+export type CrawlPageDetail = {
+  found: boolean;
+  url: string;
+  raw_url?: string;
+  title?: string | null;
+  description?: string | null;
+  status_code?: number | null;
+  indexable?: boolean;
+  canonical_url?: string | null;
+  robots?: string | null;
+  word_count?: number;
+  in_sitemap?: boolean;
+  redirect_url?: string | null;
+  inbound_internal_links?: number;
+  inbound_editorial_links?: number;
+  inbound?: CrawlLinkRow[];
+  outbound?: CrawlLinkRow[];
+  schema_blocks?: CrawlSchemaBlock[];
 };

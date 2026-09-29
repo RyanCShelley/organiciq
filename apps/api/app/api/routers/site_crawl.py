@@ -19,6 +19,8 @@ from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
+    FactCrawlInternalLink,
+    FactCrawlPageIssue,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
 )
@@ -94,10 +96,26 @@ def crawled_pages(
     ]
 
     indexable = [row for row in rows if row.indexable]
+    # "Missing from the sitemap" is only a statement when a sitemap was found.
+    # Without one, every page would read as missing, when the real finding is
+    # the site-level sitemap_missing the crawl already records.
+    sitemap_missing = (
+        db.query(FactCrawlPageIssue)
+        .filter(
+            FactCrawlPageIssue.client_id == client.id,
+            FactCrawlPageIssue.source == CRAWL_SOURCE_FIRST_PARTY,
+            FactCrawlPageIssue.issue_code == "sitemap_missing",
+        )
+        .first()
+        is not None
+    )
+    pages_in_sitemap = sum(1 for row in rows if row.in_sitemap)
     return {
         "crawled_at": _crawled_at(db, client.id),
         "total_pages": len(rows),
         "indexable_pages": len(indexable),
+        "sitemap_found": not sitemap_missing and pages_in_sitemap > 0,
+        "pages_in_sitemap": pages_in_sitemap,
         "orphaned_pages": sum(1 for row in indexable if row.inbound_editorial_links == 0),
         "items": items,
         "truncated": len(ordered) > len(items),
@@ -173,4 +191,102 @@ def structured_data(
         ],
         "gaps": gaps[:limit],
         "truncated": len(gaps) > limit,
+    }
+
+
+@router.get("/page")
+def page_detail(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    url: str = Query(..., description="Normalized page URL"),
+) -> dict[str, Any]:
+    """
+    One page: what links to it, what it links to, and its structured data.
+
+    The link graph and the raw schema blocks are both stored and were both
+    invisible — this is the view that makes them usable.
+    """
+    page = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client.id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+            FactCrawlPageSnapshot.normalized_url == url,
+        )
+        .one_or_none()
+    )
+    if page is None:
+        return {"found": False, "url": url}
+
+    def link_payload(rows, attribute: str) -> list[dict[str, Any]]:
+        # Editorial links first: those are the ones worth reading.
+        ordered = sorted(rows, key=lambda r: (r.is_template, getattr(r, attribute)))
+        return [
+            {
+                "url": getattr(row, attribute),
+                "anchor_text": row.anchor_text,
+                "is_template": row.is_template,
+                "in_content": row.in_content,
+                "occurrences": row.occurrences,
+            }
+            for row in ordered
+        ]
+
+    inbound = (
+        db.query(FactCrawlInternalLink)
+        .filter(
+            FactCrawlInternalLink.client_id == client.id,
+            FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY,
+            FactCrawlInternalLink.to_url == url,
+        )
+        .all()
+    )
+    outbound = (
+        db.query(FactCrawlInternalLink)
+        .filter(
+            FactCrawlInternalLink.client_id == client.id,
+            FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY,
+            FactCrawlInternalLink.from_url == url,
+        )
+        .all()
+    )
+    blocks = (
+        db.query(FactCrawlPageSchema)
+        .filter(
+            FactCrawlPageSchema.client_id == client.id,
+            FactCrawlPageSchema.normalized_url == url,
+        )
+        .all()
+    )
+
+    return {
+        "found": True,
+        "url": page.normalized_url,
+        "raw_url": page.raw_url,
+        "title": page.title,
+        "description": page.description,
+        "status_code": page.status_code,
+        "indexable": page.indexable,
+        "canonical_url": page.canonical_url,
+        "robots": page.robots,
+        "word_count": page.word_count,
+        "in_sitemap": page.in_sitemap,
+        "redirect_url": page.redirect_url,
+        "inbound_internal_links": page.inbound_internal_links,
+        "inbound_editorial_links": page.inbound_editorial_links,
+        "inbound": link_payload(inbound, "from_url"),
+        "outbound": link_payload(outbound, "to_url"),
+        "schema_blocks": [
+            {
+                "syntax": block.syntax,
+                "schema_type": block.schema_type,
+                "parse_error": block.parse_error,
+                "raw": block.raw,
+                "raw_text": block.raw_text,
+            }
+            for block in sorted(
+                blocks, key=lambda b: (b.parse_error is None, b.schema_type or "")
+            )
+        ],
     }

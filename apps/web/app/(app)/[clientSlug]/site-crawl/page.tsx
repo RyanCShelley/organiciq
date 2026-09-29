@@ -3,8 +3,10 @@ import Link from "next/link";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { CrawlPageDetail } from "@/components/analytics/CrawlPageDetail";
 import {
   apiFetch,
+  type CrawlPageDetail as PageDetail,
   type CrawledPagesPayload,
   type StructuredDataPayload,
 } from "@/lib/api";
@@ -19,6 +21,8 @@ const EMPTY_PAGES: CrawledPagesPayload = {
   total_pages: 0,
   indexable_pages: 0,
   orphaned_pages: 0,
+  sitemap_found: false,
+  pages_in_sitemap: 0,
   items: [],
   truncated: false,
 };
@@ -101,14 +105,22 @@ export default async function SiteCrawlPage({
   const client = await requireAccountClient(clientSlug, "site-crawl");
   const clientId = client.id;
   const tab = resolveTab(query.tab);
+  const selectedUrl = typeof query.url === "string" ? query.url : null;
 
   let pages: CrawledPagesPayload = EMPTY_PAGES;
   let schema: StructuredDataPayload = EMPTY_SCHEMA;
+  let detail: PageDetail | null = null;
   let error: string | null = null;
 
   try {
     if (tab === "pages") {
       pages = await apiFetch<CrawledPagesPayload>("/site-crawl/pages", { clientId });
+      if (selectedUrl) {
+        detail = await apiFetch<PageDetail>(
+          `/site-crawl/page?url=${encodeURIComponent(selectedUrl)}`,
+          { clientId },
+        );
+      }
     } else {
       schema = await apiFetch<StructuredDataPayload>("/site-crawl/schema", { clientId });
     }
@@ -174,7 +186,7 @@ export default async function SiteCrawlPage({
 
       {tab === "pages" && !neverCrawled ? (
         <>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Pages crawled" value={pages.total_pages.toLocaleString()} />
             <Stat label="Indexable" value={pages.indexable_pages.toLocaleString()} />
             <Stat
@@ -182,7 +194,22 @@ export default async function SiteCrawlPage({
               value={pages.orphaned_pages.toLocaleString()}
               tone={pages.orphaned_pages > 0 ? "warning" : "default"}
             />
+            <Stat
+              label="In sitemap"
+              value={
+                pages.sitemap_found
+                  ? `${pages.pages_in_sitemap.toLocaleString()} / ${pages.total_pages.toLocaleString()}`
+                  : "No sitemap"
+              }
+              tone={
+                !pages.sitemap_found || pages.pages_in_sitemap < pages.total_pages
+                  ? "warning"
+                  : "default"
+              }
+            />
           </div>
+
+          {detail ? <CrawlPageDetail detail={detail} closeHref={base} /> : null}
 
           <section className="mt-4 workspace-section">
             <SectionHeader
@@ -202,15 +229,13 @@ export default async function SiteCrawlPage({
                     key: "url",
                     header: "Page",
                     render: (row) => (
-                      <a
-                        href={row.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block max-w-[26rem] truncate hover:underline"
+                      <Link
+                        href={`${base}?url=${encodeURIComponent(row.url)}`}
+                        className="block max-w-[26rem] truncate font-medium hover:underline"
                         title={row.title ? `${row.title} — ${row.url}` : row.url}
                       >
                         {pathOf(row.url)}
-                      </a>
+                      </Link>
                     ),
                   },
                   {
@@ -279,12 +304,18 @@ export default async function SiteCrawlPage({
                   {
                     key: "in_sitemap",
                     header: "Sitemap",
-                    render: (row) =>
-                      row.in_sitemap ? (
-                        <span className="badge badge-neutral">In</span>
+                    render: (row) => {
+                      // Without a sitemap, "missing from it" says nothing — the
+                      // finding is the site-level one, not a mark on every row.
+                      if (!pages.sitemap_found) {
+                        return <span className="text-[var(--text-tertiary)]">No sitemap</span>;
+                      }
+                      return row.in_sitemap ? (
+                        <span className="badge badge-success">In</span>
                       ) : (
-                        <span className="text-[var(--text-tertiary)]">—</span>
-                      ),
+                        <span className="badge badge-warning">Missing</span>
+                      );
+                    },
                   },
                 ]}
                 rows={pages.items}
