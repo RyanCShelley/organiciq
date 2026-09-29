@@ -16,17 +16,24 @@ WATERMARK_SOURCES = (
     "ga4",
     "se_ranking_search",
     "se_ranking_ai",
-    "se_ranking_audit",
+    "site_crawl",
 )
 
+#: The integration a source depends on. `site_crawl` has none — it crawls the
+#: client's own site directly — so its health is the watermark alone, and
+#: requiring an integration would have shown it permanently "Not Connected".
 PROVIDER_FOR_SOURCE = {
     "gsc_pages": "gsc",
     "gsc_queries": "gsc",
     "ga4": "ga4",
     "se_ranking_search": "se_ranking",
     "se_ranking_ai": "se_ranking",
-    "se_ranking_audit": "se_ranking",
+    "site_crawl": None,
 }
+
+#: Sources that run on a weekly cycle rather than daily, so "stale" means
+#: something different for them.
+WEEKLY_SOURCES = frozenset({"site_crawl"})
 
 
 def data_health_rows(
@@ -36,12 +43,15 @@ def data_health_rows(
     result = []
     for source in WATERMARK_SOURCES:
         provider = PROVIDER_FOR_SOURCE[source]
-        integration = integrations.get(provider)
+        integration = integrations.get(provider) if provider else None
         watermark = watermarks.get(source)
-        if integration is None or integration.connection_status.value == "not_connected":
+        needs_integration = provider is not None
+        if needs_integration and (
+            integration is None or integration.connection_status.value == "not_connected"
+        ):
             status_label = "Not Connected"
         elif watermark is None:
-            status_label = "Not Connected"
+            status_label = "Not scheduled yet" if source in WEEKLY_SOURCES else "Not Connected"
         else:
             status_label = (
                 "Healthy"
