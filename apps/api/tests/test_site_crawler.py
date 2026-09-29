@@ -450,3 +450,79 @@ def test_subdomains_are_part_of_the_site():
     # A name that merely ends with the domain is a different site.
     assert not any("notexample.com" in target for target in targets)
     assert not any("evil.test" in target for target in targets)
+
+
+# --- A blocked or broken crawl must not replace a good one ------------------
+
+
+def test_a_robots_blocked_crawl_keeps_the_previous_pages(db, client_a, monkeypatch):
+    """
+    element6composites.com's robots.txt changed to `Disallow: /` mid-project.
+    Publishing that crawl would have replaced every real page with a status-less
+    non-indexable row — wiping the data and turning one true finding into a
+    page-by-page flood of false ones.
+    """
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.crawl import FactCrawlPageIssue
+    from app.models.job import SyncJob, SyncJobStatus
+
+    kept = _snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, PAGE)
+    db.add(kept)
+    db.commit()
+
+    blocked = CrawlResult(
+        pages=[
+            CrawledPage(
+                raw_url=f"https://example.com/p{i}",
+                normalized_url=f"https://example.com/p{i}",
+                status_code=None,
+                redirect_url=None,
+                redirect_count=0,
+                blocked_by_robots=True,
+                fetch_error=None,
+                parsed=None,
+            )
+            for i in range(5)
+        ],
+        robots_txt_found=True,
+        robots_disallows_site=True,
+    )
+    monkeypatch.setattr(pipeline.asyncio, "run", lambda coro: (coro.close(), blocked)[1])
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+
+    assert job.status == SyncJobStatus.PARTIAL
+    assert "robots.txt disallows crawling" in (job.error_message or "")
+
+    survivors = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_a.id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+        )
+        .all()
+    )
+    assert [row.normalized_url for row in survivors] == [PAGE], "the good crawl must survive"
+
+    codes = {
+        row.issue_code
+        for row in db.query(FactCrawlPageIssue).filter(
+            FactCrawlPageIssue.client_id == client_a.id
+        )
+    }
+    assert "robots_disallow_crawling" in codes, "the cause must still be reported"

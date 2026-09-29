@@ -242,3 +242,46 @@ export type PlatformJobRow = {
   error_message: string | null;
   created_at: string | null;
 };
+
+export type CrawledPageRow = {
+  url: string;
+  status_code: number | null;
+  indexable: boolean;
+  title: string | null;
+  word_count: number;
+  inbound_internal_links: number;
+  /** Links that are neither navigation nor site-wide. */
+  inbound_editorial_links: number;
+  in_sitemap: boolean;
+  redirect_count: number;
+  schema_blocks: number;
+};
+
+export type CrawledPagesPayload = {
+  crawled_at: string | null;
+  total_pages: number;
+  indexable_pages: number;
+  /** Indexable pages nothing links to from body content. */
+  orphaned_pages: number;
+  items: CrawledPageRow[];
+  truncated: boolean;
+};
+
+export type SchemaGapRow = {
+  url: string;
+  title: string | null;
+  issue: "invalid" | "missing" | "boilerplate_only";
+  detail: string | null;
+  types: string[];
+};
+
+export type StructuredDataPayload = {
+  crawled_at: string | null;
+  indexable_pages: number;
+  pages_with_descriptive_schema: number;
+  total_blocks: number;
+  invalid_blocks: number;
+  types: { type: string; count: number }[];
+  gaps: SchemaGapRow[];
+  truncated: boolean;
+};

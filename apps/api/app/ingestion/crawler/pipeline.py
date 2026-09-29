@@ -234,6 +234,39 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         if not result.pages:
             raise RuntimeError(f"Crawl of {client.domain} returned no pages")
 
+        # A crawl that fetched nothing must not replace a good one. robots.txt
+        # flipping to Disallow, or the site going down, would otherwise publish
+        # every page as status-less and non-indexable — wiping real data and
+        # turning one true finding into a page-by-page flood of false ones.
+        # The site-level issue is still recorded, so the engine reports the
+        # cause at its proper severity.
+        fetched = [page for page in result.pages if page.status_code is not None]
+        if not fetched:
+            blocked = sum(1 for page in result.pages if page.blocked_by_robots)
+            reason = (
+                "robots.txt disallows crawling"
+                if blocked
+                else "no page could be fetched"
+            )
+            db.query(FactCrawlPageIssue).filter(
+                FactCrawlPageIssue.client_id == job.client_id,
+                FactCrawlPageIssue.source == CRAWL_SOURCE_FIRST_PARTY,
+            ).delete(synchronize_session=False)
+            issue_rows = _site_issue_rows(job.client_id, result, snapshot_date=date.today())
+            if issue_rows:
+                db.execute(insert(FactCrawlPageIssue).values(issue_rows))
+            job.records_written = len(issue_rows)
+            job.validation_status = ValidationStatus.FAILED
+            job.status = SyncJobStatus.PARTIAL
+            job.completed_at = datetime.now(timezone.utc)
+            job.error_message = (
+                f"{client.domain}: {reason} — kept the previous crawl rather than "
+                f"replacing it with {len(result.pages)} unreadable pages"
+            )
+            db.commit()
+            logger.warning("Crawl of %s blocked: %s", client.domain, reason)
+            return job
+
         job.status = SyncJobStatus.NORMALIZING
         db.commit()
 

@@ -3,6 +3,7 @@ export const ACCOUNT_TOOLS = [
   "watch-list",
   "content-opp",
   "decision-engine",
+  "site-crawl",
   "annotations",
 ] as const;
 

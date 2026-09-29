@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, annotations, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, watch_list
+from app.api.routers import admin, annotations, auth, clients, dashboard, decisions, integrations, jobs, oauth_google, seranking, site_crawl, watch_list
 from app.core.settings import get_settings
 
 logger = logging.getLogger("organiciq.api")
@@ -46,6 +46,7 @@ app.include_router(admin.router)
 app.include_router(oauth_google.router)
 app.include_router(seranking.router)
 app.include_router(watch_list.router)
+app.include_router(site_crawl.router)
 app.include_router(dashboard.router)
 app.include_router(decisions.router)
 app.include_router(annotations.router)

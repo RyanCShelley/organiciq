@@ -65,7 +65,7 @@ export function SidebarNav({
   const pathname = usePathname();
   const platformOnly = isPlatformContext(pathname);
   const accountToolMatch = pathname.match(
-    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|annotations)(\/|$)/,
+    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|site-crawl|annotations)(\/|$)/,
   );
   const clientsWorkspaceMatch = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
   const pathSlug = accountToolMatch?.[1] || clientsWorkspaceMatch?.[1];
