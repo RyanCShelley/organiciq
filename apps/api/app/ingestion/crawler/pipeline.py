@@ -228,7 +228,13 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         db.commit()
 
         logger.info("Crawling %s (limit=%d)", client.domain, limit)
-        result = asyncio.run(crawl_site(client.domain, page_limit=limit))
+        result = asyncio.run(
+            crawl_site(
+                client.domain,
+                page_limit=limit,
+                sitemap_url=(client.sitemap_url or "").strip() or None,
+            )
+        )
         job.records_fetched = len(result.pages)
 
         if not result.pages:

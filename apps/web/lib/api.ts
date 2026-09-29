@@ -130,6 +130,8 @@ export type Client = {
   ai_search_prompt_limit?: number | null;
   /** Max pages one monthly site crawl may fetch. Null = default (500). */
   crawl_page_limit?: number | null;
+  /** Declared sitemap, for sites where discovery cannot find one. */
+  sitemap_url?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -255,6 +257,7 @@ export type CrawledPageRow = {
   in_sitemap: boolean;
   redirect_count: number;
   schema_blocks: number;
+  is_pagination: boolean;
 };
 
 export type CrawledPagesPayload = {
@@ -264,6 +267,9 @@ export type CrawledPagesPayload = {
   /** False when no sitemap was found — "missing from it" would then mean nothing. */
   sitemap_found: boolean;
   pages_in_sitemap: number;
+  /** Pages matching the active filters. */
+  matched_pages: number;
+  pagination_pages: number;
   /** Indexable pages nothing links to from body content. */
   orphaned_pages: number;
   items: CrawledPageRow[];

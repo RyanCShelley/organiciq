@@ -293,6 +293,21 @@ export function ClientSettingsForm({
             that stops at the limit says so on the sync job.
           </p>
         </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel label="Sitemap URL (optional)">
+            <Input
+              name="sitemap_url"
+              type="url"
+              defaultValue={client.sitemap_url ?? ""}
+              placeholder="Found automatically — set only if it isn't"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            The crawler reads robots.txt and tries the usual locations. Set this only
+            when a site hides its sitemap somewhere unusual, or serves HTML for every
+            unknown path so nothing is discoverable.
+          </p>
+        </div>
       </div>
 
       {selectedTier && !enterprise ? (

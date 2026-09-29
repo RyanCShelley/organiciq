@@ -64,6 +64,8 @@ class Client(Base):
     ai_search_prompt_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: Pages one site crawl may fetch. Null uses the default (500).
     crawl_page_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Declared sitemap, for sites where discovery cannot find one.
+    sitemap_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Dashboard baseline snapshot (calculator / contract start)
     baseline_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     # The window the snapshot was measured over. Previously only the end date

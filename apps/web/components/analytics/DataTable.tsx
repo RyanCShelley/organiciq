@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
@@ -17,6 +18,8 @@ export function DataTable<T>({
   title,
   className,
   emptyMessage = "No data for this period.",
+  rowHref,
+  rowLabel,
 }: {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -24,6 +27,13 @@ export function DataTable<T>({
   title?: string;
   className?: string;
   emptyMessage?: string;
+  /**
+   * Makes the whole row a link to this href. Rendered as an overlay anchor so
+   * the row stays a real table row — wrapping <tr> in <a> is invalid HTML, and
+   * a click handler would need a client component for what is just navigation.
+   */
+  rowHref?: (row: T) => string;
+  rowLabel?: (row: T) => string;
 }) {
   if (rows.length === 0) {
     return (
@@ -59,21 +69,34 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={getRowKey(row)}>
-              {columns.map((column) => (
-                <td
-                  key={column.key}
-                  className={cn(
-                    column.align === "right" && "text-right tabular-nums",
-                    column.className,
-                  )}
-                >
-                  {column.render(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const href = rowHref?.(row);
+            return (
+              <tr key={getRowKey(row)} className={href ? "row-linked" : undefined}>
+                {columns.map((column, index) => (
+                  <td
+                    key={column.key}
+                    className={cn(
+                      column.align === "right" && "text-right tabular-nums",
+                      href && "relative",
+                      column.className,
+                    )}
+                  >
+                    {href && index === 0 ? (
+                      <Link
+                        href={href}
+                        aria-label={rowLabel?.(row) ?? "Open row"}
+                        className="absolute inset-0 z-[1]"
+                      />
+                    ) : null}
+                    <span className={href ? "relative z-[2] pointer-events-none" : undefined}>
+                      {column.render(row)}
+                    </span>
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -46,6 +46,16 @@ TEMPLATE_LINK_PREVALENCE = 0.5
 #: Below this many pages, prevalence is meaningless — a five-page site links
 #: everything from everywhere for legitimate reasons.
 TEMPLATE_PREVALENCE_MIN_PAGES = 10
+#: Tried in order when robots.txt declares no sitemap. Covers Yoast, Rank Math,
+#: WordPress core and the plain default.
+SITEMAP_CANDIDATES = (
+    "/sitemap_index.xml",
+    "/sitemap.xml",
+    "/wp-sitemap.xml",
+    "/sitemap-index.xml",
+    "/sitemap1.xml",
+    "/sitemaps.xml",
+)
 
 
 @dataclass
@@ -107,6 +117,8 @@ class CrawlResult:
     robots_disallows_site: bool = False
     #: A sitemap was declared or found but could not be read.
     sitemap_unreadable: bool = False
+    #: Where the sitemap was actually found, for the operator.
+    sitemap_location: str | None = None
     hit_page_limit: bool = False
     links: list[InternalLink] = field(default_factory=list)
 
@@ -142,7 +154,19 @@ async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparse
         raise RobotsUnreachable(str(exc)) from exc
     if response.status_code >= 400:
         return None, []
+
+    # Some servers answer every unknown path with the site's HTML. Parsing that
+    # as robots.txt is garbage in, and reports a robots file that is not there.
+    content_type = response.headers.get("content-type", "").lower()
     text = response.text
+    looks_like_robots = any(
+        line.strip().lower().startswith(("user-agent:", "disallow:", "allow:", "sitemap:"))
+        for line in text.splitlines()
+    )
+    if "html" in content_type or not looks_like_robots:
+        logger.info("robots.txt at %s is not a robots file; treating it as absent", root)
+        return None, []
+
     parser.parse(text.splitlines())
     sitemaps = [
         line.split(":", 1)[1].strip()
@@ -194,6 +218,7 @@ async def crawl_site(
     page_limit: int = DEFAULT_PAGE_LIMIT,
     concurrency: int = DEFAULT_CONCURRENCY,
     respect_robots: bool = True,
+    sitemap_url: str | None = None,
 ) -> CrawlResult:
     """Crawl a site breadth-first from its root, bounded by `page_limit`."""
     root = _start_url(domain)
@@ -218,14 +243,32 @@ async def crawl_site(
         if robots is not None and not robots.can_fetch(USER_AGENT, root):
             result.robots_disallows_site = True
 
-        declared_sitemaps = bool(sitemap_locations)
-        if not sitemap_locations:
-            sitemap_locations = [urljoin(root, "/sitemap.xml")]
+        # A sitemap the client told us about wins: it is the one case where we
+        # know better than discovery.
+        declared_sitemaps = bool(sitemap_locations) or bool(sitemap_url)
+        if sitemap_url:
+            sitemap_locations = [sitemap_url, *sitemap_locations]
         result.sitemap_urls = await _load_sitemap_urls(
             client, sitemap_locations, host=host, budget=page_limit * 4
         )
-        # Declared in robots.txt but yielding nothing means it is broken, which
-        # is a different finding from having no sitemap at all.
+
+        # Nothing declared, or what was declared yielded nothing: try the usual
+        # locations before concluding the site has no sitemap. Plenty of sites
+        # have one and simply never mention it in robots.txt.
+        if not result.sitemap_urls:
+            for candidate in SITEMAP_CANDIDATES:
+                found = await _load_sitemap_urls(
+                    client, [urljoin(root, candidate)], host=host, budget=page_limit * 4
+                )
+                if found:
+                    result.sitemap_urls = found
+                    result.sitemap_location = urljoin(root, candidate)
+                    break
+        elif sitemap_locations:
+            result.sitemap_location = sitemap_locations[0]
+
+        # Declared but yielding nothing is broken, which is a different finding
+        # from having none at all.
         result.sitemap_unreadable = declared_sitemaps and not result.sitemap_urls
 
         # Sitemap URLs are seeded alongside the root: a page nothing links to is

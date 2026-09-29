@@ -215,3 +215,82 @@ def test_schema_view_separates_the_three_kinds_of_gap(client, db, client_a, admi
     assert issues[boilerplate] == "boilerplate_only"
     # Unparseable markup sorts first — it reads as done and nothing can use it.
     assert body["gaps"][0]["url"] == broken
+
+
+# --- Pagination and filters -------------------------------------------------
+
+
+def test_pagination_urls_are_recognised():
+    """
+    Real examples from aquamanleakdetection.com, which had 21 of 143 pages like
+    this. A slug that merely contains the word "page" is not pagination.
+    """
+    from app.api.routers.site_crawl import is_pagination_url
+
+    assert is_pagination_url("https://x.com/blog/page/2")
+    assert is_pagination_url("https://x.com/author/someone/page/9")
+    assert is_pagination_url("https://x.com/blog/category/news/page/2/")
+    assert is_pagination_url("https://x.com/?paged=3")
+    assert is_pagination_url("https://x.com/p/12")
+
+    assert not is_pagination_url("https://x.com/blog")
+    assert not is_pagination_url("https://x.com/blog/creating-a-better-landing-page")
+    assert not is_pagination_url("https://x.com/2026/")
+
+
+def test_pagination_is_hidden_by_default(client, db, client_a, admin_user):
+    db.add(_snapshot(client_a.id, PAGE))
+    db.add(_snapshot(client_a.id, "https://example.com/blog/page/2"))
+    db.commit()
+    headers = client_header(client_a.id, admin_user.email)
+
+    default = client.get("/site-crawl/pages", headers=headers).json()
+    shown = client.get("/site-crawl/pages?pagination=show", headers=headers).json()
+    only = client.get("/site-crawl/pages?pagination=only", headers=headers).json()
+
+    assert [row["url"] for row in default["items"]] == [PAGE]
+    assert default["pagination_pages"] == 1
+    assert len(shown["items"]) == 2
+    assert [row["url"] for row in only["items"]] == ["https://example.com/blog/page/2"]
+
+
+def test_filters_narrow_the_list_and_report_the_match_count(client, db, client_a, admin_user):
+    orphan = _snapshot(client_a.id, OTHER)
+    orphan.inbound_editorial_links = 0
+    orphan.word_count = 120
+    broken = _snapshot(client_a.id, "https://example.com/gone", indexable=False)
+    broken.status_code = 404
+    db.add(_snapshot(client_a.id, PAGE))
+    db.add(orphan)
+    db.add(broken)
+    db.commit()
+    headers = client_header(client_a.id, admin_user.email)
+
+    def urls(qs: str) -> list[str]:
+        body = client.get(f"/site-crawl/pages?{qs}", headers=headers).json()
+        assert body["matched_pages"] == len(body["items"])
+        return [row["url"] for row in body["items"]]
+
+    assert urls("links=orphan") == [OTHER]
+    assert urls("words=thin") == [OTHER]
+    assert urls("status=error") == ["https://example.com/gone"]
+    assert urls("indexable=no") == ["https://example.com/gone"]
+    assert sorted(urls("indexable=yes")) == sorted([PAGE, OTHER])
+
+
+def test_filters_combine(client, db, client_a, admin_user):
+    thin_orphan = _snapshot(client_a.id, OTHER)
+    thin_orphan.inbound_editorial_links = 0
+    thin_orphan.word_count = 100
+    linked_thin = _snapshot(client_a.id, "https://example.com/short")
+    linked_thin.word_count = 100
+    db.add(thin_orphan)
+    db.add(linked_thin)
+    db.commit()
+
+    body = client.get(
+        "/site-crawl/pages?words=thin&links=orphan",
+        headers=client_header(client_a.id, admin_user.email),
+    ).json()
+
+    assert [row["url"] for row in body["items"]] == [OTHER]

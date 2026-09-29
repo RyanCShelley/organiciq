@@ -624,6 +624,21 @@
 
   /* ── Tables ── */
 
+  /* Whole-row links: the overlay anchor in the first cell is stretched across
+     the row, so a click anywhere opens it while the row stays a valid <tr>. */
+  .row-linked {
+    position: relative;
+  }
+
+  .row-linked > td:first-child > a[aria-label] {
+    width: 100vw;
+  }
+
+  .row-linked:hover {
+    background: var(--surface-muted);
+    cursor: pointer;
+  }
+
   .table-shell {
     overflow: hidden;
     border: 1px solid var(--border-card);

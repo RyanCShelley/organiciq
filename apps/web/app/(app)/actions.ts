@@ -54,6 +54,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   // lookup can spend. The API clamps it again before any credits are spent.
   const aiPromptLimit = parseOptionalInt("ai_search_prompt_limit");
   const crawlPageLimit = parseOptionalInt("crawl_page_limit");
+  const sitemapUrl = String(formData.get("sitemap_url") || "").trim() || null;
 
   if (
     [customKeyword, customPrompt, customContent, customRefresh, customGrowth].some((value) =>
@@ -120,6 +121,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     custom_watchlist_cadence: isEnterprise ? customCadence || "monthly" : null,
     ai_search_prompt_limit: aiPromptLimit,
     crawl_page_limit: crawlPageLimit,
+    sitemap_url: sitemapUrl,
   };
 
   if (!body.client_name || !body.domain || !body.tier_id) {

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { CrawlFilters, CRAWL_FILTERS } from "@/components/analytics/CrawlFilters";
 import { CrawlPageDetail } from "@/components/analytics/CrawlPageDetail";
 import {
   apiFetch,
@@ -23,6 +24,8 @@ const EMPTY_PAGES: CrawledPagesPayload = {
   orphaned_pages: 0,
   sitemap_found: false,
   pages_in_sitemap: 0,
+  matched_pages: 0,
+  pagination_pages: 0,
   items: [],
   truncated: false,
 };
@@ -106,6 +109,11 @@ export default async function SiteCrawlPage({
   const clientId = client.id;
   const tab = resolveTab(query.tab);
   const selectedUrl = typeof query.url === "string" ? query.url : null;
+  const filters: Record<string, string> = {};
+  for (const group of CRAWL_FILTERS) {
+    const value = query[group.param];
+    filters[group.param] = typeof value === "string" ? value : group.defaultValue ?? "";
+  }
 
   let pages: CrawledPagesPayload = EMPTY_PAGES;
   let schema: StructuredDataPayload = EMPTY_SCHEMA;
@@ -114,7 +122,16 @@ export default async function SiteCrawlPage({
 
   try {
     if (tab === "pages") {
-      pages = await apiFetch<CrawledPagesPayload>("/site-crawl/pages", { clientId });
+      const qs = new URLSearchParams();
+      for (const group of CRAWL_FILTERS) {
+        const value = filters[group.param];
+        if (value) qs.set(group.param, value);
+      }
+      const suffix = qs.toString();
+      pages = await apiFetch<CrawledPagesPayload>(
+        suffix ? `/site-crawl/pages?${suffix}` : "/site-crawl/pages",
+        { clientId },
+      );
       if (selectedUrl) {
         detail = await apiFetch<PageDetail>(
           `/site-crawl/page?url=${encodeURIComponent(selectedUrl)}`,
@@ -137,6 +154,17 @@ export default async function SiteCrawlPage({
     { id: "schema", label: "Structured data" },
   ];
   const base = accountToolHref(client.slug, "site-crawl");
+  // Keeps the active filters when opening or closing a page's detail.
+  const filterQs = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) filterQs.set(key, value);
+  }
+  const listHref = filterQs.toString() ? `${base}?${filterQs}` : base;
+  const detailHref = (url: string) => {
+    const qs = new URLSearchParams(filterQs);
+    qs.set("url", url);
+    return `${base}?${qs}`;
+  };
 
   return (
     <section>
@@ -209,7 +237,14 @@ export default async function SiteCrawlPage({
             />
           </div>
 
-          {detail ? <CrawlPageDetail detail={detail} closeHref={base} /> : null}
+          <CrawlFilters
+            base={base}
+            active={filters}
+            matched={pages.matched_pages}
+            total={pages.total_pages}
+          />
+
+          {detail ? <CrawlPageDetail detail={detail} closeHref={listHref} /> : null}
 
           <section className="mt-4 workspace-section">
             <SectionHeader
@@ -218,7 +253,7 @@ export default async function SiteCrawlPage({
               actions={
                 <span className="text-xs text-[var(--text-tertiary)]">
                   {pages.items.length.toLocaleString()} shown
-                  {pages.truncated ? ` of ${pages.total_pages.toLocaleString()}` : ""}
+                  {pages.truncated ? ` of ${pages.matched_pages.toLocaleString()}` : ""}
                 </span>
               }
             />
@@ -229,13 +264,12 @@ export default async function SiteCrawlPage({
                     key: "url",
                     header: "Page",
                     render: (row) => (
-                      <Link
-                        href={`${base}?url=${encodeURIComponent(row.url)}`}
-                        className="block max-w-[26rem] truncate font-medium hover:underline"
+                      <span
+                        className="block max-w-[26rem] truncate font-medium"
                         title={row.title ? `${row.title} — ${row.url}` : row.url}
                       >
                         {pathOf(row.url)}
-                      </Link>
+                      </span>
                     ),
                   },
                   {
@@ -320,7 +354,9 @@ export default async function SiteCrawlPage({
                 ]}
                 rows={pages.items}
                 getRowKey={(row) => row.url}
-                emptyMessage="No pages in this crawl."
+                rowHref={(row) => detailHref(row.url)}
+                rowLabel={(row) => `Open ${row.url}`}
+                emptyMessage="No pages match these filters."
               />
             </div>
           </section>
