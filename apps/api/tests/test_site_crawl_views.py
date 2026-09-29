@@ -294,3 +294,33 @@ def test_filters_combine(client, db, client_a, admin_user):
     ).json()
 
     assert [row["url"] for row in body["items"]] == [OTHER]
+
+
+def test_the_view_carries_the_last_crawl_note(client, db, client_a, admin_user):
+    """
+    "Not found" with nothing to explain it is what made the sitemap stat
+    impossible to act on. The crawl's own summary now travels with the numbers.
+    """
+    from datetime import date as date_cls
+
+    from app.models.job import SyncJob, SyncJobStatus
+
+    db.add(_snapshot(client_a.id, PAGE))
+    db.add(
+        SyncJob(
+            id=uuid4(),
+            client_id=client_a.id,
+            source="site_crawl",
+            start_date=date_cls.today(),
+            end_date=date_cls.today(),
+            status=SyncJobStatus.SUCCESSFUL,
+            error_message="Crawled 20 pages, sitemap 80 URLs via https://x.com/sitemap_index.xml",
+        )
+    )
+    db.commit()
+
+    body = client.get(
+        "/site-crawl/pages", headers=client_header(client_a.id, admin_user.email)
+    ).json()
+
+    assert "sitemap 80 URLs" in body["last_crawl_note"]

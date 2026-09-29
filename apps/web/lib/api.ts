@@ -270,6 +270,8 @@ export type CrawledPagesPayload = {
   /** Pages matching the active filters. */
   matched_pages: number;
   pagination_pages: number;
+  /** The last crawl's own summary, so the numbers can be explained. */
+  last_crawl_note: string | null;
   /** Indexable pages nothing links to from body content. */
   orphaned_pages: number;
   items: CrawledPageRow[];

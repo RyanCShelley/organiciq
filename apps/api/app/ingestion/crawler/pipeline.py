@@ -318,21 +318,31 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         job.status = SyncJobStatus.SUCCESSFUL
         job.completed_at = datetime.now(timezone.utc)
         pages_with_schema = len({row["normalized_url"] for row in schema_rows})
+        if result.sitemap_urls:
+            where = result.sitemap_location or "robots.txt"
+            sitemap_note = f"sitemap {len(result.sitemap_urls)} URLs via {where}"
+        elif result.sitemap_unreadable:
+            sitemap_note = "sitemap declared but unreadable"
+        else:
+            sitemap_note = "no sitemap found"
         job.error_message = (
             f"Crawled {len(result.pages)} pages "
             f"({sum(1 for p in result.pages if p.indexable)} indexable), "
             f"{len(schema_rows)} schema blocks on {pages_with_schema} pages, "
-            f"{sum(1 for r in link_rows if not r['is_template'])} editorial links"
+            f"{sum(1 for r in link_rows if not r['is_template'])} editorial links, "
+            f"{sitemap_note}"
             + (f"; stopped at the {limit}-page limit" if result.hit_page_limit else "")
         )
         db.commit()
 
         _upsert_watermark(db, job.client_id, snapshot_date, ValidationStatus.PASSED)
         logger.info(
-            "Crawl %s: pages=%d schema_blocks=%d hit_limit=%s",
+            "Crawl %s: pages=%d schema_blocks=%d sitemap_urls=%d sitemap_at=%s hit_limit=%s",
             client.domain,
             len(result.pages),
             len(schema_rows),
+            len(result.sitemap_urls),
+            result.sitemap_location or ("robots.txt" if result.sitemap_urls else "none"),
             result.hit_page_limit,
         )
         return job

@@ -26,6 +26,7 @@ const EMPTY_PAGES: CrawledPagesPayload = {
   pages_in_sitemap: 0,
   matched_pages: 0,
   pagination_pages: 0,
+  last_crawl_note: null,
   items: [],
   truncated: false,
 };
@@ -227,7 +228,7 @@ export default async function SiteCrawlPage({
               value={
                 pages.sitemap_found
                   ? `${pages.pages_in_sitemap.toLocaleString()} / ${pages.total_pages.toLocaleString()}`
-                  : "No sitemap"
+                  : "Not found"
               }
               tone={
                 !pages.sitemap_found || pages.pages_in_sitemap < pages.total_pages
@@ -236,6 +237,23 @@ export default async function SiteCrawlPage({
               }
             />
           </div>
+
+          {pages.last_crawl_note ? (
+            <p className="mt-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+              {pages.last_crawl_note}
+            </p>
+          ) : null}
+
+          {!pages.sitemap_found ? (
+            <Alert variant="info" className="mt-3">
+              No sitemap was found for this site. The crawler reads robots.txt and tries
+              the usual locations. If you know where it is, set it in{" "}
+              <Link href={clientHref(client.slug, "")} className="font-medium underline">
+                Client settings
+              </Link>{" "}
+              and re-run the crawl — the line above is the last crawl&rsquo;s own summary.
+            </Alert>
+          ) : null}
 
           <CrawlFilters
             base={base}

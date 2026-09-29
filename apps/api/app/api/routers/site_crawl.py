@@ -19,6 +19,7 @@ from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
+from app.models.job import SyncJob
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
     FactCrawlInternalLink,
@@ -171,7 +172,15 @@ def crawled_pages(
         is not None
     )
     pages_in_sitemap = sum(1 for row in rows if row.in_sitemap)
+    last_crawl_note = (
+        db.query(SyncJob.error_message)
+        .filter(SyncJob.client_id == client.id, SyncJob.source == "site_crawl")
+        .order_by(SyncJob.created_at.desc())
+        .limit(1)
+        .scalar()
+    )
     return {
+        "last_crawl_note": last_crawl_note,
         "crawled_at": _crawled_at(db, client.id),
         "total_pages": len(rows),
         "indexable_pages": len(indexable),
