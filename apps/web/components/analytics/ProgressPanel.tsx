@@ -20,6 +20,11 @@ import type {
  * rather than at its own dates, so the two overlay — the comparison is "this
  * window against the last one", not a continuous history.
  *
+ * The trailing window is the picked range's own length, so the heading stays
+ * true whatever is selected. The projection is stored as a monthly figure, so
+ * it is scaled to that same window before being drawn: a 90-day view compares
+ * a 90-day total against three months of target, not one.
+ *
  * Traffic is projected to *decline* (see growth_calculator), so the question
  * the projection answers is "are we above or below the line", not "are we
  * climbing to a target". The assumption is printed under the charts so it can
@@ -364,6 +369,7 @@ export function ProgressPanel({
   const checkpoints: BaselineCheckpoint[] = projection?.checkpoints ?? [];
   const currentRows: BaselineTrailingPoint[] = baseline.trailing?.current ?? [];
   const previousRows: BaselineTrailingPoint[] = baseline.trailing?.previous ?? [];
+  const windowDays = baseline.trailing?.window_days || currentRows.length;
 
   // A measured window reads as a range; a manual snapshot only ever has one date.
   const frozenStart = baseline.period_start;
@@ -396,12 +402,17 @@ export function ProgressPanel({
 
   /**
    * Checkpoint months become x positions in the window, so the projection can
-   * be drawn on the same axis as two series that are indexed by day.
+   * be drawn on the same axis as two series that are indexed by day. The stored
+   * figures are monthly, so they are rescaled to the trailing window's length.
    */
   function projectionSeries(key: "monthly_sessions" | "monthly_leads"): Point[] {
     if (!anchorIso || checkpoints.length < 2 || !dates.length) return [];
+    const toWindow = windowDays / DAYS_PER_MONTH;
     const curve = checkpoints
-      .map((checkpoint) => ({ x: checkpoint.month * DAYS_PER_MONTH, value: checkpoint[key] }))
+      .map((checkpoint) => ({
+        x: checkpoint.month * DAYS_PER_MONTH,
+        value: checkpoint[key] * toWindow,
+      }))
       .sort((a, b) => a.x - b.x);
     const points: Point[] = [];
     dates.forEach((iso, index) => {
@@ -506,11 +517,11 @@ export function ProgressPanel({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-[12px] font-bold uppercase tracking-[0.14em]" style={{ color: LIME }}>
-              Trailing 30 days
+              {windowDays > 0 ? `Trailing ${windowDays.toLocaleString()} days` : "Trailing window"}
             </div>
             <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
-              Each point is the last 30 days ending that day, against the same window a period
-              earlier.
+              Each point is the last {windowDays.toLocaleString()} days ending that day, against the
+              same window a period earlier.
             </p>
             {windowLine ? (
               <p className="mt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--brand-on-dark-muted)]">
@@ -572,7 +583,8 @@ export function ProgressPanel({
                 style={{ borderColor: HAIRLINE }}
               >
                 Traffic is projected to decline over the plan; leads are projected to rise on lead
-                rate, not volume. Sitting above the dashed line is the goal on both charts.
+                rate, not volume. The projection is stored monthly and scaled to this window.
+                Sitting above the dashed line is the goal on both charts.
               </p>
             ) : null}
           </>

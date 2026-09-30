@@ -7,7 +7,10 @@ from uuid import uuid4
 
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.services.dashboard import TRAILING_WINDOW_DAYS, _trailing_30_series
+from app.services.dashboard import _trailing_series
+
+
+WINDOW = 30
 
 
 def _traffic(client_id, on: date, sessions: int):
@@ -59,11 +62,11 @@ def _define_lead(db, client_id, name: str = "generate_lead"):
 def test_first_point_already_holds_a_full_window(db, client_a):
     """The series opens at its true level, not climbing from zero."""
     since = date.today() - timedelta(days=5)
-    for offset in range(TRAILING_WINDOW_DAYS):
+    for offset in range(WINDOW):
         db.add(_traffic(client_a.id, since - timedelta(days=offset), 10))
     db.commit()
 
-    rows = _trailing_30_series(db, client_a.id, [], (since, date.today()))
+    rows = _trailing_series(db, client_a.id, [], (since, date.today()), window_days=WINDOW)
 
     assert rows[0]["date"] == since.isoformat()
     assert rows[0]["sessions"] == 300
@@ -77,11 +80,11 @@ def test_days_roll_out_of_the_window(db, client_a):
 
     rows = {
         row["date"]: row["sessions"]
-        for row in _trailing_30_series(db, client_a.id, [], (since, date.today()))
+        for row in _trailing_series(db, client_a.id, [], (since, date.today()), window_days=WINDOW)
     }
 
     assert rows[since.isoformat()] == 100
-    last_day_inside = since + timedelta(days=TRAILING_WINDOW_DAYS - 1)
+    last_day_inside = since + timedelta(days=WINDOW - 1)
     assert rows[last_day_inside.isoformat()] == 100
     assert rows[(last_day_inside + timedelta(days=1)).isoformat()] == 0
 
@@ -93,7 +96,9 @@ def test_sessions_and_leads_roll_together(db, client_a):
     db.add(_lead_event(client_a.id, since, 4))
     db.commit()
 
-    rows = _trailing_30_series(db, client_a.id, ["generate_lead"], (since, date.today()))
+    rows = _trailing_series(
+        db, client_a.id, ["generate_lead"], (since, date.today()), window_days=WINDOW
+    )
 
     assert rows[0]["sessions"] == 80
     assert rows[0]["leads"] == 4
@@ -105,7 +110,7 @@ def test_one_point_per_day_in_the_window(db, client_a):
     db.add(_traffic(client_a.id, since, 5))
     db.commit()
 
-    rows = _trailing_30_series(db, client_a.id, [], (since, date.today()))
+    rows = _trailing_series(db, client_a.id, [], (since, date.today()), window_days=WINDOW)
 
     assert len(rows) == 11
     assert rows[-1]["date"] == date.today().isoformat()
@@ -118,7 +123,7 @@ def test_the_window_bounds_the_series(db, client_a):
     db.add(_traffic(client_a.id, since, 7))
     db.commit()
 
-    rows = _trailing_30_series(db, client_a.id, [], (since, until))
+    rows = _trailing_series(db, client_a.id, [], (since, until), window_days=WINDOW)
 
     assert rows[0]["date"] == since.isoformat()
     assert rows[-1]["date"] == until.isoformat()
@@ -126,9 +131,23 @@ def test_the_window_bounds_the_series(db, client_a):
 
 
 def test_no_window_means_no_series(db, client_a):
-    assert _trailing_30_series(db, client_a.id, [], None) == []
+    assert _trailing_series(db, client_a.id, [], None, window_days=WINDOW) == []
 
 
 def test_no_facts_means_no_series(db, client_a):
     window = (date.today() - timedelta(days=5), date.today())
-    assert _trailing_30_series(db, client_a.id, [], window) == []
+    assert _trailing_series(db, client_a.id, [], window, window_days=WINDOW) == []
+
+
+def test_the_window_length_is_the_picked_range(db, client_a):
+    """A 7-day pick sums 7 days per point, not 30."""
+    since = date.today() - timedelta(days=3)
+    for offset in range(30):
+        db.add(_traffic(client_a.id, since - timedelta(days=offset), 10))
+    db.commit()
+
+    seven = _trailing_series(db, client_a.id, [], (since, date.today()), window_days=7)
+    thirty = _trailing_series(db, client_a.id, [], (since, date.today()), window_days=30)
+
+    assert seven[0]["sessions"] == 70
+    assert thirty[0]["sessions"] == 300

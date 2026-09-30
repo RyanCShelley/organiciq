@@ -190,7 +190,7 @@ def _baseline_comparison(
         "monthly_actuals": monthly_actuals or [],
         # Trailing 30-day sessions and leads over the viewing window and the
         # period before it, for the comparison charts.
-        "trailing": trailing or {"current": [], "previous": []},
+        "trailing": trailing or {"window_days": 0, "current": [], "previous": []},
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
@@ -253,34 +253,36 @@ def _monthly_lead_actuals(
     return rows
 
 
-TRAILING_WINDOW_DAYS = 30
-
-
-def _trailing_30_series(
+def _trailing_series(
     db: Session,
     client_id: UUID,
     event_names: list[str],
     period: tuple[date, date] | None,
+    *,
+    window_days: int,
 ) -> list[dict[str, Any]]:
     """
-    Sessions and leads over the 30 days ending each day in `period`.
+    Sessions and leads over the `window_days` ending each day in `period`.
+
+    The window is the length of the range the user picked, so the chart's label
+    is true whatever they select — and the previous period, which is the same
+    length, stays directly comparable.
 
     A trailing window rather than calendar months, so the line has daily
-    resolution without a sawtooth reset on the 1st, every point is directly
-    comparable to a monthly projection figure, and the shape of a change stays
-    legible — a cliff is an event, a slope is a trend, and a monthly view cannot
-    tell them apart.
+    resolution without a sawtooth reset on the 1st and the shape of a change
+    stays legible: a cliff is an event, a slope is a trend, and a monthly view
+    cannot tell them apart.
 
     Days with no rows count as zero, which is right for a sum. The read reaches
-    a full window back before the first day so that point is a true 30-day
-    total rather than a ramp up from nothing.
+    a full window back before the first day so that point is a true total
+    rather than a ramp up from nothing.
     """
-    if period is None:
+    if period is None or window_days < 1:
         return []
     since, end = period
     if since > end:
         return []
-    read_from = since - timedelta(days=TRAILING_WINDOW_DAYS - 1)
+    read_from = since - timedelta(days=window_days - 1)
 
     session_rows = (
         db.query(FactGa4Traffic.date, func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
@@ -320,7 +322,7 @@ def _trailing_30_series(
     while day <= end:
         sessions_sum += sessions_by_day.get(day, 0.0)
         leads_sum += leads_by_day.get(day, 0.0)
-        dropped = day - timedelta(days=TRAILING_WINDOW_DAYS)
+        dropped = day - timedelta(days=window_days)
         if dropped >= read_from:
             sessions_sum -= sessions_by_day.get(dropped, 0.0)
             leads_sum -= leads_by_day.get(dropped, 0.0)
@@ -1256,6 +1258,8 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     visibility_series = _daily_site_visibility_series(db, client.id, ser_current)
     position_series = gsc_pos_series
 
+    trailing_window = (to_date - from_date).days + 1
+
     # Baseline follows the selected date filter; period totals are scaled to monthly for comparison.
     baseline_payload = _baseline_comparison(
         client,
@@ -1274,9 +1278,16 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         ),
         # The charts follow the date filter, and carry the period before it so
         # the two can be laid over each other.
+        # The window is the picked range, not the clamped one: the chart's label
+        # describes what the user chose, even where GA4 has yet to catch up.
         trailing={
-            "current": _trailing_30_series(db, client.id, lead_events, ga4_current),
-            "previous": _trailing_30_series(db, client.id, lead_events, ga4_previous),
+            "window_days": trailing_window,
+            "current": _trailing_series(
+                db, client.id, lead_events, ga4_current, window_days=trailing_window
+            ),
+            "previous": _trailing_series(
+                db, client.id, lead_events, ga4_previous, window_days=trailing_window
+            ),
         },
     )
 

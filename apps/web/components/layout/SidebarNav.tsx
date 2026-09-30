@@ -8,6 +8,7 @@ import {
   Gauge,
   LayoutDashboard,
   LayoutGrid,
+  Monitor,
   RefreshCw,
   Settings2,
   type LucideIcon,
@@ -36,6 +37,9 @@ const ACCOUNT_ICONS: Record<string, LucideIcon> = {
   "Content Opp": FileSearch,
   "Decision Engine": Gauge,
   Annotations: Bookmark,
+  // Anything unmapped falls back to Settings2, so a missing entry here reads as
+  // a second "Client settings" in the sidebar.
+  "Site crawl": Monitor,
   "Client settings": Settings2,
 };
 

@@ -159,7 +159,7 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       tier_name: null,
       current_window: null,
       monthly_actuals: [],
-      trailing: { current: [], previous: [] },
+      trailing: { window_days: 0, current: [], previous: [] },
       monthly_sessions: null,
       monthly_leads: null,
       lead_rate: null,
@@ -196,6 +196,8 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
           }))
       : [],
     trailing: {
+      window_days:
+        typeof baseline.trailing?.window_days === "number" ? baseline.trailing.window_days : 0,
       current: trailingPoints(baseline.trailing?.current),
       previous: trailingPoints(baseline.trailing?.previous),
     },
@@ -344,6 +346,8 @@ export type BaselineTrailingPoint = {
 
 /** The viewing window and the period before it, for the comparison charts. */
 export type BaselineTrailing = {
+  /** Length of the trailing window, which is the picked range's own length. */
+  window_days: number;
   current: BaselineTrailingPoint[];
   previous: BaselineTrailingPoint[];
 };
