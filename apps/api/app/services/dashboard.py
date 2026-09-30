@@ -130,7 +130,7 @@ def _baseline_comparison(
     leads_series: list[float] | None = None,
     lead_rate_series: list[float] | None = None,
     monthly_actuals: list[dict[str, Any]] | None = None,
-    trailing: dict[str, list[dict[str, Any]]] | None = None,
+    cumulative: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare the selected window (scaled to monthly) against the frozen baseline snapshot."""
     has_baseline = (
@@ -188,9 +188,9 @@ def _baseline_comparison(
         "current_window": window_payload,
         # Monthly lead history behind the projection curve.
         "monthly_actuals": monthly_actuals or [],
-        # Trailing 30-day sessions and leads over the viewing window and the
-        # period before it, for the comparison charts.
-        "trailing": trailing or {"window_days": 0, "current": [], "previous": []},
+        # Running totals of sessions and leads over the viewing window and the
+        # period before it, for the pacing charts.
+        "cumulative": cumulative or {"window_days": 0, "current": [], "previous": []},
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
@@ -253,42 +253,33 @@ def _monthly_lead_actuals(
     return rows
 
 
-def _trailing_series(
+def _cumulative_series(
     db: Session,
     client_id: UUID,
     event_names: list[str],
     period: tuple[date, date] | None,
-    *,
-    window_days: int,
 ) -> list[dict[str, Any]]:
     """
-    Sessions and leads over the `window_days` ending each day in `period`.
+    Running totals of sessions and leads for each day in `period`.
 
-    The window is the length of the range the user picked, so the chart's label
-    is true whatever they select — and the previous period, which is the same
-    length, stays directly comparable.
+    The card asks whether we are counting toward the goal, so the series
+    accumulates from the first day of the window rather than rolling: the last
+    point is the period's total, and the slope is the rate we are adding at.
 
-    A trailing window rather than calendar months, so the line has daily
-    resolution without a sawtooth reset on the 1st and the shape of a change
-    stays legible: a cliff is an event, a slope is a trend, and a monthly view
-    cannot tell them apart.
-
-    Days with no rows count as zero, which is right for a sum. The read reaches
-    a full window back before the first day so that point is a true total
-    rather than a ramp up from nothing.
+    Days with no rows add nothing, which is right for a running total — a quiet
+    day flattens the line instead of breaking it.
     """
-    if period is None or window_days < 1:
+    if period is None:
         return []
-    since, end = period
-    if since > end:
+    start, end = period
+    if start > end:
         return []
-    read_from = since - timedelta(days=window_days - 1)
 
     session_rows = (
         db.query(FactGa4Traffic.date, func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
         .filter(
             FactGa4Traffic.client_id == client_id,
-            FactGa4Traffic.date >= read_from,
+            FactGa4Traffic.date >= start,
             FactGa4Traffic.date <= end,
         )
         .group_by(FactGa4Traffic.date)
@@ -302,7 +293,7 @@ def _trailing_series(
             db.query(FactGa4Event.date, func.coalesce(func.sum(FactGa4Event.event_count), 0))
             .filter(
                 FactGa4Event.client_id == client_id,
-                FactGa4Event.date >= read_from,
+                FactGa4Event.date >= start,
                 FactGa4Event.date <= end,
                 FactGa4Event.event_name.in_(event_names),
             )
@@ -314,26 +305,19 @@ def _trailing_series(
     if not sessions_by_day and not leads_by_day:
         return []
 
-    # Rolled in Python: the span is a year or so of days at most, and the
-    # running subtraction is clearer here than a window function.
     out: list[dict[str, Any]] = []
-    sessions_sum = leads_sum = 0.0
-    day = read_from
+    sessions_total = leads_total = 0.0
+    day = start
     while day <= end:
-        sessions_sum += sessions_by_day.get(day, 0.0)
-        leads_sum += leads_by_day.get(day, 0.0)
-        dropped = day - timedelta(days=window_days)
-        if dropped >= read_from:
-            sessions_sum -= sessions_by_day.get(dropped, 0.0)
-            leads_sum -= leads_by_day.get(dropped, 0.0)
-        if day >= since:
-            out.append(
-                {
-                    "date": day.isoformat(),
-                    "sessions": round(sessions_sum, 2),
-                    "leads": round(leads_sum, 2),
-                }
-            )
+        sessions_total += sessions_by_day.get(day, 0.0)
+        leads_total += leads_by_day.get(day, 0.0)
+        out.append(
+            {
+                "date": day.isoformat(),
+                "sessions": round(sessions_total, 2),
+                "leads": round(leads_total, 2),
+            }
+        )
         day += timedelta(days=1)
     return out
 
@@ -1258,7 +1242,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     visibility_series = _daily_site_visibility_series(db, client.id, ser_current)
     position_series = gsc_pos_series
 
-    trailing_window = (to_date - from_date).days + 1
+    picked_days = (to_date - from_date).days + 1
 
     # Baseline follows the selected date filter; period totals are scaled to monthly for comparison.
     baseline_payload = _baseline_comparison(
@@ -1278,16 +1262,12 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         ),
         # The charts follow the date filter, and carry the period before it so
         # the two can be laid over each other.
-        # The window is the picked range, not the clamped one: the chart's label
+        # The length is the picked range, not the clamped one: the chart's label
         # describes what the user chose, even where GA4 has yet to catch up.
-        trailing={
-            "window_days": trailing_window,
-            "current": _trailing_series(
-                db, client.id, lead_events, ga4_current, window_days=trailing_window
-            ),
-            "previous": _trailing_series(
-                db, client.id, lead_events, ga4_previous, window_days=trailing_window
-            ),
+        cumulative={
+            "window_days": picked_days,
+            "current": _cumulative_series(db, client.id, lead_events, ga4_current),
+            "previous": _cumulative_series(db, client.id, lead_events, ga4_previous),
         },
     )
 

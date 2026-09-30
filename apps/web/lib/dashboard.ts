@@ -129,7 +129,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
   };
 }
 
-function trailingPoints(value: unknown): BaselineTrailingPoint[] {
+function cumulativePoints(value: unknown): BaselineCumulativePoint[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(
@@ -159,7 +159,7 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       tier_name: null,
       current_window: null,
       monthly_actuals: [],
-      trailing: { window_days: 0, current: [], previous: [] },
+      cumulative: { window_days: 0, current: [], previous: [] },
       monthly_sessions: null,
       monthly_leads: null,
       lead_rate: null,
@@ -195,11 +195,11 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
             partial: row.partial === true,
           }))
       : [],
-    trailing: {
+    cumulative: {
       window_days:
-        typeof baseline.trailing?.window_days === "number" ? baseline.trailing.window_days : 0,
-      current: trailingPoints(baseline.trailing?.current),
-      previous: trailingPoints(baseline.trailing?.previous),
+        typeof baseline.cumulative?.window_days === "number" ? baseline.cumulative.window_days : 0,
+      current: cumulativePoints(baseline.cumulative?.current),
+      previous: cumulativePoints(baseline.cumulative?.previous),
     },
     current_window:
       window &&
@@ -337,19 +337,19 @@ export type BaselineMonthlyActual = {
   partial: boolean;
 };
 
-export type BaselineTrailingPoint = {
-  /** YYYY-MM-DD — the last day of the 30-day window. */
+export type BaselineCumulativePoint = {
+  /** YYYY-MM-DD. The value is the running total up to and including this day. */
   date: string;
   sessions: number;
   leads: number;
 };
 
-/** The viewing window and the period before it, for the comparison charts. */
-export type BaselineTrailing = {
-  /** Length of the trailing window, which is the picked range's own length. */
+/** The viewing window and the period before it, for the pacing charts. */
+export type BaselineCumulative = {
+  /** Length of the picked range, used to label the card and scale the goal. */
   window_days: number;
-  current: BaselineTrailingPoint[];
-  previous: BaselineTrailingPoint[];
+  current: BaselineCumulativePoint[];
+  previous: BaselineCumulativePoint[];
 };
 
 export type DashboardBaseline = {
@@ -366,8 +366,8 @@ export type DashboardBaseline = {
   current_window: { from: string; to: string; days: number | null } | null;
   /** Monthly lead history behind the projection curve, oldest first. */
   monthly_actuals: BaselineMonthlyActual[];
-  /** Trailing 30-day sessions and leads over the viewing window, oldest first. */
-  trailing: BaselineTrailing;
+  /** Running totals of sessions and leads over the viewing window, oldest first. */
+  cumulative: BaselineCumulative;
   monthly_sessions: number | null;
   monthly_leads: number | null;
   lead_rate: number | null;

@@ -2,17 +2,18 @@ import Link from "next/link";
 
 import type {
   BaselineCheckpoint,
-  BaselineTrailingPoint,
+  BaselineCumulativePoint,
   DashboardBaseline,
 } from "@/lib/dashboard";
 
 /**
- * Baseline stats and the trailing comparison charts, as two separate cards.
+ * Baseline stats and the pacing charts, as two separate cards.
  *
- * The charts plot a trailing 30-day window rather than calendar months: every
- * point is then directly comparable to a monthly projection figure, the line
- * has daily resolution without resetting on the 1st, and the shape of a change
- * is legible — a cliff is an event, a slope is a trend.
+ * The charts are cumulative: each point is the running total since the first
+ * day of the window, so the last one is the period's total and the slope is
+ * the rate we are adding at. The question they answer is "are we counting
+ * toward the goal", which a rate series cannot show — a flat stretch on a
+ * running total is visibly lost ground.
  *
  * They follow the dashboard's date filter, like every other card, and carry
  * three series: the window, the period before it, and the frozen projection.
@@ -20,13 +21,12 @@ import type {
  * rather than at its own dates, so the two overlay — the comparison is "this
  * window against the last one", not a continuous history.
  *
- * The trailing window is the picked range's own length, so the heading stays
- * true whatever is selected. The projection is stored as a monthly figure, so
- * it is scaled to that same window before being drawn: a 90-day view compares
- * a 90-day total against three months of target, not one.
+ * The projection is stored as monthly figures, so it is accumulated at a daily
+ * rate across the window: the dashed line is the pace that reaches the target,
+ * and it lengthens with the picked range rather than restating a month.
  *
  * Traffic is projected to *decline* (see growth_calculator), so the question
- * the projection answers is "are we above or below the line", not "are we
+ * the projection answers is "are we above or below the pace", not "are we
  * climbing to a target". The assumption is printed under the charts so it can
  * be argued with rather than mistaken for a bug.
  *
@@ -45,6 +45,8 @@ const HAIRLINE = "#33474f";
 const GRIDLINE = "#354952";
 const FUTURE_TICK = "#7e94a0";
 const CARD_BG = "#22333d";
+const CURRENT_FILL = "rgba(182, 227, 75, 0.14)";
+const PREVIOUS_FILL = "rgba(138, 160, 171, 0.14)";
 
 const VIEW_W = 520;
 const VIEW_H = 250;
@@ -95,7 +97,7 @@ function formatDelta(value: number | null): string {
  * in a short card: jumping a 3,419 peak all the way to 5,000 would spend a
  * third of the plot height on empty space.
  */
-const NICE_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+const NICE_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10];
 
 function niceStep(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 1;
@@ -199,6 +201,13 @@ function TrailingChart({
         ).filter((value, index, all) => all.indexOf(value) === index);
 
   const line = (points: Point[]) => points.map((p) => `${x(p.x)},${y(p.value)}`).join(" ");
+  /** The line closed down to the baseline, so a running total reads as volume. */
+  const area = (points: Point[]) =>
+    [
+      `${x(points[0].x)},${y(0)}`,
+      ...points.map((p) => `${x(p.x)},${y(p.value)}`),
+      `${x(points[points.length - 1].x)},${y(0)}`,
+    ].join(" ");
 
   return (
     <div className="min-w-0">
@@ -212,7 +221,7 @@ function TrailingChart({
         ) : null}
         {gap !== null ? (
           <Chip
-            text={`${format(Math.abs(gap))} ${gap >= 0 ? "above" : "below"} projection`}
+            text={`${format(Math.abs(gap))} ${gap >= 0 ? "ahead of" : "behind"} pace`}
             color={gap >= 0 ? LIME : DOWN}
           />
         ) : null}
@@ -223,7 +232,7 @@ function TrailingChart({
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
           style={{ width: "100%", height: "auto", display: "block" }}
           role="img"
-          aria-label={`${title}: trailing 30-day totals for this period, the period before it, and the frozen projection`}
+          aria-label={`${title}: running total for this period, the period before it, and the pace that reaches the target`}
         >
           {Array.from({ length: GRIDLINE_COUNT }, (_, i) => {
             const value = (yMax / (GRIDLINE_COUNT - 1)) * i;
@@ -239,6 +248,13 @@ function TrailingChart({
               />
             );
           })}
+
+          {previous.length > 1 ? (
+            <polygon points={area(previous)} fill={PREVIOUS_FILL} />
+          ) : null}
+          {current.length > 1 ? (
+            <polygon points={area(current)} fill={CURRENT_FILL} />
+          ) : null}
 
           {previous.length > 1 ? (
             <polyline
@@ -367,9 +383,9 @@ export function ProgressPanel({
 }) {
   const projection = baseline.projection;
   const checkpoints: BaselineCheckpoint[] = projection?.checkpoints ?? [];
-  const currentRows: BaselineTrailingPoint[] = baseline.trailing?.current ?? [];
-  const previousRows: BaselineTrailingPoint[] = baseline.trailing?.previous ?? [];
-  const windowDays = baseline.trailing?.window_days || currentRows.length;
+  const currentRows: BaselineCumulativePoint[] = baseline.cumulative?.current ?? [];
+  const previousRows: BaselineCumulativePoint[] = baseline.cumulative?.previous ?? [];
+  const windowDays = baseline.cumulative?.window_days || currentRows.length;
 
   // A measured window reads as a range; a manual snapshot only ever has one date.
   const frozenStart = baseline.period_start;
@@ -397,29 +413,32 @@ export function ProgressPanel({
   const dates = currentRows.map((row) => row.date);
   const spanDays = Math.max(dates.length - 1, 0);
 
-  const series = (rows: BaselineTrailingPoint[], key: "sessions" | "leads"): Point[] =>
+  const series = (rows: BaselineCumulativePoint[], key: "sessions" | "leads"): Point[] =>
     rows.map((row, index) => ({ x: index, value: row[key] }));
 
   /**
-   * Checkpoint months become x positions in the window, so the projection can
-   * be drawn on the same axis as two series that are indexed by day. The stored
-   * figures are monthly, so they are rescaled to the trailing window's length.
+   * The pace line: the monthly target read at each day, divided down to a daily
+   * rate and accumulated, so it rises alongside a cumulative actual.
+   *
+   * Past the plan's last checkpoint the final rate is held rather than the line
+   * stopping, since a pace chart that ends mid-window reads as missing data.
+   * Before the baseline there is genuinely no plan, so those days are skipped.
    */
   function projectionSeries(key: "monthly_sessions" | "monthly_leads"): Point[] {
     if (!anchorIso || checkpoints.length < 2 || !dates.length) return [];
-    const toWindow = windowDays / DAYS_PER_MONTH;
     const curve = checkpoints
-      .map((checkpoint) => ({
-        x: checkpoint.month * DAYS_PER_MONTH,
-        value: checkpoint[key] * toWindow,
-      }))
+      .map((checkpoint) => ({ x: checkpoint.month * DAYS_PER_MONTH, value: checkpoint[key] }))
       .sort((a, b) => a.x - b.x);
+    const lastDay = curve[curve.length - 1].x;
     const points: Point[] = [];
+    let running = 0;
     dates.forEach((iso, index) => {
       const fromAnchor = daysBetween(anchorIso, iso);
-      if (fromAnchor === null) return;
-      const value = interpolate(curve, fromAnchor);
-      if (value !== null) points.push({ x: index, value });
+      if (fromAnchor === null || fromAnchor < curve[0].x) return;
+      const monthly = interpolate(curve, Math.min(fromAnchor, lastDay));
+      if (monthly === null) return;
+      running += monthly / DAYS_PER_MONTH;
+      points.push({ x: index, value: running });
     });
     return points;
   }
@@ -517,11 +536,10 @@ export function ProgressPanel({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-[12px] font-bold uppercase tracking-[0.14em]" style={{ color: LIME }}>
-              {windowDays > 0 ? `Trailing ${windowDays.toLocaleString()} days` : "Trailing window"}
+              {windowDays > 0 ? `Last ${windowDays.toLocaleString()} days` : "Selected range"}
             </div>
             <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
-              Each point is the last {windowDays.toLocaleString()} days ending that day, against the
-              same window a period earlier.
+              Running total for the period, against the same number of days before it.
             </p>
             {windowLine ? (
               <p className="mt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--brand-on-dark-muted)]">
@@ -535,7 +553,7 @@ export function ProgressPanel({
               <>
                 <LegendKey color={LIME} label="This period" />
                 {hasPrevious ? <LegendKey color={PREVIOUS} label="Previous period" /> : null}
-                {hasProjection ? <LegendKey color={CYAN} dashed label="Projection" /> : null}
+                {hasProjection ? <LegendKey color={CYAN} dashed label="Pace to target" /> : null}
               </>
             ) : null}
             {editHref ? (
@@ -583,8 +601,8 @@ export function ProgressPanel({
                 style={{ borderColor: HAIRLINE }}
               >
                 Traffic is projected to decline over the plan; leads are projected to rise on lead
-                rate, not volume. The projection is stored monthly and scaled to this window.
-                Sitting above the dashed line is the goal on both charts.
+                rate, not volume. The dashed line is the pace that reaches the target over this
+                range — staying above it is the goal on both charts.
               </p>
             ) : null}
           </>
