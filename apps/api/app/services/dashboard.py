@@ -130,7 +130,7 @@ def _baseline_comparison(
     leads_series: list[float] | None = None,
     lead_rate_series: list[float] | None = None,
     monthly_actuals: list[dict[str, Any]] | None = None,
-    trailing_actuals: list[dict[str, Any]] | None = None,
+    trailing: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Compare the selected window (scaled to monthly) against the frozen baseline snapshot."""
     has_baseline = (
@@ -188,8 +188,9 @@ def _baseline_comparison(
         "current_window": window_payload,
         # Monthly lead history behind the projection curve.
         "monthly_actuals": monthly_actuals or [],
-        # Trailing 30-day sessions and leads, for the projection charts.
-        "trailing_actuals": trailing_actuals or [],
+        # Trailing 30-day sessions and leads over the viewing window and the
+        # period before it, for the comparison charts.
+        "trailing": trailing or {"current": [], "previous": []},
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
@@ -255,37 +256,30 @@ def _monthly_lead_actuals(
 TRAILING_WINDOW_DAYS = 30
 
 
-def _trailing_30_actuals(
+def _trailing_30_series(
     db: Session,
     client_id: UUID,
     event_names: list[str],
-    *,
-    since: date | None,
+    period: tuple[date, date] | None,
 ) -> list[dict[str, Any]]:
     """
-    Sessions and leads over the 30 days ending each day, from `since` to today.
+    Sessions and leads over the 30 days ending each day in `period`.
 
-    The dashboard's other series are scoped to the viewing window; this one runs
-    from the baseline forward, because the question it answers is whether we are
-    above or below the projection — which is only defined from the baseline on.
+    A trailing window rather than calendar months, so the line has daily
+    resolution without a sawtooth reset on the 1st, every point is directly
+    comparable to a monthly projection figure, and the shape of a change stays
+    legible — a cliff is an event, a slope is a trend, and a monthly view cannot
+    tell them apart.
 
-    A trailing window is used rather than calendar months so the line has daily
-    resolution without a sawtooth reset on the 1st, and so every point is
-    directly comparable to a monthly projection figure. It also makes the shape
-    of a change legible: a cliff is an event, a slope is a trend, and the
-    monthly view cannot tell them apart.
-
-    Days with no rows count as zero, which is correct for a sum — but it means
-    the first point already carries the 29 days before `since`, so the series
-    starts at the baseline's own level rather than climbing from nothing.
+    Days with no rows count as zero, which is right for a sum. The read reaches
+    a full window back before the first day so that point is a true 30-day
+    total rather than a ramp up from nothing.
     """
-    if since is None:
+    if period is None:
         return []
-
-    end = date.today()
+    since, end = period
     if since > end:
         return []
-    # Reach back a full window before the first point so it is a true 30-day sum.
     read_from = since - timedelta(days=TRAILING_WINDOW_DAYS - 1)
 
     session_rows = (
@@ -318,8 +312,8 @@ def _trailing_30_actuals(
     if not sessions_by_day and not leads_by_day:
         return []
 
-    # Rolled in Python: the span is a year or so of days, and the running
-    # subtraction is clearer here than a window function in four dialects.
+    # Rolled in Python: the span is a year or so of days at most, and the
+    # running subtraction is clearer here than a window function.
     out: list[dict[str, Any]] = []
     sessions_sum = leads_sum = 0.0
     day = read_from
@@ -1278,13 +1272,12 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             lead_events,
             since=client.baseline_period_start or client.baseline_as_of,
         ),
-        # The charts start where the projection does: the baseline's end.
-        trailing_actuals=_trailing_30_actuals(
-            db,
-            client.id,
-            lead_events,
-            since=client.baseline_period_end or client.baseline_as_of,
-        ),
+        # The charts follow the date filter, and carry the period before it so
+        # the two can be laid over each other.
+        trailing={
+            "current": _trailing_30_series(db, client.id, lead_events, ga4_current),
+            "previous": _trailing_30_series(db, client.id, lead_events, ga4_previous),
+        },
     )
 
     return {
