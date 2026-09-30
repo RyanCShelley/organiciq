@@ -142,6 +142,7 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
       tier_name: null,
       current_window: null,
       monthly_actuals: [],
+      trailing_actuals: [],
       monthly_sessions: null,
       monthly_leads: null,
       lead_rate: null,
@@ -175,6 +176,21 @@ function normalizeBaseline(value: unknown): DashboardBaseline {
             month: row.month,
             leads: Number(row.leads),
             partial: row.partial === true,
+          }))
+      : [],
+    trailing_actuals: Array.isArray(baseline.trailing_actuals)
+      ? baseline.trailing_actuals
+          .filter(
+            (row) =>
+              !!row &&
+              typeof row.date === "string" &&
+              Number.isFinite(Number(row.sessions)) &&
+              Number.isFinite(Number(row.leads)),
+          )
+          .map((row) => ({
+            date: row.date,
+            sessions: Number(row.sessions),
+            leads: Number(row.leads),
           }))
       : [],
     current_window:
@@ -313,6 +329,13 @@ export type BaselineMonthlyActual = {
   partial: boolean;
 };
 
+export type BaselineTrailingActual = {
+  /** YYYY-MM-DD — the last day of the 30-day window. */
+  date: string;
+  sessions: number;
+  leads: number;
+};
+
 export type DashboardBaseline = {
   configured: boolean;
   as_of: string | null;
@@ -327,6 +350,8 @@ export type DashboardBaseline = {
   current_window: { from: string; to: string; days: number | null } | null;
   /** Monthly lead history behind the projection curve, oldest first. */
   monthly_actuals: BaselineMonthlyActual[];
+  /** Trailing 30-day sessions and leads from the baseline forward, oldest first. */
+  trailing_actuals: BaselineTrailingActual[];
   monthly_sessions: number | null;
   monthly_leads: number | null;
   lead_rate: number | null;

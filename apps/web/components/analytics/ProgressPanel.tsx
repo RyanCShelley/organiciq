@@ -1,9 +1,24 @@
 import Link from "next/link";
 
-import type { BaselineMonthlyActual, DashboardBaseline } from "@/lib/dashboard";
+import type {
+  BaselineCheckpoint,
+  BaselineTrailingActual,
+  DashboardBaseline,
+} from "@/lib/dashboard";
 
 /**
- * Baseline progress and the benchmark curve, in one dark card.
+ * Baseline stats and the projection charts, as two separate cards.
+ *
+ * The charts plot a trailing 30-day window rather than calendar months: every
+ * point is then directly comparable to a monthly projection figure, the line
+ * has daily resolution without resetting on the 1st, and the shape of a change
+ * is legible — a cliff is an event, a slope is a trend.
+ *
+ * Traffic is projected to *decline* (see growth_calculator), so the question
+ * these charts answer is "are we above or below the line", not "are we climbing
+ * to a target". The gap is shaded for that reason, and the assumption is
+ * printed under the charts so it can be argued with rather than mistaken for a
+ * bug.
  *
  * The chart is inline SVG drawn from the payload — the shapes only. Every label
  * is HTML positioned over the plot in percentages derived from the same scale
@@ -16,80 +31,25 @@ const CYAN = "#7fd4e8";
 const DOWN = "#ef8b8b";
 const HAIRLINE = "#33474f";
 const GRIDLINE = "#354952";
-const BAR = "#5c7a33";
 const FUTURE_TICK = "#7e94a0";
+const CARD_BG = "#22333d";
+const BELOW_FILL = "rgba(239, 139, 139, 0.20)";
+const ABOVE_FILL = "rgba(182, 227, 75, 0.18)";
 
-const VIEW_W = 1000;
-const VIEW_H = 300;
-const PLOT = { top: 34, right: 16, bottom: 26, left: 46 };
+const VIEW_W = 520;
+const VIEW_H = 250;
+const PLOT = { top: 18, right: 12, bottom: 24, left: 46 };
 const PLOT_W = VIEW_W - PLOT.left - PLOT.right;
 const PLOT_H = VIEW_H - PLOT.top - PLOT.bottom;
 const GRIDLINE_COUNT = 5;
-/** Headroom above the tallest point so labels above the curve have somewhere to sit. */
-const Y_HEADROOM = 1.15;
+/** Headroom above the tallest point so the line never touches the card edge. */
+const Y_HEADROOM = 1.12;
+const DAYS_PER_MONTH = 365 / 12;
 /** Checkpoints that earn a gap card; +9 is on the curve but not in the row. */
 const GAP_CARD_MONTHS = [0, 3, 6, 12];
 
-type MonthKey = string; // YYYY-MM
-
-function monthKeyOf(value: Date): MonthKey {
-  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function parseMonthKey(key: MonthKey): { year: number; month: number } | null {
-  const match = /^(\d{4})-(\d{2})$/.exec(key);
-  if (!match) return null;
-  return { year: Number(match[1]), month: Number(match[2]) - 1 };
-}
-
-function addMonths(key: MonthKey, count: number): MonthKey {
-  const parsed = parseMonthKey(key);
-  if (!parsed) return key;
-  return monthKeyOf(new Date(Date.UTC(parsed.year, parsed.month + count, 1)));
-}
-
-function monthsBetween(from: MonthKey, to: MonthKey): number {
-  const a = parseMonthKey(from);
-  const b = parseMonthKey(to);
-  if (!a || !b) return 0;
-  return (b.year - a.year) * 12 + (b.month - a.month);
-}
-
-function monthRange(from: MonthKey, to: MonthKey): MonthKey[] {
-  const span = monthsBetween(from, to);
-  if (span < 0) return [from];
-  return Array.from({ length: span + 1 }, (_, i) => addMonths(from, i));
-}
-
-function monthTick(key: MonthKey): string {
-  const parsed = parseMonthKey(key);
-  if (!parsed) return key;
-  const label = new Date(Date.UTC(parsed.year, parsed.month, 1)).toLocaleDateString("en-US", {
-    month: "short",
-    timeZone: "UTC",
-  });
-  // Year only where it changes, and marked so "Jan 27" doesn't read as a date.
-  return parsed.month === 0 ? `${label} \u2019${String(parsed.year).slice(2)}` : label;
-}
-
-function monthLabel(key: MonthKey): string {
-  const parsed = parseMonthKey(key);
-  if (!parsed) return key;
-  return new Date(Date.UTC(parsed.year, parsed.month, 1)).toLocaleDateString("en-US", {
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-/** Round the axis top to something a person would choose: 1, 2 or 5 × 10ⁿ. */
-function niceCeiling(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 10;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  const normalized = value / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return step * magnitude;
-}
+type Point = { day: number; value: number };
+type Metric = "monthly_sessions" | "monthly_leads";
 
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -107,6 +67,261 @@ function formatDelta(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
   const rounded = Math.abs(value) >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
   return `${value >= 0 ? "↑" : "↓"} ${Math.abs(rounded).toLocaleString()}%`;
+}
+
+/**
+ * Round the axis top to something a person would choose.
+ *
+ * The steps are finer than the usual 1/2/5 because two charts sit side by side
+ * in a short card: jumping a 3,419 peak all the way to 5,000 would spend a
+ * third of the plot height on empty space.
+ */
+const NICE_STEPS = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+
+function niceCeiling(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 10;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const step = NICE_STEPS.find((candidate) => normalized <= candidate) ?? 10;
+  return step * magnitude;
+}
+
+function daysBetween(fromIso: string, toIso: string): number | null {
+  const from = new Date(`${fromIso}T00:00:00Z`).getTime();
+  const to = new Date(`${toIso}T00:00:00Z`).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.round((to - from) / 86_400_000);
+}
+
+/**
+ * Month name, carrying the year once the axis crosses out of the baseline year.
+ *
+ * A 12-month plan starts and ends in the same month, so without this both ends
+ * of the axis read "Sep". January is rarely a checkpoint, so the year cannot
+ * simply be hung on it.
+ */
+function monthTickLabel(anchorIso: string, day: number, baselineYear: number): string {
+  const anchor = new Date(`${anchorIso}T00:00:00Z`);
+  if (Number.isNaN(anchor.getTime())) return "";
+  anchor.setUTCDate(anchor.getUTCDate() + Math.round(day));
+  const label = anchor.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  return anchor.getUTCFullYear() === baselineYear
+    ? label
+    : `${label} ’${String(anchor.getUTCFullYear()).slice(2)}`;
+}
+
+/** Linear interpolation between frozen checkpoints — the curve is only defined at those. */
+function interpolate(points: Point[], day: number): number | null {
+  if (!points.length) return null;
+  if (day < points[0].day || day > points[points.length - 1].day) return null;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (day >= a.day && day <= b.day) {
+      if (b.day === a.day) return a.value;
+      return a.value + ((b.value - a.value) * (day - a.day)) / (b.day - a.day);
+    }
+  }
+  return points[points.length - 1].value;
+}
+
+/**
+ * Split the elapsed days into runs that sit wholly above or wholly below the
+ * projection, so the gap can be shaded green or red per run rather than the
+ * whole span taking its colour from the latest point.
+ */
+type Band = { above: boolean; actual: Point[]; projected: Point[] };
+
+function signedBands(actual: Point[], projectionAt: (day: number) => number | null): Band[] {
+  const bands: Band[] = [];
+  let current: Band | null = null;
+  for (const point of actual) {
+    const projected = projectionAt(point.day);
+    if (projected === null) {
+      current = null;
+      continue;
+    }
+    const above = point.value >= projected;
+    if (!current || current.above !== above) {
+      // Carry the previous point into the new band so the fill has no gap.
+      const previous: Point | null =
+        current && current.actual.length ? current.actual[current.actual.length - 1] : null;
+      const next: Band = { above, actual: [], projected: [] };
+      if (previous) {
+        next.actual.push(previous);
+        next.projected.push({
+          day: previous.day,
+          value: projectionAt(previous.day) ?? previous.value,
+        });
+      }
+      current = next;
+      bands.push(next);
+    }
+    current.actual.push(point);
+    current.projected.push({ day: point.day, value: projected });
+  }
+  return bands.filter((band) => band.actual.length > 1);
+}
+
+function TrailingChart({
+  title,
+  anchorIso,
+  actual,
+  checkpoints,
+  metric,
+  maxDay,
+  format,
+}: {
+  title: string;
+  anchorIso: string;
+  actual: Point[];
+  checkpoints: BaselineCheckpoint[];
+  metric: Metric;
+  maxDay: number;
+  format: (value: number) => string;
+}) {
+  const projectionPoints: Point[] = checkpoints
+    .map((checkpoint) => ({
+      day: checkpoint.month * DAYS_PER_MONTH,
+      value: checkpoint[metric],
+    }))
+    .sort((a, b) => a.day - b.day);
+
+  const projectionAt = (day: number) => interpolate(projectionPoints, day);
+
+  const highestActual = actual.reduce((max, point) => Math.max(max, point.value), 0);
+  const highestProjected = projectionPoints.reduce((max, point) => Math.max(max, point.value), 0);
+  const yMax = niceCeiling(Math.max(highestActual, highestProjected) * Y_HEADROOM) || 10;
+
+  const x = (day: number) => PLOT.left + (Math.min(day, maxDay) / maxDay) * PLOT_W;
+  const y = (value: number) => PLOT.top + PLOT_H * (1 - Math.min(value, yMax) / yMax);
+  const leftPct = (day: number) => (x(day) / VIEW_W) * 100;
+  const topPct = (value: number) => (y(value) / VIEW_H) * 100;
+
+  const latest = actual.length ? actual[actual.length - 1] : null;
+  const targetNow = latest ? projectionAt(latest.day) : null;
+  const gap = latest && targetNow !== null ? latest.value - targetNow : null;
+  const bands = signedBands(actual, projectionAt);
+  const tickDays = checkpoints
+    .map((checkpoint) => checkpoint.month * DAYS_PER_MONTH)
+    .filter((day) => day <= maxDay)
+    .sort((a, b) => a - b);
+  const anchorYear = new Date(`${anchorIso}T00:00:00Z`).getUTCFullYear();
+
+  return (
+    <div className="min-w-0">
+      <div className="text-[11.5px] font-semibold text-[var(--brand-on-dark-muted)]">{title}</div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <span className="font-[family-name:var(--font-display)] text-[26px] font-black leading-none tracking-[-0.02em] text-white">
+          {latest ? format(latest.value) : "—"}
+        </span>
+        {gap !== null ? (
+          <span
+            className="text-[11.5px] font-bold"
+            style={{ color: gap >= 0 ? LIME : DOWN }}
+          >
+            {format(Math.abs(gap))} {gap >= 0 ? "above" : "below"} projection
+          </span>
+        ) : null}
+      </div>
+
+      <div className="relative mt-3">
+        <svg
+          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          style={{ width: "100%", height: "auto", display: "block" }}
+          role="img"
+          aria-label={`${title}: trailing 30-day actual against the frozen projection`}
+        >
+          {Array.from({ length: GRIDLINE_COUNT }, (_, i) => {
+            const value = (yMax / (GRIDLINE_COUNT - 1)) * i;
+            return (
+              <line
+                key={i}
+                x1={PLOT.left}
+                x2={PLOT.left + PLOT_W}
+                y1={y(value)}
+                y2={y(value)}
+                stroke={GRIDLINE}
+                strokeWidth={1}
+              />
+            );
+          })}
+
+          {/* The gap, shaded by which side of the projection we are on. */}
+          {bands.map((band, index) => (
+            <polygon
+              key={`band-${index}`}
+              points={[
+                ...band.actual.map((p) => `${x(p.day)},${y(p.value)}`),
+                ...[...band.projected].reverse().map((p) => `${x(p.day)},${y(p.value)}`),
+              ].join(" ")}
+              fill={band.above ? ABOVE_FILL : BELOW_FILL}
+            />
+          ))}
+
+          {projectionPoints.length > 1 ? (
+            <polyline
+              points={projectionPoints.map((p) => `${x(p.day)},${y(p.value)}`).join(" ")}
+              fill="none"
+              stroke={CYAN}
+              strokeWidth={2.5}
+              strokeDasharray="7 6"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          ) : null}
+
+          {actual.length > 1 ? (
+            <polyline
+              points={actual.map((p) => `${x(p.day)},${y(p.value)}`).join(" ")}
+              fill="none"
+              stroke={LIME}
+              strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          ) : null}
+
+          {latest ? (
+            <circle
+              cx={x(latest.day)}
+              cy={y(latest.value)}
+              r={5}
+              fill={LIME}
+              stroke={CARD_BG}
+              strokeWidth={2}
+            />
+          ) : null}
+        </svg>
+
+        {/* Labels live in HTML over the plot, placed with the same scales. */}
+        {Array.from({ length: GRIDLINE_COUNT }, (_, i) => {
+          const value = (yMax / (GRIDLINE_COUNT - 1)) * i;
+          return (
+            <span
+              key={`ylab-${i}`}
+              className="pointer-events-none absolute -translate-y-1/2 text-[10.5px] tabular-nums"
+              style={{ left: 0, top: `${topPct(value)}%`, color: FUTURE_TICK }}
+            >
+              {format(value)}
+            </span>
+          );
+        })}
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0">
+          {tickDays.map((day) => (
+            <span
+              key={`xlab-${day}`}
+              className="absolute -translate-x-1/2 text-[10px] tabular-nums"
+              style={{ left: `${leftPct(day)}%`, color: FUTURE_TICK }}
+            >
+              {monthTickLabel(anchorIso, day, anchorYear)}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function StatCell({
@@ -148,7 +363,7 @@ export function ProgressPanel({
 }) {
   const projection = baseline.projection;
   const checkpoints = projection?.checkpoints ?? [];
-  const actuals: BaselineMonthlyActual[] = baseline.monthly_actuals ?? [];
+  const trailing: BaselineTrailingActual[] = baseline.trailing_actuals ?? [];
 
   // A measured window reads as a range; a manual snapshot only ever has one date.
   const frozenStart = baseline.period_start;
@@ -162,112 +377,53 @@ export function ProgressPanel({
 
   const currentLeads = baseline.vs_current.leads.current;
 
-  const todayMonth = monthKeyOf(new Date());
-  const baselineMonth = (baseline.period_start ?? baseline.as_of ?? "").slice(0, 7);
-  const firstActualMonth = actuals[0]?.month ?? "";
-
   /**
    * The curve is anchored to the baseline, not to today.
    *
    * Checkpoints are computed from the baseline's own sessions and leads, so
-   * month 0 *is* the baseline month and month 12 is a year after it. Anchoring
-   * them on the current month would slide the whole curve forward by however
-   * long ago the baseline was taken, restating every target on a date it was
-   * never calculated for, and would leave the elapsed months with no curve
-   * above them — which is the comparison this chart exists to make.
+   * month 0 *is* the baseline and month 12 is a year after it. Anchoring them
+   * on today would slide the whole curve forward by however long ago the
+   * baseline was taken, restating every target on a date it was never
+   * calculated for.
    */
-  const anchorCandidate = (
-    projection?.baseline_as_of ??
-    baseline.as_of ??
-    baseline.period_end ??
-    ""
-  ).slice(0, 7);
-  const anchorMonth = parseMonthKey(anchorCandidate) ? anchorCandidate : todayMonth;
+  const anchorIso = projection?.baseline_as_of ?? baseline.period_end ?? baseline.as_of ?? null;
 
-  const actualByMonth = new Map(actuals.map((row) => [row.month, row]));
+  const lastOffsetMonths = checkpoints.reduce((max, c) => Math.max(max, c.month), 0);
+  const maxDay = Math.max(lastOffsetMonths * DAYS_PER_MONTH, 1);
+
+  const actualPoints: Point[] = anchorIso
+    ? trailing
+        .map((row) => {
+          const day = daysBetween(anchorIso, row.date);
+          return day === null || day < 0 || day > maxDay ? null : { row, day };
+        })
+        .filter((entry): entry is { row: BaselineTrailingActual; day: number } => entry !== null)
+        .map(({ row, day }) => ({ day, value: row.sessions }))
+    : [];
+
+  const leadPoints: Point[] = anchorIso
+    ? trailing
+        .map((row) => {
+          const day = daysBetween(anchorIso, row.date);
+          return day === null || day < 0 || day > maxDay ? null : { row, day };
+        })
+        .filter((entry): entry is { row: BaselineTrailingActual; day: number } => entry !== null)
+        .map(({ row, day }) => ({ day, value: row.leads }))
+    : [];
+
+  const hasProjection = checkpoints.length > 1 && anchorIso !== null;
+  const hasTrailing = actualPoints.length > 0 || leadPoints.length > 0;
 
   const checkpointByOffset = new Map(checkpoints.map((c) => [c.month, c]));
-  const offsets = checkpoints.map((c) => c.month).sort((a, b) => a - b);
-  const lastOffset = offsets.length ? offsets[offsets.length - 1] : 0;
+  const latestDay = actualPoints.length ? actualPoints[actualPoints.length - 1].day : null;
+  const todayOffsetMonths = latestDay === null ? 0 : latestDay / DAYS_PER_MONTH;
 
-  /** Linear interpolation between frozen checkpoints — the curve is only defined at those. */
-  function projectedAt(offset: number): number | null {
-    if (!offsets.length || offset < offsets[0] || offset > lastOffset) return null;
-    const exact = checkpointByOffset.get(offset);
-    if (exact) return exact.monthly_leads;
-    let lower = offsets[0];
-    let upper = lastOffset;
-    for (const candidate of offsets) {
-      if (candidate <= offset) lower = candidate;
-      if (candidate >= offset) {
-        upper = candidate;
-        break;
-      }
-    }
-    const a = checkpointByOffset.get(lower);
-    const b = checkpointByOffset.get(upper);
-    if (!a || !b) return null;
-    if (upper === lower) return a.monthly_leads;
-    const ratio = (offset - lower) / (upper - lower);
-    return a.monthly_leads + (b.monthly_leads - a.monthly_leads) * ratio;
-  }
+  const leadCurve: Point[] = checkpoints
+    .map((c) => ({ day: c.month * DAYS_PER_MONTH, value: c.monthly_leads }))
+    .sort((a, b) => a.day - b.day);
+  const targetNow =
+    latestDay === null ? null : interpolate(leadCurve, Math.min(latestDay, maxDay));
 
-  // ── Axis: earliest of baseline/anchor/first actual → end of the curve, at least today ──
-  const starts = [baselineMonth, anchorMonth, firstActualMonth].filter(
-    (key) => parseMonthKey(key) !== null,
-  );
-  const axisStart = starts.length
-    ? starts.reduce((a, b) => (monthsBetween(a, b) < 0 ? b : a))
-    : addMonths(todayMonth, -3);
-  const lastActualMonth = actuals.length ? actuals[actuals.length - 1].month : todayMonth;
-  const ends = [addMonths(anchorMonth, lastOffset), todayMonth, lastActualMonth].filter(
-    (key) => parseMonthKey(key) !== null,
-  );
-  const axisEnd = ends.reduce((a, b) => (monthsBetween(a, b) > 0 ? b : a));
-  const months = monthRange(axisStart, axisEnd);
-
-  const highestActual = actuals.reduce((max, row) => Math.max(max, row.leads), 0);
-  const highestTarget = checkpoints.reduce((max, c) => Math.max(max, c.monthly_leads), 0);
-  // Actuals count toward the ceiling too: a month that beats the plan must still fit.
-  const yMax = niceCeiling(Math.max(highestActual, highestTarget) * Y_HEADROOM) || 10;
-
-  const x = (index: number) =>
-    months.length <= 1 ? PLOT.left + PLOT_W / 2 : PLOT.left + (index / (months.length - 1)) * PLOT_W;
-  const y = (value: number) => PLOT.top + PLOT_H * (1 - Math.min(value, yMax) / yMax);
-  const leftPct = (index: number) => (x(index) / VIEW_W) * 100;
-  const topPct = (value: number) => (y(value) / VIEW_H) * 100;
-
-  const anchorIndex = Math.max(0, monthsBetween(axisStart, anchorMonth));
-  /** Where the curve says we should be right now. */
-  const todayOffset = monthsBetween(anchorMonth, todayMonth);
-  const targetNow = projectedAt(Math.min(Math.max(todayOffset, 0), lastOffset));
-  const pastHorizon = todayOffset > lastOffset;
-
-  const actualPoints = months
-    .map((month, index) => {
-      const row = actualByMonth.get(month);
-      return row ? { index, month, leads: row.leads, partial: row.partial } : null;
-    })
-    .filter((point): point is { index: number; month: string; leads: number; partial: boolean } =>
-      point !== null,
-    );
-
-  const projectionPoints = months
-    .map((month, index) => {
-      const value = projectedAt(monthsBetween(anchorMonth, month));
-      return value === null ? null : { index, value };
-    })
-    .filter((point): point is { index: number; value: number } => point !== null);
-
-  const barWidth = Math.max(4, (PLOT_W / Math.max(months.length, 1)) * 0.5);
-  const latestActual = actualPoints.length ? actualPoints[actualPoints.length - 1] : null;
-  const hasProjection = projectionPoints.length > 1;
-
-  /**
-   * "Today's target" is the curve read at today, not checkpoint 0 — that one is
-   * the baseline month, which may be a long way behind us. The rest are the
-   * frozen checkpoints, dated so it is clear which month each one lands in.
-   */
   type GapCard = {
     key: string;
     label: string;
@@ -278,31 +434,27 @@ export function ProgressPanel({
 
   const gapCards: GapCard[] = [];
   if (targetNow !== null) {
-    gapCards.push({
-      key: "now",
-      label: pastHorizon ? "Target at plan end" : "Today's target",
-      when: pastHorizon ? monthLabel(addMonths(anchorMonth, lastOffset)) : monthLabel(todayMonth),
-      target: targetNow,
-      rate: null,
-    });
+    gapCards.push({ key: "now", label: "Today's target", when: null, target: targetNow, rate: null });
   }
   for (const offset of GAP_CARD_MONTHS) {
     const checkpoint = checkpointByOffset.get(offset);
     // A checkpoint already behind us is history; the chart still plots it.
-    if (!checkpoint || offset <= todayOffset) continue;
+    if (!checkpoint || offset <= todayOffsetMonths) continue;
     gapCards.push({
       key: `cp-${offset}`,
       label: checkpoint.label,
-      when: monthLabel(addMonths(anchorMonth, offset)),
+      when: null,
       target: checkpoint.monthly_leads,
       rate: checkpoint.lead_rate_pct,
     });
   }
 
+  const wholeNumber = (value: number) => Math.round(value).toLocaleString();
+
   return (
-    <section className="min-w-0 overflow-hidden rounded-2xl bg-[#22333d] text-white">
+    <div className="flex min-w-0 flex-col gap-4">
       {/* ── Baseline ── */}
-      <div className="p-[26px_28px]">
+      <section className="min-w-0 overflow-hidden rounded-2xl bg-[#22333d] p-[26px_28px] text-white">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0">
             <div className="text-[12px] font-bold uppercase tracking-[0.14em]" style={{ color: LIME }}>
@@ -314,6 +466,7 @@ export function ProgressPanel({
             {frozenLine ? (
               <p className="mt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--brand-on-dark-muted)]">
                 {frozenLine}
+                {projection ? ` · ${projection.plan_label} curve` : ""}
               </p>
             ) : null}
           </div>
@@ -376,30 +529,22 @@ export function ProgressPanel({
             />
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="h-px w-full" style={{ backgroundColor: HAIRLINE }} />
-
-      {/* ── Benchmark ── */}
-      <div className="p-[26px_28px]">
+      {/* ── Trailing 30 days vs projection ── */}
+      <section className="min-w-0 overflow-hidden rounded-2xl bg-[#22333d] p-[26px_28px] text-white">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-[12px] font-bold uppercase tracking-[0.14em]" style={{ color: LIME }}>
-              Benchmark · Projection vs actual
+              Trailing 30 days vs projection
             </div>
-            <p className="mt-2.5 text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
-              Monthly leads to hit at each checkpoint.
+            <p className="mt-2.5 max-w-[62ch] text-[15px] leading-relaxed text-[var(--brand-on-dark)]">
+              Each point is the last 30 days ending that day, against the projected monthly figure.
             </p>
-            {projection ? (
-              <p className="mt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--brand-on-dark-muted)]">
-                Frozen {formatDate(projection.generated_on)} · {projection.plan_label} curve
-              </p>
-            ) : null}
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-4">
-            {/* A key to a chart that isn't there only raises questions. */}
-            {hasProjection ? (
+            {hasProjection && hasTrailing ? (
               <>
                 <span className="flex items-center gap-2 text-[11.5px] text-[var(--brand-on-dark)]">
                   <span
@@ -441,179 +586,42 @@ export function ProgressPanel({
             )}{" "}
             to see the curve.
           </p>
+        ) : !hasTrailing ? (
+          <p className="mt-5 rounded-[10px] border border-white/15 bg-white/5 px-4 py-6 text-center text-[13px] text-[var(--brand-on-dark)]">
+            No recorded days since the baseline yet — the charts fill in as GA4 data lands.
+          </p>
         ) : (
           <>
-            <div className="mt-5 w-full max-w-full overflow-x-auto">
-              <div className="min-w-[560px]">
-            <div className="relative">
-              <svg
-                viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-                style={{ width: "100%", height: "auto", display: "block" }}
-                role="img"
-                aria-label="Monthly leads: recorded actuals against the frozen projection curve"
-              >
-                {Array.from({ length: GRIDLINE_COUNT }, (_, i) => {
-                  const value = (yMax / (GRIDLINE_COUNT - 1)) * i;
-                  return (
-                    <line
-                      key={i}
-                      x1={PLOT.left}
-                      x2={PLOT.left + PLOT_W}
-                      y1={y(value)}
-                      y2={y(value)}
-                      stroke={GRIDLINE}
-                      strokeWidth={1}
-                    />
-                  );
-                })}
-
-                {actualPoints.map((point) => (
-                  <rect
-                    key={`bar-${point.month}`}
-                    x={x(point.index) - barWidth / 2}
-                    y={y(point.leads)}
-                    width={barWidth}
-                    height={Math.max(0, PLOT.top + PLOT_H - y(point.leads))}
-                    fill={BAR}
-                    opacity={point.partial ? 0.3 : 0.55}
-                    rx={2}
-                  />
-                ))}
-
-                {actualPoints.length > 1 ? (
-                  <polyline
-                    points={actualPoints.map((p) => `${x(p.index)},${y(p.leads)}`).join(" ")}
-                    fill="none"
-                    stroke={LIME}
-                    strokeWidth={2.5}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                ) : null}
-
-                <polyline
-                  points={projectionPoints.map((p) => `${x(p.index)},${y(p.value)}`).join(" ")}
-                  fill="none"
-                  stroke={CYAN}
-                  strokeWidth={2.5}
-                  strokeDasharray="7 6"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-
-                {checkpoints.map((checkpoint) => {
-                  const index = anchorIndex + checkpoint.month;
-                  if (index < 0 || index >= months.length) return null;
-                  return (
-                    <g key={`cp-${checkpoint.month}`}>
-                      <line
-                        x1={x(index)}
-                        x2={x(index)}
-                        y1={y(checkpoint.monthly_leads)}
-                        y2={PLOT.top + PLOT_H}
-                        stroke={CYAN}
-                        strokeWidth={1}
-                        strokeDasharray="3 5"
-                        opacity={0.28}
-                      />
-                      <circle cx={x(index)} cy={y(checkpoint.monthly_leads)} r={4.5} fill={CYAN} />
-                    </g>
-                  );
-                })}
-
-                {latestActual ? (
-                  <circle
-                    cx={x(latestActual.index)}
-                    cy={y(latestActual.leads)}
-                    r={5}
-                    fill={LIME}
-                    stroke="#22333d"
-                    strokeWidth={2}
-                  />
-                ) : null}
-              </svg>
-
-              {/* Labels live in HTML over the plot, placed with the same scales. */}
-              {Array.from({ length: GRIDLINE_COUNT }, (_, i) => {
-                const value = (yMax / (GRIDLINE_COUNT - 1)) * i;
-                return (
-                  <span
-                    key={`ylab-${i}`}
-                    className="pointer-events-none absolute -translate-y-1/2 text-[10.5px] tabular-nums"
-                    style={{ left: 0, top: `${topPct(value)}%`, color: FUTURE_TICK }}
-                  >
-                    {Math.round(value).toLocaleString()}
-                  </span>
-                );
-              })}
-
-              {checkpoints.map((checkpoint) => {
-                const index = anchorIndex + checkpoint.month;
-                if (index < 0 || index >= months.length) return null;
-                return (
-                  <span
-                    key={`cplab-${checkpoint.month}`}
-                    className="pointer-events-none absolute -translate-x-1/2 -translate-y-[150%] whitespace-nowrap text-[11px] font-bold tabular-nums"
-                    style={{
-                      left: `${leftPct(index)}%`,
-                      top: `${topPct(checkpoint.monthly_leads)}%`,
-                      color: CYAN,
-                    }}
-                  >
-                    {Math.round(checkpoint.monthly_leads).toLocaleString()}
-                  </span>
-                );
-              })}
-
-              {latestActual ? (
-                <span
-                  className="pointer-events-none absolute translate-x-2.5 -translate-y-1/2 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-bold tabular-nums"
-                  style={{
-                    left: `${leftPct(latestActual.index)}%`,
-                    top: `${topPct(latestActual.leads)}%`,
-                    color: LIME,
-                    backgroundColor: "#22333d",
-                  }}
-                >
-                  {latestActual.leads.toLocaleString()} actual
-                  {latestActual.partial ? " · month to date" : ""}
-                </span>
-              ) : null}
+            <div className="mt-5 grid gap-x-7 gap-y-6 lg:grid-cols-2">
+              <TrailingChart
+                title="Sessions"
+                anchorIso={anchorIso as string}
+                actual={actualPoints}
+                checkpoints={checkpoints}
+                metric="monthly_sessions"
+                maxDay={maxDay}
+                format={wholeNumber}
+              />
+              <TrailingChart
+                title="Leads"
+                anchorIso={anchorIso as string}
+                actual={leadPoints}
+                checkpoints={checkpoints}
+                metric="monthly_leads"
+                maxDay={maxDay}
+                format={wholeNumber}
+              />
             </div>
 
-            <div
-              className="mt-1 grid"
-              style={{
-                gridTemplateColumns: `repeat(${months.length}, minmax(0, 1fr))`,
-                paddingLeft: `${(PLOT.left / VIEW_W) * 100}%`,
-                paddingRight: `${(PLOT.right / VIEW_W) * 100}%`,
-              }}
+            <p className="mt-5 border-t pt-4 text-[11.5px] leading-relaxed text-[var(--brand-on-dark-muted)]"
+              style={{ borderColor: HAIRLINE }}
             >
-              {months.map((month, index) => (
-                <span
-                  key={month}
-                  className="text-center text-[10px] tabular-nums"
-                  style={{
-                    color: actualByMonth.has(month) ? LIME : FUTURE_TICK,
-                    marginLeft: index === 0 ? "-50%" : undefined,
-                    marginRight: index === months.length - 1 ? "-50%" : undefined,
-                  }}
-                >
-                  {monthTick(month)}
-                </span>
-              ))}
-            </div>
-              </div>
-            </div>
-
-            {actualPoints.length === 0 ? (
-              <p className="mt-3 text-[11.5px] text-[var(--brand-on-dark-muted)]">
-                No recorded lead months yet — showing the projection alone.
-              </p>
-            ) : null}
+              Traffic is projected to decline over the plan; leads are projected to rise on lead
+              rate, not volume. Sitting above the dashed line is the goal on both charts.
+            </p>
 
             {gapCards.length ? (
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {gapCards.map((card) => {
                   const target = Math.round(card.target);
                   const met = currentLeads !== null && currentLeads >= target;
@@ -625,9 +633,6 @@ export function ProgressPanel({
                     >
                       <div className="text-[11.5px] font-semibold text-[var(--brand-on-dark-muted)]">
                         {card.label}
-                        {card.when ? (
-                          <span className="font-normal"> · {card.when}</span>
-                        ) : null}
                       </div>
                       <div className="mt-1.5 font-[family-name:var(--font-display)] text-[22px] font-black leading-none tracking-[-0.02em] text-white">
                         {target.toLocaleString()}
@@ -651,7 +656,7 @@ export function ProgressPanel({
             ) : null}
           </>
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

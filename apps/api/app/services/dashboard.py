@@ -130,6 +130,7 @@ def _baseline_comparison(
     leads_series: list[float] | None = None,
     lead_rate_series: list[float] | None = None,
     monthly_actuals: list[dict[str, Any]] | None = None,
+    trailing_actuals: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compare the selected window (scaled to monthly) against the frozen baseline snapshot."""
     has_baseline = (
@@ -187,6 +188,8 @@ def _baseline_comparison(
         "current_window": window_payload,
         # Monthly lead history behind the projection curve.
         "monthly_actuals": monthly_actuals or [],
+        # Trailing 30-day sessions and leads, for the projection charts.
+        "trailing_actuals": trailing_actuals or [],
         "monthly_sessions": client.baseline_monthly_sessions,
         "monthly_leads": client.baseline_monthly_leads,
         "lead_rate": baseline_rate,
@@ -247,6 +250,96 @@ def _monthly_lead_actuals(
             }
         )
     return rows
+
+
+TRAILING_WINDOW_DAYS = 30
+
+
+def _trailing_30_actuals(
+    db: Session,
+    client_id: UUID,
+    event_names: list[str],
+    *,
+    since: date | None,
+) -> list[dict[str, Any]]:
+    """
+    Sessions and leads over the 30 days ending each day, from `since` to today.
+
+    The dashboard's other series are scoped to the viewing window; this one runs
+    from the baseline forward, because the question it answers is whether we are
+    above or below the projection — which is only defined from the baseline on.
+
+    A trailing window is used rather than calendar months so the line has daily
+    resolution without a sawtooth reset on the 1st, and so every point is
+    directly comparable to a monthly projection figure. It also makes the shape
+    of a change legible: a cliff is an event, a slope is a trend, and the
+    monthly view cannot tell them apart.
+
+    Days with no rows count as zero, which is correct for a sum — but it means
+    the first point already carries the 29 days before `since`, so the series
+    starts at the baseline's own level rather than climbing from nothing.
+    """
+    if since is None:
+        return []
+
+    end = date.today()
+    if since > end:
+        return []
+    # Reach back a full window before the first point so it is a true 30-day sum.
+    read_from = since - timedelta(days=TRAILING_WINDOW_DAYS - 1)
+
+    session_rows = (
+        db.query(FactGa4Traffic.date, func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= read_from,
+            FactGa4Traffic.date <= end,
+        )
+        .group_by(FactGa4Traffic.date)
+        .all()
+    )
+    sessions_by_day = {day: float(value or 0) for day, value in session_rows}
+
+    leads_by_day: dict[date, float] = {}
+    if event_names:
+        lead_rows = (
+            db.query(FactGa4Event.date, func.coalesce(func.sum(FactGa4Event.event_count), 0))
+            .filter(
+                FactGa4Event.client_id == client_id,
+                FactGa4Event.date >= read_from,
+                FactGa4Event.date <= end,
+                FactGa4Event.event_name.in_(event_names),
+            )
+            .group_by(FactGa4Event.date)
+            .all()
+        )
+        leads_by_day = {day: float(value or 0) for day, value in lead_rows}
+
+    if not sessions_by_day and not leads_by_day:
+        return []
+
+    # Rolled in Python: the span is a year or so of days, and the running
+    # subtraction is clearer here than a window function in four dialects.
+    out: list[dict[str, Any]] = []
+    sessions_sum = leads_sum = 0.0
+    day = read_from
+    while day <= end:
+        sessions_sum += sessions_by_day.get(day, 0.0)
+        leads_sum += leads_by_day.get(day, 0.0)
+        dropped = day - timedelta(days=TRAILING_WINDOW_DAYS)
+        if dropped >= read_from:
+            sessions_sum -= sessions_by_day.get(dropped, 0.0)
+            leads_sum -= leads_by_day.get(dropped, 0.0)
+        if day >= since:
+            out.append(
+                {
+                    "date": day.isoformat(),
+                    "sessions": round(sessions_sum, 2),
+                    "leads": round(leads_sum, 2),
+                }
+            )
+        day += timedelta(days=1)
+    return out
 
 
 def _load_watermarks(db: Session, client_id: UUID) -> dict[str, DataWatermark]:
@@ -1184,6 +1277,13 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             client.id,
             lead_events,
             since=client.baseline_period_start or client.baseline_as_of,
+        ),
+        # The charts start where the projection does: the baseline's end.
+        trailing_actuals=_trailing_30_actuals(
+            db,
+            client.id,
+            lead_events,
+            since=client.baseline_period_end or client.baseline_as_of,
         ),
     )
 
