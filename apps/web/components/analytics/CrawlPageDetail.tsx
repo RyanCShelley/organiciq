@@ -65,11 +65,6 @@ function LinkList({
               &ldquo;{row.anchor_text}&rdquo;
             </span>
           ) : null}
-          {row.is_template ? (
-            <span className="badge badge-neutral" title="Navigation or site-wide">
-              template
-            </span>
-          ) : null}
           {row.occurrences > 1 ? (
             <span className="text-[11.5px] text-[var(--text-tertiary)]">×{row.occurrences}</span>
           ) : null}
@@ -91,10 +86,14 @@ export function CrawlPageDetail({ detail, closeHref }: { detail: Detail; closeHr
     );
   }
 
+  // The API sends editorial links in full and template links as a count: a
+  // page's nav and footer are the same on every page, so the only thing worth
+  // knowing is that it is in them.
   const inbound = detail.inbound ?? [];
   const outbound = detail.outbound ?? [];
   const blocks = detail.schema_blocks ?? [];
-  const editorialIn = inbound.filter((row) => !row.is_template);
+  const templateIn = detail.inbound_template_links ?? 0;
+  const templateOut = detail.outbound_template_links ?? 0;
 
   return (
     <section className="card mt-4 p-[var(--card-padding)]">
@@ -125,11 +124,13 @@ export function CrawlPageDetail({ detail, closeHref }: { detail: Detail; closeHr
           )}
         </Field>
         <Field label="Words">{(detail.word_count ?? 0).toLocaleString()}</Field>
-        <Field label="Links in">
-          <span className={editorialIn.length === 0 ? "text-[var(--warning)] font-semibold" : ""}>
-            {editorialIn.length} editorial
+        <Field label="Editorial links in">
+          <span className={inbound.length === 0 ? "text-[var(--warning)] font-semibold" : ""}>
+            {inbound.length}
           </span>
-          <span className="text-[var(--text-tertiary)]"> / {inbound.length} total</span>
+          {templateIn > 0 ? (
+            <span className="text-[var(--text-tertiary)]"> + {templateIn} from templates</span>
+          ) : null}
         </Field>
         <Field label="Sitemap">
           {detail.in_sitemap ? "Included" : <span className="text-[var(--warning)]">Missing</span>}
@@ -148,22 +149,38 @@ export function CrawlPageDetail({ detail, closeHref }: { detail: Detail; closeHr
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <div className="min-w-0">
           <h4 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            Pages linking here ({inbound.length})
+            Pages linking here ({inbound.length} editorial)
           </h4>
+          {templateIn > 0 ? (
+            <p className="mt-1 text-[12px] text-[var(--text-tertiary)]">
+              Plus {templateIn.toLocaleString()} template link
+              {templateIn === 1 ? "" : "s"} — it sits in the navigation or footer.
+            </p>
+          ) : null}
           <div className="mt-2">
             <LinkList
               rows={inbound}
               direction="from"
-              emptyMessage="Nothing links to this page."
+              emptyMessage="Nothing links to this page editorially."
             />
           </div>
         </div>
         <div className="min-w-0">
           <h4 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            Links from this page ({outbound.length})
+            Links from this page ({outbound.length} editorial)
           </h4>
+          {templateOut > 0 ? (
+            <p className="mt-1 text-[12px] text-[var(--text-tertiary)]">
+              Plus {templateOut.toLocaleString()} template link
+              {templateOut === 1 ? "" : "s"} from its navigation and footer.
+            </p>
+          ) : null}
           <div className="mt-2">
-            <LinkList rows={outbound} direction="to" emptyMessage="This page links nowhere." />
+            <LinkList
+              rows={outbound}
+              direction="to"
+              emptyMessage="This page has no editorial links out."
+            />
           </div>
         </div>
       </div>

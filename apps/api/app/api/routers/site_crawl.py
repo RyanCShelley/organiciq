@@ -95,12 +95,10 @@ def crawled_pages(
     schema_rows = _schema_by_url(db, client.id)
 
     def sort_key(row: FactCrawlPageSnapshot) -> tuple:
-        # Problems first: not indexable, then no editorial links, then thin.
-        return (
-            row.indexable,
-            row.inbound_editorial_links,
-            row.word_count,
-        )
+        # By URL, so the list reads as the site's own shape and a section can be
+        # scanned in one place. Sorting by severity scattered related pages and
+        # put redirects — which are mostly deliberate — at the top.
+        return (row.normalized_url,)
 
     def keep(row: FactCrawlPageSnapshot) -> bool:
         paginated = is_pagination_url(row.normalized_url)
@@ -291,19 +289,27 @@ def page_detail(
     if page is None:
         return {"found": False, "url": url}
 
-    def link_payload(rows, attribute: str) -> list[dict[str, Any]]:
-        # Editorial links first: those are the ones worth reading.
-        ordered = sorted(rows, key=lambda r: (r.is_template, getattr(r, attribute)))
-        return [
-            {
-                "url": getattr(row, attribute),
-                "anchor_text": row.anchor_text,
-                "is_template": row.is_template,
-                "in_content": row.in_content,
-                "occurrences": row.occurrences,
-            }
-            for row in ordered
-        ]
+    def link_payload(rows, attribute: str) -> tuple[list[dict[str, Any]], int]:
+        """Editorial links in full; template links only as a count.
+
+        A template link is the nav, the footer or a sidebar: knowing the page
+        sits in the site's furniture is the whole signal, and listing every one
+        buried the editorial links that are actually a decision.
+        """
+        editorial = [row for row in rows if not row.is_template]
+        template_count = sum(row.occurrences for row in rows if row.is_template)
+        return (
+            [
+                {
+                    "url": getattr(row, attribute),
+                    "anchor_text": row.anchor_text,
+                    "in_content": row.in_content,
+                    "occurrences": row.occurrences,
+                }
+                for row in sorted(editorial, key=lambda r: getattr(r, attribute))
+            ],
+            template_count,
+        )
 
     inbound = (
         db.query(FactCrawlInternalLink)
@@ -332,6 +338,9 @@ def page_detail(
         .all()
     )
 
+    inbound_editorial, inbound_template = link_payload(inbound, "from_url")
+    outbound_editorial, outbound_template = link_payload(outbound, "to_url")
+
     return {
         "found": True,
         "url": page.normalized_url,
@@ -347,8 +356,10 @@ def page_detail(
         "redirect_url": page.redirect_url,
         "inbound_internal_links": page.inbound_internal_links,
         "inbound_editorial_links": page.inbound_editorial_links,
-        "inbound": link_payload(inbound, "from_url"),
-        "outbound": link_payload(outbound, "to_url"),
+        "inbound": inbound_editorial,
+        "inbound_template_links": inbound_template,
+        "outbound": outbound_editorial,
+        "outbound_template_links": outbound_template,
         "schema_blocks": [
             {
                 "syntax": block.syntax,

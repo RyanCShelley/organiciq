@@ -8,6 +8,14 @@ export type DataTableColumn<T> = {
   header: string;
   align?: "left" | "right";
   className?: string;
+  /**
+   * Keep this cell clickable in a row that is itself a link.
+   *
+   * Row links are an overlay anchor and every other cell is
+   * `pointer-events-none` so clicks fall through to it. A cell holding its own
+   * control has to opt out, or the overlay swallows it.
+   */
+  interactive?: boolean;
   render: (row: T) => ReactNode;
 };
 
@@ -89,7 +97,12 @@ export function DataTable<T>({
                         className="absolute inset-0 z-[1]"
                       />
                     ) : null}
-                    <span className={href ? "relative z-[2] pointer-events-none" : undefined}>
+                    <span
+                      className={cn(
+                        href && "relative z-[2]",
+                        href && !column.interactive && "pointer-events-none",
+                      )}
+                    >
                       {column.render(row)}
                     </span>
                   </td>

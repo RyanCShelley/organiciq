@@ -298,11 +298,10 @@ export type StructuredDataPayload = {
 };
 
 
+/** Only editorial links are listed; template links come back as a count. */
 export type CrawlLinkRow = {
   url: string;
   anchor_text: string | null;
-  /** Navigation or site-wide, rather than an editorial reference. */
-  is_template: boolean;
   in_content: boolean;
   occurrences: number;
 };
@@ -331,6 +330,9 @@ export type CrawlPageDetail = {
   inbound_internal_links?: number;
   inbound_editorial_links?: number;
   inbound?: CrawlLinkRow[];
+  /** Navigation and footer links in, as a total rather than a list. */
+  inbound_template_links?: number;
   outbound?: CrawlLinkRow[];
+  outbound_template_links?: number;
   schema_blocks?: CrawlSchemaBlock[];
 };

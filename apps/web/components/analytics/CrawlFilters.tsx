@@ -5,6 +5,10 @@ import Link from "next/link";
  *
  * Server-rendered like the rest of the page, so the filter state lives in the
  * URL: refreshing keeps it and a filtered view can be sent to someone.
+ *
+ * Only ranges live here. Status, indexability, schema and sitemap are discrete
+ * values already printed on every row, so they are filtered by clicking the
+ * cell itself — a chip row restating what the table shows is just more to read.
  */
 
 export type FilterGroup = {
@@ -16,25 +20,6 @@ export type FilterGroup = {
 };
 
 export const CRAWL_FILTERS: FilterGroup[] = [
-  {
-    param: "status",
-    label: "Status",
-    options: [
-      { value: "", label: "Any" },
-      { value: "ok", label: "2xx" },
-      { value: "redirect", label: "3xx" },
-      { value: "error", label: "4xx / 5xx" },
-    ],
-  },
-  {
-    param: "indexable",
-    label: "Indexable",
-    options: [
-      { value: "", label: "Any" },
-      { value: "yes", label: "Yes" },
-      { value: "no", label: "No" },
-    ],
-  },
   {
     param: "links",
     label: "Editorial links",
@@ -54,24 +39,6 @@ export const CRAWL_FILTERS: FilterGroup[] = [
     ],
   },
   {
-    param: "schema",
-    label: "Schema",
-    options: [
-      { value: "", label: "Any" },
-      { value: "yes", label: "Present" },
-      { value: "none", label: "None" },
-    ],
-  },
-  {
-    param: "sitemap",
-    label: "Sitemap",
-    options: [
-      { value: "", label: "Any" },
-      { value: "in", label: "In" },
-      { value: "missing", label: "Missing" },
-    ],
-  },
-  {
     param: "pagination",
     label: "Pagination",
     defaultValue: "hide",
@@ -83,7 +50,10 @@ export const CRAWL_FILTERS: FilterGroup[] = [
   },
 ];
 
-function hrefWith(
+/** Every filter the page understands, including the ones driven from the table. */
+export const CELL_FILTER_PARAMS = ["status", "indexable", "schema", "sitemap"] as const;
+
+export function hrefWith(
   base: string,
   active: Record<string, string>,
   param: string,
@@ -109,10 +79,15 @@ export function CrawlFilters({
   matched: number;
   total: number;
 }) {
-  const applied = CRAWL_FILTERS.filter((group) => {
-    const value = active[group.param] ?? "";
-    return value !== (group.defaultValue ?? "");
-  });
+  const applied = [
+    ...CRAWL_FILTERS.filter((group) => {
+      const value = active[group.param] ?? "";
+      return value !== (group.defaultValue ?? "");
+    }).map((group) => group.param),
+    // Clearing has to reach the filters set from the table, or a row-click
+    // filter would be stuck with no visible way to undo it.
+    ...CELL_FILTER_PARAMS.filter((param) => active[param]),
+  ];
 
   return (
     <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-3">

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { CrawlFilters, CRAWL_FILTERS } from "@/components/analytics/CrawlFilters";
+import { CrawlFilters, CRAWL_FILTERS, CELL_FILTER_PARAMS, hrefWith } from "@/components/analytics/CrawlFilters";
 import { CrawlPageDetail } from "@/components/analytics/CrawlPageDetail";
 import { RunCrawlButton } from "@/components/analytics/RunCrawlButton";
 import {
@@ -98,6 +98,42 @@ function Stat({
   );
 }
 
+/**
+ * A table cell that filters the list by its own value.
+ *
+ * Clicking the value that is already filtered clears it, so the same cell is
+ * both the way in and the way out and there is no hunting for a reset.
+ */
+function FilterCell({
+  base,
+  active,
+  param,
+  value,
+  children,
+}: {
+  base: string;
+  active: Record<string, string>;
+  param: string;
+  value: string;
+  children: React.ReactNode;
+}) {
+  const on = active[param] === value;
+  return (
+    <Link
+      href={hrefWith(base, active, param, on ? "" : value)}
+      className={
+        on
+          ? "-mx-1 rounded px-1 ring-1 ring-[var(--brand-teal-hover)]"
+          : "-mx-1 rounded px-1 hover:bg-[var(--surface-muted)]"
+      }
+      title={on ? `Stop filtering by ${param}` : `Show only these`}
+      scroll={false}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default async function SiteCrawlPage({
   params,
   searchParams,
@@ -111,10 +147,16 @@ export default async function SiteCrawlPage({
   const clientId = client.id;
   const tab = resolveTab(query.tab);
   const selectedUrl = typeof query.url === "string" ? query.url : null;
+  // Both the chip row and the table's own cells write to the query string, so
+  // every filter has to be read here — not just the ones with a chip.
   const filters: Record<string, string> = {};
   for (const group of CRAWL_FILTERS) {
     const value = query[group.param];
     filters[group.param] = typeof value === "string" ? value : group.defaultValue ?? "";
+  }
+  for (const param of CELL_FILTER_PARAMS) {
+    const value = query[param];
+    filters[param] = typeof value === "string" ? value : "";
   }
 
   let pages: CrawledPagesPayload = EMPTY_PAGES;
@@ -125,9 +167,8 @@ export default async function SiteCrawlPage({
   try {
     if (tab === "pages") {
       const qs = new URLSearchParams();
-      for (const group of CRAWL_FILTERS) {
-        const value = filters[group.param];
-        if (value) qs.set(group.param, value);
+      for (const [param, value] of Object.entries(filters)) {
+        if (value) qs.set(param, value);
       }
       const suffix = qs.toString();
       pages = await apiFetch<CrawledPagesPayload>(
@@ -267,7 +308,7 @@ export default async function SiteCrawlPage({
           <section className="mt-4 workspace-section">
             <SectionHeader
               title="Crawled pages"
-              description="Problems first: not indexable, then nothing linking to them, then thin."
+              description="In URL order. Click a status, indexability, schema or sitemap cell to filter by it."
               actions={
                 <span className="text-xs text-[var(--text-tertiary)]">
                   {pages.items.length.toLocaleString()} shown
@@ -294,27 +335,40 @@ export default async function SiteCrawlPage({
                     key: "status_code",
                     header: "Status",
                     align: "right",
-                    render: (row) => (
-                      <span
-                        className={
-                          row.status_code && row.status_code >= 400
-                            ? "font-semibold text-[var(--danger)]"
-                            : ""
-                        }
-                      >
-                        {row.status_code ?? "—"}
-                      </span>
-                    ),
+                    interactive: true,
+                    render: (row) => {
+                      const code = row.status_code;
+                      if (code === null) return <span className="text-[var(--text-tertiary)]">—</span>;
+                      const band = code >= 400 ? "error" : code >= 300 ? "redirect" : "ok";
+                      return (
+                        <FilterCell base={base} active={filters} param="status" value={band}>
+                          <span
+                            className={code >= 400 ? "font-semibold text-[var(--danger)]" : ""}
+                          >
+                            {code}
+                          </span>
+                        </FilterCell>
+                      );
+                    },
                   },
                   {
                     key: "indexable",
                     header: "Indexable",
-                    render: (row) =>
-                      row.indexable ? (
-                        <span className="badge badge-success">Yes</span>
-                      ) : (
-                        <span className="badge badge-neutral">No</span>
-                      ),
+                    interactive: true,
+                    render: (row) => (
+                      <FilterCell
+                        base={base}
+                        active={filters}
+                        param="indexable"
+                        value={row.indexable ? "yes" : "no"}
+                      >
+                        {row.indexable ? (
+                          <span className="badge badge-success">Yes</span>
+                        ) : (
+                          <span className="badge badge-neutral">No</span>
+                        )}
+                      </FilterCell>
+                    ),
                   },
                   {
                     key: "inbound_editorial_links",
@@ -346,26 +400,45 @@ export default async function SiteCrawlPage({
                     key: "schema_blocks",
                     header: "Schema",
                     align: "right",
-                    render: (row) =>
-                      row.schema_blocks > 0 ? (
-                        row.schema_blocks
-                      ) : (
-                        <span className="text-[var(--text-tertiary)]">—</span>
-                      ),
+                    interactive: true,
+                    render: (row) => (
+                      <FilterCell
+                        base={base}
+                        active={filters}
+                        param="schema"
+                        value={row.schema_blocks > 0 ? "yes" : "none"}
+                      >
+                        {row.schema_blocks > 0 ? (
+                          row.schema_blocks
+                        ) : (
+                          <span className="text-[var(--text-tertiary)]">—</span>
+                        )}
+                      </FilterCell>
+                    ),
                   },
                   {
                     key: "in_sitemap",
                     header: "Sitemap",
+                    interactive: true,
                     render: (row) => {
                       // Without a sitemap, "missing from it" says nothing — the
                       // finding is the site-level one, not a mark on every row.
                       if (!pages.sitemap_found) {
                         return <span className="text-[var(--text-tertiary)]">No sitemap</span>;
                       }
-                      return row.in_sitemap ? (
-                        <span className="badge badge-success">In</span>
-                      ) : (
-                        <span className="badge badge-warning">Missing</span>
+                      return (
+                        <FilterCell
+                          base={base}
+                          active={filters}
+                          param="sitemap"
+                          value={row.in_sitemap ? "in" : "missing"}
+                        >
+                          {row.in_sitemap ? (
+                            <span className="badge badge-success">In</span>
+                          ) : (
+                            <span className="badge badge-warning">Missing</span>
+                          )}
+                        </FilterCell>
                       );
                     },
                   },

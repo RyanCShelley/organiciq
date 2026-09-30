@@ -143,8 +143,8 @@ def test_orphaned_counts_only_indexable_pages(client, db, client_a, admin_user):
 # --- Page detail ------------------------------------------------------------
 
 
-def test_page_detail_returns_the_link_graph_both_ways(client, db, client_a, admin_user):
-    """The graph was stored and had no way to be read."""
+def test_page_detail_lists_editorial_links_and_counts_template_ones(client, db, client_a, admin_user):
+    """A nav link is the same on every page: the count is the whole signal."""
     db.add(_snapshot(client_a.id, PAGE))
     db.add(_link(client_a.id, OTHER, PAGE))
     db.add(_link(client_a.id, "https://example.com/", PAGE, anchor="Services", template=True))
@@ -156,11 +156,30 @@ def test_page_detail_returns_the_link_graph_both_ways(client, db, client_a, admi
     ).json()
 
     assert body["found"] is True
-    assert len(body["inbound"]) == 2
-    # Editorial first: those are the ones worth reading.
-    assert body["inbound"][0]["is_template"] is False
+    assert [row["url"] for row in body["inbound"]] == [OTHER]
     assert body["inbound"][0]["anchor_text"] == "see our services"
+    assert body["inbound_template_links"] == 1
     assert [row["url"] for row in body["outbound"]] == [OTHER]
+    assert body["outbound_template_links"] == 0
+
+
+def test_template_links_are_counted_by_occurrence(client, db, client_a, admin_user):
+    """A nav repeated twice on a page is two links, and the total should say so."""
+    db.add(_snapshot(client_a.id, PAGE))
+    db.add(
+        _link(client_a.id, "https://example.com/", PAGE, anchor="Services", template=True)
+    )
+    db.commit()
+    link = db.query(FactCrawlInternalLink).one()
+    link.occurrences = 3
+    db.commit()
+
+    body = client.get(
+        f"/site-crawl/page?url={PAGE}", headers=client_header(client_a.id, admin_user.email)
+    ).json()
+
+    assert body["inbound"] == []
+    assert body["inbound_template_links"] == 3
 
 
 def test_page_detail_includes_the_raw_schema(client, db, client_a, admin_user):
@@ -324,3 +343,21 @@ def test_the_view_carries_the_last_crawl_note(client, db, client_a, admin_user):
     ).json()
 
     assert "sitemap 80 URLs" in body["last_crawl_note"]
+
+
+def test_pages_are_listed_in_url_order(client, db, client_a, admin_user):
+    """Severity ordering scattered related pages and led with deliberate redirects."""
+    for path in ("/services/roofing", "/about", "/services/siding", "/blog/post"):
+        db.add(_snapshot(client_a.id, f"https://example.com{path}"))
+    db.commit()
+
+    body = client.get(
+        "/site-crawl/pages", headers=client_header(client_a.id, admin_user.email)
+    ).json()
+
+    assert [row["url"] for row in body["items"]] == [
+        "https://example.com/about",
+        "https://example.com/blog/post",
+        "https://example.com/services/roofing",
+        "https://example.com/services/siding",
+    ]
