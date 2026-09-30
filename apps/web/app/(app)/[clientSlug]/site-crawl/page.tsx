@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { CrawlFilters, CRAWL_FILTERS } from "@/components/analytics/CrawlFilters";
 import { CrawlPageDetail } from "@/components/analytics/CrawlPageDetail";
+import { RunCrawlButton } from "@/components/analytics/RunCrawlButton";
 import {
   apiFetch,
   type CrawlPageDetail as PageDetail,
@@ -183,11 +184,14 @@ export default async function SiteCrawlPage({
             </Link>
           ))}
         </div>
-        {crawledAt ? (
-          <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-            Crawled {crawledAt}
-          </span>
-        ) : null}
+        <div className="flex items-start gap-3">
+          {crawledAt ? (
+            <span className="self-center font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+              Crawled {crawledAt}
+            </span>
+          ) : null}
+          <RunCrawlButton clientId={clientId} />
+        </div>
       </div>
 
       {error ? (
@@ -198,14 +202,10 @@ export default async function SiteCrawlPage({
 
       {neverCrawled ? (
         <Alert variant="info" className="mt-4">
-          This site hasn&rsquo;t been crawled yet. Crawls run weekly and each client has its
-          own day in the cycle, so a newly added client waits for its slot. You can run one
-          now from{" "}
-          <Link href={clientHref(client.slug, "jobs")} className="font-medium underline">
-            Sync jobs
-          </Link>{" "}
-          with the <span className="font-[family-name:var(--font-mono)]">site_crawl</span>{" "}
-          source, and set the page limit in{" "}
+          This site hasn&rsquo;t been crawled yet. Crawls run weekly and each client has
+          its own day in the cycle, so a newly added client waits for its slot &mdash; or
+          press <strong>Run crawl</strong> above. The page limit and an optional sitemap
+          URL are in{" "}
           <Link href={clientHref(client.slug, "")} className="font-medium underline">
             Client settings
           </Link>
