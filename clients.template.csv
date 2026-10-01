@@ -1,3 +1,3 @@
-client_name,domain,tier,lead_events,start_date,timezone,primary_market,monthly_lead_goal,crawl_page_limit,sitemap_url,ai_search_prompt_limit,status,ga4_property_id,gsc_site_url,seranking_project_id
-EXAMPLE - delete this row,acmeroofing.com,Launch,generate_lead;phone_call,2026-01-15,America/New_York,"Tampa, FL",25,500,,,onboarding,,,
-EXAMPLE - delete this row too,betadental.com,Lift,generate_lead,2025-11-01,America/Chicago,,,,https://betadental.com/sitemap_index.xml,40,active,properties/123456789,sc-domain:betadental.com,9002
+client_name,domain,tier
+EXAMPLE - delete this row,acmeroofing.com,Launch
+EXAMPLE - delete this row too,betadental.com,Lift

@@ -17,8 +17,14 @@ connection covers every client this creates.
 CSV columns
 -----------
 Required: client_name, domain, tier
-Recommended: lead_events            semicolon-separated GA4 event names
-Optional: slug, start_date, timezone, monthly_lead_goal, crawl_page_limit,
+
+Everything else is optional and may simply be left out of the file — the
+columns exist so a whole book of business can be loaded in one pass, not
+because a row needs them. Connecting the integrations by hand afterwards is a
+perfectly good way to work, and the lookups below only save that labour.
+
+Optional: lead_events (semicolon-separated GA4 event names), slug, start_date,
+          timezone, primary_market, monthly_lead_goal, crawl_page_limit,
           sitemap_url, ai_search_prompt_limit, status
 Overrides: ga4_property_id, gsc_site_url, seranking_project_id
            — supplied values always win over a lookup.
