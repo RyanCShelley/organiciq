@@ -172,3 +172,17 @@ def test_a_row_missing_a_required_field_is_skipped(db, resolver):
     counts = import_clients(db, rows, apply=True)
 
     assert counts["skipped"] == 1
+
+
+def test_trailing_empty_rows_are_ignored_quietly(db, resolver):
+    """A spreadsheet export carries hundreds of them; each warning buries the report."""
+    rows = [
+        {"client_name": "Beta Dental", "domain": "betadental.com", "tier": "Lift"},
+        *[{"client_name": "", "domain": "", "tier": ""} for _ in range(50)],
+    ]
+
+    counts = import_clients(db, rows, apply=True)
+
+    assert counts["created"] == 1
+    assert counts["blank"] == 50
+    assert counts["skipped"] == 0

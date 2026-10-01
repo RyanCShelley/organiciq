@@ -31,3 +31,6 @@ out/
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
 .vercel
+
+# Client lists for the bulk importer — real client data, never committed.
+clients.csv

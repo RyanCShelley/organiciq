@@ -276,7 +276,7 @@ def import_clients(
         raise RuntimeError("No tiers in the database — seed them before importing clients.")
 
     resolver = Resolver(db, skip_lookups=skip_lookups)
-    counts = {"created": 0, "updated": 0, "skipped": 0, "unresolved": 0}
+    counts = {"created": 0, "updated": 0, "skipped": 0, "unresolved": 0, "blank": 0}
 
     logger.info("")
     logger.info(
@@ -294,6 +294,11 @@ def import_clients(
         domain_raw = (row.get("domain") or "").strip()
         tier_name = (row.get("tier") or "").strip().lower()
 
+        # Spreadsheets export hundreds of empty trailing rows. Warning about
+        # each one buries the report the operator actually needs to read.
+        if not any((value or "").strip() for value in row.values()):
+            counts["blank"] += 1
+            continue
         if not name or not domain_raw or not tier_name:
             logger.warning("line %d: missing client_name, domain or tier — skipped", line)
             counts["skipped"] += 1
@@ -437,6 +442,8 @@ def main() -> int:
                 counts["skipped"],
                 counts["unresolved"],
             )
+            if counts["blank"]:
+                logger.info("Ignored %d empty rows.", counts["blank"])
             logger.info("Key: = from CSV, + matched on domain, ~ matched on name, ? ambiguous, - none")
             logger.info("Re-run with --apply to write.")
         return 0
