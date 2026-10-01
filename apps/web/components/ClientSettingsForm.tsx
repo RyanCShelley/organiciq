@@ -95,6 +95,23 @@ export function ClientSettingsForm({
         <FieldLabel label="Website URL / domain">
           <Input name="domain" defaultValue={client.domain} required />
         </FieldLabel>
+        {/* Beside the domain, because together they say what this client's site
+            *is*. Filed under the crawl settings it read as a crawl option, and
+            was the last place anyone looked for it. */}
+        <FieldLabel label="Site folder (optional)">
+          <Input
+            name="path_prefix"
+            defaultValue={client.path_prefix ?? ""}
+            placeholder="Blank = whole domain"
+          />
+        </FieldLabel>
+        <p className="text-xs text-[var(--text-secondary)] sm:col-span-2">
+          Set <strong>Site folder</strong> only when this brand&rsquo;s site is a section
+          of a larger domain — <code>robinsonheli.com</code> with{" "}
+          <code>/unmanned</code>. Analytics, Search Console and the crawler are all held
+          to that folder, so a sibling brand&rsquo;s pages are never counted here. The
+          folder never belongs in the domain field.
+        </p>
         <FieldLabel label="OrganicIQ tier">
           <Select
             name="tier_id"
@@ -291,21 +308,6 @@ export function ClientSettingsForm({
             Blank uses {CRAWL_DEFAULT_PAGES.toLocaleString()}. Raise it for large blogs
             or catalogues; the ceiling is {CRAWL_MAX_PAGES.toLocaleString()}. A crawl
             that stops at the limit says so on the sync job.
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Site folder (optional)">
-            <Input
-              name="path_prefix"
-              defaultValue={client.path_prefix ?? ""}
-              placeholder="Whole domain — set only for a site inside a folder"
-            />
-          </FieldLabel>
-          <p className="text-xs text-[var(--text-secondary)]">
-            For a brand whose site is a section of a larger domain, such as{" "}
-            <code>/unmanned</code>. Analytics, Search Console and the crawler are all
-            held to this folder, so a sibling brand&rsquo;s pages are never counted as
-            this client&rsquo;s. Leave blank for the whole domain.
           </p>
         </div>
         <div className="flex flex-col gap-1">

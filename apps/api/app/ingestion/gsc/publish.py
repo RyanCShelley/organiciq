@@ -169,7 +169,90 @@ def _canonical_page_url(
     return page, normalize_url(page)
 
 
+def _write_daily(db: Session, payloads: list[dict[str, Any]]) -> int:
+    if not payloads:
+        return 0
+
+    payloads = _dedupe_payloads(payloads, _daily_grain_key)
+
+    for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
+        stmt = insert(FactGscDaily).values(batch)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_facts_gsc_daily_grain",
+            set_={
+                "impressions": stmt.excluded.impressions,
+                "clicks": stmt.excluded.clicks,
+                "ctr": stmt.excluded.ctr,
+                "average_position": stmt.excluded.average_position,
+            },
+        )
+        db.execute(stmt)
+    db.commit()
+    return len(payloads)
+
+
+def _daily_from_scoped_pages(db: Session, job: SyncJob, scope: str) -> list[dict[str, Any]]:
+    """Daily totals rebuilt from the pages inside this client's folder.
+
+    Search Console's own daily rows carry no URL, so on a domain property they
+    are the whole parent site — which would put the parent brand's impressions,
+    clicks and position on this client's dashboard while its page-level facts
+    were correctly scoped. Rebuilding the totals from the scoped page rows is
+    the only way to keep the two telling the same story.
+
+    It is an estimate: summing the page dimension does not reproduce Search
+    Console's site total exactly, because the two are deduplicated differently.
+    For a client that occupies part of a domain there is no exact figure to be
+    had, and a close one about the right pages beats an exact one about the
+    wrong site.
+    """
+    rows = (
+        db.query(StagingGscPage)
+        .filter(StagingGscPage.job_id == job.id, StagingGscPage.client_id == job.client_id)
+        .all()
+    )
+    totals: dict[Any, dict[str, Decimal]] = {}
+    for row in rows:
+        if row.date is None or not row.page:
+            continue
+        if not url_in_scope(normalize_url(row.page), scope):
+            continue
+        impressions = row.impressions or Decimal(0)
+        bucket = totals.setdefault(
+            row.date,
+            {"impressions": Decimal(0), "clicks": Decimal(0), "position_weighted": Decimal(0)},
+        )
+        bucket["impressions"] += impressions
+        bucket["clicks"] += row.clicks or Decimal(0)
+        # Position is an average, so it is weighted by impressions rather than
+        # summed; adding averages together invents a number.
+        bucket["position_weighted"] += (row.average_position or Decimal(0)) * impressions
+
+    payloads: list[dict[str, Any]] = []
+    for day, bucket in totals.items():
+        impressions = bucket["impressions"]
+        payloads.append(
+            {
+                "client_id": job.client_id,
+                "date": day,
+                "impressions": impressions,
+                "clicks": bucket["clicks"],
+                "ctr": (bucket["clicks"] / impressions) if impressions else Decimal(0),
+                "average_position": (
+                    bucket["position_weighted"] / impressions if impressions else Decimal(0)
+                ),
+                "is_primary": True,
+            }
+        )
+    return payloads
+
+
 def publish_gsc_daily(db: Session, job: SyncJob) -> int:
+    scope = _client_scope(db, job.client_id)
+    if scope:
+        payloads = _daily_from_scoped_pages(db, job, scope)
+        return _write_daily(db, payloads)
+
     rows = (
         db.query(StagingGscDaily)
         .filter(StagingGscDaily.job_id == job.id, StagingGscDaily.client_id == job.client_id)
@@ -197,25 +280,7 @@ def publish_gsc_daily(db: Session, job: SyncJob) -> int:
             }
         )
 
-    if not payloads:
-        return 0
-
-    payloads = _dedupe_payloads(payloads, _daily_grain_key)
-
-    for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
-        stmt = insert(FactGscDaily).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_facts_gsc_daily_grain",
-            set_={
-                "impressions": stmt.excluded.impressions,
-                "clicks": stmt.excluded.clicks,
-                "ctr": stmt.excluded.ctr,
-                "average_position": stmt.excluded.average_position,
-            },
-        )
-        db.execute(stmt)
-    db.commit()
-    return len(payloads)
+    return _write_daily(db, payloads)
 
 
 def publish_gsc_pages(db: Session, job: SyncJob) -> int:

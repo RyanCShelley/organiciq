@@ -211,3 +211,92 @@ def test_an_unscoped_client_still_keeps_everything(db, client_a):
     publish_gsc_pages(db, job)
 
     assert db.query(FactGscPage).filter(FactGscPage.client_id == client_a.id).count() == 2
+
+
+def test_gsc_daily_totals_are_rebuilt_from_the_folder(db, client_a):
+    """A domain property's daily rows are the whole parent site.
+
+    Search Console's daily dimension carries no URL, so without this the
+    dashboard would show the parent brand's impressions and position while the
+    page-level facts were correctly scoped — the two telling different stories.
+    """
+    from app.ingestion.gsc.publish import publish_gsc_daily
+    from app.models.gsc import FactGscDaily, StagingGscDaily
+
+    _scoped(db, client_a)
+    job = _job(db, client_a.id, "gsc")
+
+    # What Search Console reports for the whole domain.
+    db.add(
+        StagingGscDaily(
+            job_id=job.id,
+            client_id=client_a.id,
+            raw={},
+            date=TODAY,
+            impressions=Decimal("10000"),
+            clicks=Decimal("500"),
+            ctr=Decimal("0.05"),
+            average_position=Decimal("20"),
+        )
+    )
+    # What actually belongs to this client, plus a sibling brand's page.
+    for path, impressions, clicks, position in (
+        ("/unmanned", Decimal("100"), Decimal("10"), Decimal("4")),
+        ("/unmanned/drones", Decimal("300"), Decimal("20"), Decimal("8")),
+        ("/helicopters/r44", Decimal("9600"), Decimal("470"), Decimal("22")),
+    ):
+        db.add(
+            StagingGscPage(
+                job_id=job.id,
+                client_id=client_a.id,
+                raw={},
+                date=TODAY,
+                page=f"https://robinsonheli.com{path}",
+                country="usa",
+                device="DESKTOP",
+                impressions=impressions,
+                clicks=clicks,
+                ctr=clicks / impressions,
+                average_position=position,
+            )
+        )
+    db.commit()
+
+    publish_gsc_daily(db, job)
+
+    row = db.query(FactGscDaily).filter(FactGscDaily.client_id == client_a.id).one()
+    assert row.impressions == Decimal("400")
+    assert row.clicks == Decimal("30")
+    # Impression-weighted, not the mean of 4 and 8: (100*4 + 300*8) / 400.
+    assert row.average_position == Decimal("7")
+    assert row.ctr == Decimal("30") / Decimal("400")
+
+
+def test_an_unscoped_client_keeps_search_console_s_own_daily_totals(db, client_a):
+    """Deriving them for everyone would replace exact figures with an estimate."""
+    from app.ingestion.gsc.publish import publish_gsc_daily
+    from app.models.gsc import FactGscDaily, StagingGscDaily
+
+    client_a.domain = "example.com"
+    client_a.path_prefix = None
+    db.commit()
+    job = _job(db, client_a.id, "gsc")
+    db.add(
+        StagingGscDaily(
+            job_id=job.id,
+            client_id=client_a.id,
+            raw={},
+            date=TODAY,
+            impressions=Decimal("10000"),
+            clicks=Decimal("500"),
+            ctr=Decimal("0.05"),
+            average_position=Decimal("20"),
+        )
+    )
+    db.commit()
+
+    publish_gsc_daily(db, job)
+
+    row = db.query(FactGscDaily).filter(FactGscDaily.client_id == client_a.id).one()
+    assert row.impressions == Decimal("10000")
+    assert row.average_position == Decimal("20")
