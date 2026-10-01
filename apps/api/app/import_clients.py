@@ -111,6 +111,9 @@ class Match:
     #: "csv" (supplied), "domain" (matched on URL), "name" (guessed), "none", "ambiguous"
     how: str = "none"
     candidates: list[str] = field(default_factory=list)
+    #: What the provider calls it. A property id cannot be checked by eye; the
+    #: name it was matched against can.
+    label: str | None = None
 
     @property
     def mark(self) -> str:
@@ -161,13 +164,19 @@ class Resolver:
             logger.warning("SE_RANKING_API_KEY is not set — SE Ranking cannot be resolved.")
 
     @staticmethod
-    def _pick(candidates: list[str], how: str) -> Match:
+    def _pick(candidates: list[str], how: str, labels: dict[str, str] | None = None) -> Match:
         unique = list(dict.fromkeys(candidates))
         if not unique:
             return Match(how="none")
         if len(unique) > 1:
             return Match(how="ambiguous", candidates=unique)
-        return Match(value=unique[0], how=how)
+        return Match(value=unique[0], how=how, label=(labels or {}).get(unique[0]))
+
+    #: Search Console lets one site be verified several ways at once. A domain
+    #: property covers every scheme and subdomain, so it is strictly the best
+    #: of them; https beats http. Preferring in that order is a rule, not a
+    #: guess, so these do not need to be reported as ambiguous.
+    _GSC_PREFERENCE = ("sc-domain:", "https://", "http://")
 
     def gsc_site(self, host: str) -> Match:
         hits = [
@@ -175,6 +184,13 @@ class Resolver:
             for entry in self.gsc
             if normalize_host(str(entry.get("siteUrl") or "")) == host
         ]
+        for prefix in self._GSC_PREFERENCE:
+            preferred = [hit for hit in hits if hit.startswith(prefix)]
+            if len(preferred) == 1:
+                return Match(value=preferred[0], how="domain")
+            if preferred:
+                # Several of the same kind is a real ambiguity.
+                return self._pick(preferred, "domain")
         return self._pick(hits, "domain")
 
     def seranking_project(self, host: str) -> Match:
@@ -193,6 +209,7 @@ class Resolver:
         root = host.split(".")[0]
         name_key = re.sub(r"[^a-z0-9]", "", client_name.lower())
         hits = []
+        labels: dict[str, str] = {}
         for prop in self.ga4:
             display = re.sub(r"[^a-z0-9]", "", str(prop.get("display_name") or "").lower())
             if not display:
@@ -201,7 +218,10 @@ class Resolver:
                 hits.append(prop["property_id"])
             elif name_key and len(name_key) > 3 and name_key in display:
                 hits.append(prop["property_id"])
-        return self._pick(hits, "name")
+            else:
+                continue
+            labels[prop["property_id"]] = str(prop.get("display_name") or "")
+        return self._pick(hits, "name", labels)
 
 
 def _as_int(value: str | None) -> int | None:
@@ -268,9 +288,30 @@ def _upsert_lead_events(db: Session, client_id, names: list[str]) -> int:
     return added
 
 
+@dataclass
+class Resolved:
+    """One CSV row after matching, before anything is written."""
+
+    row: dict[str, str]
+    name: str
+    host: str
+    slug: str
+    tier_id: Any
+    ga4: Match
+    gsc: Match
+    ser: Match
+
+
 def import_clients(
     db: Session, rows: list[dict[str, str]], *, apply: bool = False, skip_lookups: bool = False
 ) -> dict[str, int]:
+    """Resolve every row, report, then write.
+
+    Resolution and writing are separate passes because a collision is only
+    visible once every row has been matched — and a client written in the first
+    pass cannot be un-bound when the tenth row turns out to claim the same
+    property.
+    """
     tiers = {t.tier_name.strip().lower(): t for t in db.query(Tier).all()}
     if not tiers:
         raise RuntimeError("No tiers in the database — seed them before importing clients.")
@@ -278,17 +319,8 @@ def import_clients(
     resolver = Resolver(db, skip_lookups=skip_lookups)
     counts = {"created": 0, "updated": 0, "skipped": 0, "unresolved": 0, "blank": 0}
 
-    logger.info("")
-    logger.info(
-        "%-24s %-24s   %-16s   %-26s   %-12s",
-        "Client",
-        "Domain",
-        "GA4 property",
-        "Search Console",
-        "SE Ranking",
-    )
-    logger.info("%s", "-" * 116)
-
+    # ── Pass one: match ──
+    resolved: list[Resolved] = []
     for line, row in enumerate(rows, start=2):
         name = (row.get("client_name") or "").strip()
         domain_raw = (row.get("domain") or "").strip()
@@ -315,56 +347,92 @@ def import_clients(
             continue
 
         host = normalize_host(domain_raw)
-        slug = slugify(row.get("slug") or name)
+        supplied = lambda key: (row.get(key) or "").strip()  # noqa: E731
+        resolved.append(
+            Resolved(
+                row=row,
+                name=name,
+                host=host,
+                slug=slugify(row.get("slug") or name),
+                tier_id=tier.id,
+                ga4=(
+                    Match(value=supplied("ga4_property_id"), how="csv")
+                    if supplied("ga4_property_id")
+                    else resolver.ga4_property(host, name)
+                ),
+                gsc=(
+                    Match(value=supplied("gsc_site_url"), how="csv")
+                    if supplied("gsc_site_url")
+                    else resolver.gsc_site(host)
+                ),
+                ser=(
+                    Match(value=supplied("seranking_project_id"), how="csv")
+                    if supplied("seranking_project_id")
+                    else resolver.seranking_project(host)
+                ),
+            )
+        )
 
-        ga4 = (
-            Match(value=row["ga4_property_id"].strip(), how="csv")
-            if (row.get("ga4_property_id") or "").strip()
-            else resolver.ga4_property(host, name)
-        )
-        gsc = (
-            Match(value=row["gsc_site_url"].strip(), how="csv")
-            if (row.get("gsc_site_url") or "").strip()
-            else resolver.gsc_site(host)
-        )
-        ser = (
-            Match(value=row["seranking_project_id"].strip(), how="csv")
-            if (row.get("seranking_project_id") or "").strip()
-            else resolver.seranking_project(host)
-        )
+    # ── Two clients pointed at one property is the worst outcome here: both
+    # read plausible and both are wrong, and a name-based GA4 match is exactly
+    # how it would happen. Found across all rows, so neither is written. ──
+    claimed: dict[tuple[str, str], str] = {}
+    collisions: dict[tuple[str, str], list[str]] = {}
+    for entry in resolved:
+        for label, match in (("GA4", entry.ga4), ("GSC", entry.gsc), ("SE Ranking", entry.ser)):
+            if not match.value:
+                continue
+            key = (label, match.value)
+            owner = claimed.setdefault(key, entry.name)
+            if owner != entry.name:
+                collisions.setdefault(key, [owner]).append(entry.name)
 
+    # ── Pass two: report, and write when asked ──
+    logger.info("")
+    logger.info(
+        "%-26s %-22s %-36s %-12s", "Client", "GA4 property", "Search Console", "SE Ranking"
+    )
+    logger.info("%s", "-" * 100)
+
+    for entry in resolved:
+        # Identifiers print in full: a truncated property id cannot be checked,
+        # and checking them is the entire point of the dry run.
         logger.info(
-            "%-24s %-24s %s %-16s %s %-26s %s %-12s",
-            name[:24],
-            host[:24],
-            ga4.mark,
-            ga4.describe()[:16],
-            gsc.mark,
-            gsc.describe()[:26],
-            ser.mark,
-            ser.describe()[:12],
+            "%-26s %s %-20s %s %-34s %s %-12s",
+            entry.name[:26],
+            entry.ga4.mark,
+            entry.ga4.describe(),
+            entry.gsc.mark,
+            entry.gsc.describe(),
+            entry.ser.mark,
+            entry.ser.describe(),
         )
-        for label, match in (("GA4", ga4), ("GSC", gsc), ("SE Ranking", ser)):
+        # A name match is a guess. Printing the property's own name is what
+        # makes it checkable — the id alone tells the reader nothing.
+        if entry.ga4.how == "name" and entry.ga4.label:
+            logger.info('    GA4 matched on name: "%s"', entry.ga4.label)
+        for label, match in (("GA4", entry.ga4), ("GSC", entry.gsc), ("SE Ranking", entry.ser)):
             if match.how == "ambiguous":
                 logger.warning(
                     "    %s ambiguous for %s, left empty: %s",
                     label,
-                    host,
+                    entry.host,
                     ", ".join(match.candidates[:5]),
                 )
-        if any(m.how in {"none", "ambiguous"} for m in (ga4, gsc, ser)):
+        if any(m.how in {"none", "ambiguous"} for m in (entry.ga4, entry.gsc, entry.ser)):
             counts["unresolved"] += 1
 
-        existing = db.query(Client).filter(Client.slug == slug).one_or_none()
+        existing = db.query(Client).filter(Client.slug == entry.slug).one_or_none()
         counts["created" if existing is None else "updated"] += 1
 
         if not apply:
             continue
 
-        client = existing or Client(slug=slug)
-        client.client_name = name
-        client.domain = host
-        client.tier_id = tier.id
+        row = entry.row
+        client = existing or Client(slug=entry.slug)
+        client.client_name = entry.name
+        client.domain = entry.host
+        client.tier_id = entry.tier_id
         client.timezone = (row.get("timezone") or "").strip() or "America/New_York"
         client.start_date = _as_date(row.get("start_date")) or client.start_date
         client.monthly_lead_goal = _as_int(row.get("monthly_lead_goal")) or client.monthly_lead_goal
@@ -382,9 +450,14 @@ def import_clients(
             client.status = ClientStatus(status)
         db.flush()
 
-        _upsert_integration(db, client.id, IntegrationProvider.GA4, ga4.value)
-        _upsert_integration(db, client.id, IntegrationProvider.GSC, gsc.value)
-        _upsert_integration(db, client.id, IntegrationProvider.SE_RANKING, ser.value)
+        def unique(label: str, match: Match) -> str | None:
+            return None if (label, match.value) in collisions else match.value
+
+        _upsert_integration(db, client.id, IntegrationProvider.GA4, unique("GA4", entry.ga4))
+        _upsert_integration(db, client.id, IntegrationProvider.GSC, unique("GSC", entry.gsc))
+        _upsert_integration(
+            db, client.id, IntegrationProvider.SE_RANKING, unique("SE Ranking", entry.ser)
+        )
 
         events = [e.strip() for e in (row.get("lead_events") or "").split(";") if e.strip()]
         _upsert_lead_events(db, client.id, events)
@@ -392,6 +465,15 @@ def import_clients(
         # Sessions here run with autoflush off, so without this a later row
         # looking up the same slug would not see this one and would duplicate it.
         db.flush()
+
+    for (label, value), names in sorted(collisions.items()):
+        logger.error(
+            "%s %s is claimed by %s — left empty on all of them",
+            label,
+            value,
+            ", ".join(names),
+        )
+    counts["collisions"] = len(collisions)
 
     return counts
 

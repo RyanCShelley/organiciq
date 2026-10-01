@@ -186,3 +186,72 @@ def test_trailing_empty_rows_are_ignored_quietly(db, resolver):
     assert counts["created"] == 1
     assert counts["blank"] == 50
     assert counts["skipped"] == 0
+
+
+def test_a_domain_property_is_preferred_over_its_url_variants(db, monkeypatch):
+    """One site verified four ways is not an ambiguity — sc-domain covers them all."""
+
+    def build(db, *, skip_lookups=False):
+        instance = Resolver.__new__(Resolver)
+        instance.ga4 = []
+        instance.gsc = [
+            {"siteUrl": "http://www.popfoam.com/"},
+            {"siteUrl": "https://www.popfoam.com/"},
+            {"siteUrl": "sc-domain:popfoam.com"},
+        ]
+        instance.seranking = []
+        return instance
+
+    monkeypatch.setattr("app.import_clients.Resolver", build)
+    rows = [{"client_name": "PopFoam", "domain": "popfoam.com", "tier": "Launch"}]
+
+    import_clients(db, rows, apply=True)
+
+    client = db.query(Client).filter(Client.slug == "popfoam").one()
+    row = (
+        db.query(Integration)
+        .filter(Integration.client_id == client.id, Integration.provider == IntegrationProvider.GSC)
+        .one()
+    )
+    assert row.external_property_id == "sc-domain:popfoam.com"
+
+
+def test_two_clients_are_never_bound_to_one_property(db, monkeypatch):
+    """Both would read plausible and both would be wrong."""
+
+    def build(db, *, skip_lookups=False):
+        instance = Resolver.__new__(Resolver)
+        instance.ga4 = []
+        instance.gsc = []
+        instance.seranking = []
+        return instance
+
+    monkeypatch.setattr("app.import_clients.Resolver", build)
+    rows = [
+        {
+            "client_name": "First Co",
+            "domain": "first.com",
+            "tier": "Launch",
+            "ga4_property_id": "properties/999",
+        },
+        {
+            "client_name": "Second Co",
+            "domain": "second.com",
+            "tier": "Launch",
+            "ga4_property_id": "properties/999",
+        },
+    ]
+
+    import_clients(db, rows, apply=True)
+
+    for slug in ("first-co", "second-co"):
+        client = db.query(Client).filter(Client.slug == slug).one()
+        assert (
+            db.query(Integration)
+            .filter(
+                Integration.client_id == client.id,
+                Integration.provider == IntegrationProvider.GA4,
+            )
+            .one_or_none()
+            is None
+        )
