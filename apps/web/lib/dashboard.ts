@@ -63,6 +63,23 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
         typeof conversions?.goal_period_days === "number" ? conversions.goal_period_days : null,
       goal_progress_pct:
         typeof conversions?.goal_progress_pct === "number" ? conversions.goal_progress_pct : null,
+      goal_checkpoint:
+        conversions?.goal_checkpoint && typeof conversions.goal_checkpoint.month === "number"
+          ? {
+              month: conversions.goal_checkpoint.month,
+              due:
+                typeof conversions.goal_checkpoint.due === "string"
+                  ? conversions.goal_checkpoint.due
+                  : null,
+              projected:
+                typeof conversions.goal_checkpoint.projected === "number"
+                  ? conversions.goal_checkpoint.projected
+                  : null,
+              overridden: conversions.goal_checkpoint.overridden === true,
+            }
+          : null,
+      final_lead_goal:
+        typeof conversions?.final_lead_goal === "number" ? conversions.final_lead_goal : null,
       leads_series: Array.isArray(conversions?.leads_series)
         ? conversions.leads_series.filter(
             (v): v is number => typeof v === "number" && !Number.isNaN(v),
@@ -256,6 +273,15 @@ export type DashboardResponse = {
     period_lead_goal: number | null;
     goal_period_days: number | null;
     goal_progress_pct: number | null;
+    /** Which step of the plan this goal is — null when there is no projection. */
+    goal_checkpoint: {
+      month: number;
+      due: string | null;
+      projected: number | null;
+      overridden: boolean;
+    } | null;
+    /** The end-of-plan target, kept only as context for the current goal. */
+    final_lead_goal: number | null;
     leads_series: number[];
   };
   visibility: {

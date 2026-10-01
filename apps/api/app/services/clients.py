@@ -149,8 +149,31 @@ def create_client(db: Session, payload: ClientCreate) -> Client:
     return client
 
 
+def _clean_lead_goal_overrides(raw: object) -> dict[str, int]:
+    """Keep only positive whole goals keyed by checkpoint month.
+
+    These are read on every dashboard load, so junk here would be read back
+    forever. Dropping a bad entry rather than rejecting the whole request means
+    one mistyped box does not lose the other corrections in the same save.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, int] = {}
+    for key, value in raw.items():
+        try:
+            month = int(key)
+            goal = int(value)
+        except (TypeError, ValueError):
+            continue
+        if month >= 0 and goal > 0:
+            cleaned[str(month)] = goal
+    return cleaned
+
+
 def update_client(db: Session, client: Client, payload: ClientUpdate) -> Client:
     data = payload.model_dump(exclude_unset=True)
+    if "lead_goal_overrides" in data:
+        data["lead_goal_overrides"] = _clean_lead_goal_overrides(data["lead_goal_overrides"])
     if "slug" in data and data["slug"]:
         data["slug"] = allocate_client_slug(
             db, desired=str(data["slug"]), exclude_client_id=client.id

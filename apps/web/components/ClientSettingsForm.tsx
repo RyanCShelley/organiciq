@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { updateClientSettingsAction } from "@/app/(app)/actions";
+import { LeadGoalSchedule } from "@/components/LeadGoalSchedule";
 import { BaselineSnapshotPanel } from "@/components/BaselineSnapshotPanel";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -138,7 +139,7 @@ export function ClientSettingsForm({
         <FieldLabel label="Contract start date">
           <Input name="start_date" type="date" defaultValue={client.start_date ?? ""} />
         </FieldLabel>
-        <FieldLabel label="Monthly lead goal">
+        <FieldLabel label="Lead goal fallback">
           <Input
             name="monthly_lead_goal"
             type="number"
@@ -153,6 +154,15 @@ export function ClientSettingsForm({
         <FieldLabel label="Timezone">
           <Input name="timezone" defaultValue={client.timezone} />
         </FieldLabel>
+      </div>
+
+      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            Lead goal by checkpoint
+          </p>
+        </div>
+        <LeadGoalSchedule client={client} />
       </div>
 
       <div className="flex flex-col gap-1">

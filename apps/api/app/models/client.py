@@ -49,7 +49,15 @@ class Client(Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     primary_market: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
+    #: Fallback goal, used only when there is no projection to read a
+    #: checkpoint from. The dashboard's goal comes from the curve.
     monthly_lead_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Hand corrections to the projected goals, keyed by checkpoint month
+    #: ("3", "6", "12"). Held apart from the frozen projection so re-running it
+    #: does not quietly discard a correction someone made on purpose.
+    lead_goal_overrides: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     account_sheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Enterprise (and optional overrides): agreement-specific plan amounts
     custom_tracked_keyword_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -34,6 +34,13 @@ function leadGoalLabel(periodDays: number | null): string {
   return `Lead Goal (${periodDays} days)`;
 }
 
+/** Which step of the plan a goal belongs to, as a person would say it. */
+function checkpointLabel(month: number): string {
+  if (month <= 0) return "baseline";
+  if (month === 1) return "month 1 target";
+  return `${month}-month target`;
+}
+
 function channelBarColor(label: string): string {
   const key = label.toLowerCase();
   if (key.includes("organic")) return "var(--brand-teal)";
@@ -152,10 +159,22 @@ export default async function DashboardPage({
                       height={30}
                     />
                   </div>
-                  {data.conversions.monthly_lead_goal &&
-                  data.conversions.goal_period_days !== null &&
-                  (data.conversions.goal_period_days < 28 ||
-                    data.conversions.goal_period_days > 31) ? (
+                  {/* A goal with no provenance invites "why that number?". The
+                      checkpoint it comes from answers it before it is asked. */}
+                  {data.conversions.goal_checkpoint ? (
+                    <div className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      {data.conversions.monthly_lead_goal?.toLocaleString()}/month ·{" "}
+                      {checkpointLabel(data.conversions.goal_checkpoint.month)}
+                      {data.conversions.goal_checkpoint.overridden ? " · adjusted" : ""}
+                      {data.conversions.final_lead_goal &&
+                      data.conversions.final_lead_goal !== data.conversions.monthly_lead_goal
+                        ? ` · ${data.conversions.final_lead_goal.toLocaleString()} by plan end`
+                        : ""}
+                    </div>
+                  ) : data.conversions.monthly_lead_goal &&
+                    data.conversions.goal_period_days !== null &&
+                    (data.conversions.goal_period_days < 28 ||
+                      data.conversions.goal_period_days > 31) ? (
                     <div className="mt-1 text-xs text-[var(--text-tertiary)]">
                       Based on{" "}
                       {data.conversions.monthly_lead_goal.toLocaleString()}

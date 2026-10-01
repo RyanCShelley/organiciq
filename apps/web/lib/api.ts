@@ -134,6 +134,8 @@ export type Client = {
   sitemap_url?: string | null;
   /** Folder this client's site occupies on `domain`; null is the whole domain. */
   path_prefix?: string | null;
+  /** Hand corrections to the projected goals, keyed by checkpoint month. */
+  lead_goal_overrides?: Record<string, number> | null;
   status: string;
   created_at: string;
   updated_at: string;

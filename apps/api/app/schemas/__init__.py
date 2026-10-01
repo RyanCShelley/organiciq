@@ -62,6 +62,7 @@ class ClientCreate(BaseModel):
     primary_market: str | None = None
     timezone: str = "America/New_York"
     monthly_lead_goal: int | None = None
+    lead_goal_overrides: dict | None = None
     account_sheet_url: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
@@ -94,6 +95,7 @@ class ClientUpdate(BaseModel):
     primary_market: str | None = None
     timezone: str | None = None
     monthly_lead_goal: int | None = None
+    lead_goal_overrides: dict | None = None
     account_sheet_url: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
@@ -234,10 +236,12 @@ class BaselineUpdate(BaseModel):
     baseline_notes: str | None = None
     baseline_projection_json: dict | None = None
     monthly_lead_goal: int | None = None
+    lead_goal_overrides: dict | None = None
 
 
 class BaselineSnapshotApplyRequest(BaseModel):
     monthly_lead_goal: int | None = None
+    lead_goal_overrides: dict | None = None
     notes: str | None = None
     # Window anchor. Defaults to the GA4 watermark when omitted.
     as_of: Date | None = None

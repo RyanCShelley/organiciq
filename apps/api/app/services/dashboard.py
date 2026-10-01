@@ -15,6 +15,7 @@ from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
+from app.services.lead_goals import current_lead_goal, schedule_payload
 from app.models.seranking import (
     FactSerAiTrackerStats,
     FactSerCompetitor,
@@ -1226,7 +1227,10 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     )
     search_visibility_previous, _ = _resolve_search_visibility(db, client.id, ser_previous)
 
-    monthly_goal = client.monthly_lead_goal
+    # The goal in force now, not the twelve-month target: judging a thirty-day
+    # review against next September's number makes an on-track client look like
+    # a failing one.
+    monthly_goal, goal_checkpoint = current_lead_goal(client)
     period_goal, goal_period_days = period_lead_goal(monthly_goal, from_date, to_date)
     progress_pct: float | None = None
     if period_goal and current_leads is not None:
@@ -1292,6 +1296,20 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "period_lead_goal": period_goal,
             "goal_period_days": goal_period_days,
             "goal_progress_pct": progress_pct,
+            # Which step of the plan this goal is, so the dashboard can say so
+            # rather than presenting a number with no provenance.
+            "goal_checkpoint": (
+                {
+                    "month": goal_checkpoint.month,
+                    "due": goal_checkpoint.due.isoformat() if goal_checkpoint.due else None,
+                    "projected": goal_checkpoint.projected,
+                    "overridden": goal_checkpoint.overridden,
+                }
+                if goal_checkpoint
+                else None
+            ),
+            "goal_schedule": schedule_payload(client),
+            "final_lead_goal": client.monthly_lead_goal,
             "leads_series": leads_series,
         },
         "visibility": {

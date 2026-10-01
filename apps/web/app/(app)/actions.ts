@@ -57,6 +57,16 @@ export async function updateClientSettingsAction(formData: FormData) {
   const sitemapUrl = String(formData.get("sitemap_url") || "").trim() || null;
   const pathPrefix = String(formData.get("path_prefix") || "").trim() || null;
 
+  // One input per checkpoint, named lead_goal_<month>. A blank box means "use
+  // the projection", so it is left out rather than sent as zero.
+  const leadGoalOverrides: Record<string, number> = {};
+  for (const [key, value] of formData.entries()) {
+    const match = /^lead_goal_(\d+)$/.exec(key);
+    if (!match) continue;
+    const goal = Number(String(value).trim());
+    if (Number.isFinite(goal) && goal > 0) leadGoalOverrides[match[1]] = Math.round(goal);
+  }
+
   if (
     [customKeyword, customPrompt, customContent, customRefresh, customGrowth].some((value) =>
       Number.isNaN(value),
@@ -124,6 +134,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     crawl_page_limit: crawlPageLimit,
     sitemap_url: sitemapUrl,
     path_prefix: pathPrefix,
+    lead_goal_overrides: leadGoalOverrides,
   };
 
   if (!body.client_name || !body.domain || !body.tier_id) {
