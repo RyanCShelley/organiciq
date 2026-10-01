@@ -1,14 +1,14 @@
 """Client path scope, for a site that lives under a folder of a larger domain.
 
-Revision ID: 0035
-Revises: 0034
+Revision ID: 0035_client_path_prefix
+Revises: 0034_client_sitemap_url
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0035"
-down_revision = "0034"
+revision = "0035_client_path_prefix"
+down_revision = "0034_client_sitemap_url"
 branch_labels = None
 depends_on = None
 
