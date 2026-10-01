@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.urls import normalize_landing_page
+from app.core.urls import normalize_landing_page, normalize_path_prefix, url_in_scope
 from app.ingestion.channels import classify_channel
 from app.models.client import Client
 from app.models.config import ChannelRule
@@ -29,6 +29,9 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     rules = _rules(db)
     client = db.query(Client).filter(Client.id == job.client_id).one()
     domain = client.domain
+    # A client scoped to a folder shares its GA4 property with the parent
+    # brand, so rows outside that folder are someone else's traffic.
+    scope = normalize_path_prefix(client.path_prefix)
     traffic = (
         db.query(StagingGa4Traffic)
         .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id)
@@ -45,12 +48,15 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         if row.date is None:
             continue
         raw_url = row.landing_page or ""
+        normalized = normalize_landing_page(raw_url, domain)
+        if not url_in_scope(normalized, scope):
+            continue
         traffic_payloads.append(
             {
                 "client_id": job.client_id,
                 "date": row.date,
                 "raw_url": raw_url,
-                "normalized_url": normalize_landing_page(raw_url, domain),
+                "normalized_url": normalized,
                 "session_source": row.session_source or "",
                 "session_medium": row.session_medium or "",
                 "channel": classify_channel(row.session_source, row.session_medium, rules),
@@ -66,12 +72,15 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         if row.date is None or not row.event_name:
             continue
         raw_url = row.landing_page or ""
+        normalized = normalize_landing_page(raw_url, domain)
+        if not url_in_scope(normalized, scope):
+            continue
         event_payloads.append(
             {
                 "client_id": job.client_id,
                 "date": row.date,
                 "raw_url": raw_url,
-                "normalized_url": normalize_landing_page(raw_url, domain),
+                "normalized_url": normalized,
                 "session_source": row.session_source or "",
                 "session_medium": row.session_medium or "",
                 "channel": classify_channel(row.session_source, row.session_medium, rules),

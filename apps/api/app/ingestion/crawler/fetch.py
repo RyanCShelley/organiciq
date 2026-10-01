@@ -17,7 +17,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from app.core.urls import normalize_url
+from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
 from app.ingestion.crawler.parse import PageLink, ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
@@ -128,14 +128,18 @@ def page_limit_for(client_limit: int | None) -> int:
     return max(1, min(int(requested), MAX_PAGE_LIMIT))
 
 
-def _start_url(domain: str) -> str:
+def _start_url(domain: str, path_prefix: str | None = None) -> str:
     value = (domain or "").strip()
     if not value:
         raise ValueError("Client has no domain set")
     if "://" not in value:
         value = f"https://{value}"
     parts = urlsplit(value)
-    return f"{parts.scheme}://{parts.netloc}{parts.path or '/'}"
+    # A scoped client starts at its own folder, not the parent brand's homepage,
+    # which would otherwise be the only page reachable before the scope filter
+    # rejected everything linked from it.
+    path = path_prefix or parts.path or "/"
+    return f"{parts.scheme}://{parts.netloc}{path}"
 
 
 def _same_site(host: str, other: str) -> bool:
@@ -205,7 +209,12 @@ async def _load_sitemap_urls(
                 queue.append(value)
             else:
                 parts = urlsplit(value)
-                if parts.hostname and _same_site(host, parts.hostname) and is_page_url(value):
+                if (
+                    parts.hostname
+                    and _same_site(host, parts.hostname)
+                    and is_page_url(value)
+                    and url_in_scope(normalize_url(value), scope)
+                ):
                     found.add(normalize_url(value))
             if len(found) >= budget:
                 break
@@ -219,9 +228,16 @@ async def crawl_site(
     concurrency: int = DEFAULT_CONCURRENCY,
     respect_robots: bool = True,
     sitemap_url: str | None = None,
+    path_prefix: str | None = None,
 ) -> CrawlResult:
-    """Crawl a site breadth-first from its root, bounded by `page_limit`."""
-    root = _start_url(domain)
+    """Crawl a site breadth-first from its root, bounded by `page_limit`.
+
+    `path_prefix` confines the crawl to one folder, for a client whose site is a
+    section of a larger domain. Without it the crawl follows the parent brand's
+    navigation and reports its pages as this client's.
+    """
+    root = _start_url(domain, path_prefix)
+    scope = normalize_path_prefix(path_prefix)
     host = urlsplit(root).hostname or ""
     result = CrawlResult()
 
@@ -302,7 +318,11 @@ async def crawl_site(
 
                 if page.redirect_url:
                     target = normalize_url(page.redirect_url)
-                    if target != page.normalized_url and target not in queued:
+                    if (
+                        target != page.normalized_url
+                        and target not in queued
+                        and url_in_scope(target, scope)
+                    ):
                         queued.add(target)
                         queue.append(page.redirect_url)
 
@@ -331,7 +351,11 @@ async def crawl_site(
                             existing_edge.anchor = link.anchor or existing_edge.anchor
                         elif not existing_edge.anchor:
                             existing_edge.anchor = link.anchor
-                    if key not in queued and len(queued) < page_limit * 4:
+                    if (
+                        key not in queued
+                        and len(queued) < page_limit * 4
+                        and url_in_scope(key, scope)
+                    ):
                         queued.add(key)
                         queue.append(link.target)
 

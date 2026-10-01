@@ -72,6 +72,7 @@ class ClientCreate(BaseModel):
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None
+    path_prefix: str | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None
@@ -103,6 +104,7 @@ class ClientUpdate(BaseModel):
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None
+    path_prefix: str | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None
@@ -135,6 +137,7 @@ class ClientOut(ORMModel):
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None
+    path_prefix: str | None = None
     baseline_as_of: Date | None = None
     baseline_period_start: Date | None = None
     baseline_period_end: Date | None = None

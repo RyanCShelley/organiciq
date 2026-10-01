@@ -18,6 +18,10 @@ CSV columns
 -----------
 Required: client_name, domain, tier
 
+A domain may carry a folder — `robinsonheli.com/unmanned` — for a client whose
+site is a section of a larger domain. The folder is stored as the client's path
+scope, never in `domain`, which is read as a host everywhere else.
+
 Everything else is optional and may simply be left out of the file — the
 columns exist so a whole book of business can be loaded in one pass, not
 because a row needs them. Connecting the integrations by hand afterwards is a
@@ -66,6 +70,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
+from app.core.urls import normalize_path_prefix
 from app.core.settings import get_settings
 from app.ingestion.ga4.client import list_ga4_properties
 from app.ingestion.google_credentials import workspace_google_refresh_token
@@ -96,6 +101,20 @@ def normalize_host(value: str) -> str:
     text = text.split("?", 1)[0]
     text = text.removeprefix("www.")
     return text.strip().strip(".")
+
+
+def split_path_prefix(value: str) -> str | None:
+    """The folder part of a domain cell, for a site that lives under a parent brand.
+
+    `robinsonheli.com/unmanned` means a client scoped to that folder. Dropping
+    the path would quietly widen it to the whole domain, so it is kept — in its
+    own field, never in `domain`.
+    """
+    text = (value or "").strip()
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    _, _, path = text.partition("/")
+    return normalize_path_prefix(path)
 
 
 def slugify(value: str) -> str:
@@ -295,6 +314,7 @@ class Resolved:
     row: dict[str, str]
     name: str
     host: str
+    path_prefix: str | None
     slug: str
     tier_id: Any
     ga4: Match
@@ -353,6 +373,8 @@ def import_clients(
                 row=row,
                 name=name,
                 host=host,
+                path_prefix=split_path_prefix(domain_raw)
+                or normalize_path_prefix(row.get("path_prefix")),
                 slug=slugify(row.get("slug") or name),
                 tier_id=tier.id,
                 ga4=(
@@ -432,6 +454,7 @@ def import_clients(
         client = existing or Client(slug=entry.slug)
         client.client_name = entry.name
         client.domain = entry.host
+        client.path_prefix = entry.path_prefix
         client.tier_id = entry.tier_id
         client.timezone = (row.get("timezone") or "").strip() or "America/New_York"
         client.start_date = _as_date(row.get("start_date")) or client.start_date

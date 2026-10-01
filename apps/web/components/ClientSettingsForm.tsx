@@ -294,6 +294,21 @@ export function ClientSettingsForm({
           </p>
         </div>
         <div className="flex flex-col gap-1">
+          <FieldLabel label="Site folder (optional)">
+            <Input
+              name="path_prefix"
+              defaultValue={client.path_prefix ?? ""}
+              placeholder="Whole domain — set only for a site inside a folder"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            For a brand whose site is a section of a larger domain, such as{" "}
+            <code>/unmanned</code>. Analytics, Search Console and the crawler are all
+            held to this folder, so a sibling brand&rsquo;s pages are never counted as
+            this client&rsquo;s. Leave blank for the whole domain.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1">
           <FieldLabel label="Sitemap URL (optional)">
             <Input
               name="sitemap_url"

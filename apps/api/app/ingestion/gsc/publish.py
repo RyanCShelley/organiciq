@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.urls import normalize_url, rewrite_url_host
+from app.core.urls import normalize_path_prefix, url_in_scope, normalize_url, rewrite_url_host
 from app.models.client import Client
 from app.models.gsc import (
     FactGscDaily,
@@ -134,6 +134,17 @@ def _primary_site_url(db: Session, client_id: UUID) -> str | None:
     return primary or None
 
 
+def _client_scope(db: Session, client_id: UUID) -> str | None:
+    """Path this client occupies, when its site is a folder of a larger domain.
+
+    A URL-prefix Search Console property is already scoped at source, so this
+    only bites for a client verified with a domain property — where every
+    sibling brand's pages arrive too.
+    """
+    client = db.query(Client).filter(Client.id == client_id).one_or_none()
+    return normalize_path_prefix(client.path_prefix) if client else None
+
+
 def _client_domain(db: Session, client_id: UUID) -> str | None:
     client = db.query(Client).filter(Client.id == client_id).one_or_none()
     if client is None:
@@ -218,6 +229,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
 
     primary_site_url = _primary_site_url(db, job.client_id)
     client_domain = _client_domain(db, job.client_id)
+    scope = _client_scope(db, job.client_id)
     payloads: list[dict[str, Any]] = []
     for row in rows:
         if row.date is None or not row.page:
@@ -230,7 +242,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
             primary_site_url=primary_site_url,
             client_domain=client_domain,
         )
-        if not normalized_url:
+        if not normalized_url or not url_in_scope(normalized_url, scope):
             continue
         payloads.append(
             {
@@ -284,6 +296,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
 
     primary_site_url = _primary_site_url(db, job.client_id)
     client_domain = _client_domain(db, job.client_id)
+    scope = _client_scope(db, job.client_id)
     payloads: list[dict[str, Any]] = []
     for row in rows:
         query = (row.query or "").strip()
@@ -297,7 +310,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
             primary_site_url=primary_site_url,
             client_domain=client_domain,
         )
-        if not normalized_url:
+        if not normalized_url or not url_in_scope(normalized_url, scope):
             continue
         payloads.append(
             {

@@ -73,13 +73,61 @@ def normalize_landing_page(raw: str, domain: str | None = None) -> str:
     if value.lower() in _LANDING_SENTINELS:
         return value.lower()
     if value.startswith("/"):
-        host = (domain or "").strip()
+        host = _host_only(domain)
         if host:
-            if "://" in host:
-                host = urlsplit(host).hostname or host
             return normalize_url(f"https://{host}{value}")
         path = value.lower()
         if path != "/" and path.endswith("/"):
             path = path.rstrip("/")
         return path
     return normalize_url(value)
+
+
+def _host_only(value: str | None) -> str:
+    """The bare host from anything domain-shaped.
+
+    A client's path scope lives in its own field, but a path has been typed into
+    the domain before now — and silently joining it onto a GA4 path produced
+    `/section/section/page`, which still looks like a URL. Taking only the host
+    makes that impossible.
+    """
+    host = (value or "").strip().lower()
+    if not host:
+        return ""
+    if "://" in host:
+        host = urlsplit(host).hostname or ""
+    else:
+        host = host.split("/", 1)[0]
+    return host.removeprefix("www.").strip().strip(".")
+
+
+def normalize_path_prefix(value: str | None) -> str | None:
+    """Canonical path scope, or None for a whole site.
+
+    Accepts the shapes a person types: `unmanned`, `/unmanned/`, or a full URL.
+    Returns a lowercase path with a leading slash and no trailing one, matching
+    how `normalize_url` stores paths so the two can be compared directly.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if "://" in text:
+        text = urlsplit(text).path
+    text = text.split("?", 1)[0].split("#", 1)[0]
+    text = "/" + text.strip("/").lower()
+    return None if text == "/" else text
+
+
+def url_in_scope(normalized_url: str, prefix: str | None) -> bool:
+    """Whether a URL belongs to a client scoped to `prefix`.
+
+    A prefix matches its own page and anything beneath it, but not a sibling
+    that merely starts with the same letters: `/unmanned` must not claim
+    `/unmanned-sales`. Comparing on a path boundary is what makes that hold.
+    """
+    if not prefix:
+        return True
+    if not normalized_url:
+        return False
+    path = urlsplit(normalized_url).path.lower().rstrip("/") or "/"
+    return path == prefix or path.startswith(f"{prefix}/")

@@ -55,6 +55,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   const aiPromptLimit = parseOptionalInt("ai_search_prompt_limit");
   const crawlPageLimit = parseOptionalInt("crawl_page_limit");
   const sitemapUrl = String(formData.get("sitemap_url") || "").trim() || null;
+  const pathPrefix = String(formData.get("path_prefix") || "").trim() || null;
 
   if (
     [customKeyword, customPrompt, customContent, customRefresh, customGrowth].some((value) =>
@@ -122,6 +123,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     ai_search_prompt_limit: aiPromptLimit,
     crawl_page_limit: crawlPageLimit,
     sitemap_url: sitemapUrl,
+    path_prefix: pathPrefix,
   };
 
   if (!body.client_name || !body.domain || !body.tier_id) {

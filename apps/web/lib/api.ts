@@ -132,6 +132,8 @@ export type Client = {
   crawl_page_limit?: number | null;
   /** Declared sitemap, for sites where discovery cannot find one. */
   sitemap_url?: string | null;
+  /** Folder this client's site occupies on `domain`; null is the whole domain. */
+  path_prefix?: string | null;
   status: string;
   created_at: string;
   updated_at: string;

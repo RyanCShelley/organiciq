@@ -66,6 +66,11 @@ class Client(Base):
     crawl_page_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: Declared sitemap, for sites where discovery cannot find one.
     sitemap_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: Path this client's site occupies on `domain`, for a brand that lives in a
+    #: folder of a larger site. Null is the whole domain. The path never belongs
+    #: in `domain` itself: that field is a host everywhere it is read, and a path
+    #: there is silently joined onto GA4 and GSC paths that already contain it.
+    path_prefix: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Dashboard baseline snapshot (calculator / contract start)
     baseline_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     # The window the snapshot was measured over. Previously only the end date
