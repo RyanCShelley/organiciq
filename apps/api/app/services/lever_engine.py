@@ -277,7 +277,27 @@ def _rule_key(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
-def _link_floor(word_count: int) -> int:
+def _link_floor(
+    word_count: int,
+    classification: PageClassification | None = None,
+    thresholds: dict[str, float | int] | None = None,
+) -> int:
+    """How many editorial links a page should have, by what it is for. T4.
+
+    Length was the wrong yardstick. A three-thousand-word blog post was held
+    to the same bar as the services page the business runs on, and a short
+    high-intent page was let off with two. What a page is for decides how much
+    of the site should be pointing at it.
+    """
+    limits = thresholds or {}
+    if classification is not None:
+        if classification.page_type in {PageType.CONVERSION, PageType.COMMERCIAL}:
+            return int(limits.get("link_floor_money", 10))
+        if classification.page_type is PageType.CONSIDERATION:
+            return int(limits.get("link_floor_industry", 6))
+        if classification.page_type is PageType.INFORMATIONAL:
+            return int(limits.get("link_floor_blog", 3))
+    # No classification: fall back to length, which is better than nothing.
     if word_count < 500:
         return 2
     if word_count < 2000:
@@ -1033,6 +1053,9 @@ class LinkGap:
     source_url: str
     shared_query: str
     source_clicks: float
+    #: Referring domains pointing at the donor. A page with links of its own
+    #: has more to lend than one that merely gets clicks.
+    source_refdomains: int = 0
 
 
 def _link_gaps(
@@ -1041,7 +1064,8 @@ def _link_gaps(
     *,
     period: tuple[date, date] | None,
     targets: set[str],
-) -> dict[str, LinkGap]:
+    max_donors: int = 3,
+) -> dict[str, list[LinkGap]]:
     """For each under-linked page, the best page that should link to it.
 
     "This page has fewer than five inbound links" is a symptom. It tells a
@@ -1097,7 +1121,16 @@ def _link_gaps(
         .all()
     }
 
-    best: dict[str, LinkGap] = {}
+    # Referring domains per donor, so authority is measured by what links to
+    # the page and not only by what it earns. T4.
+    refdomains = {
+        row.normalized_url: row.refdomains
+        for row in db.query(FactSerBacklinkPage).filter(
+            FactSerBacklinkPage.client_id == client_id
+        )
+    }
+
+    candidates: dict[str, dict[str, LinkGap]] = {}
     for query, entries in by_query.items():
         if len(entries) < 2:
             continue
@@ -1111,14 +1144,23 @@ def _link_gaps(
                     continue
                 if (source_url, target_url) in existing:
                     continue
-                current = best.get(target_url)
-                if current is None or source_clicks > current.source_clicks:
-                    best[target_url] = LinkGap(
+                found = candidates.setdefault(target_url, {})
+                existing_gap = found.get(source_url)
+                if existing_gap is None or source_clicks > existing_gap.source_clicks:
+                    found[source_url] = LinkGap(
                         source_url=source_url,
                         shared_query=query,
                         source_clicks=source_clicks,
+                        source_refdomains=refdomains.get(source_url, 0),
                     )
-    return best
+
+    return {
+        target: sorted(
+            donors.values(),
+            key=lambda gap: (-gap.source_refdomains, -gap.source_clicks),
+        )[:max_donors]
+        for target, donors in candidates.items()
+    }
 
 
 def _internal_linking_finding(
@@ -1130,10 +1172,12 @@ def _internal_linking_finding(
     lead_rate_ctx: LeadRateContext | None = None,
     classification: PageClassification | None = None,
     link_gap: LinkGap | None = None,
+    link_gaps: list[LinkGap] | None = None,
+    thresholds: dict[str, float | int] | None = None,
 ) -> LeverFinding | None:
     if page.average_position < 4 or page.average_position > 20:
         return None
-    floor = _link_floor(crawl.word_count)
+    floor = _link_floor(crawl.word_count, classification, thresholds)
     # Editorial links only. Counting navigation put every page that sits in a
     # menu above the floor regardless of whether anything references it — on
     # smamarketing.com only 12% of inbound links are editorial, so the lever was
@@ -1162,12 +1206,20 @@ def _internal_linking_finding(
     # generic lever text still applies — there is simply no page that both
     # shares a subject and has the authority to lend.
     action = None
-    if link_gap is not None:
+    donors = link_gaps or ([link_gap] if link_gap else [])
+    if donors:
+        lines = [
+            f"{gap.source_url} (anchor: \u201c{gap.shared_query}\u201d"
+            + (f", {gap.source_refdomains} referring domains" if gap.source_refdomains else "")
+            + ")"
+            for gap in donors
+        ]
         action = (
-            f"Add a link to this page from {link_gap.source_url}. Both rank for "
-            f"\u201c{link_gap.shared_query}\u201d and that page earns "
-            f"{int(link_gap.source_clicks):,} clicks for it, so it has the authority "
-            "this one is missing."
+            "Add links to this page from: "
+            + "; ".join(lines)
+            + ". Each ranks for the same query and has the authority this page is "
+            "missing. The anchor is the shared query — confirm it reads naturally "
+            "in the donor's copy before using it verbatim."
         )
     return _make_finding(
         lever=GrowthAction.INTERNAL_LINKING.value,
@@ -1176,8 +1228,17 @@ def _internal_linking_finding(
         action_override=action,
         evidence_json={
             "position": round(page.average_position, 1),
-            "link_from": link_gap.source_url if link_gap else None,
-            "link_shared_query": link_gap.shared_query if link_gap else None,
+            "link_from": donors[0].source_url if donors else None,
+            "link_shared_query": donors[0].shared_query if donors else None,
+            "link_donors": [
+                {
+                    "url": gap.source_url,
+                    "anchor": gap.shared_query,
+                    "clicks": int(gap.source_clicks),
+                    "refdomains": gap.source_refdomains,
+                }
+                for gap in donors
+            ],
             "inbound_internal_links": crawl.inbound_internal_links,
             "inbound_editorial_links": crawl.inbound_editorial_links,
             "inlink_source": "se_ranking_audit",
@@ -1272,7 +1333,8 @@ def _per_page_cascade(
     #: URLs the first-party crawl covered. None means it has never run, and no
     #: schema claim can be made about any page.
     schema_crawled_urls: frozenset[str] | None = None,
-    link_gaps: dict[str, LinkGap] | None = None,
+    link_gaps: dict[str, list[LinkGap]] | None = None,
+    thresholds: dict[str, float | int] | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
@@ -1311,7 +1373,9 @@ def _per_page_cascade(
                     site=site,
                     lead_rate_ctx=lead_rate_ctx,
                     classification=classification,
-                    link_gap=gaps.get(page.normalized_url),
+                    link_gap=(gaps.get(page.normalized_url) or [None])[0],
+                    link_gaps=gaps.get(page.normalized_url),
+                    thresholds=thresholds,
                 )
         if finding is None:
             finding = _serp_ctr_finding(
@@ -3151,9 +3215,15 @@ def diagnose(
             if crawl.source == CRAWL_SOURCE_FIRST_PARTY
             else crawl.inbound_internal_links
         )
-        < _link_floor(crawl.word_count)
+        < _link_floor(crawl.word_count, classifications.get(page.normalized_url), thresholds)
     }
-    link_gaps = _link_gaps(db, client.id, period=gsc_period, targets=under_linked)
+    link_gaps = _link_gaps(
+        db,
+        client.id,
+        period=gsc_period,
+        targets=under_linked,
+        max_donors=int(thresholds.get("link_max_donors", 3)),
+    )
 
     findings: list[LeverFinding] = []
     findings.extend(
@@ -3170,6 +3240,7 @@ def diagnose(
             schema_by_url=schema_by_url,
             schema_crawled_urls=schema_crawled_urls,
             link_gaps=link_gaps,
+            thresholds=thresholds,
         )
     )
     for site_finding in _site_technical_findings(
