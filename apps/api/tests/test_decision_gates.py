@@ -251,3 +251,59 @@ def test_core_work_never_becomes_a_recommended_action(db, client_a):
 
     assert recommended == []
     assert all_findings[0].promotion_blocked_reason == "core work: included in the monthly plan"
+
+
+# --- Every check prescribes a next move -------------------------------------
+
+
+def test_every_technical_signal_prescribes_an_action():
+    """The lever-level text restated the finding; a strategist needs the move."""
+    from app.services.lever_engine import INDEXATION_BLOCKING_SIGNALS, TECHNICAL_ACTIONS
+
+    detected_signals = {
+        "status_error",
+        "broken_redirect",
+        "redirect_chain",
+        "non_indexable",
+        "canonical_elsewhere",
+        "missing_meta",
+        "duplicate_meta",
+        "invalid_schema",
+        "missing_schema",
+        "sitemap_missing",
+        "robots_blocking",
+        "robots_advisory",
+    }
+    assert detected_signals <= set(TECHNICAL_ACTIONS)
+    # Every blocking signal is covered too, or the urgent ones would fall back
+    # to the generic lever text.
+    assert INDEXATION_BLOCKING_SIGNALS <= set(TECHNICAL_ACTIONS)
+
+
+def test_an_action_says_what_to_do_not_what_is_wrong():
+    from app.services.lever_engine import TECHNICAL_ACTIONS
+
+    for signal, action in TECHNICAL_ACTIONS.items():
+        first_word = action.split()[0]
+        assert first_word[0].isupper(), signal
+        # An imperative, not a restatement. "Resolve the flagged issue" was the
+        # old text and is exactly what this guards against.
+        assert "flagged" not in action.lower(), signal
+
+
+def test_the_technical_finding_carries_its_own_action(db, client_a):
+    from app.services.lever_engine import TECHNICAL_ACTIONS, _make_finding
+    from app.models.decision import GrowthAction
+
+    finding = _make_finding(
+        lever=GrowthAction.TECHNICAL_SEO.value,
+        rule_key="k",
+        diagnosis="Canonicalized elsewhere",
+        evidence_json={},
+        baseline_metrics_json={},
+        impact=50.0,
+        action_override=TECHNICAL_ACTIONS["canonical_elsewhere"],
+    )
+
+    assert finding.recommended_action == TECHNICAL_ACTIONS["canonical_elsewhere"]
+    assert "Point the canonical" in finding.recommended_action

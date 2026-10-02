@@ -412,6 +412,61 @@ def is_core_work_signal(audit_signal: str | None) -> bool:
     return bool(audit_signal) and audit_signal not in INDEXATION_BLOCKING_SIGNALS
 
 
+#: What to actually do, per signal.
+#:
+#: The lever-level action said "resolve the flagged technical issue (status,
+#: redirect, indexation, canonical, or core meta)", which is the finding read
+#: back with the word "resolve" in front. A strategist opening the queue needs
+#: the next move, not a restatement — and where the work is cheap, saying so
+#: is what lets someone judge whether it is worth an action.
+TECHNICAL_ACTIONS: dict[str, str] = {
+    "status_error": (
+        "Restore the page, or 301 it to the closest live equivalent. It has demand, "
+        "so leaving the error throws that away."
+    ),
+    "broken_redirect": (
+        "Repoint this redirect at a live URL. It currently lands on an error, so the "
+        "visitor and the link equity both stop here."
+    ),
+    "redirect_chain": (
+        "Collapse the chain to one hop, straight from the original URL to the final "
+        "destination."
+    ),
+    "non_indexable": (
+        "Remove the noindex or robots rule if this page should rank. If it genuinely "
+        "should not, the demand it is attracting belongs on a page that can."
+    ),
+    "canonical_elsewhere": (
+        "Point the canonical at this URL, or confirm the target is the page you want "
+        "ranking. Right now this page tells Google to ignore it, and it has demand."
+    ),
+    "missing_meta": "Write a title and meta description for this page.",
+    "duplicate_meta": (
+        "Give this page its own title and description — it currently shares them with "
+        "another page, so neither reads as the better answer."
+    ),
+    "invalid_schema": (
+        "Fix the malformed structured data. It is present but cannot be parsed, so it "
+        "earns nothing while looking like it should."
+    ),
+    "missing_schema": "Add structured data describing what this page is.",
+    "sitemap_missing": "Publish an XML sitemap and declare it in robots.txt.",
+    "robots_blocking": (
+        "Remove the robots.txt rule blocking crawl. Nothing on the blocked paths can "
+        "rank while it stands."
+    ),
+    "robots_advisory": (
+        "Correct the robots.txt syntax errors. A malformed rule is read more "
+        "broadly than intended often enough to be worth ten minutes."
+    ),
+}
+
+TRACKING_ACTION = (
+    "Fire a test conversion and confirm it reaches GA4. Until it does, every "
+    "other number in this report is built on a zero that may not be real."
+)
+
+
 ROBOTS_BLOCKING_CODES = frozenset({"robots_disallow_crawling"})
 ROBOTS_ADVISORY_CODES = frozenset(
     {"no_robots", "robots_not_accessible", "robots_has_errors"}
@@ -662,6 +717,7 @@ def _technical_finding(
         severity=assessment.severity,
         urgency_override=urgency_override,
         page_url=page.normalized_url,
+        action_override=TECHNICAL_ACTIONS.get(detected.audit_signal),
     )
     finding.core_work = is_core_work_signal(detected.audit_signal)
     return finding
@@ -696,6 +752,7 @@ def _site_technical_findings(
                 lever=GrowthAction.TECHNICAL_SEO.value,
                 rule_key=_rule_key("technical_sitemap", str(client_id)),
                 diagnosis="Website Audit reports the XML sitemap is missing.",
+                action_override=TECHNICAL_ACTIONS["sitemap_missing"],
                 evidence_json={
                     "audit_signal": "sitemap_missing",
                     "issue_code": "sitemap_missing",
@@ -739,6 +796,7 @@ def _site_technical_findings(
                     if audit_signal == "robots_blocking"
                     else "Website Audit reports robots.txt problems."
                 ),
+                action_override=TECHNICAL_ACTIONS.get(audit_signal),
                 evidence_json={
                     "audit_signal": audit_signal,
                     "issue_code": primary_code,
@@ -812,6 +870,7 @@ def _make_finding(
     query: str | None = None,
     urgency_override: float | None = None,
     severity: float | None = None,
+    action_override: str | None = None,
 ) -> LeverFinding:
     inputs = LEVER_INPUTS[lever]
     urgency = urgency_override if urgency_override is not None else inputs.urgency
@@ -826,7 +885,7 @@ def _make_finding(
         lever=lever,
         stage=inputs.stage,
         diagnosis=diagnosis,
-        recommended_action=inputs.recommended_action,
+        recommended_action=action_override or inputs.recommended_action,
         success_metric=inputs.success_metric,
         evidence_json=evidence_json,
         baseline_metrics_json=baseline_metrics_json,

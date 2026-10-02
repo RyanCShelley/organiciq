@@ -12,6 +12,7 @@ import {
   findingSubject,
   formatEvidence,
   impactExplanation,
+  findingState,
   promotionBlockedLabel,
   scoreBar,
   stageLabel,
@@ -21,18 +22,32 @@ import {
 
 function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys: Set<string>): {
   label: string;
-  variant: "success" | "warning" | "neutral" | "accent";
+  variant: "success" | "warning" | "neutral" | "accent" | "danger";
+  hint?: string;
 } {
-  if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) {
-    return { label: "Recommendation", variant: "success" };
+  switch (findingState(item, recommendedKeys, suggestedKeys)) {
+    case "blocked":
+      return {
+        label: "Blocked",
+        variant: "danger",
+        hint: "Scored from data a failed check says cannot be trusted. Clear that first.",
+      };
+    case "recommended":
+      return { label: "Recommendation", variant: "success" };
+    case "core-work":
+      return {
+        label: "Core work",
+        variant: "neutral",
+        hint: "Monthly upkeep, already in the plan — it does not spend a growth action.",
+      };
+    case "suggested":
+      return { label: "Suggested", variant: "accent" };
+    default:
+      return {
+        label: promotionBlockedLabel(item.promotion_blocked_reason),
+        variant: "warning",
+      };
   }
-  if (suggestedKeys.has(item.rule_key) || item.is_suggested) {
-    return { label: "Suggested", variant: "accent" };
-  }
-  return {
-    label: promotionBlockedLabel(item.promotion_blocked_reason),
-    variant: "warning",
-  };
 }
 
 function ExpandedFinding({
@@ -191,6 +206,14 @@ export function FindingsReviewPanel({
                       </td>
                       <td className="max-w-sm">
                         <Badge variant={status.variant}>{status.label}</Badge>
+                        {/* A one-word badge cannot say why a row is not an
+                            action. "Core work" and "Blocked" mean very
+                            different things to whoever picks this up. */}
+                        {status.hint ? (
+                          <div className="mt-1 text-[11.5px] leading-snug text-[var(--text-tertiary)]">
+                            {status.hint}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="whitespace-nowrap">
                         {decision ? (

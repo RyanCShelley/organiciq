@@ -25,6 +25,10 @@ export type Finding = {
   evidence_json: Record<string, unknown>;
   is_recommended_action?: boolean;
   promotion_blocked_reason?: string | null;
+  /** Upkeep the plan covers every month — reported, never spends an action. */
+  core_work?: boolean;
+  /** Rule key of the gate that failed; this finding cannot be trusted yet. */
+  suppressed_by?: string | null;
   priority_band?: string;
   priority_band_reason?: string | null;
   /** UI-only: optional alternative surfaced when hard recommendations are below the plan allowance */
@@ -111,6 +115,30 @@ export function leverStatusLabel(status: string): string {
 export function promotionBlockedLabel(reason: string | null | undefined): string {
   if (!reason) return "Not promoted for this period.";
   return PROMOTION_BLOCKED_LABELS[reason] ?? reason.replaceAll("_", " ");
+}
+
+/**
+ * How a finding should read on screen.
+ *
+ * Three states the old UI collapsed into one amber "not promoted" chip:
+ * work the plan already covers, work that cannot be judged until a gate is
+ * cleared, and work that simply did not score high enough this period. They
+ * call for different responses, so they should not look the same.
+ */
+export type FindingState = "recommended" | "suggested" | "core-work" | "blocked" | "deferred";
+
+export function findingState(
+  item: Finding,
+  recommendedKeys: Set<string>,
+  suggestedKeys: Set<string>,
+): FindingState {
+  // A gate failing outranks everything: the score behind any other state was
+  // computed from data the gate says is wrong.
+  if (item.suppressed_by) return "blocked";
+  if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) return "recommended";
+  if (item.core_work) return "core-work";
+  if (suggestedKeys.has(item.rule_key) || item.is_suggested) return "suggested";
+  return "deferred";
 }
 
 export function formatPriorityBand(band: string | undefined): string | null {
