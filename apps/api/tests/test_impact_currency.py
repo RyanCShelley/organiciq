@@ -169,3 +169,19 @@ def test_keyword_impact_differentiates_by_search_volume():
     assert len(set(scores)) == len(scores), f"all terms scored the same: {scores}"
     # A big term has to be able to clear the actionable threshold at all.
     assert scores[-1] > 25
+
+
+def test_watchlist_findings_prescribe_rather_than_restate():
+    """"Recover search rankings for tracked keywords" is the finding read back."""
+    from app.services.lever_engine import PROMPT_ACTION, keyword_action
+
+    slipped = keyword_action("keyword_fell_top5", "seo agency", "https://x.com/seo")
+    never = keyword_action("keyword_not_ranking", "aeo agency", None)
+
+    # A term that slipped has a page to recover; one that never ranked has none,
+    # so telling someone to "recover rankings" for it says nothing.
+    assert "https://x.com/seo" in slipped
+    assert "drop it from the watchlist" in never
+    assert slipped != never
+    assert "tracked keywords and improve AI citation" not in slipped
+    assert "citation" in PROMPT_ACTION

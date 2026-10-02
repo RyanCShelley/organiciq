@@ -516,6 +516,30 @@ TECHNICAL_ACTIONS: dict[str, str] = {
     ),
 }
 
+#: What to do about a watchlist term, per shape of the problem. A term that
+#: slipped has a page to recover; a term that never ranked has no page at all,
+#: and telling someone to "recover rankings" for it is telling them nothing.
+def keyword_action(signal: str, keyword: str, ranking_url: str | None) -> str:
+    where = f" on {ranking_url}" if ranking_url else ""
+    if signal in {"keyword_fell_top5", "keyword_fell_top10"}:
+        return (
+            f"Recover \u201c{keyword}\u201d{where}: compare the page against what now "
+            "outranks it for coverage and freshness, and check nothing changed on it "
+            "when the slip began."
+        )
+    return (
+        f"Nothing ranks for \u201c{keyword}\u201d. Decide whether to build a page that "
+        "targets it properly, or drop it from the watchlist — a term tracked for "
+        "months with no page behind it is measuring an intention, not the work."
+    )
+
+
+PROMPT_ACTION = (
+    "Win a citation for this prompt: the sources answer engines currently cite "
+    "are the brief. Cover what they cover, say it more plainly, and make sure the "
+    "page states who it is about in terms a model can attribute."
+)
+
 TRACKING_ACTION = (
     "Fire a test conversion and confirm it reaches GA4. Until it does, every "
     "other number in this report is built on a zero that may not be real."
@@ -1504,6 +1528,7 @@ def _ai_visibility_keyword_findings(
             impact=impact,
             query=row.keyword,
             page_url=row.ranking_url,
+            action_override=keyword_action(signal, row.keyword, row.ranking_url),
         )
         # Prefer fallouts over not-ranking when sorting; volume is secondary.
         rank_boost = {"keyword_fell_top5": 1e9, "keyword_fell_top10": 1e8}.get(signal, 0.0)
@@ -1599,6 +1624,7 @@ def _ai_visibility_prompt_findings(
             },
             impact=impact,
             query=prompt_text[:200],
+            action_override=PROMPT_ACTION,
         )
         candidates.append((volume + len(rows), finding))
 
