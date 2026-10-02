@@ -1,4 +1,4 @@
-"""Queue a long historical sync for one client.
+"""Queue a sync job for one client, with history where the source has it.
 
 The daily cycle pulls three days and the Integrations page offers ninety. Neither
 reaches far enough to see a season: a pool leak detection company is quiet from
@@ -43,10 +43,19 @@ MAX_MONTHS = {"gsc_pages": 16, "gsc_queries": 16}
 #: Search Console finalises a day or two late; asking for today returns nothing.
 SOURCE_LAG_DAYS = {"gsc_pages": 3, "gsc_queries": 3, "ga4": 2}
 
-BACKFILLABLE = ("gsc_pages", "gsc_queries", "ga4")
+#: A crawl has no history to ask for — it reads the site as it is now — so it
+#: takes a single-day window like the Run crawl button does. It lives here
+#: because this is where one-off jobs are queued from a terminal, which is the
+#: only route when the database is not reachable.
+SAME_DAY_SOURCES = ("site_crawl",)
+
+BACKFILLABLE = ("gsc_pages", "gsc_queries", "ga4", *SAME_DAY_SOURCES)
 
 
 def backfill_window(source: str, months: int, today: date | None = None) -> tuple[date, date]:
+    if source in SAME_DAY_SOURCES:
+        day = today or date.today()
+        return day, day
     end = (today or date.today()) - timedelta(days=SOURCE_LAG_DAYS.get(source, 2))
     capped = min(months, MAX_MONTHS.get(source, months))
     start = end - timedelta(days=round(capped * 365 / 12) - 1)
@@ -81,7 +90,9 @@ def main() -> int:
             days,
             capped,
         )
-        if capped < args.months:
+        if args.source in SAME_DAY_SOURCES:
+            logger.info("%s reads the site as it is now, so there is no window to widen.", args.source)
+        elif capped < args.months:
             logger.info(
                 "Capped at %d months: %s does not serve more than that.", capped, args.source
             )

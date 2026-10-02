@@ -44,3 +44,14 @@ def test_a_short_window_is_honoured():
     start, end = backfill_window("gsc_pages", 3, TODAY)
 
     assert (end - start).days + 1 == 91
+
+
+def test_a_crawl_takes_a_single_day_window():
+    """A crawl reads the site as it is now; there is no history to ask for."""
+    start, end = backfill_window("site_crawl", 16, TODAY)
+
+    assert start == end == TODAY
+
+
+def test_the_crawl_window_ignores_the_months_asked_for():
+    assert backfill_window("site_crawl", 1, TODAY) == backfill_window("site_crawl", 36, TODAY)
