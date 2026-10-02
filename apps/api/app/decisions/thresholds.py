@@ -56,6 +56,18 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "lead_spike_multiple": 3.0,
     # 3x of two leads is six, which is a good week, not a spike.
     "lead_spike_min_leads": 10,
+    # --- Phase 4: new rules, each behind a flag that defaults on ---
+    "rule_ai_sov_falling_enabled": 1,
+    "rule_link_reclamation_enabled": 1,
+    # Share of the tracked prompt set mentioning the brand, read over this
+    # many days. A relative fall past the percentage is the finding.
+    "ai_sov_window_days": 30,
+    "ai_sov_drop_pct": 20.0,
+    # Below this the share is too small for a 20% relative move to mean
+    # anything: 2% to 1.5% is one prompt changing its mind.
+    "ai_sov_min_presence_pct": 5.0,
+    # A broken URL worth reclaiming has at least this many referring domains.
+    "reclaim_min_refdomains": 1,
     # C1: confidence read from the evidence rather than from the lever.
     # Applying it is off until the distribution across real clients has been
     # looked at — see app/decisions/confidence.py.

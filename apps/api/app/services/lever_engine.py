@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -48,6 +49,7 @@ from app.core.urls import normalize_url
 from app.models.seranking import (
     FactSerAiCheck,
     FactSerAiPrompt,
+    FactSerAiTrackerStats,
     FactSerBacklinkPage,
     FactSerKeyword,
 )
@@ -3080,6 +3082,242 @@ def _tracking_failure_finding(
     )
 
 
+def _ai_sov_falling_finding(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+    site: SiteBusinessContext,
+    thresholds: dict[str, Any],
+) -> LeverFinding | None:
+    """Share of the tracked prompt set that mentions the brand, falling. N1.
+
+    The per-prompt rule says a prompt never cites you, which is a fact about
+    one prompt and stays true for months. This asks whether the set as a whole
+    is moving, which is the question someone running the account actually has.
+
+    `ai_sov` on the prompt fact is never populated by the ingest, so this uses
+    the tracker's own presence percentage — the share of checked prompts that
+    mentioned the brand, which is what share of voice means here.
+    """
+    if period is None or not thresholds.get("rule_ai_sov_falling_enabled"):
+        return None
+
+    _, end = period
+    window = int(thresholds.get("ai_sov_window_days", 30))
+    start = end - timedelta(days=window)
+
+    rows = (
+        db.query(FactSerAiTrackerStats)
+        .filter(
+            FactSerAiTrackerStats.client_id == client.id,
+            FactSerAiTrackerStats.metric_date >= start,
+            FactSerAiTrackerStats.metric_date <= end,
+        )
+        .order_by(FactSerAiTrackerStats.metric_date)
+        .all()
+    )
+    points = [
+        (row.metric_date, float(row.mention_presence_pct))
+        for row in rows
+        if row.mention_presence_pct is not None
+    ]
+    if len(points) < 2:
+        return None
+
+    (_, first), (_, last) = points[0], points[-1]
+    floor = float(thresholds.get("ai_sov_min_presence_pct", 5.0))
+    if first < floor:
+        # A 20% relative fall from 2% is half a percentage point, which is one
+        # prompt changing its mind. Relative moves need a base to be relative to.
+        return None
+
+    drop_pct = ((first - last) / first) * 100.0
+    if drop_pct < float(thresholds.get("ai_sov_drop_pct", 20.0)):
+        return None
+
+    volume = max(float(len(rows)), 50.0)
+    impact, impact_evidence = score_ai_visibility_impact(
+        signal="ai_sov_falling",
+        volume=volume,
+        site=site,
+    )
+    return _make_finding(
+        lever=GrowthAction.AI_VISIBILITY.value,
+        rule_key=_rule_key("ai_sov_falling", str(client.id)),
+        diagnosis=(
+            f"AI share of voice fell from {first:.1f}% to {last:.1f}% of tracked "
+            f"prompts over {window} days"
+        ),
+        evidence_json={
+            "audit_signal": "ai_sov_falling",
+            "promotion_class": "actionable",
+            "window_days": window,
+            "presence_start_pct": round(first, 2),
+            "presence_end_pct": round(last, 2),
+            "relative_drop_pct": round(drop_pct, 1),
+            "checks_in_window": len(rows),
+            **impact_evidence,
+        },
+        baseline_metrics_json={"presence_start_pct": round(first, 2)},
+        impact=impact,
+        action_override=(
+            "Find which prompts stopped mentioning the brand and what is being "
+            "cited instead. A falling share is usually a competitor publishing "
+            "the answer you used to own, not a ranking change."
+        ),
+    )
+
+
+#: A 3xx landing here is a redirect to nowhere in particular — the link
+#: equity arrives and the visitor has to start again.
+_GENERIC_REDIRECT_PATHS = frozenset({"", "/", "/home", "/index", "/index.html"})
+
+
+def _link_reclamation_findings(
+    db: Session,
+    client: Client,
+    *,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot],
+    site: SiteBusinessContext,
+    thresholds: dict[str, Any],
+) -> list[LeverFinding]:
+    """Broken URLs that other sites still link to. N2.
+
+    A 404 on a page nobody links to is housekeeping. A 404 on a page with
+    referring domains is somebody else's link pointing at nothing, and the
+    authority it carries stops at the error. The same is true of a redirect
+    that dumps every inbound link on the homepage: the link survives, the
+    relevance does not.
+    """
+    if not thresholds.get("rule_link_reclamation_enabled"):
+        return []
+
+    min_domains = float(thresholds.get("reclaim_min_refdomains", 1))
+    linked = {
+        row.normalized_url: row
+        for row in db.query(FactSerBacklinkPage)
+        .filter(
+            FactSerBacklinkPage.client_id == client.id,
+            FactSerBacklinkPage.refdomains >= min_domains,
+        )
+        .all()
+    }
+    if not linked:
+        return []
+
+    findings: list[LeverFinding] = []
+    for url, backlinks in linked.items():
+        crawl = crawl_by_url.get(url)
+        if crawl is None or crawl.status_code is None:
+            continue
+        status = crawl.status_code
+        broken = status >= 400
+        dumped = False
+        if 300 <= status < 400 and crawl.redirect_url:
+            target_path = urlsplit(crawl.redirect_url).path.rstrip("/").lower()
+            dumped = target_path in _GENERIC_REDIRECT_PATHS
+        if not broken and not dumped:
+            continue
+
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            recoverable_clicks=float(backlinks.refdomains),
+            strategic_priority=4,
+            data_confidence="medium",
+        )
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.TECHNICAL_SEO.value,
+                rule_key=_rule_key("link_reclaim", url),
+                diagnosis=(
+                    f"HTTP {status} on a URL {backlinks.refdomains} domains still "
+                    f"link to: {url}"
+                    if broken
+                    else (
+                        f"{backlinks.refdomains} linking domains land on the homepage "
+                        f"via this redirect: {url}"
+                    )
+                ),
+                evidence_json={
+                    "audit_signal": "link_reclamation",
+                    "promotion_class": "actionable",
+                    "status_code": status,
+                    "redirect_url": crawl.redirect_url,
+                    "refdomains": backlinks.refdomains,
+                    "backlinks": backlinks.backlinks,
+                    **impact_evidence,
+                },
+                baseline_metrics_json={"refdomains": backlinks.refdomains},
+                impact=impact,
+                page_url=url,
+                action_override=(
+                    "Restore the page, or 301 it to the closest page on the same "
+                    "subject. Pointing it at the homepage keeps the link and throws "
+                    "away what it was about."
+                ),
+            )
+        )
+    return findings
+
+
+def _ai_referral_segment(
+    db: Session,
+    client_id: UUID,
+    *,
+    period: tuple[date, date] | None,
+    lead_events: list[str],
+) -> dict[str, dict[str, float]]:
+    """Sessions and leads arriving from AI assistants, per page. N4.
+
+    Reported as its own segment because it answers a question the organic
+    numbers cannot: whether the work is earning anything from the surfaces
+    that do not report impressions.
+    """
+    if period is None:
+        return {}
+    start, end = period
+    out: dict[str, dict[str, float]] = {}
+    sessions = (
+        db.query(
+            FactGa4Traffic.normalized_url,
+            func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
+        )
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+            FactGa4Traffic.channel == OrganicChannel.AI_REFERRAL,
+        )
+        .group_by(FactGa4Traffic.normalized_url)
+        .all()
+    )
+    for url, total in sessions:
+        if url and float(total) > 0:
+            out.setdefault(url, {"sessions": 0.0, "leads": 0.0})["sessions"] = float(total)
+
+    if lead_events:
+        leads = (
+            db.query(
+                FactGa4Event.normalized_url,
+                func.coalesce(func.sum(FactGa4Event.event_count), 0),
+            )
+            .filter(
+                FactGa4Event.client_id == client_id,
+                FactGa4Event.date >= start,
+                FactGa4Event.date <= end,
+                FactGa4Event.channel == OrganicChannel.AI_REFERRAL,
+                FactGa4Event.event_name.in_(lead_events),
+            )
+            .group_by(FactGa4Event.normalized_url)
+            .all()
+        )
+        for url, total in leads:
+            if url and float(total) > 0:
+                out.setdefault(url, {"sessions": 0.0, "leads": 0.0})["leads"] = float(total)
+    return out
+
+
 def _tracking_anomaly_findings(
     db: Session,
     client: Client,
@@ -3801,6 +4039,45 @@ def diagnose(
     # in the payload — hiding them entirely would make the queue look empty
     # when it is only untrustworthy — but nothing is promoted to a Growth
     # Action until the tag is fixed.
+    # ── Phase 4 ──
+    # Each behind a flag that defaults on, so a client who disagrees with a
+    # new rule can switch it off without waiting for a deploy.
+    sov = _ai_sov_falling_finding(
+        db, client, period=gsc_period or ga4_period, site=site, thresholds=thresholds
+    )
+    if sov is not None:
+        _enrich_finding(sov, classification=None, page_ctx=None)
+        findings.append(sov)
+
+    reclaimed = _link_reclamation_findings(
+        db, client, crawl_by_url=crawl_by_url, site=site, thresholds=thresholds
+    )
+    for finding in reclaimed:
+        _enrich_finding(
+            finding,
+            classification=classifications.get(finding.page_url or ""),
+            page_ctx=page_contexts.get(finding.page_url or ""),
+        )
+    findings.extend(reclaimed)
+
+    # N4: AI assistants do not report impressions, so the organic numbers on a
+    # page finding cannot say whether that surface is earning anything. This
+    # rides along on every page finding as its own segment.
+    ai_segment = _ai_referral_segment(
+        db,
+        client.id,
+        period=ga4_period,
+        lead_events=_lead_event_names(db, client.id),
+    )
+    if ai_segment:
+        for finding in findings:
+            segment = ai_segment.get(finding.page_url or "")
+            if segment:
+                finding.evidence_json["ai_referral_sessions"] = round(
+                    segment["sessions"], 1
+                )
+                finding.evidence_json["ai_referral_leads"] = round(segment["leads"], 1)
+
     # The two Gate 0 anomalies that are not total silence. They compete on
     # impact like anything else — only silence has a veto. Phase 3.
     findings.extend(
