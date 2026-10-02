@@ -68,6 +68,13 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "ai_sov_min_presence_pct": 5.0,
     # A broken URL worth reclaiming has at least this many referring domains.
     "reclaim_min_refdomains": 1,
+    # --- Phase 5: effort ---
+    # Between two findings worth the same, the cheaper one should come first.
+    # These re-order the queue; they never promote or block anything.
+    "effort_weight_small": 1.0,
+    "effort_weight_medium": 1.5,
+    "effort_weight_large": 2.5,
+    "effort_reorder_top_n": 25,
     # C1: confidence read from the evidence rather than from the lever.
     # Applying it is off until the distribution across real clients has been
     # looked at — see app/decisions/confidence.py.

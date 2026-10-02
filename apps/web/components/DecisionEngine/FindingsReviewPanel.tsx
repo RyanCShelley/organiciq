@@ -49,6 +49,31 @@ function groupByStage(findings: Finding[]): [string, Finding[]][] {
   ]);
 }
 
+/**
+ * Effort as a size, not a number. Two findings worth the same are not the
+ * same job, and the queue orders the top of the list by what each costs —
+ * so the cost has to be visible, or the order looks arbitrary.
+ */
+const EFFORT_LABELS: Record<string, { label: string; title: string }> = {
+  S: { label: "S", title: "Small — an edit to one page" },
+  M: { label: "M", title: "Medium — a page's worth of work" },
+  L: { label: "L", title: "Large — a new page, or a rewrite" },
+};
+
+function EffortChip({ item }: { item: Finding }) {
+  const size = String(item.evidence_json?.effort_class ?? "");
+  const meta = EFFORT_LABELS[size];
+  if (!meta) return null;
+  return (
+    <span
+      title={meta.title}
+      className="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-[3px] bg-[var(--surface-muted)] text-[10px] font-bold text-[var(--text-tertiary)]"
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys: Set<string>): {
   label: string;
   variant: "success" | "warning" | "neutral" | "accent" | "danger";
@@ -240,7 +265,10 @@ export function FindingsReviewPanel({
                 return (
                   <Fragment key={item.rule_key}>
                     <tr className="align-top">
-                      <td className="whitespace-nowrap">{item.label}</td>
+                      <td className="whitespace-nowrap">
+                        {item.label}
+                        <EffortChip item={item} />
+                      </td>
                       <td className="max-w-xs">
                         <span className="line-clamp-2 break-all">{findingSubject(item)}</span>
                       </td>

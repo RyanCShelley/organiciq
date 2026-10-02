@@ -21,6 +21,23 @@ from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.services.dashboard import period_lead_goal
 from app.services.page_eligibility import PageClassification, PageType
 
+#: What one period's "meaningful" lead movement is, as a share of the goal.
+#:
+#: Impact is a percentage of this reference, not of the goal, so the units
+#: are worth stating plainly — they are easy to read as "percent of the
+#: goal" and be wrong by a factor of four. S3.
+#:
+#:     reference_leads = 0.25 x period_lead_goal
+#:     impact          = (leads / reference_leads) x 100
+#:
+#: So an impact of 25 is a finding worth 25% of the reference, which is
+#: 6.25% of the period goal. On a 20-lead goal the reference is 5 leads and
+#: an impact of 25 is 1.25 leads. `minimum_actionable_impact` of 25 is
+#: therefore "worth at least a sixteenth of the month", not "a quarter".
+#:
+#: The cap at 100 means any finding worth a quarter of the goal or more
+#: scores the same; past that point the ranking is doing no work and the
+#: size of the prize is not the question any more.
 LEAD_IMPACT_REFERENCE_FRACTION = 0.25
 UPSTREAM_FALLBACK_IMPACT_CAP = 35.0
 FALLBACK_VISIBILITY_IMPACT_CAP = 35.0

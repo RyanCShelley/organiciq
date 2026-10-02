@@ -15,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
+from app.decisions.effort import effort_class, ranking_score
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
     benchmark_source_label,
@@ -4131,6 +4132,26 @@ def diagnose(
     cap_per_url_impact(findings)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
+
+    # ── S1 ──
+    # Size every finding and re-order the top of the queue by what it costs.
+    # Only the order moves: promotion still turns on impact and confidence, so
+    # nothing is promoted or blocked for being cheap or expensive. Confined to
+    # the top N because the tail is not work anyone is choosing between.
+    top_n = int(thresholds.get("effort_reorder_top_n", 25))
+    for finding in findings:
+        size = effort_class(finding.lever, finding.evidence_json)
+        finding.evidence_json["effort_class"] = size
+        finding.evidence_json["ranking_score"] = ranking_score(
+            impact=finding.impact,
+            confidence=finding.confidence,
+            effort=size,
+            thresholds=thresholds,
+        )
+    head = findings[:top_n]
+    head.sort(key=lambda row: row.evidence_json["ranking_score"], reverse=True)
+    findings[:top_n] = head
+
     all_findings, recommended_actions = promote_findings(
         findings,
         classifications=classifications,
