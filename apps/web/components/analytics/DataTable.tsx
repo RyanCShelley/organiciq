@@ -16,8 +16,24 @@ export type DataTableColumn<T> = {
    * control has to opt out, or the overlay swallows it.
    */
   interactive?: boolean;
+  /**
+   * Makes the header clickable, ordering by what this returns.
+   *
+   * Separate from `render` because what you read and what you sort by differ:
+   * a chip reading "Near win" orders by how actionable it is, not by "N".
+   */
+  sortValue?: (row: T) => number | string | null;
+  /**
+   * Which way the first click should order this column.
+   *
+   * Biggest-first is right for a count and wrong for a ranking: opening
+   * "Opportunity Type" on descending buries the quickest wins at the bottom.
+   */
+  sortInitial?: "asc" | "desc";
   render: (row: T) => ReactNode;
 };
+
+export type SortState = { key: string; dir: "asc" | "desc" };
 
 export function DataTable<T>({
   columns,
@@ -28,6 +44,8 @@ export function DataTable<T>({
   emptyMessage = "No data for this period.",
   rowHref,
   rowLabel,
+  sort,
+  onSortChange,
 }: {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -42,7 +60,29 @@ export function DataTable<T>({
    */
   rowHref?: (row: T) => string;
   rowLabel?: (row: T) => string;
+  /** Current ordering. Columns with `sortValue` become clickable when set. */
+  sort?: SortState | null;
+  onSortChange?: (key: string) => void;
 }) {
+  const sortColumn = sort ? columns.find((column) => column.key === sort.key) : undefined;
+  if (sortColumn?.sortValue) {
+    const read = sortColumn.sortValue;
+    const direction = sort?.dir === "asc" ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      const left = read(a);
+      const right = read(b);
+      // Missing values sink, whichever way the column is pointing: they are
+      // never the answer to "show me the biggest" or "the smallest".
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      if (typeof left === "number" && typeof right === "number") {
+        return (left - right) * direction;
+      }
+      return String(left).localeCompare(String(right)) * direction;
+    });
+  }
+
   if (rows.length === 0) {
     return (
       <div
@@ -66,14 +106,37 @@ export function DataTable<T>({
       <table>
         <thead>
           <tr>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                className={cn(column.align === "right" && "text-right", column.className)}
-              >
-                {column.header}
-              </th>
-            ))}
+            {columns.map((column) => {
+              const sortable = Boolean(column.sortValue && onSortChange);
+              const active = sort?.key === column.key;
+              return (
+                <th
+                  key={column.key}
+                  className={cn(column.align === "right" && "text-right", column.className)}
+                  aria-sort={
+                    active ? (sort?.dir === "asc" ? "ascending" : "descending") : undefined
+                  }
+                >
+                  {sortable ? (
+                    <button
+                      type="button"
+                      onClick={() => onSortChange?.(column.key)}
+                      className={cn(
+                        "inline-flex items-center gap-1 hover:text-[var(--text-primary)]",
+                        active && "text-[var(--text-primary)]",
+                      )}
+                    >
+                      {column.header}
+                      <span aria-hidden className="text-[9px] leading-none">
+                        {active ? (sort?.dir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
+                    </button>
+                  ) : (
+                    column.header
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

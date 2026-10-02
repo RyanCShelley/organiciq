@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { DataTable } from "@/components/analytics/DataTable";
+import { DataTable, type SortState } from "@/components/analytics/DataTable";
 import { Input } from "@/components/ui/Input";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { formatNum, type SearchOpportunity } from "@/lib/decision-engine";
@@ -28,6 +28,33 @@ const OPPORTUNITY_TYPE_STYLES: Record<string, string> = {
   "Striking distance": "bg-[var(--accent-soft)] text-[var(--brand-teal-hover)]",
 };
 
+/**
+ * What the three labels mean, taken from `_classify_opportunity` rather than
+ * paraphrased — a key that drifts from the rule is worse than none.
+ *
+ * The order is the engine's own precedence, which is also roughly cheapest
+ * work first, so sorting by type puts the quickest wins on top.
+ */
+const OPPORTUNITY_TYPES: { value: string; meaning: string }[] = [
+  {
+    value: "CTR gap",
+    meaning: "Ranking is fine but clicks are under half what the position should earn — the listing, not the page",
+  },
+  { value: "Near win", meaning: "Averaging position 5 or better: a small push moves it into the top results" },
+  { value: "Striking distance", meaning: "Ranking below position 5 with no particular click problem — the broad middle" },
+];
+
+const TYPE_RANK: Record<string, number> = Object.fromEntries(
+  OPPORTUNITY_TYPES.map((row, index) => [row.value, index]),
+);
+
+/** Counts open biggest-first; rankings and labels open at the useful end. */
+const COLUMN_SORT_INITIAL: Record<string, "asc" | "desc"> = {
+  opportunity_type: "asc",
+  page_type: "asc",
+  position: "asc",
+};
+
 const CHIP = "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold tracking-[0.02em]";
 
 function Chip({ value, styles }: { value: string; styles: Record<string, string> }) {
@@ -49,15 +76,29 @@ export function SearchOpportunitiesTable({
 }) {
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Impressions descending is how the list already arrived; making it the
+  // starting sort means clicking a header changes the order rather than
+  // revealing that it was never what you thought.
+  const [sort, setSort] = useState<SortState>({ key: "impressions", dir: "desc" });
+
+  function toggleSort(key: string) {
+    setSort((current) => {
+      if (current.key === key) {
+        return { key, dir: current.dir === "desc" ? "asc" : "desc" };
+      }
+      const column = COLUMN_SORT_INITIAL[key] ?? "desc";
+      return { key, dir: column };
+    });
+    setVisibleCount(PAGE_SIZE);
+  }
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return items;
     return items.filter((row) => {
       const url = (row.page_url ?? "").toLowerCase();
-      const topic = (row.topic ?? "").toLowerCase();
       const q = (row.query ?? "").toLowerCase();
-      return url.includes(needle) || topic.includes(needle) || q.includes(needle);
+      return url.includes(needle) || q.includes(needle);
     });
   }, [items, query]);
 
@@ -87,7 +128,7 @@ export function SearchOpportunitiesTable({
             setQuery(event.target.value);
             setVisibleCount(PAGE_SIZE);
           }}
-          placeholder="Search by page URL, topic, or query…"
+          placeholder="Search by page URL or query…"
           aria-label="Search content opportunities"
         />
       </div>
@@ -113,32 +154,30 @@ export function SearchOpportunitiesTable({
                 ),
               },
               {
-                key: "topic",
-                header: "Topic",
-                render: (row) => (
-                  <span className="text-[var(--text-secondary)]">{row.topic ?? "—"}</span>
-                ),
-              },
-              {
                 key: "impressions",
+                sortValue: (row) => row.impressions ?? null,
                 header: "Impressions",
                 align: "right",
                 render: (row) => formatNum(row.impressions, 0),
               },
               {
                 key: "clicks",
+                sortValue: (row) => row.clicks ?? null,
                 header: "Clicks",
                 align: "right",
                 render: (row) => formatNum(row.clicks, 0),
               },
               {
                 key: "ctr",
+                sortValue: (row) => row.ctr_percent ?? null,
                 header: "CTR",
                 align: "right",
                 render: (row) => (row.ctr_percent != null ? `${row.ctr_percent}%` : "—"),
               },
               {
                 key: "position",
+                sortValue: (row) => row.average_position ?? null,
+                sortInitial: "asc",
                 header: "Avg Position",
                 align: "right",
                 render: (row) => formatNum(row.average_position),
@@ -146,6 +185,7 @@ export function SearchOpportunitiesTable({
               {
                 key: "page_type",
                 header: "Page Type",
+                sortValue: (row) => row.page_type ?? null,
                 render: (row) =>
                   row.page_type ? (
                     <Chip value={row.page_type} styles={PAGE_TYPE_STYLES} />
@@ -155,6 +195,7 @@ export function SearchOpportunitiesTable({
               },
               {
                 key: "tracked_keywords",
+                sortValue: (row) => row.tracked_keywords ?? null,
                 header: "Tracked KWs",
                 align: "right",
                 render: (row) =>
@@ -172,6 +213,8 @@ export function SearchOpportunitiesTable({
               {
                 key: "opportunity_type",
                 header: "Opportunity Type",
+                sortValue: (row) => TYPE_RANK[row.opportunity_type] ?? 99,
+                sortInitial: "asc",
                 render: (row) => (
                   <Chip value={row.opportunity_type} styles={OPPORTUNITY_TYPE_STYLES} />
                 ),
@@ -179,7 +222,20 @@ export function SearchOpportunitiesTable({
             ]}
             rows={visible}
             getRowKey={(row) => row.rule_key}
+            sort={sort}
+            onSortChange={toggleSort}
           />
+
+          <dl className="mt-4 grid gap-x-5 gap-y-2 text-xs sm:grid-cols-3">
+            {OPPORTUNITY_TYPES.map((row) => (
+              <div key={row.value} className="flex flex-col gap-1">
+                <dt>
+                  <Chip value={row.value} styles={OPPORTUNITY_TYPE_STYLES} />
+                </dt>
+                <dd className="text-[var(--text-secondary)]">{row.meaning}</dd>
+              </div>
+            ))}
+          </dl>
 
           {remaining > 0 ? (
             <div className="mt-3">
