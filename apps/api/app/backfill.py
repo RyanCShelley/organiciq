@@ -80,15 +80,19 @@ def main() -> int:
         start, end = backfill_window(args.source, args.months)
         days = (end - start).days + 1
         capped = min(args.months, MAX_MONTHS.get(args.source, args.months))
+        span = (
+            "a single day"
+            if args.source in SAME_DAY_SOURCES
+            else f"{days} days, {capped} months"
+        )
         logger.info(
-            "%s: %s / %s — %s to %s (%d days, %d months)",
+            "%s: %s / %s — %s to %s (%s)",
             "APPLY" if args.apply else "DRY RUN",
             client.client_name,
             args.source,
             start,
             end,
-            days,
-            capped,
+            span,
         )
         if args.source in SAME_DAY_SOURCES:
             logger.info("%s reads the site as it is now, so there is no window to widen.", args.source)
@@ -113,7 +117,11 @@ def main() -> int:
             return 1
 
         logger.info("Queued job %s. Watch it on the Sync jobs page.", job.id)
-        logger.info("A window this long takes a while — it pages through Search Console.")
+        logger.info(
+            "A large site takes a few minutes to crawl."
+            if args.source in SAME_DAY_SOURCES
+            else "A window this long takes a while — it pages through Search Console."
+        )
         return 0
     finally:
         db.close()
