@@ -242,3 +242,98 @@ def test_it_reaches_the_queue_end_to_end(db, client_a):
     assert gate3[0].suppressed_by is None
     assert gate3[0].core_work is False
     assert gate3[0].evidence_json["leads"] == 0
+
+
+# --- T3: judged against its own kind of page --------------------------------
+
+
+def _support(**kwargs):
+    return {key: value for key, value in kwargs.items()}
+
+
+def test_a_blog_post_is_judged_against_blog_posts(db, client_a):
+    """0.4% is a blog post doing its job and a service page failing. One
+    sitewide number flags every blog on a site with good service pages."""
+    from app.services.page_eligibility import PageType
+
+    blog = "https://example.com/blog/guide"
+    classifications = {
+        blog: PageClassification(
+            normalized_url=blog,
+            page_type=PageType.INFORMATIONAL,
+            eligible_for_growth_action=True,
+            strategic_priority=2,
+            commercial_priority=2,
+        )
+    }
+    # Site converts at 2%, blogs at 0.5%. This post is at 0.4%.
+    findings = _conversion_page_findings(
+        [_page(url=blog)],
+        page_contexts={
+            blog: PageBusinessContext(normalized_url=blog, ga4_sessions=2000.0, ga4_leads=8)
+        },
+        classifications=classifications,
+        site=_site(rate=2.0),
+        page_type_rates={"informational": 0.5},
+        page_type_support={"informational": (12, 40)},
+    )
+
+    assert findings == []
+
+
+def test_the_same_page_against_the_sitewide_rate_would_have_fired(db, client_a):
+    """Which is the behaviour being corrected."""
+    from app.services.page_eligibility import PageType
+
+    blog = "https://example.com/blog/guide"
+    classifications = {
+        blog: PageClassification(
+            normalized_url=blog,
+            page_type=PageType.INFORMATIONAL,
+            eligible_for_growth_action=True,
+            strategic_priority=2,
+            commercial_priority=2,
+        )
+    }
+    findings = _conversion_page_findings(
+        [_page(url=blog)],
+        page_contexts={
+            blog: PageBusinessContext(normalized_url=blog, ga4_sessions=2000.0, ga4_leads=8)
+        },
+        classifications=classifications,
+        site=_site(rate=2.0),
+        page_type_rates={},
+        page_type_support={},
+    )
+
+    assert len(findings) == 1
+    assert findings[0].evidence_json["benchmark_source"] == "site"
+
+
+def test_a_thin_page_type_falls_back_to_the_sitewide_rate(db, client_a):
+    """Two pages and one lead produce a number, not a comparison."""
+    from app.services.page_eligibility import PageType
+
+    blog = "https://example.com/blog/guide"
+    classifications = {
+        blog: PageClassification(
+            normalized_url=blog,
+            page_type=PageType.INFORMATIONAL,
+            eligible_for_growth_action=True,
+            strategic_priority=2,
+            commercial_priority=2,
+        )
+    }
+    findings = _conversion_page_findings(
+        [_page(url=blog)],
+        page_contexts={
+            blog: PageBusinessContext(normalized_url=blog, ga4_sessions=2000.0, ga4_leads=8)
+        },
+        classifications=classifications,
+        site=_site(rate=2.0),
+        page_type_rates={"informational": 0.5},
+        page_type_support={"informational": (2, 1)},
+    )
+
+    assert len(findings) == 1
+    assert findings[0].evidence_json["benchmark_source"] == "site"

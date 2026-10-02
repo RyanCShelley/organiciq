@@ -65,6 +65,7 @@ from app.services.decision_impact import (
     build_impact_explanation,
     business_impact_reference_leads,
     compute_page_type_lead_rates,
+    page_type_rate_support,
     compute_topic_lead_rates,
     load_page_business_contexts,
     downstream_lead_opportunity,
@@ -1768,6 +1769,9 @@ def _conversion_page_findings(
     page_contexts: dict[str, PageBusinessContext],
     classifications: dict[str, PageClassification],
     site: SiteBusinessContext,
+    page_type_rates: dict[str, float] | None = None,
+    page_type_support: dict[str, tuple[int, int]] | None = None,
+    thresholds: dict[str, float | int] | None = None,
 ) -> list[LeverFinding]:
     """Gate 3: pages earning traffic and not turning it into anything.
 
@@ -1790,6 +1794,28 @@ def _conversion_page_findings(
         # conversions at all is Gate 0's problem, not this one.
         return []
 
+    rates = page_type_rates or {}
+    support = page_type_support or {}
+    limits = thresholds or {}
+    min_pages = int(limits.get("gate3_page_type_min_pages", 5))
+    min_leads = int(limits.get("gate3_page_type_min_leads", 10))
+
+    def comparison_for(classification: PageClassification | None) -> tuple[float, str]:
+        """The rate this page should be judged against. T3.
+
+        A blog post converting at 0.4% is doing its job; a service page at
+        0.4% is not. Measuring both against one sitewide number flags every
+        blog on a site with good service pages, and excuses every service page
+        on a site with a big blog.
+        """
+        if classification is not None:
+            key = classification.page_type.value
+            pages_seen, leads_seen = support.get(key, (0, 0))
+            rate = rates.get(key)
+            if rate and pages_seen >= min_pages and leads_seen >= min_leads:
+                return rate, key
+        return site_rate, "site"
+
     findings: list[LeverFinding] = []
     for page in pages:
         ctx = page_contexts.get(page.normalized_url)
@@ -1799,12 +1825,13 @@ def _conversion_page_findings(
         if classification is not None and not classification.eligible_for_growth_action:
             continue
 
-        expected = ctx.ga4_sessions * (site_rate / 100.0)
+        benchmark, benchmark_source = comparison_for(classification)
+        expected = ctx.ga4_sessions * (benchmark / 100.0)
         shortfall = expected - ctx.ga4_leads
         if shortfall < CONVERSION_PAGE_MIN_SHORTFALL:
             continue
         page_rate = ctx.page_lead_rate_pct or 0.0
-        if page_rate >= site_rate * CONVERSION_PAGE_RATE_RATIO:
+        if page_rate >= benchmark * CONVERSION_PAGE_RATE_RATIO:
             continue
 
         none_at_all = ctx.ga4_leads == 0
@@ -1812,7 +1839,8 @@ def _conversion_page_findings(
             f"{int(ctx.ga4_sessions):,} sessions and no conversions: {page.normalized_url}"
             if none_at_all
             else (
-                f"Converting at {page_rate:.2f}% against a site rate of {site_rate:.2f}%: "
+                f"Converting at {page_rate:.2f}% against {benchmark:.2f}% for "
+                f"{'the site' if benchmark_source == 'site' else benchmark_source + ' pages'}: "
                 f"{page.normalized_url}"
             )
         )
@@ -1843,6 +1871,8 @@ def _conversion_page_findings(
                     "leads": int(ctx.ga4_leads),
                     "page_lead_rate_pct": round(page_rate, 2),
                     "site_lead_rate_pct": round(site_rate, 2),
+                    "benchmark_rate_pct": round(benchmark, 2),
+                    "benchmark_source": benchmark_source,
                     "expected_leads": round(expected, 1),
                     "shortfall_leads": round(shortfall, 1),
                     "no_conversions_at_all": none_at_all,
@@ -3240,6 +3270,9 @@ def diagnose(
             page_contexts=page_contexts,
             classifications=classifications,
             site=site,
+            page_type_rates=page_type_rates,
+            page_type_support=page_type_rate_support(page_contexts, classifications),
+            thresholds=thresholds,
         )
     )
     for finding in findings:

@@ -155,6 +155,27 @@ def impact_from_lead_opportunity(estimated_leads: float, site: SiteBusinessConte
     return impact
 
 
+def page_type_rate_support(
+    page_contexts: dict[str, PageBusinessContext],
+    classifications: dict[str, PageClassification],
+) -> dict[str, tuple[int, int]]:
+    """Pages and leads behind each page type's rate.
+
+    A rate is only a fair comparison if something stands behind it. Two blog
+    posts and one lead produce a number, and judging thirty pages against it
+    judges them against an accident. T3.
+    """
+    support: dict[str, tuple[int, int]] = {}
+    for url, ctx in page_contexts.items():
+        classification = classifications.get(url)
+        if classification is None or ctx.ga4_sessions < MIN_PAGE_SESSIONS_FOR_PAGE_RATE:
+            continue
+        key = classification.page_type.value
+        pages, leads = support.get(key, (0, 0))
+        support[key] = (pages + 1, leads + ctx.ga4_leads)
+    return support
+
+
 def compute_page_type_lead_rates(
     page_contexts: dict[str, PageBusinessContext],
     classifications: dict[str, PageClassification],
