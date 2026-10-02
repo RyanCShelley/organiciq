@@ -140,3 +140,32 @@ def test_the_guard_catches_a_reintroduced_divisor(tmp_path, monkeypatch):
         assert "clicks / 200.0" in str(exc)
     else:
         raise AssertionError("the guard did not catch an invented scale")
+
+
+def test_keyword_impact_differentiates_by_search_volume():
+    """It did not, and that was invisible until real output was read.
+
+    Passing only recoverable_clicks sent this down the upstream fallback,
+    where the click component caps at 15 and then takes a low-confidence
+    haircut. Every term above roughly 400 searches a month scored an identical
+    8.2, so twenty-five tracked keywords came back indistinguishable and all
+    of them below the threshold to be worth doing.
+    """
+    from app.services.decision_impact import SiteBusinessContext, score_ai_visibility_impact
+
+    site = SiteBusinessContext(
+        site_lead_rate_pct=2.0,
+        period_sessions=5000.0,
+        period_leads=35,
+        period_lead_goal=38,
+        p90_page_sessions=400.0,
+    )
+    scores = [
+        score_ai_visibility_impact(signal="keyword_not_ranking", volume=volume, site=site)[0]
+        for volume in (150, 500, 1500, 5000)
+    ]
+
+    assert scores == sorted(scores), scores
+    assert len(set(scores)) == len(scores), f"all terms scored the same: {scores}"
+    # A big term has to be able to clear the actionable threshold at all.
+    assert scores[-1] > 25

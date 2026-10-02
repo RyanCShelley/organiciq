@@ -856,11 +856,21 @@ def score_ai_visibility_impact(
         "prompt_not_cited": 0.12,
     }.get(signal, 0.05)
     recoverable_clicks = max(0.0, volume) * weight
+    # Converted to leads like every other rule. Passing only the clicks sent
+    # this down the upstream fallback, where the click component caps at 15 and
+    # then takes a low-confidence haircut — so every term above roughly 400
+    # searches a month scored an identical 8.2, and twenty-five tracked
+    # keywords came back indistinguishable from each other and all of them
+    # below the threshold to be worth doing.
+    confidence = "medium" if volume >= 100 else "low"
     impact, norm_meta = normalize_business_impact(
         site=site,
+        estimated_incremental_leads=downstream_lead_opportunity(
+            recoverable_clicks, site.site_lead_rate_pct
+        ),
         recoverable_clicks=recoverable_clicks,
         strategic_priority=4 if signal.startswith("keyword_fell") else 3,
-        data_confidence="medium" if volume >= 100 else "low",
+        data_confidence=confidence,
     )
     return impact, {
         "impact_basis": "fallback",
