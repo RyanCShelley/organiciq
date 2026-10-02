@@ -142,7 +142,9 @@ def test_brand_tokens_cover_name_and_domain(db, client_a):
 
 def test_only_the_strongest_clusters_are_reported(db, client_a):
     """Clusters overlap by construction, so the list has to be capped."""
-    for topic in ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"):
+    # Two shared words each, so each forms a real cluster.
+    for topic in ("alpha roofing", "bravo siding", "charlie decking", "delta fencing",
+                  "echo guttering", "foxtrot cladding", "golf paving"):
         for suffix in ("guide", "cost", "example"):
             _q(db, client_a.id, f"{topic} {suffix}", 500, 40)
     db.commit()
@@ -186,6 +188,59 @@ def test_a_narrower_subject_inside_a_broader_one_stays_separate(db, client_a):
         for row in _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
     }
 
-    # "roofing" spans all five queries and is its own, broader cluster.
     assert "metal roofing" in tokens
-    assert "roofing" in tokens
+    # "roofing" alone spans all five queries but is one word — a coincidence of
+    # vocabulary, not a subject, and no longer a cluster. T5.
+    assert "roofing" not in tokens
+
+
+# --- T5: phrases, generics and exclusions -----------------------------------
+
+
+def test_a_single_shared_word_is_not_a_subject(db, client_a):
+    """"guide" joins a hundred unrelated queries."""
+    for query in ("roofing guide", "plumbing guide", "fencing guide", "decking guide"):
+        _q(db, client_a.id, query, 800, 40)
+    db.commit()
+
+    assert _content_cluster_findings(db, client_a, period=PERIOD, site=_site()) == []
+
+
+def test_a_client_can_strike_out_generic_terms(db, client_a):
+    """Words that join this client's queries without describing them."""
+    for query in ("roofing quick reliable", "siding quick reliable", "decking quick reliable"):
+        _q(db, client_a.id, query, 800, 40)
+    db.commit()
+
+    # "quick reliable" joins three unrelated services and describes none.
+    without = {
+        row.evidence_json["cluster_token"]
+        for row in _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
+    }
+    assert "quick reliable" in without
+
+    with_list = _content_cluster_findings(
+        db,
+        client_a,
+        period=PERIOD,
+        site=_site(),
+        thresholds={"cluster_generic_terms": ["quick", "reliable"]},
+    )
+    assert with_list == []
+
+
+def test_a_client_can_exclude_a_topic_outright(db, client_a):
+    for query in ("asbestos removal cost", "asbestos removal near", "asbestos removal law"):
+        _q(db, client_a.id, query, 900, 40)
+    db.commit()
+
+    assert (
+        _content_cluster_findings(
+            db,
+            client_a,
+            period=PERIOD,
+            site=_site(),
+            thresholds={"cluster_excluded_topics": ["asbestos"]},
+        )
+        == []
+    )

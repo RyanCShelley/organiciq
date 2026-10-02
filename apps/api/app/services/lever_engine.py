@@ -2139,6 +2139,7 @@ def _content_cluster_findings(
     *,
     period: tuple[date, date] | None,
     site: SiteBusinessContext,
+    thresholds: dict[str, Any] | None = None,
 ) -> list[LeverFinding]:
     """Subjects the site draws demand for and has no page ranking on.
 
@@ -2174,7 +2175,13 @@ def _content_cluster_findings(
     if not rows:
         return []
 
-    brand = _brand_tokens(client)
+    limits = thresholds or {}
+    min_phrase = int(limits.get("cluster_min_phrase_words", 2))
+    generic = {str(term).strip().lower() for term in limits.get("cluster_generic_terms") or []}
+    excluded = {
+        str(topic).strip().lower() for topic in limits.get("cluster_excluded_topics") or []
+    }
+    brand = _brand_tokens(client) | generic
     clusters: dict[str, list[tuple[str, float, float]]] = {}
     for query, impressions, best_position in rows:
         entry = (query, float(impressions or 0), float(best_position or 100))
@@ -2195,13 +2202,17 @@ def _content_cluster_findings(
         for query, _impressions, _position in entries:
             tokens = set(_cluster_tokens(query, brand))
             shared = tokens if shared is None else (shared & tokens)
-        if not shared:
+        # A single shared word is a coincidence of vocabulary, not a subject:
+        # "guide" joins a hundred unrelated queries. A phrase is a subject. T5.
+        if len(shared) < min_phrase:
             continue
         # Read the words off the busiest query so they come out in the order a
         # person would say them, not alphabetically.
         busiest = max(entries, key=lambda row: row[1])[0]
         order = {word: index for index, word in enumerate(_cluster_tokens(busiest, brand))}
         label = " ".join(sorted(shared, key=lambda word: order.get(word, 99)))
+        if label.lower() in excluded or any(term in label.lower() for term in excluded):
+            continue
         by_label.setdefault(label, entries)
 
     candidates: list[tuple[float, str, list[tuple[str, float, float]]]] = []
@@ -3316,7 +3327,11 @@ def diagnose(
             )
 
     # ── Subjects with demand and no page at all ──
-    findings.extend(_content_cluster_findings(db, client, period=gsc_period, site=site))
+    findings.extend(
+        _content_cluster_findings(
+            db, client, period=gsc_period, site=site, thresholds=thresholds
+        )
+    )
     for finding in findings:
         if finding.evidence_json.get("gate") == "content_cluster":
             _enrich_finding(finding, classification=None, page_ctx=None)

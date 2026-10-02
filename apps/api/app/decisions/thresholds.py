@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
+DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "gsc_high_impression_min": 100,
     "gsc_low_ctr_max_pct": 1.0,
     "gsc_striking_distance_min_pos": 8,
@@ -37,6 +37,10 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     "link_max_donors": 3,
     # T5: a subject needs a phrase, not a word.
     "cluster_min_phrase_words": 2,
+    # Lists rather than numbers, but this is the per-client config store and a
+    # separate column for two lists would not earn its migration.
+    "cluster_generic_terms": [],
+    "cluster_excluded_topics": [],
     # T7: clicks down this far, with impressions holding, is a listing problem.
     "decay_impressions_flat_pct": 10.0,
     "light_refresh_min_drop_pct": 20.0,
