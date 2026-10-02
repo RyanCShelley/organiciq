@@ -107,17 +107,19 @@ def test_a_falling_rate_with_steady_traffic_still_fires(db, client_a):
 
 def test_a_site_that_never_converted_well_is_now_found(db, client_a):
     """Steady and bad. The old rule saw nothing here because nothing changed."""
+    # Enough traffic that 0.2% against a 2% baseline is a finding and not a
+    # small sample: at the prior rate these sessions expect 12.5 leads.
     _setup(
         db,
         client_a,
-        now_sessions=1000,
+        now_sessions=2500,
         now_leads=5,
-        prev_sessions=1000,
+        prev_sessions=2500,
         prev_leads=5,
         baseline=Decimal("2.0"),
     )
 
-    finding = _run(db, client_a, _dashboard(1000, 1000, leads_now=5, goal=40))
+    finding = _run(db, client_a, _dashboard(2500, 2500, leads_now=5, goal=40))
 
     assert finding is not None
     assert "below_baseline" in finding.evidence_json["triggers"]
@@ -190,3 +192,82 @@ def test_three_problems_report_as_one_finding(db, client_a):
 
 def test_no_conversions_configured_means_no_finding(db, client_a):
     assert _run(db, client_a, _dashboard()) is None
+
+
+# --- T1: small samples ------------------------------------------------------
+
+
+def test_a_rate_that_moved_on_a_handful_of_leads_is_not_a_finding(db, client_a):
+    """A rate halving on four expected leads halved on noise, and saying so to
+    a client costs more credibility than staying quiet."""
+    _setup(db, client_a, now_sessions=200, now_leads=0, prev_sessions=200, prev_leads=4)
+
+    # 200 sessions at the prior 2% rate expects 4 leads, under the minimum 10.
+    assert _run(db, client_a, _dashboard(200, 200, leads_now=0, goal=0)) is None
+
+
+def test_the_same_shape_at_volume_does_fire(db, client_a):
+    _setup(db, client_a, now_sessions=2000, now_leads=2, prev_sessions=2000, prev_leads=40)
+
+    finding = _run(db, client_a, _dashboard(2000, 2000, leads_now=2, goal=0))
+
+    assert finding is not None
+    assert "falling" in finding.evidence_json["triggers"]
+    assert finding.evidence_json["expected_leads"] == 40.0
+
+
+def test_below_baseline_expects_against_the_baseline_not_the_slump(db, client_a):
+    """Using the previous rate for both would silence this on exactly the
+    client it exists for: a site that always converted badly has a low
+    previous rate, so it would never expect enough leads to qualify."""
+    _setup(
+        db,
+        client_a,
+        now_sessions=1000,
+        now_leads=2,
+        prev_sessions=1000,
+        prev_leads=2,
+        baseline=Decimal("2.0"),
+    )
+
+    finding = _run(db, client_a, _dashboard(1000, 1000, leads_now=2, goal=0))
+
+    assert finding is not None
+    assert "below_baseline" in finding.evidence_json["triggers"]
+    # 0.2% prior expects 2 leads; 2% baseline expects 20.
+    assert finding.evidence_json["expected_leads"] == 2.0
+    assert finding.evidence_json["expected_leads_at_baseline"] == 20.0
+
+
+def test_paid_and_direct_do_not_count_toward_the_organic_rate(db, client_a):
+    """The query never scoped to managed channels despite the name, so a paid
+    campaign ending read as the organic conversion path breaking."""
+    from app.models.config import OrganicChannel
+    from app.services.lever_engine import _managed_sessions
+
+    db.add(
+        FactGa4Traffic(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=END,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com",
+            session_source="google",
+            session_medium="cpc",
+            channel=OrganicChannel.OTHER,
+            sessions=Decimal("5000"),
+            active_users=Decimal("5000"),
+            views=Decimal("5000"),
+        )
+    )
+    _setup(db, client_a, now_sessions=400, now_leads=8, prev_sessions=400, prev_leads=8)
+
+    assert _managed_sessions(db, client_a.id, (START, END)) == 400.0
+
+
+def test_leads_are_marked_raw_because_no_qualified_field_exists(db, client_a):
+    _setup(db, client_a, now_sessions=2000, now_leads=2, prev_sessions=2000, prev_leads=40)
+
+    finding = _run(db, client_a, _dashboard(2000, 2000, leads_now=2, goal=0))
+
+    assert finding.evidence_json["lead_source"] == "raw"

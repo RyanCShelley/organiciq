@@ -261,9 +261,12 @@ def test_conversion_portfolio_rule(db, client_a):
     # traffic holds is the tracking-failure shape, and Gate 0 suppresses
     # everything when it sees it. This rule is about a falling rate, so the
     # fixture keeps the tag alive and lets the rate fall 5% -> 1%.
+    # Sized past the small-sample guard: at the prior 5% rate these sessions
+    # should produce 15 leads, so a fall to 1% is a real signal rather than a
+    # handful of coin flips.
     for day, sessions, leads in [
-        (end, Decimal("104"), 1),
-        (prev_end, Decimal("100"), 5),
+        (end, Decimal("300"), 3),
+        (prev_end, Decimal("300"), 15),
     ]:
         db.add(
             FactGa4Traffic(

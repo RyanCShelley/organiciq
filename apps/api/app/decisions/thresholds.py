@@ -22,6 +22,26 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     # the demand gate is read against the period before for blocking technical
     # checks. B2.
     "technical_blocking_min_prior_impressions": 30,
+    # --- Phase 2 ---
+    # T1: a rate that moved on four expected leads moved on noise.
+    "gate1_min_expected_leads": 10,
+    # T2/T6: clicks below this share of what the position should earn.
+    "gate2_capture_ratio": 0.5,
+    # T3: a page type needs this much behind it to be a fair comparison.
+    "gate3_page_type_min_pages": 5,
+    "gate3_page_type_min_leads": 10,
+    # T4: inbound editorial links expected, by what the page is for.
+    "link_floor_money": 10,
+    "link_floor_industry": 6,
+    "link_floor_blog": 3,
+    "link_max_donors": 3,
+    # T5: a subject needs a phrase, not a word.
+    "cluster_min_phrase_words": 2,
+    # T7: clicks down this far, with impressions holding, is a listing problem.
+    "decay_impressions_flat_pct": 10.0,
+    "light_refresh_min_drop_pct": 20.0,
+    # T8: a rule gets another chance once the work has moved on.
+    "contested_reset_days": 90,
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,

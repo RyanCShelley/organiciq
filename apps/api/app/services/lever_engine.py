@@ -21,6 +21,7 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
+from app.models.config import OrganicChannel
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
     CRAWL_SOURCE_SE_RANKING,
@@ -1695,6 +1696,10 @@ def _managed_lead_rate(
     if period is None or not lead_events:
         return None
     start, end = period
+    # Managed channels only, which the name always claimed and the query never
+    # did. Counting paid and direct alongside organic measured a rate the
+    # engagement does not move, so a paid campaign ending read as the organic
+    # conversion path breaking. T1.
     leads = (
         db.query(func.coalesce(func.sum(FactGa4Event.event_count), 0))
         .filter(
@@ -1702,6 +1707,7 @@ def _managed_lead_rate(
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.event_name.in_(lead_events),
+            FactGa4Event.channel.in_(MANAGED_CHANNELS),
         )
         .scalar()
     )
@@ -1711,6 +1717,7 @@ def _managed_lead_rate(
             FactGa4Traffic.client_id == client_id,
             FactGa4Traffic.date >= start,
             FactGa4Traffic.date <= end,
+            FactGa4Traffic.channel.in_(MANAGED_CHANNELS),
         )
         .scalar()
     )
@@ -1718,6 +1725,30 @@ def _managed_lead_rate(
     if sessions_f <= 0:
         return None
     return (float(leads or 0) / sessions_f) * 100
+
+
+def _managed_sessions(
+    db: Session, client_id: UUID, period: tuple[date, date] | None
+) -> float:
+    if period is None:
+        return 0.0
+    start, end = period
+    return float(
+        db.query(func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+            FactGa4Traffic.channel.in_(MANAGED_CHANNELS),
+        )
+        .scalar()
+        or 0
+    )
+
+
+#: What OrganicIQ actually moves. Paid and direct belong on the dashboard and
+#: not in a rule about whether the organic conversion path is working.
+MANAGED_CHANNELS = (OrganicChannel.ORGANIC_SEARCH, OrganicChannel.AI_REFERRAL)
 
 
 #: A page converts "below the site" only when the gap is worth someone's
@@ -2714,6 +2745,7 @@ def _conversion_portfolio(
     to_date: date,
     dashboard: dict[str, Any],
     site: SiteBusinessContext,
+    thresholds: dict[str, float | int] | None = None,
 ) -> LeverFinding | None:
     """Gate 1: is the site converting at the level the plan requires?
 
@@ -2731,6 +2763,7 @@ def _conversion_portfolio(
     units is the noise this engine is being pulled out of, so the most urgent
     reading leads and the rest ride along as evidence.
     """
+    thresholds = thresholds or {}
     lead_events = _lead_event_names(db, client.id)
     if not lead_events:
         return None
@@ -2759,14 +2792,30 @@ def _conversion_portfolio(
     raw_baseline = client.baseline_lead_rate_pct
     baseline_rate = float(raw_baseline) if raw_baseline is not None else None
 
+    # How many leads the window should have produced at the previous rate.
+    # A rate that halved on four expected leads halved on noise, and saying so
+    # out loud to a client costs more credibility than staying quiet. T1.
+    # Each trigger expects against the rate it is comparing to. Using the
+    # previous rate for both would silence "below baseline" on exactly the
+    # client it is for: a site that has always converted badly has a low
+    # previous rate, so it would never expect enough leads to qualify.
+    managed_sessions = _managed_sessions(db, client.id, current_period)
+    min_expected = float(thresholds.get("gate1_min_expected_leads", 10))
+    expected_leads = managed_sessions * (previous_rate / 100.0)
+    enough_sample = expected_leads >= min_expected
+
     # ── Trigger 1: something broke recently ──
     # Traffic has to be holding, or this is a traffic problem wearing a
     # conversion problem's clothes.
-    falling = sessions_change_pct >= -5 and lead_rate_change_pct <= -10
+    falling = enough_sample and sessions_change_pct >= -5 and lead_rate_change_pct <= -10
 
     # ── Trigger 2: we have gone backwards from where we started ──
+    expected_at_baseline = (
+        managed_sessions * (float(baseline_rate) / 100.0) if baseline_rate else 0.0
+    )
     below_baseline = (
-        baseline_rate is not None
+        expected_at_baseline >= min_expected
+        and baseline_rate is not None
         and baseline_rate > 0
         and current_rate < baseline_rate * CONVERSION_BASELINE_RATIO
     )
@@ -2830,6 +2879,12 @@ def _conversion_portfolio(
             "tracking_validated": True,
             # Every trigger is recorded, not just the one that led, so the
             # reader can see whether this is one problem or three.
+            # Raw lead events: no qualified-lead field exists on this client,
+            # so an MQL and a newsletter signup weigh the same. T1.
+            "lead_source": "raw",
+            "expected_leads": round(expected_leads, 1),
+            "expected_leads_at_baseline": round(expected_at_baseline, 1),
+            "managed_sessions": int(managed_sessions),
             "triggers": [
                 name
                 for name, hit in (
@@ -3094,6 +3149,7 @@ def diagnose(
         to_date=to_date,
         dashboard=dashboard,
         site=site,
+        thresholds=thresholds,
     )
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
