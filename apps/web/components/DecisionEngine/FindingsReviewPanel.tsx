@@ -15,10 +15,39 @@ import {
   findingState,
   promotionBlockedLabel,
   scoreBar,
-  stageLabel,
   type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
+
+/**
+ * The cascade, as the engine orders it.
+ *
+ * Visibility earns traffic and traffic earns leads, so a finding about leads
+ * outranks one about rankings however they score. Grouping by that makes the
+ * order legible — a flat list sorted by score hides the fact that the engine
+ * thinks in layers, and hides a blocking gate entirely.
+ */
+const STAGE_ORDER = ["conversion", "traffic", "visibility"] as const;
+
+const STAGE_HEADINGS: Record<string, { title: string; blurb: string }> = {
+  conversion: { title: "Leads", blurb: "Traffic arriving and not converting." },
+  traffic: { title: "Traffic", blurb: "Rankings not turning into visits." },
+  visibility: { title: "Visibility", blurb: "Not being found in the first place." },
+};
+
+function groupByStage(findings: Finding[]): [string, Finding[]][] {
+  const groups = new Map<string, Finding[]>();
+  for (const item of findings) {
+    const key = STAGE_ORDER.includes(item.stage as (typeof STAGE_ORDER)[number])
+      ? item.stage
+      : "visibility";
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return STAGE_ORDER.filter((stage) => groups.has(stage)).map((stage) => [
+    stage,
+    groups.get(stage) ?? [],
+  ]);
+}
 
 function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys: Set<string>): {
   label: string;
@@ -185,15 +214,26 @@ export function FindingsReviewPanel({
               <tr>
                 <th>Growth Action</th>
                 <th>Subject</th>
-                <th>Stage</th>
                 <th className="text-right">Score</th>
                 <th>Engine status</th>
                 <th>Your status</th>
                 <th aria-label="Expand" />
               </tr>
             </thead>
-            <tbody>
-              {findings.map((item) => {
+            {groupByStage(findings).map(([stage, rows]) => (
+            <tbody key={stage}>
+              <tr>
+                <th
+                  colSpan={6}
+                  className="bg-[var(--surface-muted)] text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]"
+                >
+                  {STAGE_HEADINGS[stage]?.title ?? stage}
+                  <span className="ml-2 font-normal normal-case tracking-normal text-[var(--text-tertiary)]">
+                    {STAGE_HEADINGS[stage]?.blurb} · {rows.length}
+                  </span>
+                </th>
+              </tr>
+              {rows.map((item) => {
                 const isOpen = expandedKey === item.rule_key;
                 const decision = decisionsByRule?.get(item.rule_key) ?? null;
                 const status = engineStatus(item, recommendedKeys, suggestedKeys);
@@ -203,9 +243,6 @@ export function FindingsReviewPanel({
                       <td className="whitespace-nowrap">{item.label}</td>
                       <td className="max-w-xs">
                         <span className="line-clamp-2 break-all">{findingSubject(item)}</span>
-                      </td>
-                      <td className="whitespace-nowrap text-[var(--text-secondary)]">
-                        {stageLabel(item.stage)}
                       </td>
                       <td className="whitespace-nowrap text-right font-medium tabular-nums">
                         {item.priority_score.toFixed(1)}
@@ -243,7 +280,7 @@ export function FindingsReviewPanel({
                     </tr>
                     {isOpen ? (
                       <tr>
-                        <td colSpan={7} className="p-0">
+                        <td colSpan={6} className="p-0">
                           <ExpandedFinding
                             item={item}
                             clientId={clientId}
@@ -259,6 +296,7 @@ export function FindingsReviewPanel({
                 );
               })}
             </tbody>
+            ))}
           </table>
         </div>
       )}
