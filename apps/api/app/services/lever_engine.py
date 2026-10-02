@@ -1709,6 +1709,12 @@ def _tracking_failure_finding(
     )
 
 
+#: Behind the plan by less than this is a normal month, not a finding.
+CONVERSION_PLAN_SHORTFALL_RATIO = 0.8
+#: Below where the client started by more than this is going backwards.
+CONVERSION_BASELINE_RATIO = 0.9
+
+
 def _conversion_portfolio(
     db: Session,
     client: Client,
@@ -1718,6 +1724,22 @@ def _conversion_portfolio(
     dashboard: dict[str, Any],
     site: SiteBusinessContext,
 ) -> LeverFinding | None:
+    """Gate 1: is the site converting at the level the plan requires?
+
+    The rule here used to ask one question — did the rate fall while traffic
+    held — which only catches a site that got worse recently. A site that has
+    converted badly since the day it was onboarded never tripped it, and that
+    is the client most in need of the finding.
+
+    Three references, because they answer different questions. Against last
+    period: did something just break? Against the baseline: have we gone
+    backwards from where we started? Against this month's checkpoint goal: are
+    we going to make the number we promised?
+
+    One finding either way. Three findings saying the same thing in different
+    units is the noise this engine is being pulled out of, so the most urgent
+    reading leads and the rest ride along as evidence.
+    """
     lead_events = _lead_event_names(db, client.id)
     if not lead_events:
         return None
@@ -1735,14 +1757,68 @@ def _conversion_portfolio(
         return None
 
     sessions_change_pct = ((float(sessions_current) - float(sessions_previous)) / float(sessions_previous)) * 100
-    if sessions_change_pct < -5:
-        return None
     if previous_rate <= 0:
         lead_rate_change_pct = -100.0 if current_rate <= 0 else 100.0
     else:
         lead_rate_change_pct = ((current_rate - previous_rate) / previous_rate) * 100
-    if lead_rate_change_pct > -10:
+
+    conversions = dashboard.get("conversions", {}) or {}
+    period_goal = conversions.get("period_lead_goal")
+    period_leads = conversions.get("leads", {}).get("current")
+    raw_baseline = client.baseline_lead_rate_pct
+    baseline_rate = float(raw_baseline) if raw_baseline is not None else None
+
+    # ── Trigger 1: something broke recently ──
+    # Traffic has to be holding, or this is a traffic problem wearing a
+    # conversion problem's clothes.
+    falling = sessions_change_pct >= -5 and lead_rate_change_pct <= -10
+
+    # ── Trigger 2: we have gone backwards from where we started ──
+    below_baseline = (
+        baseline_rate is not None
+        and baseline_rate > 0
+        and current_rate < baseline_rate * CONVERSION_BASELINE_RATIO
+    )
+
+    # ── Trigger 3: we are not going to make the number we promised ──
+    behind_plan = (
+        period_goal is not None
+        and period_goal > 0
+        and period_leads is not None
+        and float(period_leads) < float(period_goal) * CONVERSION_PLAN_SHORTFALL_RATIO
+    )
+
+    if not (falling or below_baseline or behind_plan):
         return None
+
+    # Most urgent reading leads: a fall says act now, backwards says the work
+    # is not landing, behind plan is the ongoing story.
+    if falling:
+        diagnosis = "Managed traffic holding but lead rate falling"
+        action = (
+            "Find what changed on the conversion path in the last period — form, "
+            "CTA, page template, or a tracking change that moved the goalposts."
+        )
+    elif below_baseline:
+        diagnosis = (
+            f"Lead rate {current_rate:.2f}% is below the {baseline_rate:.2f}% baseline "
+            "the engagement started from"
+        )
+        action = (
+            "Review the conversion path against what the site was doing at baseline. "
+            "Converting worse than the starting point means the work is not landing "
+            "where it matters."
+        )
+    else:
+        short = float(period_goal) - float(period_leads)
+        diagnosis = (
+            f"{int(float(period_leads))} leads against a goal of {int(float(period_goal))} "
+            f"for this period"
+        )
+        action = (
+            f"Close a {short:.0f}-lead gap: take the pages with the most traffic and the "
+            "worst conversion first, since that is where the shortfall is cheapest to buy back."
+        )
 
     impact, impact_evidence = score_conversion_impact(
         sessions_current=float(sessions_current),
@@ -1754,11 +1830,27 @@ def _conversion_portfolio(
     return _make_finding(
         lever=GrowthAction.CONVERSION_PATH.value,
         rule_key=_rule_key("conversion_path", str(client.id), from_date.isoformat(), to_date.isoformat()),
-        diagnosis="Managed traffic holding but lead rate falling",
+        diagnosis=diagnosis,
+        action_override=action,
         evidence_json={
+            "gate": "site_conversion",
             "lead_rate_change_pct": round(lead_rate_change_pct, 1),
             "sessions_change_pct": round(sessions_change_pct, 1),
             "tracking_validated": True,
+            # Every trigger is recorded, not just the one that led, so the
+            # reader can see whether this is one problem or three.
+            "triggers": [
+                name
+                for name, hit in (
+                    ("falling", falling),
+                    ("below_baseline", below_baseline),
+                    ("behind_plan", behind_plan),
+                )
+                if hit
+            ],
+            "baseline_lead_rate_pct": round(baseline_rate, 2) if baseline_rate else None,
+            "period_lead_goal": float(period_goal) if period_goal else None,
+            "period_leads": float(period_leads) if period_leads is not None else None,
             **impact_evidence,
         },
         baseline_metrics_json={
