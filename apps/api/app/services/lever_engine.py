@@ -1588,6 +1588,112 @@ def _conversion_page_findings(
     return findings
 
 
+#: Page one. Below this a thin impression count is just the ranking.
+VISIBILITY_MAX_POSITION = 10.0
+#: Terms smaller than this can legitimately draw almost nothing, so silence
+#: tells you nothing about whether the ranking is working.
+VISIBILITY_MIN_VOLUME = 100.0
+#: Ranking on page one should put the site in front of most people searching
+#: the term. Seeing under a tenth of them means the ranking is not reaching
+#: the demand the term was picked for.
+VISIBILITY_IMPRESSION_RATIO = 0.1
+DAYS_PER_MONTH_VISIBILITY = 365 / 12
+
+
+def _visibility_without_traffic_findings(
+    db: Session,
+    client: Client,
+    pages: list[PageDemand],
+    *,
+    period: tuple[date, date] | None,
+) -> list[LeverFinding]:
+    """Gate 2: core terms that rank and bring nothing.
+
+    Visibility earns traffic and traffic earns leads, so a ranking that
+    produces no demand breaks the chain at the top — and it was invisible to
+    every rule here. The keyword rules watch for a term *falling*; a term
+    sitting at position three and delivering nothing never moves, so nothing
+    fired, and the watchlist looked healthy.
+
+    Measured against the term's own search volume rather than a flat
+    impression floor. Ranking on page one should put the site in front of most
+    people searching it; seeing a tenth of them means the ranking is not
+    reaching the demand, and that is usually the term rather than the page —
+    volume overstated, a market Search Console does not report, or a phrase
+    buyers do not actually use.
+    """
+    if period is None or not pages:
+        # With no Search Console data every ranking would look like it earns
+        # nothing, which says more about the gap in the data than the site.
+        return []
+
+    start, end = period
+    period_days = (end - start).days + 1
+    impressions_by_url = {page.normalized_url: page.impressions for page in pages}
+
+    rows = (
+        db.query(FactSerKeyword)
+        .filter(
+            FactSerKeyword.client_id == client.id,
+            FactSerKeyword.ranking_url.isnot(None),
+            FactSerKeyword.current_position.isnot(None),
+        )
+        .all()
+    )
+
+    findings: list[LeverFinding] = []
+    for row in rows:
+        position = float(row.current_position or 0)
+        volume = float(row.volume or 0)
+        if position <= 0 or position > VISIBILITY_MAX_POSITION:
+            continue
+        if volume < VISIBILITY_MIN_VOLUME:
+            continue
+
+        url = normalize_url(row.ranking_url or "")
+        if not url:
+            continue
+        impressions = float(impressions_by_url.get(url, 0.0))
+        expected = volume * (period_days / DAYS_PER_MONTH_VISIBILITY)
+        if expected <= 0 or impressions >= expected * VISIBILITY_IMPRESSION_RATIO:
+            continue
+
+        share = (impressions / expected) * 100 if expected else 0.0
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.AI_VISIBILITY.value,
+                rule_key=_rule_key("visibility_no_traffic", str(row.keyword_id), url),
+                diagnosis=(
+                    f"Ranking {position:.0f} for \u201c{row.keyword}\u201d but the page drew "
+                    f"{int(impressions):,} impressions against {int(expected):,} searches"
+                ),
+                action_override=(
+                    "Check the term before the page: confirm the volume is real in this "
+                    "market, and that this is the phrasing buyers use. If it is, the "
+                    "ranking is in a market Search Console does not report and the term "
+                    "belongs off the watchlist."
+                ),
+                evidence_json={
+                    "gate": "visibility_no_traffic",
+                    "keyword": row.keyword,
+                    "current_position": round(position, 1),
+                    "search_volume": round(volume),
+                    "expected_impressions": round(expected),
+                    "actual_impressions": int(impressions),
+                    "impression_share_pct": round(share, 1),
+                    "promotion_class": "actionable",
+                },
+                baseline_metrics_json={"search_volume": volume, "position": position},
+                # What the term is worth, capped: a 5,000/month phrase earning
+                # nothing matters more than a 150/month one.
+                impact=min(100.0, (volume / 1000.0) * 100.0),
+                page_url=url,
+                query=row.keyword,
+            )
+        )
+    return findings
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -2091,6 +2197,14 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Gate 2: rankings that bring nothing ──
+    findings.extend(
+        _visibility_without_traffic_findings(db, client, pages, period=gsc_period)
+    )
+    for finding in findings:
+        if finding.evidence_json.get("gate") == "visibility_no_traffic":
+            _enrich_finding(finding, classification=None, page_ctx=None)
 
     # ── Gate 3: traffic that is not turning into anything ──
     # The layer closest to leads, which is the order the product works in:
