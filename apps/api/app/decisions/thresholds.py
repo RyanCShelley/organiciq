@@ -46,6 +46,16 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "light_refresh_min_drop_pct": 20.0,
     # T8: a rule gets another chance once the work has moved on.
     "contested_reset_days": 90,
+    # --- Phase 3 ---
+    # An orphan page needs demand to be worth reporting: most pages nothing
+    # links to are drafts and thank-you pages.
+    "orphan_min_impressions": 30,
+    # Gate 0 anomalies. Neither suppresses anything.
+    "partial_break_days": 14,
+    "partial_break_min_expected_leads": 3,
+    "lead_spike_multiple": 3.0,
+    # 3x of two leads is six, which is a good week, not a spike.
+    "lead_spike_min_leads": 10,
     # C1: confidence read from the evidence rather than from the lever.
     # Applying it is off until the distribution across real clients has been
     # looked at — see app/decisions/confidence.py.

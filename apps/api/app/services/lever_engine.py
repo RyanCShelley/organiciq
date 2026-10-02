@@ -111,6 +111,19 @@ GATE_BEHAVIOUR: dict[str, dict[str, str]] = {
             "true whatever the conversion tag is doing"
         ),
     },
+    "tracking_partial": {
+        "layer": "Gate 0",
+        "bucket": "Conversion Path",
+        "suppresses": (
+            "nothing — one form going quiet makes some scores wrong, not all "
+            "of them, so the honest response is to say which"
+        ),
+    },
+    "tracking_spike": {
+        "layer": "Gate 0",
+        "bucket": "Conversion Path",
+        "suppresses": "nothing",
+    },
     "site_conversion": {"layer": "Gate 1", "bucket": "Conversion Path", "suppresses": "nothing"},
     "visibility_no_traffic": {
         "layer": "Gate 2",
@@ -547,8 +560,35 @@ def _load_audit_issues(
 #: Action queue and preempt, because nothing else matters on a page Google
 #: cannot index.
 INDEXATION_BLOCKING_SIGNALS = frozenset(
-    {"status_error", "non_indexable", "canonical_elsewhere", "broken_redirect", "robots_blocking"}
+    {
+        "status_error",
+        "non_indexable",
+        "canonical_elsewhere",
+        "broken_redirect",
+        "robots_blocking",
+        # A page nothing links to is unreachable by crawl and by visitor alike.
+        # It is blocking in the same sense a noindex is: the page exists and
+        # cannot be arrived at. Phase 3.
+        "orphan_page",
+    }
 )
+
+#: Which growth action a technical signal belongs to.
+#:
+#: A title is the listing, not the plumbing. It earns the click, so a page
+#: missing one is SERP & CTR work that can be promoted — the same sentence
+#: cannot be said of a meta description, which Google rewrites at will and
+#: which stays monthly upkeep. They used to be one signal, "missing_meta",
+#: and lumping them meant the half that moves clicks could never compete for
+#: an action. Phase 3.
+SIGNAL_LEVERS: dict[str, str] = {
+    "title_missing": GrowthAction.SERP_CTR.value,
+    "title_duplicate": GrowthAction.SERP_CTR.value,
+}
+
+
+def signal_lever(audit_signal: str | None) -> str:
+    return SIGNAL_LEVERS.get(audit_signal or "", GrowthAction.TECHNICAL_SEO.value)
 
 #: Everything else Technical SEO detects is upkeep the plan already covers
 #: every month — "titles, metas, internal links, schema" is Core Work in the
@@ -557,7 +597,13 @@ INDEXATION_BLOCKING_SIGNALS = frozenset(
 #: to spend. Before this, a Launch client with one action a month could be
 #: handed twenty-five findings, most of them work already paid for.
 def is_core_work_signal(audit_signal: str | None) -> bool:
-    return bool(audit_signal) and audit_signal not in INDEXATION_BLOCKING_SIGNALS
+    if not audit_signal:
+        return False
+    if audit_signal in INDEXATION_BLOCKING_SIGNALS:
+        return False
+    # A signal that belongs to another lever is that lever's work, and the
+    # Technical SEO core-work carve-out has nothing to say about it.
+    return audit_signal not in SIGNAL_LEVERS
 
 
 #: What to actually do, per signal.
@@ -588,6 +634,26 @@ TECHNICAL_ACTIONS: dict[str, str] = {
         "Point the canonical at this URL, or confirm the target is the page you want "
         "ranking. Right now this page tells Google to ignore it, and it has demand."
     ),
+    "orphan_page": (
+        "Link to this page from the section it belongs to. It is earning impressions "
+        "with nothing pointing at it, so neither a crawler following links nor a "
+        "visitor browsing the site can reach it."
+    ),
+    "title_missing": (
+        "Write a title tag. This page has demand and no headline in the results, so "
+        "Google is inventing one from the content."
+    ),
+    "title_duplicate": (
+        "Give this page its own title — it currently shares one with another page, so "
+        "neither reads as the better answer to the query."
+    ),
+    "description_missing": "Write a meta description for this page.",
+    "description_duplicate": (
+        "Give this page its own meta description; it currently shares one with "
+        "another page."
+    ),
+    # Kept: findings stored before titles and descriptions were separated still
+    # carry these signals, and a stored finding with no action reads as a bug.
     "missing_meta": "Write a title and meta description for this page.",
     "duplicate_meta": (
         "Give this page its own title and description — it currently shares them with "
@@ -698,6 +764,8 @@ def detect_technical_signal(
     crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
     schema_by_url: dict[str, PageSchema] | None = None,
     schema_crawled_urls: frozenset[str] | None = None,
+    impressions: float = 0.0,
+    thresholds: dict[str, Any] | None = None,
 ) -> DetectedTechnicalSignal | None:
     """
     Priority-ordered Technical SEO detector for a single page.
@@ -753,31 +821,48 @@ def detect_technical_signal(
             issue_code=None,
             diagnosis=f"Canonicalized elsewhere: {page_url}",
         )
-    missing_title = crawl.title == "" or "title_missing" in codes
-    missing_description = crawl.description == "" or "description_missing" in codes
-    if missing_title or missing_description:
-        issue_code = "title_missing" if missing_title else "description_missing"
+    # A page nothing links to cannot be reached by a crawler following links
+    # or by a visitor browsing the site, however well it ranks. Demand is the
+    # qualifier: most orphans are drafts, thank-you pages and old landers, and
+    # reporting those would bury the handful that matter. Phase 3.
+    orphan_min = float((thresholds or {}).get("orphan_min_impressions", 0) or 0)
+    if crawl.inbound_internal_links <= 0 and orphan_min > 0 and impressions >= orphan_min:
         return DetectedTechnicalSignal(
-            audit_signal="missing_meta",
-            issue_code=issue_code,
-            diagnosis=f"Missing core meta on page with demand: {page_url}",
+            audit_signal="orphan_page",
+            issue_code="no_inlinks",
+            diagnosis=(
+                f"Orphan page earning {int(impressions):,} impressions with no "
+                f"internal links to it: {page_url}"
+            ),
         )
-    duplicate = (
-        crawl.title_duplicate
-        or crawl.description_duplicate
-        or "title_duplicate" in codes
-        or "description_duplicate" in codes
-    )
-    if duplicate:
-        issue_code = (
-            "title_duplicate"
-            if crawl.title_duplicate or "title_duplicate" in codes
-            else "description_duplicate"
-        )
+
+    # Title before description, and both separately: the title earns the click
+    # and is SERP & CTR work that can be promoted, while the description is
+    # upkeep. One signal per page, so the promotable half has to be checked
+    # first or it never surfaces. Phase 3.
+    if crawl.title == "" or "title_missing" in codes:
         return DetectedTechnicalSignal(
-            audit_signal="duplicate_meta",
-            issue_code=issue_code,
-            diagnosis=f"Duplicate meta on page with demand: {page_url}",
+            audit_signal="title_missing",
+            issue_code="title_missing",
+            diagnosis=f"No title tag on page with demand: {page_url}",
+        )
+    if crawl.title_duplicate or "title_duplicate" in codes:
+        return DetectedTechnicalSignal(
+            audit_signal="title_duplicate",
+            issue_code="title_duplicate",
+            diagnosis=f"Duplicate title on page with demand: {page_url}",
+        )
+    if crawl.description == "" or "description_missing" in codes:
+        return DetectedTechnicalSignal(
+            audit_signal="description_missing",
+            issue_code="description_missing",
+            diagnosis=f"No meta description on page with demand: {page_url}",
+        )
+    if crawl.description_duplicate or "description_duplicate" in codes:
+        return DetectedTechnicalSignal(
+            audit_signal="description_duplicate",
+            issue_code="description_duplicate",
+            diagnosis=f"Duplicate meta description on page with demand: {page_url}",
         )
 
     # Only pages the first-party crawl actually reached can be said to lack
@@ -828,6 +913,7 @@ def _technical_finding(
     crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
     schema_by_url: dict[str, PageSchema] | None = None,
     schema_crawled_urls: frozenset[str] | None = None,
+    thresholds: dict[str, Any] | None = None,
 ) -> LeverFinding | None:
     detected = detect_technical_signal(
         page.normalized_url,
@@ -836,9 +922,12 @@ def _technical_finding(
         crawl_by_url=crawl_by_url,
         schema_by_url=schema_by_url,
         schema_crawled_urls=schema_crawled_urls,
+        impressions=page.impressions,
+        thresholds=thresholds,
     )
     if detected is None:
         return None
+    lever = signal_lever(detected.audit_signal)
 
     assessment = score_technical_impact(
         impressions=page.impressions,
@@ -855,9 +944,9 @@ def _technical_finding(
     )
     urgency_override = None
     if assessment.critical_override:
-        urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
+        urgency_override = max(LEVER_INPUTS[lever].urgency, 90.0)
     finding = _make_finding(
-        lever=GrowthAction.TECHNICAL_SEO.value,
+        lever=lever,
         rule_key=_rule_key("technical", page.normalized_url),
         diagnosis=detected.diagnosis,
         evidence_json={
@@ -1460,6 +1549,7 @@ def _per_page_cascade(
                 classification=classification,
                 page_issue_codes=issue_map.get(page.normalized_url),
                 crawl_by_url=crawl_by_url,
+                thresholds=thresholds,
             )
             if finding is None:
                 finding = _internal_linking_finding(
@@ -1497,6 +1587,7 @@ def _per_page_cascade(
                 crawl_by_url=crawl_by_url,
                 schema_by_url=schema_by_url,
                 schema_crawled_urls=schema_crawled_urls,
+                thresholds=thresholds,
             )
         if finding is not None:
             _enrich_finding(finding, classification=classification, page_ctx=page_ctx)
@@ -2989,6 +3080,184 @@ def _tracking_failure_finding(
     )
 
 
+def _tracking_anomaly_findings(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+    site: SiteBusinessContext,
+    thresholds: dict[str, Any],
+) -> list[LeverFinding]:
+    """Gate 0, the two failures that are not total silence. Phase 3.
+
+    The silence check asks whether the site records any conversions at all,
+    which misses the two ways tracking goes wrong on a site that still
+    converts: one form stops and the total hides it, or one event starts
+    firing twice and the total flatters it.
+
+    Neither suppresses anything. Silence makes every score below it a
+    fiction, which is what earns that gate its veto; these two make *some*
+    scores wrong, and the honest response is to say which.
+    """
+    if period is None:
+        return []
+    lead_events = _lead_event_names(db, client.id)
+    if not lead_events:
+        return []
+
+    _, end = period
+    days = int(thresholds.get("partial_break_days", 14))
+    window_start = end - timedelta(days=days - 1)
+    findings: list[LeverFinding] = []
+
+    current = _leads_by_page(db, client.id, lead_events, window_start, end)
+    site_leads_now = sum(current.values())
+    if site_leads_now <= 0:
+        # Nothing recorded anywhere is the silence gate's business, not this
+        # one, and reporting both would say the same thing twice.
+        return []
+
+    # ── Partial break ──
+    # Prior rate per page, from everything before the window.
+    prior = _leads_by_page(db, client.id, lead_events, None, window_start - timedelta(days=1))
+    prior_days = _recorded_day_span(db, client.id, before=window_start)
+    min_expected = float(thresholds.get("partial_break_min_expected_leads", 3))
+    if prior_days > 0:
+        for url, prior_leads in sorted(prior.items(), key=lambda row: -row[1]):
+            if current.get(url, 0.0) > 0:
+                continue
+            expected = (prior_leads / prior_days) * days
+            if expected < min_expected:
+                continue
+            impact, impact_evidence = normalize_business_impact(
+                site=site,
+                leads_at_risk=expected,
+                data_confidence="high",
+            )
+            findings.append(
+                _make_finding(
+                    lever=GrowthAction.CONVERSION_PATH.value,
+                    rule_key=_rule_key("tracking_partial", url),
+                    diagnosis=(
+                        f"No conversions from this page in {days} days while the rest "
+                        f"of the site still converts: {url}"
+                    ),
+                    evidence_json={
+                        "gate": "tracking_partial",
+                        "audit_signal": "tracking_partial",
+                        "promotion_class": "actionable",
+                        "window_days": days,
+                        "window_start": window_start.isoformat(),
+                        "window_end": end.isoformat(),
+                        "expected_leads": round(expected, 1),
+                        "site_leads_in_window": round(site_leads_now, 1),
+                        "lead_events": lead_events,
+                        **impact_evidence,
+                    },
+                    baseline_metrics_json={"prior_leads": round(prior_leads, 1)},
+                    impact=impact,
+                    page_url=url,
+                    action_override=(
+                        "Submit this page's form yourself and confirm the event fires. "
+                        "The rest of the site is still recording conversions, so this "
+                        "is one form or one template, not the tag."
+                    ),
+                )
+            )
+            break  # One is a finding; a list of them is the silence gate.
+
+    # ── Spike ──
+    multiple = float(thresholds.get("lead_spike_multiple", 3.0))
+    floor = float(thresholds.get("lead_spike_min_leads", 10))
+    if prior_days > 0 and site_leads_now >= floor:
+        expected_site = (sum(prior.values()) / prior_days) * days
+        if expected_site > 0 and site_leads_now >= expected_site * multiple:
+            # The excess over the usual rate is the number of recorded leads
+            # that may not exist. That is a real quantity in the same currency
+            # as everything else — and it is exactly what is wrong with the
+            # period if the event is firing twice.
+            suspect = site_leads_now - expected_site
+            impact, impact_evidence = normalize_business_impact(
+                site=site,
+                leads_at_risk=suspect,
+                data_confidence="high",
+            )
+            findings.append(
+                _make_finding(
+                    lever=GrowthAction.CONVERSION_PATH.value,
+                    rule_key=_rule_key("tracking_spike", str(client.id)),
+                    diagnosis=(
+                        f"{int(site_leads_now):,} conversions in {days} days against "
+                        f"{expected_site:.0f} expected — more than {multiple:g}x the "
+                        f"usual rate"
+                    ),
+                    evidence_json={
+                        "gate": "tracking_spike",
+                        "audit_signal": "tracking_spike",
+                        "promotion_class": "actionable",
+                        "window_days": days,
+                        "leads": round(site_leads_now, 1),
+                        "expected_leads": round(expected_site, 1),
+                        "multiple": round(site_leads_now / expected_site, 1),
+                        "suspect_leads": round(suspect, 1),
+                        "lead_events": lead_events,
+                        **impact_evidence,
+                    },
+                    baseline_metrics_json={"expected_leads": round(expected_site, 1)},
+                    impact=impact,
+                    severity=60.0,
+                    action_override=(
+                        "Check the event for double firing or form spam before trusting "
+                        "this period's numbers. Every impact score here is computed from "
+                        "leads, so an inflated count inflates the queue."
+                    ),
+                )
+            )
+
+    return findings
+
+
+def _leads_by_page(
+    db: Session,
+    client_id: UUID,
+    lead_events: list[str],
+    start: date | None,
+    end: date,
+) -> dict[str, float]:
+    query = db.query(
+        FactGa4Event.normalized_url,
+        func.coalesce(func.sum(FactGa4Event.event_count), 0),
+    ).filter(
+        FactGa4Event.client_id == client_id,
+        FactGa4Event.date <= end,
+        FactGa4Event.event_name.in_(lead_events),
+    )
+    if start is not None:
+        query = query.filter(FactGa4Event.date >= start)
+    return {
+        url: float(total)
+        for url, total in query.group_by(FactGa4Event.normalized_url).all()
+        if url and float(total) > 0
+    }
+
+
+def _recorded_day_span(db: Session, client_id: UUID, *, before: date) -> int:
+    """Days of history behind the window, so a rate can be a rate.
+
+    Measured from the first recorded day rather than assumed, because a client
+    onboarded three weeks ago has three weeks of history and dividing by a
+    year would make every page look broken.
+    """
+    first = (
+        db.query(func.min(FactGa4Event.date))
+        .filter(FactGa4Event.client_id == client_id, FactGa4Event.date < before)
+        .scalar()
+    )
+    if first is None:
+        return 0
+    return max(0, (before - first).days)
+
+
 #: Behind the plan by less than this is a normal month, not a finding.
 CONVERSION_PLAN_SHORTFALL_RATIO = 0.8
 #: Below where the client started by more than this is going backwards.
@@ -3532,6 +3801,14 @@ def diagnose(
     # in the payload — hiding them entirely would make the queue look empty
     # when it is only untrustworthy — but nothing is promoted to a Growth
     # Action until the tag is fixed.
+    # The two Gate 0 anomalies that are not total silence. They compete on
+    # impact like anything else — only silence has a veto. Phase 3.
+    findings.extend(
+        _tracking_anomaly_findings(
+            db, client, period=ga4_period, site=site, thresholds=thresholds
+        )
+    )
+
     tracking = _tracking_failure_finding(db, client, period=ga4_period, site=site)
     if tracking is not None:
         _enrich_finding(tracking, classification=None, page_ctx=None)

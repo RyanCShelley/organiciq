@@ -30,15 +30,17 @@ def _crawl(**overrides) -> FactCrawlPageSnapshot:
     return FactCrawlPageSnapshot(**base)
 
 
-def test_detect_missing_meta_from_empty_title():
+def test_detect_missing_title_from_empty_title():
+    """Phase 3 split this from the description: a title earns the click, so
+    it is SERP & CTR work that can be promoted rather than monthly upkeep."""
     crawl = _crawl(title="", description="Has description")
     detected = detect_technical_signal(crawl.normalized_url, crawl)
     assert detected is not None
-    assert detected.audit_signal == "missing_meta"
+    assert detected.audit_signal == "title_missing"
     assert detected.issue_code == "title_missing"
 
 
-def test_detect_missing_meta_ignores_unenriched_null_title():
+def test_detect_missing_title_ignores_unenriched_null_title():
     crawl = _crawl(title=None, description=None)
     detected = detect_technical_signal(crawl.normalized_url, crawl)
     assert detected is None
@@ -79,7 +81,7 @@ def test_detect_priority_prefers_status_error_over_meta():
     assert detected.audit_signal == "status_error"
 
 
-def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
+def test_diagnose_emits_a_title_gap_and_the_site_sitemap(db, client_a):
     start, end = date_window(14)
     page = "https://example.com/blog/useful-meta-gap"
     db.add(
@@ -138,16 +140,26 @@ def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
 
     seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
-    technical = [row for row in result.findings if row.lever == "technical_seo"]
-    signals = {row.evidence_json.get("audit_signal") for row in technical}
-    assert "missing_meta" in signals
+    signals = {row.evidence_json.get("audit_signal") for row in result.findings}
+    # The title gap now files under SERP & CTR, not Technical SEO.
+    assert "title_missing" in signals
     assert "sitemap_missing" in signals
-    # Both are upkeep the plan already covers monthly, so they are reported
-    # and never spend one of the client's one-to-five flexible actions.
-    sitemap = next(row for row in technical if row.evidence_json.get("audit_signal") == "sitemap_missing")
+    assert {row.lever for row in result.findings if
+            row.evidence_json.get("audit_signal") == "title_missing"} == {"serp_ctr"}
+    # The sitemap gap is upkeep the plan already covers monthly, so it is
+    # reported and never spends one of the client's flexible actions.
+    sitemap = next(
+        row
+        for row in result.findings
+        if row.evidence_json.get("audit_signal") == "sitemap_missing"
+    )
     assert sitemap.core_work is True
     assert sitemap.promotion_blocked_reason == "core work: included in the monthly plan"
-    meta = next(row for row in technical if row.evidence_json.get("audit_signal") == "missing_meta")
-    assert meta.evidence_json.get("issue_code") == "title_missing"
-    assert meta.core_work is True
-    assert meta.is_recommended_action is False
+    # The title gap is not: it can compete for an action.
+    title = next(
+        row
+        for row in result.findings
+        if row.evidence_json.get("audit_signal") == "title_missing"
+    )
+    assert title.evidence_json.get("issue_code") == "title_missing"
+    assert title.core_work is False

@@ -146,6 +146,9 @@ def test_every_gate_states_what_it_suppresses():
         "site_conversion",
         "visibility_no_traffic",
         "conversion_page",
+        # Phase 3: Gate 0's two non-silence failures. Neither has a veto.
+        "tracking_partial",
+        "tracking_spike",
     }
     for gate, spec in GATE_BEHAVIOUR.items():
         assert spec["suppresses"], gate
