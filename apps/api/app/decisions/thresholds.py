@@ -46,6 +46,18 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "light_refresh_min_drop_pct": 20.0,
     # T8: a rule gets another chance once the work has moved on.
     "contested_reset_days": 90,
+    # C1: confidence read from the evidence rather than from the lever.
+    # Applying it is off until the distribution across real clients has been
+    # looked at — see app/decisions/confidence.py.
+    "data_driven_confidence_enabled": 0,
+    "confidence_tier_high": 1.0,
+    "confidence_tier_medium": 0.9,
+    "confidence_tier_low": 0.75,
+    "confidence_small_sample_factor": 0.8,
+    "confidence_min_sample_leads": 3,
+    "confidence_min_sample_impressions": 100,
+    "confidence_stale_after_days": 14,
+    "confidence_stale_factor": 0.85,
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,
@@ -59,10 +71,18 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
 }
 
 
-def merge_thresholds(overrides: dict[str, Any] | None) -> dict[str, float | int]:
+def merge_thresholds(overrides: dict[str, Any] | None) -> dict[str, Any]:
     merged = deepcopy(DEFAULT_DECISION_THRESHOLDS)
     if overrides:
         for key, value in overrides.items():
-            if key in merged and isinstance(value, (int, float)):
+            if key not in merged:
+                continue
+            # Two of these keys hold lists of terms. They were being dropped
+            # here, which made them tunable only by deploy — the opposite of
+            # what this store is for.
+            if isinstance(merged[key], list):
+                if isinstance(value, list):
+                    merged[key] = [str(item) for item in value]
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
                 merged[key] = value
     return merged

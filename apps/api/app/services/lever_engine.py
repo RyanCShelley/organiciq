@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.decisions.confidence import data_confidence
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
     benchmark_source_label,
@@ -3540,6 +3541,37 @@ def diagnose(
             if not survives_tracking_gate(finding, active_before):
                 finding.suppressed_by = tracking.rule_key
         findings.append(tracking)
+
+    # ── C1 ──
+    # Confidence read from the evidence instead of from the lever. It is
+    # recorded on every finding and applied only when the client opts in: the
+    # 60 gate has never rejected anything, so switching this on without
+    # looking first would silently stop promoting work for reasons nobody has
+    # seen. `scripts/confidence_distribution.py` reads the recorded scores.
+    gsc_age_days = (date.today() - gsc_period[1]).days if gsc_period else None
+    apply_scores = bool(thresholds.get("data_driven_confidence_enabled"))
+    for finding in findings:
+        lever_ceiling = (
+            LEVER_INPUTS[finding.lever].confidence
+            if finding.lever in LEVER_INPUTS
+            else finding.confidence
+        )
+        scored = data_confidence(
+            lever_ceiling,
+            finding.evidence_json,
+            thresholds,
+            data_age_days=gsc_age_days,
+        )
+        finding.evidence_json["data_driven_confidence"] = scored
+        finding.evidence_json["lever_confidence"] = lever_ceiling
+        if apply_scores and scored != finding.confidence:
+            finding.confidence = scored
+            finding.priority_score = score_finding(
+                impact=finding.impact,
+                confidence=finding.confidence,
+                urgency=finding.urgency,
+                effort=finding.effort,
+            )
 
     # Before sorting, or a page counted three times outranks pages counted once.
     cap_per_url_impact(findings)
