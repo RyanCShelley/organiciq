@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -1818,6 +1819,162 @@ def _visibility_without_traffic_findings(
     return findings
 
 
+#: Words that join queries together without saying what they are about.
+CLUSTER_STOPWORDS: frozenset[str] = frozenset(
+    """a an and are as at be best by can cheap cost do does for from get good how
+    i in is it me my near of on or our price pricing should that the to top
+    vs what when where which who why will with you your""".split()
+)
+#: A token has to recur across this many distinct queries before it describes a
+#: subject rather than a coincidence.
+CLUSTER_MIN_QUERIES = 3
+#: Demand worth writing for.
+CLUSTER_MIN_IMPRESSIONS = 300.0
+#: Page one. Anything better than this and the subject already has an owner.
+CLUSTER_OWNED_POSITION = 10.0
+#: Clusters overlap by construction, so only the strongest few are reported.
+CLUSTER_MAX_FINDINGS = 5
+
+
+def _cluster_tokens(query: str, brand: frozenset[str]) -> list[str]:
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", (query or "").lower())
+    return [
+        token
+        for token in cleaned.split()
+        if len(token) > 2 and token not in CLUSTER_STOPWORDS and token not in brand
+    ]
+
+
+def _brand_tokens(client: Client) -> frozenset[str]:
+    """The client's own name, which otherwise forms the biggest cluster on every site.
+
+    Brand queries are demand the site already owns by existing; they are not a
+    subject anyone needs to go and write about.
+    """
+    parts = re.split(r"[^a-z0-9]+", (client.client_name or "").lower())
+    host = (client.domain or "").lower().split(".")[0]
+    return frozenset(part for part in [*parts, host] if len(part) > 2)
+
+
+def _content_cluster_findings(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+) -> list[LeverFinding]:
+    """Subjects the site draws demand for and has no page ranking on.
+
+    The link-gap rule asks which existing page should point at another. This
+    asks the question underneath it: is there a subject here with no page at
+    all? Same query data, read the other way.
+
+    The grouping is a heuristic and worth naming as one: queries are clustered
+    by a shared word, after stripping the words that join queries without
+    describing them and the client's own brand. It will not find a subject
+    whose queries share no vocabulary, and it will occasionally group two
+    subjects that happen to share a word. It is reported with its own example
+    queries so a strategist can see in a second whether the grouping is real —
+    which is the honest way to ship a heuristic.
+    """
+    if period is None:
+        return []
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.query,
+            func.sum(FactGscQueryPage.impressions).label("impressions"),
+            func.min(FactGscQueryPage.average_position).label("best_position"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.query)
+        .all()
+    )
+    if not rows:
+        return []
+
+    brand = _brand_tokens(client)
+    clusters: dict[str, list[tuple[str, float, float]]] = {}
+    for query, impressions, best_position in rows:
+        entry = (query, float(impressions or 0), float(best_position or 100))
+        for token in set(_cluster_tokens(query, brand)):
+            clusters.setdefault(token, []).append(entry)
+
+    # A cluster is named by every word its queries share, not by the one word
+    # that seeded it. Three queries all containing "metal" and "roofing" are
+    # about metal roofing; calling that cluster "metal" tells a strategist
+    # nothing, and it also means two seed words over one set of queries —
+    # "schema" and "markup" — collapse to a single finding instead of two
+    # saying the same thing.
+    by_label: dict[str, list[tuple[str, float, float]]] = {}
+    for entries in clusters.values():
+        if len(entries) < CLUSTER_MIN_QUERIES:
+            continue
+        shared: set[str] | None = None
+        for query, _impressions, _position in entries:
+            tokens = set(_cluster_tokens(query, brand))
+            shared = tokens if shared is None else (shared & tokens)
+        if not shared:
+            continue
+        # Read the words off the busiest query so they come out in the order a
+        # person would say them, not alphabetically.
+        busiest = max(entries, key=lambda row: row[1])[0]
+        order = {word: index for index, word in enumerate(_cluster_tokens(busiest, brand))}
+        label = " ".join(sorted(shared, key=lambda word: order.get(word, 99)))
+        by_label.setdefault(label, entries)
+
+    candidates: list[tuple[float, str, list[tuple[str, float, float]]]] = []
+    for label, entries in by_label.items():
+        total = sum(row[1] for row in entries)
+        if total < CLUSTER_MIN_IMPRESSIONS:
+            continue
+        best = min(row[2] for row in entries)
+        if best <= CLUSTER_OWNED_POSITION:
+            # Something already ranks for this subject. That is a page to
+            # strengthen, not a cluster to start, and the page-level rules
+            # already have it.
+            continue
+        candidates.append((total, label, entries))
+
+    candidates.sort(key=lambda row: (-row[0], row[1]))
+    findings: list[LeverFinding] = []
+    for total, token, entries in candidates[:CLUSTER_MAX_FINDINGS]:
+        examples = [row[0] for row in sorted(entries, key=lambda row: -row[1])[:3]]
+        best = min(row[2] for row in entries)
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.AI_VISIBILITY.value,
+                rule_key=_rule_key("content_cluster", str(client.id), token),
+                diagnosis=(
+                    f"No page ranking for \u201c{token}\u201d: {len(entries)} queries, "
+                    f"{int(total):,} impressions, best position {best:.0f}"
+                ),
+                action_override=(
+                    f"Write or rework a page that answers \u201c{token}\u201d properly — "
+                    f"the demand is already there ({int(total):,} impressions across "
+                    f"{len(entries)} queries) and nothing on the site ranks for it. "
+                    f"Start from: {', '.join(examples)}."
+                ),
+                evidence_json={
+                    "gate": "content_cluster",
+                    "cluster_token": token,
+                    "query_count": len(entries),
+                    "impressions": int(total),
+                    "best_position": round(best, 1),
+                    "example_queries": examples,
+                    "promotion_class": "actionable",
+                },
+                baseline_metrics_json={"impressions": total, "best_position": best},
+                impact=min(100.0, (total / 2000.0) * 100.0),
+                query=token,
+            )
+        )
+    return findings
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -2337,6 +2494,12 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Subjects with demand and no page at all ──
+    findings.extend(_content_cluster_findings(db, client, period=gsc_period))
+    for finding in findings:
+        if finding.evidence_json.get("gate") == "content_cluster":
+            _enrich_finding(finding, classification=None, page_ctx=None)
 
     # ── Gate 2: rankings that bring nothing ──
     findings.extend(
