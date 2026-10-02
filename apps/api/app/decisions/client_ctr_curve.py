@@ -22,6 +22,10 @@ from app.models.gsc import FactGscPage
 
 #: Below this the client's own data says less than the aggregate does.
 MIN_IMPRESSIONS_FOR_OWN_CURVE = 1000
+#: And it needs breadth, not only volume. A curve fitted to a handful of pages
+#: is dominated by the very pages it is then used to judge, so each one comes
+#: out exactly as expected by construction — the comparison measures nothing.
+MIN_PAGES_FOR_OWN_CURVE = 20
 #: Positions beyond this are too sparse to fit and too far back to matter.
 MAX_CURVE_POSITION = 20
 
@@ -53,6 +57,18 @@ def build_client_ctr_curve(
         .group_by("position")
         .all()
     )
+    distinct_pages = (
+        db.query(func.count(func.distinct(FactGscPage.normalized_url)))
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .scalar()
+        or 0
+    )
+    if distinct_pages < MIN_PAGES_FOR_OWN_CURVE:
+        return {}, "default"
 
     totals: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
     for position, impressions, clicks in rows:

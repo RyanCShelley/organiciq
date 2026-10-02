@@ -1256,6 +1256,50 @@ def _internal_linking_finding(
     )
 
 
+def _branded_impression_share(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+) -> dict[str, float]:
+    """Share of each page's impressions that came from brand searches.
+
+    A page ranking first for the company name has a CTR that reflects the
+    brand, not the listing, and judging it against a generic curve reports a
+    problem nobody can fix. T6.
+    """
+    if period is None:
+        return {}
+    brand = _brand_tokens(client)
+    if not brand:
+        return {}
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.normalized_url,
+            FactGscQueryPage.query,
+            func.sum(FactGscQueryPage.impressions),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.normalized_url, FactGscQueryPage.query)
+        .all()
+    )
+    totals: dict[str, list[float]] = {}
+    for url, query, impressions in rows:
+        value = float(impressions or 0)
+        bucket = totals.setdefault(url, [0.0, 0.0])
+        bucket[0] += value
+        if any(token in (query or "").lower() for token in brand):
+            bucket[1] += value
+    return {
+        url: (branded / total) for url, (total, branded) in totals.items() if total > 0
+    }
+
+
 def _serp_ctr_finding(
     page: PageDemand,
     *,
@@ -1263,12 +1307,21 @@ def _serp_ctr_finding(
     site: SiteBusinessContext,
     lead_rate_ctx: LeadRateContext | None = None,
     classification: PageClassification | None = None,
+    ctr_curve: dict[int, float] | None = None,
+    branded_share: float = 0.0,
 ) -> LeverFinding | None:
     if page.impressions < 1000:
         return None
-    if page.average_position < 2 or page.average_position > 10:
+    # Position one included. A page ranking first and under-clicked is the
+    # cheapest fix on the site, and excluding it assumed first place cannot
+    # under-perform — which an AI Overview above it comfortably disproves. T6.
+    if page.average_position < 1 or page.average_position > 10:
         return None
-    expected = expected_ctr_percent(page.average_position)
+    # Brand searches convert at their own rate and are not a listing problem:
+    # someone typing the company name clicks whatever is there. T6.
+    if branded_share >= BRANDED_SHARE_MAX:
+        return None
+    expected = ctr_at(page.average_position, ctr_curve or {})
     if not is_ctr_underperforming(
         ctr_percent=page.ctr_percent,
         expected_ctr=expected,
@@ -1335,10 +1388,14 @@ def _per_page_cascade(
     schema_crawled_urls: frozenset[str] | None = None,
     link_gaps: dict[str, list[LinkGap]] | None = None,
     thresholds: dict[str, float | int] | None = None,
+    page_ctr_curve: dict[int, float] | None = None,
+    branded_shares: dict[str, float] | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
     gaps = link_gaps or {}
+    ctr_curve = page_ctr_curve or {}
+    branded = branded_shares or {}
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -1384,6 +1441,8 @@ def _per_page_cascade(
                 site=site,
                 lead_rate_ctx=lead_rate_ctx,
                 classification=classification,
+                ctr_curve=ctr_curve,
+                branded_share=branded.get(page.normalized_url, 0.0),
             )
         if finding is None and crawl_ready and crawl is not None:
             # Last resort: nothing else to say about this page, so report the
@@ -1961,6 +2020,11 @@ VISIBILITY_MAX_POSITION = 10.0
 #: Terms smaller than this can legitimately draw almost nothing, so silence
 #: tells you nothing about whether the ranking is working.
 VISIBILITY_MIN_VOLUME = 100.0
+#: Above this share of branded impressions a page's CTR says more about the
+#: brand than the listing.
+BRANDED_SHARE_MAX = 0.5
+
+
 #: Kept for the impression check: a ranking that is not even being shown is a
 #: different problem from one being shown and not clicked.
 VISIBILITY_IMPRESSION_RATIO = 0.1
@@ -3252,6 +3316,8 @@ def diagnose(
             schema_crawled_urls=schema_crawled_urls,
             link_gaps=link_gaps,
             thresholds=thresholds,
+            page_ctr_curve=build_client_ctr_curve(db, client.id, gsc_period)[0],
+            branded_shares=_branded_impression_share(db, client, period=gsc_period),
         )
     )
     for site_finding in _site_technical_findings(

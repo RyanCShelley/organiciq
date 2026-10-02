@@ -383,3 +383,57 @@ def test_diagnose_is_blocked_when_any_single_source_is_missing(db, client_a):
         assert result.readiness[missing] is False
 
 
+
+
+# --- T6 ---------------------------------------------------------------------
+
+
+def test_position_one_can_under_perform(db, client_a):
+    """Excluding it assumed first place cannot be under-clicked, which an AI
+    Overview sitting above it comfortably disproves."""
+    from app.services.decision_impact import SiteBusinessContext
+    from app.services.lever_engine import PageDemand, _serp_ctr_finding
+
+    finding = _serp_ctr_finding(
+        PageDemand(
+            normalized_url="https://example.com/services",
+            impressions=5000.0,
+            clicks=25.0,
+            average_position=1.0,
+            ctr_percent=0.5,
+        ),
+        page_ctx=None,
+        site=SiteBusinessContext(
+            site_lead_rate_pct=2.0,
+            period_sessions=5000.0,
+            period_leads=40,
+            period_lead_goal=50,
+            p90_page_sessions=400.0,
+        ),
+    )
+
+    assert finding is not None
+
+
+def test_a_page_living_on_brand_searches_is_not_a_listing_problem(db, client_a):
+    """Someone typing the company name clicks whatever is there."""
+    from app.services.decision_impact import SiteBusinessContext
+    from app.services.lever_engine import PageDemand, _serp_ctr_finding
+
+    page = PageDemand(
+        normalized_url="https://example.com/",
+        impressions=5000.0,
+        clicks=25.0,
+        average_position=1.0,
+        ctr_percent=0.5,
+    )
+    site = SiteBusinessContext(
+        site_lead_rate_pct=2.0,
+        period_sessions=5000.0,
+        period_leads=40,
+        period_lead_goal=50,
+        p90_page_sessions=400.0,
+    )
+
+    assert _serp_ctr_finding(page, page_ctx=None, site=site, branded_share=0.9) is None
+    assert _serp_ctr_finding(page, page_ctx=None, site=site, branded_share=0.1) is not None
