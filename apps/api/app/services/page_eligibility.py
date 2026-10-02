@@ -152,10 +152,24 @@ def classify_page_url(normalized_url: str) -> PageClassification:
 
 
 def _extract_topic_slug(path: str, prefix: str) -> str | None:
+    """The category a post sits in, or None on a flat blog.
+
+    A topic only exists where the URL has one: `/blog/seo/some-post` is a post
+    about SEO, but `/blog/some-post` is just a post, and its slug is not a
+    subject it shares with anything.
+
+    This returned the slug either way, so on a flat blog every post got a topic
+    of its own. Two things quietly did nothing as a result: findings grouped by
+    `topic:<x>` grouped one page each, and topic lead rates averaged a single
+    page, which is the page rate with extra steps. Neither looked broken.
+    """
     if prefix not in path:
         return None
-    slug = path.split(prefix, 1)[1].split("/")[0]
-    return slug.replace("-", " ") if slug else None
+    segments = [part for part in path.split(prefix, 1)[1].split("/") if part]
+    # One segment is the post itself; a category needs something beneath it.
+    if len(segments) < 2:
+        return None
+    return segments[0].replace("-", " ")
 
 
 def classify_pages(normalized_urls: list[str]) -> dict[str, PageClassification]:
