@@ -2415,6 +2415,7 @@ def _decaying_page_findings(
     period: tuple[date, date] | None,
     fact_min: date | None,
     site: SiteBusinessContext,
+    thresholds: dict[str, Any] | None = None,
 ) -> list[LeverFinding]:
     """Pages that used to perform and no longer do.
 
@@ -2436,6 +2437,10 @@ def _decaying_page_findings(
         # site.
         return []
 
+    limits = thresholds or {}
+    flat_band = float(limits.get("decay_impressions_flat_pct", 10.0))
+    light_min_drop = float(limits.get("light_refresh_min_drop_pct", 20.0))
+
     now = _page_totals(db, client.id, period)
     before = _page_totals(db, client.id, earlier)
     if not before:
@@ -2452,17 +2457,50 @@ def _decaying_page_findings(
             continue
         current_clicks, current_impressions = now.get(url, (0.0, 0.0))
         drop_pct = (prior_clicks - current_clicks) / prior_clicks * 100
-        if drop_pct < DECAY_MIN_DROP_PCT:
+        if drop_pct < light_min_drop:
             continue
         if drop_pct - site_drop_pct < DECAY_EXCESS_OVER_SITE_PCT:
             continue
-        # Impressions have to be down too. Clicks falling while impressions
-        # hold is a listing problem, and the CTR rule owns that one.
-        if prior_impressions > 0 and current_impressions >= prior_impressions:
-            continue
 
+        impressions_change = (
+            ((current_impressions - prior_impressions) / prior_impressions * 100)
+            if prior_impressions > 0
+            else 0.0
+        )
+        # Clicks falling while impressions hold is not decay. The page is
+        # still being shown as often and chosen less, which is the listing or
+        # something now sitting above it — a different job from rewriting the
+        # page, and routed accordingly rather than silently dropped. T7.
+        held = abs(impressions_change) <= flat_band
         lost = prior_clicks - current_clicks
         against = "the same period last year" if yoy else "earlier in the history"
+        light = drop_pct < DECAY_MIN_DROP_PCT
+
+        if held:
+            cause = "serp_feature_or_ctr"
+            diagnosis = (
+                f"Clicks down {drop_pct:.0f}% on {against} with impressions flat: {url}"
+            )
+            action = (
+                "The page is shown as often and chosen less, so this is the listing "
+                "rather than the content. Check what now appears above it — an AI "
+                "Overview or a new feature — and rewrite the title and description "
+                "against what is actually winning the click."
+            )
+        else:
+            cause = "light_refresh" if light else "decay"
+            verb = "Slipping" if light else "Down"
+            diagnosis = (
+                f"{verb} {drop_pct:.0f}% on {against}: {url} "
+                f"({int(prior_clicks):,} clicks to {int(current_clicks):,})"
+            )
+            action = (
+                f"{'Review' if light else 'Deep refresh'} this page. It earned "
+                f"{int(prior_clicks):,} clicks {against} and now earns "
+                f"{int(current_clicks):,}, while the site as a whole moved "
+                f"{-site_drop_pct:+.0f}% — so this is the page losing ground, not the "
+                "market. Rework the content against what currently ranks."
+            )
 
         # Scored in leads: the clicks this page used to bring and no longer
         # does, at the site's lead rate. Medium confidence — the clicks are
@@ -2475,18 +2513,12 @@ def _decaying_page_findings(
             data_confidence="medium",
         )
         finding = _make_finding(
-            lever=GrowthAction.AI_VISIBILITY.value,
+            lever=(
+                GrowthAction.SERP_CTR.value if held else GrowthAction.AI_VISIBILITY.value
+            ),
             rule_key=_rule_key("decaying_page", url),
-            diagnosis=(
-                f"Down {drop_pct:.0f}% on {against}: {url} "
-                f"({int(prior_clicks):,} clicks to {int(current_clicks):,})"
-            ),
-            action_override=(
-                f"Deep refresh this page. It earned {int(prior_clicks):,} clicks "
-                f"{against} and now earns {int(current_clicks):,}, while the site as a "
-                f"whole moved {-site_drop_pct:+.0f}% — so this is the page losing ground, "
-                "not the market. Rework the content against what currently ranks."
-            ),
+            diagnosis=diagnosis,
+            action_override=action,
             evidence_json={
                 "gate": "decaying_page",
                 "prior_clicks": int(prior_clicks),
@@ -2494,7 +2526,9 @@ def _decaying_page_findings(
                 "prior_impressions": int(prior_impressions),
                 "current_impressions": int(current_impressions),
                 "drop_pct": round(drop_pct, 1),
+                "impressions_change_pct": round(impressions_change, 1),
                 "site_drop_pct": round(site_drop_pct, 1),
+                "cause": cause,
                 "compared_with": [earlier[0].isoformat(), earlier[1].isoformat()],
                 "year_over_year": yoy,
                 "promotion_class": "actionable",
@@ -3382,7 +3416,10 @@ def diagnose(
 
     # ── Pages that used to perform ──
     findings.extend(
-        _decaying_page_findings(db, client, period=gsc_period, fact_min=fact_min, site=site)
+        _decaying_page_findings(
+            db, client, period=gsc_period, fact_min=fact_min, site=site,
+            thresholds=thresholds,
+        )
     )
     for finding in findings:
         if finding.evidence_json.get("gate") == "decaying_page":

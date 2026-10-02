@@ -126,15 +126,61 @@ def test_a_page_falling_further_than_the_site_still_shows(db, client_a):
     assert [row.page_url for row in findings] == [PAGE]
 
 
-def test_clicks_falling_while_impressions_hold_is_a_listing_problem(db, client_a):
-    """That is the CTR rule's finding, and two rules on one page is noise."""
+def test_clicks_falling_while_impressions_hold_is_routed_not_dropped(db, client_a):
+    """The page is shown as often and chosen less. That is the listing, not the
+    content — a different job, and previously it vanished rather than moving. T7."""
     _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
-    _fact(db, client_a.id, PAGE, END, 40, 8500)
+    _fact(db, client_a.id, PAGE, END, 40, 8200)
     _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
 
-    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()) == []
+    findings = _decaying_page_findings(
+        db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()
+    )
+
+    assert len(findings) == 1
+    assert findings[0].evidence_json["cause"] == "serp_feature_or_ctr"
+    assert findings[0].lever == "serp_ctr"
+    assert "impressions flat" in findings[0].diagnosis
+    assert "what now appears above it" in findings[0].recommended_action
+
+
+def test_a_smaller_slide_is_a_light_refresh(db, client_a):
+    """Down a third is worth reviewing, not reworking.
+
+    The rest of the site is large and steady here on purpose: the page must
+    still clear the 25-point excess over the site, so on a small site a page's
+    own fall drags the average down and masks it."""
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
+    _fact(db, client_a.id, PAGE, END, 280, 3000)
+    _fact(db, client_a.id, OTHER, LAST_YEAR, 3000, 60000)
+    _fact(db, client_a.id, OTHER, END, 3000, 60000)
+    db.commit()
+
+    findings = _decaying_page_findings(
+        db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()
+    )
+
+    assert len(findings) == 1
+    assert findings[0].evidence_json["cause"] == "light_refresh"
+    assert findings[0].diagnosis.startswith("Slipping")
+    assert "Review this page" in findings[0].recommended_action
+
+
+def test_a_big_drop_with_impressions_gone_is_still_a_deep_refresh(db, client_a):
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
+    _fact(db, client_a.id, PAGE, END, 40, 2000)
+    _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
+    _fact(db, client_a.id, OTHER, END, 300, 6000)
+    db.commit()
+
+    findings = _decaying_page_findings(
+        db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()
+    )
+
+    assert findings[0].evidence_json["cause"] == "decay"
+    assert "Deep refresh" in findings[0].recommended_action
 
 
 def test_a_page_that_never_performed_cannot_have_decayed(db, client_a):
@@ -149,8 +195,9 @@ def test_a_page_that_never_performed_cannot_have_decayed(db, client_a):
 
 
 def test_a_small_dip_is_not_decay(db, client_a):
+    """Under the light-refresh floor of 20%."""
     _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
-    _fact(db, client_a.id, PAGE, END, 330, 7000)
+    _fact(db, client_a.id, PAGE, END, 350, 7000)
     _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
