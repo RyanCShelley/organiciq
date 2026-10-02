@@ -1975,6 +1975,159 @@ def _content_cluster_findings(
     return findings
 
 
+#: A page has to have been worth something before it can have decayed.
+DECAY_MIN_PRIOR_CLICKS = 20.0
+#: How far clicks must have fallen before it is decay rather than a wobble.
+DECAY_MIN_DROP_PCT = 40.0
+#: And how far it must have fallen *beyond the site*. In a seasonal trough
+#: every page is down; a page is only decaying if it is losing ground its
+#: neighbours are not.
+DECAY_EXCESS_OVER_SITE_PCT = 25.0
+#: A year back reads through seasonality. Anything shorter is compared to the
+#: nearest window that is at least this far from the current one, so a decline
+#: has had room to happen.
+DECAY_MIN_GAP_DAYS = 90
+DECAY_MAX_FINDINGS = 10
+
+
+def _page_totals(
+    db: Session, client_id: UUID, window: tuple[date, date]
+) -> dict[str, tuple[float, float]]:
+    """clicks and impressions per URL across a window."""
+    start, end = window
+    rows = (
+        db.query(
+            FactGscPage.normalized_url,
+            func.sum(FactGscPage.clicks),
+            func.sum(FactGscPage.impressions),
+        )
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .group_by(FactGscPage.normalized_url)
+        .all()
+    )
+    return {url: (float(clicks or 0), float(impressions or 0)) for url, clicks, impressions in rows}
+
+
+def _decay_comparison_window(
+    current: tuple[date, date], fact_min: date | None
+) -> tuple[date, date] | None:
+    """The window to measure decay against.
+
+    A year back where the history allows, because that reads through
+    seasonality — a pool company in November should be compared with last
+    November, not with August. Where it does not, fall back to the nearest
+    window far enough back that a decline has had room to happen; a page
+    compared with last month is being asked about noise.
+    """
+    if fact_min is None:
+        return None
+    start, end = current
+    span = (end - start).days
+
+    year_start = start - timedelta(days=365)
+    if year_start >= fact_min:
+        return (year_start, year_start + timedelta(days=span))
+
+    earlier_end = start - timedelta(days=DECAY_MIN_GAP_DAYS)
+    earlier_start = earlier_end - timedelta(days=span)
+    if earlier_start >= fact_min:
+        return (earlier_start, earlier_end)
+    return None
+
+
+def _decaying_page_findings(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+    fact_min: date | None,
+) -> list[LeverFinding]:
+    """Pages that used to perform and no longer do.
+
+    Every other rule here reads a snapshot: what is wrong with this page now.
+    Decay is only visible across time, so a page that quietly lost three
+    quarters of its traffic over a year looked perfectly healthy to all of
+    them — correct status, fine meta, decent links, still ranking somewhere.
+
+    The site's own decline is subtracted before judging. Without that, a
+    seasonal trough or a sitewide algorithm hit flags every page at once, which
+    is both useless and the loudest possible false alarm.
+    """
+    if period is None:
+        return []
+    earlier = _decay_comparison_window(period, fact_min)
+    if earlier is None:
+        # Not enough history to say anything about a trend. Saying it anyway
+        # would mean reporting the shape of the backfill as the shape of the
+        # site.
+        return []
+
+    now = _page_totals(db, client.id, period)
+    before = _page_totals(db, client.id, earlier)
+    if not before:
+        return []
+
+    site_now = sum(clicks for clicks, _ in now.values())
+    site_before = sum(clicks for clicks, _ in before.values())
+    site_drop_pct = ((site_before - site_now) / site_before * 100) if site_before > 0 else 0.0
+
+    yoy = (period[0] - earlier[0]).days >= 300
+    candidates: list[tuple[float, LeverFinding]] = []
+    for url, (prior_clicks, prior_impressions) in before.items():
+        if prior_clicks < DECAY_MIN_PRIOR_CLICKS:
+            continue
+        current_clicks, current_impressions = now.get(url, (0.0, 0.0))
+        drop_pct = (prior_clicks - current_clicks) / prior_clicks * 100
+        if drop_pct < DECAY_MIN_DROP_PCT:
+            continue
+        if drop_pct - site_drop_pct < DECAY_EXCESS_OVER_SITE_PCT:
+            continue
+        # Impressions have to be down too. Clicks falling while impressions
+        # hold is a listing problem, and the CTR rule owns that one.
+        if prior_impressions > 0 and current_impressions >= prior_impressions:
+            continue
+
+        lost = prior_clicks - current_clicks
+        against = "the same period last year" if yoy else "earlier in the history"
+        finding = _make_finding(
+            lever=GrowthAction.AI_VISIBILITY.value,
+            rule_key=_rule_key("decaying_page", url),
+            diagnosis=(
+                f"Down {drop_pct:.0f}% on {against}: {url} "
+                f"({int(prior_clicks):,} clicks to {int(current_clicks):,})"
+            ),
+            action_override=(
+                f"Deep refresh this page. It earned {int(prior_clicks):,} clicks "
+                f"{against} and now earns {int(current_clicks):,}, while the site as a "
+                f"whole moved {-site_drop_pct:+.0f}% — so this is the page losing ground, "
+                "not the market. Rework the content against what currently ranks."
+            ),
+            evidence_json={
+                "gate": "decaying_page",
+                "prior_clicks": int(prior_clicks),
+                "current_clicks": int(current_clicks),
+                "prior_impressions": int(prior_impressions),
+                "current_impressions": int(current_impressions),
+                "drop_pct": round(drop_pct, 1),
+                "site_drop_pct": round(site_drop_pct, 1),
+                "compared_with": [earlier[0].isoformat(), earlier[1].isoformat()],
+                "year_over_year": yoy,
+                "promotion_class": "actionable",
+            },
+            baseline_metrics_json={"clicks": prior_clicks, "impressions": prior_impressions},
+            impact=min(100.0, (lost / 200.0) * 100.0),
+            page_url=url,
+        )
+        candidates.append((lost, finding))
+
+    candidates.sort(key=lambda row: -row[0])
+    return [finding for _, finding in candidates[:DECAY_MAX_FINDINGS]]
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -2494,6 +2647,18 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Pages that used to perform ──
+    findings.extend(
+        _decaying_page_findings(db, client, period=gsc_period, fact_min=fact_min)
+    )
+    for finding in findings:
+        if finding.evidence_json.get("gate") == "decaying_page":
+            _enrich_finding(
+                finding,
+                classification=classifications.get(finding.page_url or ""),
+                page_ctx=page_contexts.get(finding.page_url or ""),
+            )
 
     # ── Subjects with demand and no page at all ──
     findings.extend(_content_cluster_findings(db, client, period=gsc_period))
