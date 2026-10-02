@@ -142,8 +142,12 @@ def test_diagnose_emits_missing_meta_and_site_sitemap(db, client_a):
     signals = {row.evidence_json.get("audit_signal") for row in technical}
     assert "missing_meta" in signals
     assert "sitemap_missing" in signals
+    # Both are upkeep the plan already covers monthly, so they are reported
+    # and never spend one of the client's one-to-five flexible actions.
     sitemap = next(row for row in technical if row.evidence_json.get("audit_signal") == "sitemap_missing")
-    assert sitemap.promotion_blocked_reason == "advisory_audit_signal"
+    assert sitemap.core_work is True
+    assert sitemap.promotion_blocked_reason == "core work: included in the monthly plan"
     meta = next(row for row in technical if row.evidence_json.get("audit_signal") == "missing_meta")
     assert meta.evidence_json.get("issue_code") == "title_missing"
-    assert meta.promotion_blocked_reason == "advisory_audit_signal"
+    assert meta.core_work is True
+    assert meta.is_recommended_action is False

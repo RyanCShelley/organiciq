@@ -475,6 +475,12 @@ class FindingOut(BaseModel):
     priority_band: str = "none"
     priority_band_reason: str | None = None
     finding_group_key: str | None = None
+    #: Upkeep the plan covers monthly — reported, never promoted to one of the
+    #: client's flexible Growth Actions.
+    core_work: bool = False
+    #: Rule key of the gate that failed, when this finding cannot be trusted
+    #: until that gate is cleared.
+    suppressed_by: str | None = None
 
 
 class SearchOpportunityOut(BaseModel):

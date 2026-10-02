@@ -165,6 +165,19 @@ def promote_findings(
         finding.is_recommended_action = False
         finding.promotion_blocked_reason = None
 
+        # A finding suppressed by a failed gate is scored on data that gate
+        # says cannot be trusted. It stays visible and never becomes an action.
+        if finding.suppressed_by:
+            finding.promotion_blocked_reason = "suppressed: fix the blocking issue first"
+            continue
+
+        # Core Work is included in the plan every month. Promoting it would
+        # spend the one-to-five flexible actions a client buys on work they are
+        # already paying for.
+        if finding.core_work:
+            finding.promotion_blocked_reason = "core work: included in the monthly plan"
+            continue
+
         page_key = finding.page_url or ""
         classification = classifications.get(page_key)
         page_ctx = page_contexts.get(page_key)

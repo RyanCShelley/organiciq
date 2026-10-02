@@ -257,8 +257,12 @@ def test_conversion_portfolio_rule(db, client_a):
             average_position=Decimal("10"),
         )
     )
+    # One lead rather than none: a rate that falls to exactly zero while
+    # traffic holds is the tracking-failure shape, and Gate 0 suppresses
+    # everything when it sees it. This rule is about a falling rate, so the
+    # fixture keeps the tag alive and lets the rate fall 5% -> 1%.
     for day, sessions, leads in [
-        (end, Decimal("104"), 0),
+        (end, Decimal("104"), 1),
         (prev_end, Decimal("100"), 5),
     ]:
         db.add(

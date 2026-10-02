@@ -32,6 +32,12 @@ class LeverFinding:
     priority_band_reason: str | None = None
     severity: float | None = None
     finding_group_key: str | None = None
+    #: Work the plan already covers every month, so it is reported rather than
+    #: queued for the flexible Growth Action capacity a client actually buys.
+    core_work: bool = False
+    #: Set when a higher gate failed and this finding cannot be trusted or
+    #: acted on until that is fixed.
+    suppressed_by: str | None = None
 
 
 @dataclass

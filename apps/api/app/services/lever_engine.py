@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -81,6 +81,20 @@ LEVER_LABELS: dict[str, str] = {
     GrowthAction.AI_VISIBILITY.value: "Search & AI Visibility",
     GrowthAction.CONVERSION_PATH.value: "Conversion Path Optimization",
 }
+
+#: Conversions at zero this long, while traffic keeps arriving, is the product
+#: spec's first Urgent condition. Shorter and a quiet fortnight at a small
+#: client reads as a broken tag.
+TRACKING_SILENCE_DAYS = 14
+#: Zero conversions only means something if conversions were likely. Measured
+#: against the client's own historical rate: fire when the fortnight should
+#: have produced at least this many and produced none. A flat session floor
+#: cried wolf on small clients, where fifty sessions at a one percent rate
+#: expects half a lead and zero is an ordinary fortnight.
+TRACKING_EXPECTED_LEADS = 3.0
+#: With no history there is no rate to expect against, so a plain volume floor
+#: is all that is left — set high, because this is the weaker signal.
+TRACKING_NO_HISTORY_SESSIONS = 500.0
 
 SEARCH_OPPORTUNITY_LEVER = "search_opportunity"
 SEARCH_OPPORTUNITY_LABEL = "Search Opportunity"
@@ -381,6 +395,23 @@ def _load_audit_issues(
     return by_url, site_codes
 
 
+#: Technical signals that remove a page from search. These stay in the Growth
+#: Action queue and preempt, because nothing else matters on a page Google
+#: cannot index.
+INDEXATION_BLOCKING_SIGNALS = frozenset(
+    {"status_error", "non_indexable", "canonical_elsewhere", "broken_redirect", "robots_blocking"}
+)
+
+#: Everything else Technical SEO detects is upkeep the plan already covers
+#: every month — "titles, metas, internal links, schema" is Core Work in the
+#: product spec, not one of the one-to-five flexible actions a client buys. It
+#: is still reported; it just stops competing for capacity it was never meant
+#: to spend. Before this, a Launch client with one action a month could be
+#: handed twenty-five findings, most of them work already paid for.
+def is_core_work_signal(audit_signal: str | None) -> bool:
+    return bool(audit_signal) and audit_signal not in INDEXATION_BLOCKING_SIGNALS
+
+
 ROBOTS_BLOCKING_CODES = frozenset({"robots_disallow_crawling"})
 ROBOTS_ADVISORY_CODES = frozenset(
     {"no_robots", "robots_not_accessible", "robots_has_errors"}
@@ -598,7 +629,7 @@ def _technical_finding(
     urgency_override = None
     if assessment.critical_override:
         urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
-    return _make_finding(
+    finding = _make_finding(
         lever=GrowthAction.TECHNICAL_SEO.value,
         rule_key=_rule_key("technical", page.normalized_url),
         diagnosis=detected.diagnosis,
@@ -632,6 +663,8 @@ def _technical_finding(
         urgency_override=urgency_override,
         page_url=page.normalized_url,
     )
+    finding.core_work = is_core_work_signal(detected.audit_signal)
+    return finding
 
 
 def _site_technical_findings(
@@ -640,6 +673,10 @@ def _site_technical_findings(
     site: SiteBusinessContext,
     client_id: UUID,
 ) -> list[LeverFinding]:
+    def tagged(finding: LeverFinding, audit_signal: str) -> LeverFinding:
+        finding.core_work = is_core_work_signal(audit_signal)
+        return finding
+
     findings: list[LeverFinding] = []
     if "sitemap_missing" in site_codes:
         assessment = score_technical_impact(
@@ -654,6 +691,7 @@ def _site_technical_findings(
             audit_signal="sitemap_missing",
         )
         findings.append(
+            tagged(
             _make_finding(
                 lever=GrowthAction.TECHNICAL_SEO.value,
                 rule_key=_rule_key("technical_sitemap", str(client_id)),
@@ -667,6 +705,8 @@ def _site_technical_findings(
                 baseline_metrics_json={},
                 impact=assessment.impact,
                 severity=assessment.severity,
+            ),
+            "sitemap_missing",
             )
         )
 
@@ -690,6 +730,7 @@ def _site_technical_findings(
         if assessment.critical_override:
             urgency_override = max(LEVER_INPUTS[GrowthAction.TECHNICAL_SEO.value].urgency, 90.0)
         findings.append(
+            tagged(
             _make_finding(
                 lever=GrowthAction.TECHNICAL_SEO.value,
                 rule_key=_rule_key("technical_robots", str(client_id)),
@@ -711,6 +752,8 @@ def _site_technical_findings(
                 impact=assessment.impact,
                 severity=assessment.severity,
                 urgency_override=urgency_override,
+            ),
+            audit_signal,
             )
         )
     return findings
@@ -1380,6 +1423,127 @@ def _managed_lead_rate(
     return (float(leads or 0) / sessions_f) * 100
 
 
+def _tracking_failure_finding(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+) -> LeverFinding | None:
+    """Gate 0: are conversions being recorded at all?
+
+    Every impact score in this engine is computed from leads. If the tag has
+    stopped firing, everything below is scored against a zero that is not real,
+    and the engine would confidently rank work nobody can judge. So this does
+    not merely outrank the other findings — when it fires they are suppressed.
+
+    Three things must be true together, because each alone is ordinary:
+    conversions are configured, traffic is still arriving, and nothing has been
+    recorded for a fortnight. A client with no conversions configured has not
+    broken anything, and a quiet week is a quiet week.
+    """
+    if period is None:
+        return None
+    lead_events = _lead_event_names(db, client.id)
+    if not lead_events:
+        # Nothing expected, so nothing missing. No conversions configured is a
+        # Setup gap, not a tracking failure, and saying otherwise would put
+        # every unconfigured client at the top of its own queue.
+        return None
+
+    _, end = period
+    window_start = end - timedelta(days=TRACKING_SILENCE_DAYS - 1)
+
+    sessions = float(
+        db.query(func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client.id,
+            FactGa4Traffic.date >= window_start,
+            FactGa4Traffic.date <= end,
+        )
+        .scalar()
+        or 0
+    )
+    leads = float(
+        db.query(func.coalesce(func.sum(FactGa4Event.event_count), 0))
+        .filter(
+            FactGa4Event.client_id == client.id,
+            FactGa4Event.date >= window_start,
+            FactGa4Event.date <= end,
+            FactGa4Event.event_name.in_(lead_events),
+        )
+        .scalar()
+        or 0
+    )
+    if leads > 0:
+        return None
+
+    # What the fortnight should have produced, from the client's own history.
+    # Whether anything was ever recorded also separates a tag that broke from
+    # one never wired up: both need fixing, but they are different jobs.
+    prior_leads = float(
+        db.query(func.coalesce(func.sum(FactGa4Event.event_count), 0))
+        .filter(
+            FactGa4Event.client_id == client.id,
+            FactGa4Event.date < window_start,
+            FactGa4Event.event_name.in_(lead_events),
+        )
+        .scalar()
+        or 0
+    )
+    prior_sessions = float(
+        db.query(func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client.id,
+            FactGa4Traffic.date < window_start,
+        )
+        .scalar()
+        or 0
+    )
+    ever_recorded = prior_leads > 0
+
+    if ever_recorded and prior_sessions > 0:
+        expected = sessions * (prior_leads / prior_sessions)
+        if expected < TRACKING_EXPECTED_LEADS:
+            return None
+    elif sessions < TRACKING_NO_HISTORY_SESSIONS:
+        return None
+    else:
+        expected = 0.0
+
+    return _make_finding(
+        lever=GrowthAction.CONVERSION_PATH.value,
+        rule_key=_rule_key("tracking_silent", str(client.id)),
+        diagnosis=(
+            f"No conversions recorded in {TRACKING_SILENCE_DAYS} days while "
+            f"{int(sessions):,} sessions arrived"
+            + (
+                " — tracking was working before this"
+                if ever_recorded
+                else " — tracking may never have fired"
+            )
+        ),
+        evidence_json={
+            "sessions": int(sessions),
+            "leads": 0,
+            "window_days": TRACKING_SILENCE_DAYS,
+            "window_start": window_start.isoformat(),
+            "window_end": end.isoformat(),
+            "lead_events": lead_events,
+            "previously_recorded": ever_recorded,
+            "expected_leads": round(expected, 1),
+            # Rule keys are hashed, so this is how anything downstream — the
+            # UI, a report, a test — recognises the gate that suppressed the
+            # rest rather than matching on diagnosis text.
+            "gate": "tracking",
+            "promotion_class": "actionable",
+        },
+        baseline_metrics_json={},
+        impact=100.0,
+        severity=100.0,
+        urgency_override=100.0,
+    )
+
+
 def _conversion_portfolio(
     db: Session,
     client: Client,
@@ -1670,6 +1834,19 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Gate 0 ──
+    # A silent conversion tag makes every impact score below it a fiction, so
+    # the others are marked suppressed rather than ranked beneath it. They stay
+    # in the payload — hiding them entirely would make the queue look empty
+    # when it is only untrustworthy — but nothing is promoted to a Growth
+    # Action until the tag is fixed.
+    tracking = _tracking_failure_finding(db, client, period=ga4_period)
+    if tracking is not None:
+        _enrich_finding(tracking, classification=None, page_ctx=None)
+        for finding in findings:
+            finding.suppressed_by = tracking.rule_key
+        findings.append(tracking)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
     all_findings, recommended_actions = promote_findings(

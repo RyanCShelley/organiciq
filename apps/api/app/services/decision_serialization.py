@@ -33,6 +33,8 @@ def _serialize_finding(row) -> FindingOut:
         priority_band=row.priority_band,
         priority_band_reason=row.priority_band_reason,
         finding_group_key=row.finding_group_key,
+        core_work=row.core_work,
+        suppressed_by=row.suppressed_by,
     )
 
 
