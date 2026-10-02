@@ -18,6 +18,10 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, float | int] = {
     "ai_visibility_keyword_top_n": 25,
     "ai_visibility_prompt_min_checks": 2,
     "ai_visibility_prompt_top_n": 25,
+    # A page can be broken and draw no impressions *because* it is broken, so
+    # the demand gate is read against the period before for blocking technical
+    # checks. B2.
+    "technical_blocking_min_prior_impressions": 30,
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,

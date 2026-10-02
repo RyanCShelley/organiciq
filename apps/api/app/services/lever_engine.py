@@ -85,6 +85,32 @@ PRIORITY_IMPACT_RELEVANCE_SCALE = 20.0
 DEFAULT_TOP_N = 25
 MIN_PAGE_IMPRESSIONS = 30
 
+#: What each gate does when it fires. B5.
+#:
+#: Only Gate 0 suppresses, and it suppresses because every impact score below
+#: it is computed from a lead count it says is wrong. Gates 1-3 compete on
+#: impact like any other finding: nothing downstream depends on them being
+#: true, so silencing anything would hide work rather than clarify it.
+GATE_BEHAVIOUR: dict[str, dict[str, str]] = {
+    "tracking": {
+        "layer": "Gate 0",
+        "bucket": "Conversion Path",
+        "suppresses": (
+            "everything except blocking technical findings on pages that had "
+            "traffic in the previous period — a 5xx on a page with demand is "
+            "true whatever the conversion tag is doing"
+        ),
+    },
+    "site_conversion": {"layer": "Gate 1", "bucket": "Conversion Path", "suppresses": "nothing"},
+    "visibility_no_traffic": {
+        "layer": "Gate 2",
+        "bucket": "Search & AI Visibility",
+        "suppresses": "nothing",
+    },
+    "conversion_page": {"layer": "Gate 3", "bucket": "Conversion Path", "suppresses": "nothing"},
+}
+
+
 LEVER_LABELS: dict[str, str] = {
     GrowthAction.TECHNICAL_SEO.value: "Technical SEO & Indexation",
     GrowthAction.INTERNAL_LINKING.value: "Internal Linking & Site Architecture",
@@ -2263,6 +2289,185 @@ def _decaying_page_findings(
     return [finding for _, finding in candidates[:DECAY_MAX_FINDINGS]]
 
 
+def _blocking_only_findings(
+    db: Session,
+    client: Client,
+    *,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot],
+    already_seen: set[str],
+    period: tuple[date, date] | None,
+    page_contexts: dict[str, PageBusinessContext],
+    classifications: dict[str, PageClassification],
+    site: SiteBusinessContext,
+    issues_by_url: dict[str, set[str]] | None,
+    thresholds: dict[str, float | int],
+) -> list[LeverFinding]:
+    """Blocking technical problems on pages the demand gate dropped. B2.
+
+    A page needs thirty impressions to enter the pipeline, which is the right
+    bar for "is this worth optimising" and exactly the wrong one for "is this
+    broken": a page noindexed last month draws nothing *because* it is broken,
+    so the gate hides the page by the same mechanism that damaged it.
+
+    Eligibility is therefore read from the period before, or from the page
+    being one the site clearly means to rank — in the sitemap, or a commercial
+    or conversion page. Only blocking signals are emitted; upkeep on a page
+    with no demand is not worth anyone's attention.
+    """
+    if period is None:
+        return []
+    min_prior = float(thresholds.get("technical_blocking_min_prior_impressions", 30))
+    prior_totals = _page_totals(db, client.id, previous_period(*period))
+
+    findings: list[LeverFinding] = []
+    for url, crawl in crawl_by_url.items():
+        if url in already_seen:
+            continue
+        classification = classifications.get(url)
+        intended = classification is not None and classification.page_type in {
+            PageType.COMMERCIAL,
+            PageType.CONVERSION,
+        }
+        prior_impressions = prior_totals.get(url, (0.0, 0.0))[1]
+        if not (prior_impressions >= min_prior or crawl.in_sitemap or intended):
+            continue
+
+        detected = detect_technical_signal(
+            url,
+            crawl,
+            page_issue_codes=(issues_by_url or {}).get(url),
+            crawl_by_url=crawl_by_url,
+        )
+        if detected is None or is_core_work_signal(detected.audit_signal):
+            continue
+
+        # Scored on what the page used to earn, since what it earns now is the
+        # symptom. Inferred: the loss is real but the recovery is an estimate.
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            estimated_incremental_leads=downstream_lead_opportunity(
+                prior_totals.get(url, (0.0, 0.0))[0], site.site_lead_rate_pct
+            ),
+            recoverable_clicks=prior_totals.get(url, (0.0, 0.0))[0],
+            data_confidence="medium",
+        )
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.TECHNICAL_SEO.value,
+                rule_key=_rule_key("technical", url),
+                diagnosis=f"{detected.diagnosis} (no current demand — it stopped)",
+                action_override=TECHNICAL_ACTIONS.get(detected.audit_signal),
+                evidence_json={
+                    "audit_signal": detected.audit_signal,
+                    "issue_code": detected.issue_code,
+                    "eligibility": "prior_period"
+                    if prior_impressions >= min_prior
+                    else ("sitemap" if crawl.in_sitemap else "intended_page"),
+                    "prior_impressions": int(prior_impressions),
+                    "in_sitemap": crawl.in_sitemap,
+                    "status_code": crawl.status_code,
+                    "indexable": crawl.indexable,
+                    "promotion_class": "actionable",
+                    **impact_evidence,
+                },
+                baseline_metrics_json={"prior_impressions": prior_impressions},
+                impact=impact,
+                page_url=url,
+            )
+        )
+    return findings
+
+
+def cap_per_url_impact(findings: list[LeverFinding]) -> None:
+    """Stop several rules claiming the same upside on one page. B4.
+
+    Internal linking, SERP CTR and a deep refresh on the same URL are three
+    descriptions of one page's unrealised traffic, not three separate prizes.
+    Summed, they made a single page look like the biggest opportunity on the
+    site by counting its upside three times.
+
+    The cap is the largest single finding on that URL — the most any one of
+    them claims is the most the page can give — and the capped total is split
+    between them in proportion to what each claimed. Raw values are kept for
+    display, because the honest answer to "what is this worth" is the
+    uncapped figure; the cap is about not adding them up.
+    """
+    by_url: dict[str, list[LeverFinding]] = {}
+    for finding in findings:
+        if finding.page_url and finding.impact > 0:
+            by_url.setdefault(finding.page_url, []).append(finding)
+
+    for rows in by_url.values():
+        if len(rows) < 2:
+            continue
+        total = sum(row.impact for row in rows)
+        cap = max(row.impact for row in rows)
+        if total <= cap:
+            continue
+        scale = cap / total
+        for row in rows:
+            row.evidence_json = {
+                **row.evidence_json,
+                "raw_impact": round(row.impact, 1),
+                "impact_shared_with": len(rows) - 1,
+            }
+            row.impact = round(row.impact * scale, 1)
+            row.priority_score = score_finding(
+                impact=row.impact,
+                confidence=row.confidence,
+                urgency=row.urgency,
+                effort=row.effort,
+            )
+
+
+def _pages_active_before(
+    db: Session,
+    client_id: UUID,
+    *,
+    period: tuple[date, date] | None,
+) -> set[str]:
+    """URLs that drew traffic in the period before this one.
+
+    Used to decide which findings survive Gate 0. A page that was earning
+    impressions last period and is now returning 5xx is broken whatever the
+    conversion tag is doing — that finding does not depend on lead data being
+    trustworthy, so suppressing it would hide the most urgent thing on the site
+    behind the second most urgent.
+    """
+    if period is None:
+        return set()
+    prior = previous_period(*period)
+    active = {
+        url
+        for url, (clicks, impressions) in _page_totals(db, client_id, prior).items()
+        if clicks > 0 or impressions > 0
+    }
+    sessions_rows = (
+        db.query(FactGa4Traffic.normalized_url)
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= prior[0],
+            FactGa4Traffic.date <= prior[1],
+            FactGa4Traffic.sessions > 0,
+        )
+        .distinct()
+        .all()
+    )
+    active.update(url for (url,) in sessions_rows if url)
+    return active
+
+
+def survives_tracking_gate(finding: LeverFinding, active_before: set[str]) -> bool:
+    """Whether a finding stays promotable while Gate 0 is failing. B1."""
+    if finding.lever != GrowthAction.TECHNICAL_SEO.value:
+        return False
+    if finding.core_work:
+        # Upkeep is never promoted anyway; letting it through here would only
+        # make the exception look broader than it is.
+        return False
+    return bool(finding.page_url) and finding.page_url in active_before
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -2796,6 +3001,31 @@ def diagnose(
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
 
+    # ── Blocking problems the demand gate would otherwise hide ──
+    findings.extend(
+        _blocking_only_findings(
+            db,
+            client,
+            crawl_by_url=crawl_by_url,
+            already_seen={page.normalized_url for page in pages},
+            period=gsc_period,
+            page_contexts=page_contexts,
+            classifications=classifications,
+            site=site,
+            issues_by_url=issues_by_url,
+            thresholds=thresholds,
+        )
+        if crawl_ready
+        else []
+    )
+    for finding in findings:
+        if finding.evidence_json.get("eligibility"):
+            _enrich_finding(
+                finding,
+                classification=classifications.get(finding.page_url or ""),
+                page_ctx=page_contexts.get(finding.page_url or ""),
+            )
+
     # ── Pages that used to perform ──
     findings.extend(
         _decaying_page_findings(db, client, period=gsc_period, fact_min=fact_min, site=site)
@@ -2864,9 +3094,15 @@ def diagnose(
     tracking = _tracking_failure_finding(db, client, period=ga4_period, site=site)
     if tracking is not None:
         _enrich_finding(tracking, classification=None, page_ctx=None)
+        # Computed only when the gate actually fires, which is rare.
+        active_before = _pages_active_before(db, client.id, period=gsc_period)
         for finding in findings:
-            finding.suppressed_by = tracking.rule_key
+            if not survives_tracking_gate(finding, active_before):
+                finding.suppressed_by = tracking.rule_key
         findings.append(tracking)
+
+    # Before sorting, or a page counted three times outranks pages counted once.
+    cap_per_url_impact(findings)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
     all_findings, recommended_actions = promote_findings(
