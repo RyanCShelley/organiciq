@@ -23,13 +23,14 @@ from app.models.client import Client
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
     CRAWL_SOURCE_SE_RANKING,
+    FactCrawlInternalLink,
     FactCrawlPageIssue,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
 )
 from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscPage
+from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.core.settings import get_settings
 from app.core.urls import normalize_url
@@ -901,6 +902,111 @@ def _make_finding(
     )
 
 
+#: Queries worth considering as a bridge between two pages. Below this the
+#: overlap is usually incidental rather than a shared subject.
+LINK_GAP_MIN_IMPRESSIONS = 50.0
+#: A source has to be meaningfully stronger than the target, or the link is
+#: being asked for in the wrong direction.
+LINK_GAP_SOURCE_CLICK_RATIO = 2.0
+#: How many shared queries to name. One is the reason; a list is a report.
+LINK_GAP_MAX_QUERIES = 2
+
+
+@dataclass(frozen=True)
+class LinkGap:
+    """A link that should exist and does not."""
+
+    source_url: str
+    shared_query: str
+    source_clicks: float
+
+
+def _link_gaps(
+    db: Session,
+    client_id: UUID,
+    *,
+    period: tuple[date, date] | None,
+    targets: set[str],
+) -> dict[str, LinkGap]:
+    """For each under-linked page, the best page that should link to it.
+
+    "This page has fewer than five inbound links" is a symptom. It tells a
+    strategist that something is wrong and leaves them to work out what to do,
+    which on a four-hundred-page site is most of the job.
+
+    Two pages ranking for the same query are, by definition, about the same
+    thing — and the one already earning clicks for it has the authority the
+    other needs. If no editorial link runs between them, that is a specific
+    link from a named page, which is ten minutes of work rather than an
+    afternoon of judgement.
+
+    Direction matters: the link has to come from the stronger page. Pointing it
+    the other way asks the page with nothing to give to give it.
+    """
+    if period is None or not targets:
+        return {}
+
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.query,
+            FactGscQueryPage.normalized_url,
+            func.sum(FactGscQueryPage.impressions).label("impressions"),
+            func.sum(FactGscQueryPage.clicks).label("clicks"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
+        .having(func.sum(FactGscQueryPage.impressions) >= LINK_GAP_MIN_IMPRESSIONS)
+        .all()
+    )
+
+    by_query: dict[str, list[tuple[str, float]]] = {}
+    for query, url, _impressions, clicks in rows:
+        by_query.setdefault(query, []).append((url, float(clicks or 0)))
+
+    # Editorial edges only. A target already in the navigation still needs a
+    # reference from a page about the same subject — that is the whole reason
+    # the floor counts editorial links and not every link.
+    existing = {
+        (row.from_url, row.to_url)
+        for row in db.query(FactCrawlInternalLink)
+        .filter(
+            FactCrawlInternalLink.client_id == client_id,
+            FactCrawlInternalLink.source == active_crawl_source(),
+            FactCrawlInternalLink.is_template.is_(False),
+            FactCrawlInternalLink.to_url.in_(targets),
+        )
+        .all()
+    }
+
+    best: dict[str, LinkGap] = {}
+    for query, entries in by_query.items():
+        if len(entries) < 2:
+            continue
+        for target_url, target_clicks in entries:
+            if target_url not in targets:
+                continue
+            for source_url, source_clicks in entries:
+                if source_url == target_url:
+                    continue
+                if source_clicks < max(target_clicks * LINK_GAP_SOURCE_CLICK_RATIO, 1.0):
+                    continue
+                if (source_url, target_url) in existing:
+                    continue
+                current = best.get(target_url)
+                if current is None or source_clicks > current.source_clicks:
+                    best[target_url] = LinkGap(
+                        source_url=source_url,
+                        shared_query=query,
+                        source_clicks=source_clicks,
+                    )
+    return best
+
+
 def _internal_linking_finding(
     page: PageDemand,
     crawl: FactCrawlPageSnapshot,
@@ -909,6 +1015,7 @@ def _internal_linking_finding(
     site: SiteBusinessContext,
     lead_rate_ctx: LeadRateContext | None = None,
     classification: PageClassification | None = None,
+    link_gap: LinkGap | None = None,
 ) -> LeverFinding | None:
     if page.average_position < 4 or page.average_position > 20:
         return None
@@ -937,12 +1044,26 @@ def _internal_linking_finding(
     diagnosis = (
         f"Under-linked page ranking {page.average_position:.0f}: {page.normalized_url}"
     )
+    # Naming the source turns the finding into the work. Without one the
+    # generic lever text still applies — there is simply no page that both
+    # shares a subject and has the authority to lend.
+    action = None
+    if link_gap is not None:
+        action = (
+            f"Add a link to this page from {link_gap.source_url}. Both rank for "
+            f"\u201c{link_gap.shared_query}\u201d and that page earns "
+            f"{int(link_gap.source_clicks):,} clicks for it, so it has the authority "
+            "this one is missing."
+        )
     return _make_finding(
         lever=GrowthAction.INTERNAL_LINKING.value,
         rule_key=_rule_key("internal_linking", page.normalized_url),
         diagnosis=diagnosis,
+        action_override=action,
         evidence_json={
             "position": round(page.average_position, 1),
+            "link_from": link_gap.source_url if link_gap else None,
+            "link_shared_query": link_gap.shared_query if link_gap else None,
             "inbound_internal_links": crawl.inbound_internal_links,
             "inbound_editorial_links": crawl.inbound_editorial_links,
             "inlink_source": "se_ranking_audit",
@@ -1037,9 +1158,11 @@ def _per_page_cascade(
     #: URLs the first-party crawl covered. None means it has never run, and no
     #: schema claim can be made about any page.
     schema_crawled_urls: frozenset[str] | None = None,
+    link_gaps: dict[str, LinkGap] | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
+    gaps = link_gaps or {}
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -1074,6 +1197,7 @@ def _per_page_cascade(
                     site=site,
                     lead_rate_ctx=lead_rate_ctx,
                     classification=classification,
+                    link_gap=gaps.get(page.normalized_url),
                 )
         if finding is None:
             finding = _serp_ctr_finding(
@@ -2154,6 +2278,21 @@ def diagnose(
     page_type_rates = compute_page_type_lead_rates(page_contexts, classifications)
     topic_rates = compute_topic_lead_rates(page_contexts, classifications)
 
+    # Which pages are short of links, so the gap search only runs for those
+    # rather than every page on the site.
+    under_linked = {
+        page.normalized_url
+        for page in pages
+        if (crawl := crawl_by_url.get(page.normalized_url)) is not None
+        and (
+            crawl.inbound_editorial_links
+            if crawl.source == CRAWL_SOURCE_FIRST_PARTY
+            else crawl.inbound_internal_links
+        )
+        < _link_floor(crawl.word_count)
+    }
+    link_gaps = _link_gaps(db, client.id, period=gsc_period, targets=under_linked)
+
     findings: list[LeverFinding] = []
     findings.extend(
         _per_page_cascade(
@@ -2168,6 +2307,7 @@ def diagnose(
             issues_by_url=issues_by_url,
             schema_by_url=schema_by_url,
             schema_crawled_urls=schema_crawled_urls,
+            link_gaps=link_gaps,
         )
     )
     for site_finding in _site_technical_findings(
