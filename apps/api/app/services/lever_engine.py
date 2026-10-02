@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
     benchmark_source_label,
     expected_ctr_percent,
@@ -1866,9 +1867,8 @@ VISIBILITY_MAX_POSITION = 10.0
 #: Terms smaller than this can legitimately draw almost nothing, so silence
 #: tells you nothing about whether the ranking is working.
 VISIBILITY_MIN_VOLUME = 100.0
-#: Ranking on page one should put the site in front of most people searching
-#: the term. Seeing under a tenth of them means the ranking is not reaching
-#: the demand the term was picked for.
+#: Kept for the impression check: a ranking that is not even being shown is a
+#: different problem from one being shown and not clicked.
 VISIBILITY_IMPRESSION_RATIO = 0.1
 DAYS_PER_MONTH_VISIBILITY = 365 / 12
 
@@ -1880,6 +1880,7 @@ def _visibility_without_traffic_findings(
     *,
     period: tuple[date, date] | None,
     site: SiteBusinessContext,
+    thresholds: dict[str, float | int] | None = None,
 ) -> list[LeverFinding]:
     """Gate 2: core terms that rank and bring nothing.
 
@@ -1903,7 +1904,9 @@ def _visibility_without_traffic_findings(
 
     start, end = period
     period_days = (end - start).days + 1
-    impressions_by_url = {page.normalized_url: page.impressions for page in pages}
+    traffic_by_url = {page.normalized_url: (page.impressions, page.clicks) for page in pages}
+    ctr_curve, curve_source = build_client_ctr_curve(db, client.id, period)
+    capture_ratio = float((thresholds or {}).get("gate2_capture_ratio", 0.5))
 
     rows = (
         db.query(FactSerKeyword)
@@ -1927,9 +1930,17 @@ def _visibility_without_traffic_findings(
         url = normalize_url(row.ranking_url or "")
         if not url:
             continue
-        impressions = float(impressions_by_url.get(url, 0.0))
+        impressions, actual_clicks = traffic_by_url.get(url, (0.0, 0.0))
         expected = volume * (period_days / DAYS_PER_MONTH_VISIBILITY)
-        if expected <= 0 or impressions >= expected * VISIBILITY_IMPRESSION_RATIO:
+        if expected <= 0:
+            continue
+
+        # What the position should earn, from this client's own curve where it
+        # has one. A flat tenth treated position one and position ten alike,
+        # which is the whole thing a CTR curve exists to avoid. T2.
+        expected_ctr = ctr_at(position, ctr_curve)
+        expected_clicks = expected * (expected_ctr / 100.0)
+        if expected_clicks <= 0 or actual_clicks >= expected_clicks * capture_ratio:
             continue
 
         share = (impressions / expected) * 100 if expected else 0.0
@@ -1938,7 +1949,7 @@ def _visibility_without_traffic_findings(
         # not reaching, converted at the position's own click rate and then at
         # the site's lead rate. Confidence is low: the volume figure is a
         # third-party estimate and the lead rate is the site's, not the page's.
-        missed_clicks = (expected - impressions) * (expected_ctr_percent(position) / 100.0)
+        missed_clicks = max(0.0, expected_clicks - actual_clicks)
         impact, impact_evidence = normalize_business_impact(
             site=site,
             estimated_incremental_leads=downstream_lead_opportunity(
@@ -1969,6 +1980,11 @@ def _visibility_without_traffic_findings(
                     "expected_impressions": round(expected),
                     "actual_impressions": int(impressions),
                     "impression_share_pct": round(share, 1),
+                    "expected_ctr_pct": round(expected_ctr, 2),
+                    "expected_clicks": round(expected_clicks, 1),
+                    "actual_clicks": int(actual_clicks),
+                    "ctr_curve_source": curve_source,
+                    "capture_ratio": capture_ratio,
                     "missed_clicks": round(missed_clicks, 1),
                     "promotion_class": "actionable",
                     **impact_evidence,
@@ -3206,7 +3222,9 @@ def diagnose(
 
     # ── Gate 2: rankings that bring nothing ──
     findings.extend(
-        _visibility_without_traffic_findings(db, client, pages, period=gsc_period, site=site)
+        _visibility_without_traffic_findings(
+            db, client, pages, period=gsc_period, site=site, thresholds=thresholds
+        )
     )
     for finding in findings:
         if finding.evidence_json.get("gate") == "visibility_no_traffic":

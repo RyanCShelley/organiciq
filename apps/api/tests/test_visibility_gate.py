@@ -55,12 +55,12 @@ def _keyword(db, client_id, *, keyword="metal roofing", position=3, volume=1000,
     db.commit()
 
 
-def _pages(impressions, url=URL):
+def _pages(impressions, url=URL, clicks=0.0):
     return [
         PageDemand(
             normalized_url=url,
             impressions=float(impressions),
-            clicks=0.0,
+            clicks=float(clicks),
             average_position=3.0,
             ctr_percent=0.0,
         )
@@ -83,10 +83,17 @@ def test_a_top_three_ranking_that_draws_nothing_is_found(db, client_a):
 
 
 def test_a_ranking_that_is_working_is_left_alone(db, client_a):
-    """Seeing most of the searches is the ranking doing its job."""
+    """Earning the clicks the position should earn is the ranking doing its job."""
     _keyword(db, client_a.id, volume=1000, position=3)
 
-    assert _visibility_without_traffic_findings(db, client_a, _pages(800), period=PERIOD, site=_site()) == []
+    # Position 3 on the shared curve earns 3.9%, so a thousand searches should
+    # bring about 39 clicks. Earning 35 is the ranking working.
+    assert (
+        _visibility_without_traffic_findings(
+            db, client_a, _pages(800, clicks=35), period=PERIOD, site=_site()
+        )
+        == []
+    )
 
 
 def test_a_small_term_drawing_little_is_not_a_finding(db, client_a):
@@ -147,8 +154,20 @@ def test_the_window_scales_the_expectation(db, client_a):
     _keyword(db, client_a.id, volume=1000, position=3)
     week = (END - timedelta(days=6), END)
 
-    # 1,000/month over 7 days expects ~230 searches, so 30 impressions is 13%
-    # — above the tenth that would trip it.
-    assert _visibility_without_traffic_findings(db, client_a, _pages(30), period=week, site=_site()) == []
-    # Over 30 days the same 30 impressions is 3% of expected, and does trip it.
-    assert len(_visibility_without_traffic_findings(db, client_a, _pages(30), period=PERIOD, site=_site())) == 1
+    # 1,000/month over 7 days expects ~230 searches and 9 clicks at position 3,
+    # so 10 clicks clears the half-of-expected bar.
+    assert (
+        _visibility_without_traffic_findings(
+            db, client_a, _pages(200, clicks=10), period=week, site=_site()
+        )
+        == []
+    )
+    # Over 30 days the same 10 clicks is a quarter of the 38 expected.
+    assert (
+        len(
+            _visibility_without_traffic_findings(
+                db, client_a, _pages(200, clicks=10), period=PERIOD, site=_site()
+            )
+        )
+        == 1
+    )
