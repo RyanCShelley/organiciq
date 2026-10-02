@@ -48,6 +48,7 @@ from app.services.decision_impact import (
     PageBusinessContext,
     SiteBusinessContext,
     build_impact_explanation,
+    business_impact_reference_leads,
     compute_page_type_lead_rates,
     compute_topic_lead_rates,
     load_page_business_contexts,
@@ -1482,6 +1483,111 @@ def _managed_lead_rate(
     return (float(leads or 0) / sessions_f) * 100
 
 
+#: A page converts "below the site" only when the gap is worth someone's
+#: afternoon. Measured in leads rather than percentage points: a page five
+#: points under the site rate is noise at forty sessions and a serious problem
+#: at four thousand, and only the lead count tells the two apart.
+CONVERSION_PAGE_MIN_SHORTFALL = 3.0
+#: Half the site's own rate. A page merely under the average is not a finding —
+#: half of every site's pages are, by definition.
+CONVERSION_PAGE_RATE_RATIO = 0.5
+
+
+def _conversion_page_findings(
+    pages: list[PageDemand],
+    *,
+    page_contexts: dict[str, PageBusinessContext],
+    classifications: dict[str, PageClassification],
+    site: SiteBusinessContext,
+) -> list[LeverFinding]:
+    """Gate 3: pages earning traffic and not turning it into anything.
+
+    The engine spent its attention on whether pages could be *found*. This asks
+    the question the client is actually paying for — the traffic arrived, so
+    what happened next?
+
+    The comparison is against the site's own lead rate, not an industry figure:
+    a 2% site and a 0.4% site both have pages letting them down, and only the
+    site itself says what normal looks like here.
+
+    Like the tracking gate, this fires on expected leads rather than a rate
+    gap, because a rate gap means nothing without volume behind it. A page
+    converting at zero against a site rate of 1% needs three hundred sessions
+    before "zero" is even surprising.
+    """
+    site_rate = site.site_lead_rate_pct
+    if not site_rate or site_rate <= 0:
+        # Without a site rate there is nothing to be below. A client with no
+        # conversions at all is Gate 0's problem, not this one.
+        return []
+
+    findings: list[LeverFinding] = []
+    for page in pages:
+        ctx = page_contexts.get(page.normalized_url)
+        if ctx is None or ctx.ga4_sessions <= 0:
+            continue
+        classification = classifications.get(page.normalized_url)
+        if classification is not None and not classification.eligible_for_growth_action:
+            continue
+
+        expected = ctx.ga4_sessions * (site_rate / 100.0)
+        shortfall = expected - ctx.ga4_leads
+        if shortfall < CONVERSION_PAGE_MIN_SHORTFALL:
+            continue
+        page_rate = ctx.page_lead_rate_pct or 0.0
+        if page_rate >= site_rate * CONVERSION_PAGE_RATE_RATIO:
+            continue
+
+        none_at_all = ctx.ga4_leads == 0
+        diagnosis = (
+            f"{int(ctx.ga4_sessions):,} sessions and no conversions: {page.normalized_url}"
+            if none_at_all
+            else (
+                f"Converting at {page_rate:.2f}% against a site rate of {site_rate:.2f}%: "
+                f"{page.normalized_url}"
+            )
+        )
+        action = (
+            "Work the conversion path on this page — CTA placement, form length, and "
+            "whether the offer matches what the visitor searched for. "
+            f"At the site's own rate it would be producing about {shortfall:.0f} more "
+            "leads per period."
+        )
+
+        # Impact is the shortfall measured against what a lead is worth to this
+        # site, so a page losing ten leads outranks one losing three.
+        reference = business_impact_reference_leads(site)
+        impact = min(100.0, (shortfall / reference) * 100.0) if reference > 0 else 50.0
+
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.CONVERSION_PATH.value,
+                rule_key=_rule_key("conversion_page", page.normalized_url),
+                diagnosis=diagnosis,
+                evidence_json={
+                    "gate": "conversion_page",
+                    "sessions": int(ctx.ga4_sessions),
+                    "leads": int(ctx.ga4_leads),
+                    "page_lead_rate_pct": round(page_rate, 2),
+                    "site_lead_rate_pct": round(site_rate, 2),
+                    "expected_leads": round(expected, 1),
+                    "shortfall_leads": round(shortfall, 1),
+                    "no_conversions_at_all": none_at_all,
+                    "promotion_class": "actionable",
+                },
+                baseline_metrics_json={
+                    "impressions": page.impressions,
+                    "sessions": ctx.ga4_sessions,
+                },
+                impact=impact,
+                severity=impact,
+                page_url=page.normalized_url,
+                action_override=action,
+            )
+        )
+    return findings
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -1893,6 +1999,26 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Gate 3: traffic that is not turning into anything ──
+    # The layer closest to leads, which is the order the product works in:
+    # visibility earns traffic, traffic earns leads, and a page that takes the
+    # traffic and stops is the most expensive thing on the site.
+    findings.extend(
+        _conversion_page_findings(
+            pages,
+            page_contexts=page_contexts,
+            classifications=classifications,
+            site=site,
+        )
+    )
+    for finding in findings:
+        if finding.evidence_json.get("gate") == "conversion_page":
+            _enrich_finding(
+                finding,
+                classification=classifications.get(finding.page_url or ""),
+                page_ctx=page_contexts.get(finding.page_url or ""),
+            )
 
     # ── Gate 0 ──
     # A silent conversion tag makes every impact score below it a fiction, so
