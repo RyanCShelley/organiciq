@@ -12,7 +12,7 @@ PR push landing — rather than a number that silently went up.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ from app.core.settings import get_settings
 from app.core.urls import normalize_url
 from app.ingestion.seranking.client import list_backlink_pages
 from app.models.client import Client
-from app.models.job import SyncJob, SyncJobStatus
+from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
 from app.models.seranking import FactSerBacklinkPage
 
 logger = logging.getLogger("organiciq.seranking.backlinks")
@@ -153,17 +153,30 @@ def run_seranking_backlinks_job(db: Session, job: SyncJob) -> SyncJob:
                     },
                 )
             )
-        job.records_published = len(payloads)
-        job.status = SyncJobStatus.SUCCEEDED
-        job.error_message = (
-            f"{len(payloads)} linked pages, "
-            f"{sum(v['refdomains'] for v in merged.values())} referring domains"
+        job.records_written = len(payloads)
+        job.validation_status = ValidationStatus.PASSED
+        job.status = SyncJobStatus.SUCCESSFUL
+        job.completed_at = datetime.now(timezone.utc)
+        job.error_message = None
+        db.commit()
+        logger.info(
+            "Backlinks for %s: %d pages, %d referring domains",
+            domain,
+            len(payloads),
+            sum(values["refdomains"] for values in merged.values()),
         )
-        db.commit()
-        logger.info("Backlinks for %s: %d pages", domain, len(payloads))
-    except Exception as exc:  # noqa: BLE001
+        return job
+
+    except Exception as exc:  # noqa: BLE001 — durable job failure boundary
+        job_id = job.id
+        message = str(exc)[:2000]
         db.rollback()
+        job = db.get(SyncJob, job_id)
+        if job is None:
+            raise
         job.status = SyncJobStatus.FAILED
-        job.error_message = str(exc)[:1000]
+        job.validation_status = ValidationStatus.FAILED
+        job.error_message = message
+        job.completed_at = datetime.now(timezone.utc)
         db.commit()
-    return job
+        return job

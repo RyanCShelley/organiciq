@@ -8,8 +8,13 @@ traffic is still worth checking — and nothing stored it.
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
+from uuid import uuid4
 
+from app.ingestion.seranking import pipeline_backlinks
 from app.ingestion.seranking.pipeline_backlinks import collapse_rows
+from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
+from app.models.seranking import FactSerBacklinkPage
 
 
 def test_the_scheme_variants_of_one_page_are_merged():
@@ -241,3 +246,120 @@ def test_a_linked_page_with_no_search_data_at_all_is_still_flagged(db, client_a)
 
     assert len(findings) == 1
     assert "drawing no search traffic" in findings[0].diagnosis
+
+
+# ── The job itself ──
+# Everything above tests `collapse_rows` and the rules that read the rows.
+# Nothing ran the job, so three bugs in its success path shipped: a status
+# enum member that does not exist, a write to an unmapped column, and no
+# `completed_at`. A blanket `except Exception` turned the first into a job
+# marked failed with an AttributeError in `error_message` rather than a crash
+# anyone would notice. These run it.
+
+
+def _backlinks_job(db, client_id):
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_id,
+        source="se_ranking_backlinks",
+        start_date=date(2026, 10, 2),
+        end_date=date(2026, 10, 2),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+    return job
+
+
+def test_a_finished_job_is_marked_successful(db, client_a, monkeypatch):
+    monkeypatch.setattr(
+        pipeline_backlinks, "get_settings", lambda: SimpleNamespace(se_ranking_api_key="k")
+    )
+    monkeypatch.setattr(
+        pipeline_backlinks,
+        "list_backlink_pages",
+        lambda *args, **kwargs: [
+            {
+                "url": "https://example.com/pricing",
+                "backlinks": 12,
+                "refdomains": 4,
+                "dofollow_backlinks": 9,
+                "nofollow_backlinks": 3,
+                "first_seen": "2026-09-01",
+                "last_visited": "2026-10-01",
+            },
+            {
+                "url": "http://www.example.com/pricing/",
+                "backlinks": 3,
+                "refdomains": 1,
+                "dofollow_backlinks": 3,
+                "nofollow_backlinks": 0,
+                "first_seen": "2026-08-15",
+                "last_visited": "2026-10-01",
+            },
+        ],
+    )
+
+    job = pipeline_backlinks.run_seranking_backlinks_job(db, _backlinks_job(db, client_a.id))
+
+    assert job.status is SyncJobStatus.SUCCESSFUL
+    assert job.validation_status is ValidationStatus.PASSED
+    assert job.completed_at is not None
+    assert job.records_fetched == 2
+    # One page, not two: the scheme and www variants are the same page.
+    assert job.records_written == 1
+    # A success summary in error_message reads as a failure in the UI.
+    assert job.error_message is None
+
+    rows = db.query(FactSerBacklinkPage).filter(
+        FactSerBacklinkPage.client_id == client_a.id
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].refdomains == 5
+    assert rows[0].first_seen == date(2026, 8, 15)
+
+
+def test_a_rerun_keeps_the_date_a_link_first_appeared(db, client_a, monkeypatch):
+    """first_seen is what makes a PR push an event rather than a number."""
+    monkeypatch.setattr(
+        pipeline_backlinks, "get_settings", lambda: SimpleNamespace(se_ranking_api_key="k")
+    )
+    rows = [
+        {
+            "url": "https://example.com/pricing",
+            "backlinks": 12,
+            "refdomains": 4,
+            "first_seen": "2026-09-01",
+            "last_visited": "2026-10-01",
+        }
+    ]
+    monkeypatch.setattr(pipeline_backlinks, "list_backlink_pages", lambda *a, **k: rows)
+    pipeline_backlinks.run_seranking_backlinks_job(db, _backlinks_job(db, client_a.id))
+
+    rows[0]["first_seen"] = "2026-10-02"
+    rows[0]["refdomains"] = 6
+    pipeline_backlinks.run_seranking_backlinks_job(db, _backlinks_job(db, client_a.id))
+
+    stored = db.query(FactSerBacklinkPage).filter(
+        FactSerBacklinkPage.client_id == client_a.id
+    ).one()
+    assert stored.refdomains == 6
+    assert stored.first_seen == date(2026, 9, 1)
+
+
+def test_a_failed_fetch_records_why(db, client_a, monkeypatch):
+    monkeypatch.setattr(
+        pipeline_backlinks, "get_settings", lambda: SimpleNamespace(se_ranking_api_key="k")
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("SE Ranking said no")
+
+    monkeypatch.setattr(pipeline_backlinks, "list_backlink_pages", _boom)
+
+    job = pipeline_backlinks.run_seranking_backlinks_job(db, _backlinks_job(db, client_a.id))
+
+    assert job.status is SyncJobStatus.FAILED
+    assert job.validation_status is ValidationStatus.FAILED
+    assert job.completed_at is not None
+    assert "SE Ranking said no" in job.error_message
