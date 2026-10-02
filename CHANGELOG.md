@@ -1,3 +1,77 @@
+## Decision engine review — Phases 3–5, 2 Oct 2026
+
+No migration. `decision_thresholds.thresholds` is JSONB merged with the
+defaults at read time, so every new key below already applies to every
+existing client and can be overridden per client without a deploy.
+
+### Phase 3 — technical rules
+
+- **Orphan pages with demand are blocking.** A page nothing links to cannot
+  be reached by a crawler following links or by a visitor browsing the site,
+  however well it ranks. `orphan_min_impressions` (30) is the qualifier:
+  most orphans are drafts and thank-you pages.
+- **Titles moved to SERP & CTR**, split from meta descriptions, and can now
+  be promoted. A title earns the click; a description is upkeep Google
+  rewrites at will. They were one signal (`missing_meta` / `duplicate_meta`),
+  so the half that moves clicks could never compete for an action. Title is
+  checked first, since only one signal is reported per page.
+- **Gate 0 gains its two non-silence failures**, neither of which suppresses
+  anything: one form going quiet while the site still converts
+  (`partial_break_days` 14, `partial_break_min_expected_leads` 3), and leads
+  past `lead_spike_multiple` (3×) of the usual rate with at least
+  `lead_spike_min_leads` (10) recorded — what double firing and form spam
+  look like. Silence makes every score a fiction, which is what earns that
+  gate its veto; these make some scores wrong, and the honest answer is to
+  say which.
+
+### Phase 4 — new rules, each behind a flag that defaults on
+
+- **N1 AI share of voice falling** (`rule_ai_sov_falling_enabled`). The
+  per-prompt rule states a fact about one prompt that stays true for months;
+  this asks whether the tracked set is moving. `ai_sov_drop_pct` (20%
+  relative) over `ai_sov_window_days` (30), floored at
+  `ai_sov_min_presence_pct` (5%) — a 20% relative fall from a 2% share is one
+  prompt changing its mind.
+- **N2 Link reclamation** (`rule_link_reclamation_enabled`,
+  `reclaim_min_refdomains` 1). A 404 nobody links to is housekeeping; a 404
+  with referring domains is someone else's link pointing at nothing. A
+  redirect that dumps every inbound link on the homepage counts too: the link
+  survives, what it was about does not.
+- **N4, in part.** AI referrals are reported as their own segment on every
+  page finding. AI assistants report no impressions, so the organic numbers
+  cannot say whether that surface earns anything.
+
+### Phase 5 — scoring
+
+- **S1 Effort as a size.** Every rule carries S/M/L and the top
+  `effort_reorder_top_n` (25) is re-ordered by impact × confidence ÷ weight
+  (`effort_weight_small` 1.0, `_medium` 1.5, `_large` 2.5). Only the order
+  moves — promotion still turns on impact and confidence, so nothing is
+  promoted or blocked for being cheap or expensive. The engine's existing
+  per-lever effort of 0–100 priced every Technical SEO finding at 45, title
+  rewrite and migration alike. The size shows in the findings table.
+- **S3 The impact units, documented in code.** Impact is a percentage of a
+  *quarter* of the period goal, not of the goal — the two readings differ by
+  a factor of four. On a 20-lead goal an impact of 25 is 1.25 leads, and the
+  promotion floor of 25 means "worth at least a sixteenth of the month".
+  There is a test asserting exactly that.
+
+### Not built, and why
+
+Each of these was specified in the review and has no data source. Nothing
+was stubbed or approximated.
+
+| Item | Why |
+|---|---|
+| Soft 404s | SE Ranking's Website Audit has no such check. The full code list from SMA's live audit was read before deciding. |
+| Render-critical JS/CSS blocked by robots.txt | SE Ranking reports resource *status* errors (`js45xx`, `extjs345xx`, `css45xx`) but nothing for resources disallowed in robots.txt, and only pages are stored, not the resources a page loads. |
+| N1's competitor-citation clause | Nothing stores which competitors a prompt cites; the prompt fact holds the client's own `brand_cited` only. "Prompt never cited" therefore stays rather than being replaced — dropping it would have removed 25 findings from SMA and given nothing back. |
+| N3 Intent mismatch | No SERP results are stored, with or without page-type classification. |
+| N4 "no CTA on the page" | No page body or DOM is stored. |
+| N4 mobile vs desktop conversion | GA4 facts carry no device dimension. Adding one is an ingestion change plus a re-sync of every client — a decision, not a detail. |
+| N4 mobile LCP | No Core Web Vitals are stored. SE Ranking exposes `chrome_ux_lcp` / `lighthouse_lcp` as boolean issue flags, not milliseconds, and neither is in the curated code list. |
+| S2 Lead-value weighting | Conditional on a persona or lead-value field; none exists on the client or on any conversion definition. |
+
 ## Decision engine review — Phase 2 (thresholds and rules), 2 Oct 2026
 
 Every number below is a per-client row in `decision_thresholds`, tunable

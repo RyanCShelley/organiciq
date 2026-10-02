@@ -17,6 +17,8 @@ Each finding says what is wrong *and* prescribes the action to take.
 | | Question | Bucket | Suppresses |
 |---|---|---|---|
 | **Gate 0** | Are conversions being recorded at all? | Conversion Path | Everything except blocking technical findings on pages that had traffic last period |
+| **Gate 0** | Has one form gone quiet while the site still converts? | Conversion Path | Nothing |
+| **Gate 0** | Are leads far above the usual rate? | Conversion Path | Nothing |
 | **Gate 1** | Is the site converting at the level the plan requires? | Conversion Path | Nothing |
 | **Gate 2** | Do core terms rank and bring nothing? | Search & AI Visibility | Nothing |
 | **Gate 3** | Do pages earn traffic and turn it into nothing? | Conversion Path | Nothing |
@@ -37,6 +39,22 @@ shape is a broken tag far more often than a dead month.
 
 **Action:** verify the conversion event is still firing before trusting any
 other number on the page.
+
+Two more Gate 0 checks fire on a site that is still converting, and neither
+suppresses anything — silence makes every score a fiction, which is what
+earns that gate its veto; these make *some* scores wrong, and the honest
+answer is to say which.
+
+**Partial break.** One page stops producing conversions for
+**`partial_break_days`** (14) while the rest of the site carries on. The
+site total hides this completely. Guarded by
+**`partial_break_min_expected_leads`** (3), measured against that page's own
+prior rate.
+
+**Spike.** Leads past **`lead_spike_multiple`** (3×) the usual rate with at
+least **`lead_spike_min_leads`** (10) recorded — what double firing and form
+spam look like. Its impact is the excess over the expected rate: the
+recorded leads that may not exist.
 
 ## Gate 1 — Site conversion
 
@@ -105,7 +123,31 @@ light one.
 Pages that earned referring domains recently and no traffic with them — the
 link landed and the page did not convert the attention.
 
+### Orphan pages
+A page with **`orphan_min_impressions`** (30) impressions and nothing linking
+to it. Blocking: it cannot be reached by a crawler following links or by a
+visitor browsing the site, however well it ranks. Demand is the qualifier —
+most orphans are drafts and thank-you pages.
+
+### Link reclamation
+A URL returning 4xx, or redirecting to the homepage, with at least
+**`reclaim_min_refdomains`** (1) referring domains. Someone else's link is
+pointing at nothing, and the authority stops at the error. A redirect to the
+homepage keeps the link and throws away what it was about. Flag:
+`rule_link_reclamation_enabled`.
+
+### AI share of voice
+The share of tracked prompts mentioning the brand, falling by
+**`ai_sov_drop_pct`** (20% relative) over **`ai_sov_window_days`** (30).
+Floored at **`ai_sov_min_presence_pct`** (5%): a 20% relative fall from a 2%
+share is one prompt changing its mind. Flag:
+`rule_ai_sov_falling_enabled`.
+
 ### Technical
+Titles are **not** here — a missing or duplicate title is SERP & CTR work
+that can be promoted, because the title earns the click. Meta descriptions
+stay core work; Google rewrites them at will.
+
 Blocking signals (5xx, noindex, canonical conflicts, robots blocks) on pages
 with demand. Eligibility reads the previous period, the sitemap, or the page
 being commercial/conversion, rather than the global demand gate — which hid
@@ -128,6 +170,22 @@ how the number was arrived at (measured 1.0, inferred 0.85, estimated 0.55).
 Impact on one URL is capped at its largest single finding and shared between
 them in proportion. Three rules describing one page's unrealised traffic were
 being counted three times.
+
+**What an impact number means.** Impact is a percentage of a *quarter* of
+the period goal, not of the goal — the two readings differ by a factor of
+four. On a 20-lead goal an impact of 25 is **1.25 leads**, and the promotion
+floor of 25 means "worth at least a sixteenth of the month".
+
+### Effort
+
+Every rule carries a size — S, M or L — and the top
+**`effort_reorder_top_n`** (25) is ordered by impact × confidence ÷ weight
+(**`effort_weight_small`** 1.0, **`effort_weight_medium`** 1.5,
+**`effort_weight_large`** 2.5).
+
+Only the order moves. Promotion still turns on impact and confidence, so
+nothing is promoted or blocked for being cheap or expensive — between two
+findings worth the same, the cheaper one simply comes first.
 
 A finding is promoted to a recommendation when impact clears
 **`minimum_actionable_impact`** (25) and confidence clears
