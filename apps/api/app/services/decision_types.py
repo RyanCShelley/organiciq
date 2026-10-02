@@ -38,6 +38,9 @@ class LeverFinding:
     #: Set when a higher gate failed and this finding cannot be trusted or
     #: acted on until that is fixed.
     suppressed_by: str | None = None
+    #: How many times this client's team has dismissed this kind of
+    #: suggestion. Past the retirement count the rule is the problem.
+    override_count: int = 0
 
 
 @dataclass

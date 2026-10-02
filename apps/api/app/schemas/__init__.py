@@ -481,6 +481,9 @@ class FindingOut(BaseModel):
     #: Rule key of the gate that failed, when this finding cannot be trusted
     #: until that gate is cleared.
     suppressed_by: str | None = None
+    #: Times this team has dismissed this kind of suggestion. Past three, the
+    #: rule is the thing to change.
+    override_count: int = 0
 
 
 class SearchOpportunityOut(BaseModel):

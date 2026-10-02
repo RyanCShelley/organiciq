@@ -29,7 +29,13 @@ from app.models.crawl import (
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
 )
-from app.models.decision import DecisionThreshold, DiagnosticLayer, GrowthAction
+from app.models.decision import (
+    Decision,
+    DecisionStatus,
+    DecisionThreshold,
+    DiagnosticLayer,
+    GrowthAction,
+)
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.models.job import DataWatermark, ValidationStatus
@@ -84,6 +90,50 @@ LEVER_LABELS: dict[str, str] = {
     GrowthAction.AI_VISIBILITY.value: "Search & AI Visibility",
     GrowthAction.CONVERSION_PATH.value: "Conversion Path Optimization",
 }
+
+#: How many times a team can override the same kind of suggestion before the
+#: rule, not the team, is the thing that is wrong. From the product spec.
+OVERRIDE_RETIREMENT_COUNT = 3
+
+
+def rule_family(lever: str, evidence: dict[str, Any]) -> str:
+    """The kind of suggestion, as distinct from the page it landed on.
+
+    `rule_key` is hashed per page, so counting overrides by it would ask "has
+    anyone dismissed this exact finding three times", which is a question about
+    one page. The useful question is whether the same *kind* of suggestion
+    keeps being rejected across different pages — that is a rule that does not
+    fit how this client is run.
+    """
+    signal = evidence.get("audit_signal") or evidence.get("gate")
+    return f"{lever}:{signal}" if signal else lever
+
+
+def _overridden_rule_families(db: Session, client_id: UUID) -> dict[str, int]:
+    """Rule families this client's team keeps dismissing, and how often.
+
+    Counted across distinct pages. Dismissing the same page three times is one
+    disagreement repeated, not three — usually someone working through a stale
+    queue — and retiring a rule on that would be the engine misreading its own
+    history.
+    """
+    rows = (
+        db.query(Decision.evidence_json, Decision.growth_action, Decision.rule_key)
+        .filter(
+            Decision.client_id == client_id,
+            Decision.status == DecisionStatus.DISMISSED,
+        )
+        .all()
+    )
+    seen: dict[str, set[str]] = {}
+    for evidence, growth_action, key in rows:
+        lever = growth_action.value if growth_action is not None else ""
+        if not lever:
+            continue
+        family = rule_family(lever, evidence or {})
+        seen.setdefault(family, set()).add(key)
+    return {family: len(keys) for family, keys in seen.items()}
+
 
 #: Conversions at zero this long, while traffic keeps arriving, is the product
 #: spec's first Urgent condition. Shorter and a quiet fortnight at a small
@@ -876,6 +926,9 @@ def _make_finding(
     action_override: str | None = None,
 ) -> LeverFinding:
     inputs = LEVER_INPUTS[lever]
+    # Recorded rather than derived later: the finding knows its own kind, and
+    # a dismissal has to be countable against it long after the finding is gone.
+    evidence_json = {**evidence_json, "rule_family": rule_family(lever, evidence_json)}
     urgency = urgency_override if urgency_override is not None else inputs.urgency
     priority_score = score_finding(
         impact=impact,
@@ -2693,6 +2746,19 @@ def diagnose(
                 classification=classifications.get(finding.page_url or ""),
                 page_ctx=page_contexts.get(finding.page_url or ""),
             )
+
+    # ── The 3x override rule ──
+    # A team that has thrown the same kind of suggestion away three times is
+    # telling us the rule does not fit how this client is run. Keeping it in
+    # the queue spends capacity on an argument already had three times, so it
+    # is marked and stops being promoted — but it keeps appearing, because a
+    # rule that vanishes silently can never be rewritten or deliberately
+    # removed, which is what the spec asks for.
+    overridden = _overridden_rule_families(db, client.id)
+    for finding in findings:
+        count = overridden.get(finding.evidence_json.get("rule_family", ""), 0)
+        if count >= OVERRIDE_RETIREMENT_COUNT:
+            finding.override_count = count
 
     # ── Gate 0 ──
     # A silent conversion tag makes every impact score below it a fiction, so

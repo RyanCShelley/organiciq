@@ -29,6 +29,8 @@ export type Finding = {
   core_work?: boolean;
   /** Rule key of the gate that failed; this finding cannot be trusted yet. */
   suppressed_by?: string | null;
+  /** Times this team has dismissed this kind of suggestion. */
+  override_count?: number;
   priority_band?: string;
   priority_band_reason?: string | null;
   /** UI-only: optional alternative surfaced when hard recommendations are below the plan allowance */
@@ -125,7 +127,13 @@ export function promotionBlockedLabel(reason: string | null | undefined): string
  * cleared, and work that simply did not score high enough this period. They
  * call for different responses, so they should not look the same.
  */
-export type FindingState = "recommended" | "suggested" | "core-work" | "blocked" | "deferred";
+export type FindingState =
+  | "recommended"
+  | "suggested"
+  | "core-work"
+  | "blocked"
+  | "retired"
+  | "deferred";
 
 export function findingState(
   item: Finding,
@@ -135,6 +143,9 @@ export function findingState(
   // A gate failing outranks everything: the score behind any other state was
   // computed from data the gate says is wrong.
   if (item.suppressed_by) return "blocked";
+  // Three dismissals across different pages: the rule is what needs changing,
+  // and that is a different message from "not important enough this month".
+  if ((item.override_count ?? 0) >= 3) return "retired";
   if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) return "recommended";
   if (item.core_work) return "core-work";
   if (suggestedKeys.has(item.rule_key) || item.is_suggested) return "suggested";

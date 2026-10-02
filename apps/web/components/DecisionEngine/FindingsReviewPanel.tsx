@@ -32,6 +32,12 @@ function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys
         variant: "danger",
         hint: "Scored from data a failed check says cannot be trusted. Clear that first.",
       };
+    case "retired":
+      return {
+        label: "Rule contested",
+        variant: "warning",
+        hint: `Dismissed ${item.override_count} times on different pages — rewrite or retire this rule.`,
+      };
     case "recommended":
       return { label: "Recommendation", variant: "success" };
     case "core-work":

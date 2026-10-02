@@ -171,6 +171,15 @@ def promote_findings(
             finding.promotion_blocked_reason = "suppressed: fix the blocking issue first"
             continue
 
+        # Dismissed three times across different pages: the rule is the thing
+        # that is wrong, and promoting it again spends an action on an argument
+        # this team has already had three times.
+        if finding.override_count >= 3:
+            finding.promotion_blocked_reason = (
+                f"overridden {finding.override_count} times: rewrite or retire this rule"
+            )
+            continue
+
         # Core Work is included in the plan every month. Promoting it would
         # spend the one-to-five flexible actions a client buys on work they are
         # already paying for.
