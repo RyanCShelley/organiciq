@@ -32,6 +32,22 @@ class DecisionPriority(str, enum.Enum):
     LOW = "low"
 
 
+class DismissalReason(str, enum.Enum):
+    """Why a recommendation was turned down.
+
+    Free text meant the 3x override rule counted disagreements it could not
+    read: "wrong data" is a bug report and "already done" is a scheduling
+    note, and neither says the rule is a bad fit. Stored as text so no
+    database enum has to be altered to add one, validated on the way in.
+    """
+
+    WRONG_DATA = "wrong_data"
+    ALREADY_DONE = "already_done"
+    NOT_RELEVANT = "not_relevant"
+    CLIENT_DECLINED = "client_declined"
+    OTHER = "other"
+
+
 class DecisionStatus(str, enum.Enum):
     NEW = "new"
     REVIEWED = "reviewed"

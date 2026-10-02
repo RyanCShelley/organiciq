@@ -187,3 +187,104 @@ def test_two_dismissals_are_not_yet_a_verdict():
     )
 
     assert "retire this rule" not in (all_findings[0].promotion_blocked_reason or "")
+
+
+# --- T8: reasons, and a rule getting another chance -------------------------
+
+
+def test_a_dismissal_needs_a_reason_from_the_list(db, client_a):
+    """Free text meant the override rule counted disagreements it could not read."""
+    import pytest
+
+    from app.models.decision import DismissalReason
+    from app.services.decisions import update_decision_status
+
+    _dismissed(
+        db,
+        client_a.id,
+        rule_key="k",
+        lever=GrowthAction.TECHNICAL_SEO,
+        evidence={"audit_signal": "missing_meta"},
+    )
+    db.commit()
+    decision = db.query(Decision).filter(Decision.client_id == client_a.id).one()
+
+    with pytest.raises(ValueError, match="dismissal_reason must be one of"):
+        update_decision_status(
+            db,
+            client_id=client_a.id,
+            decision_id=decision.id,
+            status=DecisionStatus.DISMISSED,
+            dismissal_reason="because",
+        )
+
+    updated = update_decision_status(
+        db,
+        client_id=client_a.id,
+        decision_id=decision.id,
+        status=DecisionStatus.DISMISSED,
+        dismissal_reason=DismissalReason.NOT_RELEVANT.value,
+    )
+    assert updated.dismissal_reason == "not_relevant"
+
+
+def test_a_bug_report_is_not_a_vote_against_the_rule(db, client_a):
+    """"Wrong data" and "already done" say nothing about whether the rule fits,
+    and counting them retires rules for being right at a bad moment."""
+    for index, reason in enumerate(("wrong_data", "already_done", "not_relevant")):
+        _dismissed(
+            db,
+            client_a.id,
+            rule_key=f"k{index}",
+            lever=GrowthAction.TECHNICAL_SEO,
+            evidence={"audit_signal": "missing_meta"},
+        )
+        db.flush()
+        db.query(Decision).filter(Decision.rule_key == f"k{index}").update(
+            {"dismissal_reason": reason}
+        )
+    db.commit()
+
+    counts = _overridden_rule_families(db, client_a.id)
+
+    assert counts.get("technical_seo:missing_meta") == 1
+
+
+def test_old_dismissals_stop_counting(db, client_a):
+    """A judgement made against last quarter's site is not about this one."""
+    for index in range(3):
+        _dismissed(
+            db,
+            client_a.id,
+            rule_key=f"old{index}",
+            lever=GrowthAction.TECHNICAL_SEO,
+            evidence={"audit_signal": "missing_meta"},
+            window=8,  # roughly eight months back
+        )
+    db.commit()
+
+    assert _overridden_rule_families(db, client_a.id, reset_days=90) == {}
+    # And with a longer memory they count again.
+    assert _overridden_rule_families(db, client_a.id, reset_days=400)[
+        "technical_seo:missing_meta"
+    ] == 3
+
+
+def test_changing_the_thresholds_gives_a_rule_another_chance(db, client_a):
+    """The rule that was dismissed is not the rule running now."""
+    from app.services.decisions import upsert_thresholds
+
+    for index in range(3):
+        _dismissed(
+            db,
+            client_a.id,
+            rule_key=f"k{index}",
+            lever=GrowthAction.TECHNICAL_SEO,
+            evidence={"audit_signal": "missing_meta"},
+        )
+    db.commit()
+    assert _overridden_rule_families(db, client_a.id)["technical_seo:missing_meta"] == 3
+
+    upsert_thresholds(db, client_a.id, {"minimum_actionable_impact": 30})
+
+    assert _overridden_rule_families(db, client_a.id) == {}

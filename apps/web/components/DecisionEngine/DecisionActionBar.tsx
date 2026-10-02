@@ -9,10 +9,19 @@ import {
 } from "@/app/(app)/actions";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { Input, Select } from "@/components/ui/Input";
 import type { StoredDecision } from "@/lib/decision-engine";
 
 const LOCKED = new Set(["task_created", "completed", "validated"]);
+
+/** The five the engine understands. Only the last three count against a rule. */
+const DISMISSAL_REASONS = [
+  { value: "not_relevant", label: "Not relevant to this client" },
+  { value: "client_declined", label: "Client declined" },
+  { value: "other", label: "Other" },
+  { value: "wrong_data", label: "Wrong data (does not count against the rule)" },
+  { value: "already_done", label: "Already done (does not count against the rule)" },
+];
 
 export function DecisionActionBar({
   clientId,
@@ -200,14 +209,24 @@ export function DecisionActionBar({
 
       {showDismiss && !isLocked && !isDismissed ? (
         <div className="flex flex-wrap items-end gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+          {/* A fixed list, not free text. The 3x override rule counts
+              dismissals to decide a rule is a bad fit, and it cannot read
+              "wrong data" — a bug report — differently from "not relevant"
+              unless the reasons are the same five every time. */}
           <label className="field-label min-w-[220px] flex-1">
             Dismissal reason
-            <Input
+            <Select
               value={dismissalReason}
               onChange={(event) => setDismissalReason(event.target.value)}
-              placeholder="Why skip this action?"
               required
-            />
+            >
+              <option value="">Choose a reason…</option>
+              {DISMISSAL_REASONS.map((reason) => (
+                <option key={reason.value} value={reason.value}>
+                  {reason.label}
+                </option>
+              ))}
+            </Select>
           </label>
           <Button
             type="button"

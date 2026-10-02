@@ -36,6 +36,7 @@ from app.models.decision import (
     DecisionStatus,
     DecisionThreshold,
     DiagnosticLayer,
+    DismissalReason,
     GrowthAction,
 )
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
@@ -145,7 +146,32 @@ def rule_family(lever: str, evidence: dict[str, Any]) -> str:
     return f"{lever}:{signal}" if signal else lever
 
 
-def _overridden_rule_families(db: Session, client_id: UUID) -> dict[str, int]:
+def _contested_window_start(
+    db: Session, client_id: UUID, *, reset_days: int, today: date | None = None
+) -> date:
+    """How far back a dismissal still counts against a rule. T8.
+
+    Two things give a rule another chance. Time, because a judgement made
+    against last quarter's site is not a judgement about this one. And a
+    change to the client's thresholds, because the rule that was dismissed is
+    not the rule running now — holding the old verdict against it would mean
+    a tuned rule could never come back.
+    """
+    cutoff = (today or date.today()) - timedelta(days=reset_days)
+    row = (
+        db.query(DecisionThreshold.updated_at)
+        .filter(DecisionThreshold.client_id == client_id)
+        .one_or_none()
+    )
+    if row and row[0]:
+        changed = row[0].date() if hasattr(row[0], "date") else row[0]
+        cutoff = max(cutoff, changed)
+    return cutoff
+
+
+def _overridden_rule_families(
+    db: Session, client_id: UUID, *, reset_days: int = 90
+) -> dict[str, int]:
     """Rule families this client's team keeps dismissing, and how often.
 
     Counted across distinct pages. Dismissing the same page three times is one
@@ -153,16 +179,28 @@ def _overridden_rule_families(db: Session, client_id: UUID) -> dict[str, int]:
     queue — and retiring a rule on that would be the engine misreading its own
     history.
     """
+    since = _contested_window_start(db, client_id, reset_days=reset_days)
     rows = (
-        db.query(Decision.evidence_json, Decision.growth_action, Decision.rule_key)
+        db.query(
+            Decision.evidence_json,
+            Decision.growth_action,
+            Decision.rule_key,
+            Decision.dismissal_reason,
+        )
         .filter(
             Decision.client_id == client_id,
             Decision.status == DecisionStatus.DISMISSED,
+            Decision.date_range_end >= since,
         )
         .all()
     )
     seen: dict[str, set[str]] = {}
-    for evidence, growth_action, key in rows:
+    for evidence, growth_action, key, reason in rows:
+        # "Wrong data" is a bug report and "already done" is a scheduling
+        # note. Neither says the rule is a bad fit, and counting them would
+        # retire rules for being right at an inconvenient moment. T8.
+        if reason in {DismissalReason.WRONG_DATA.value, DismissalReason.ALREADY_DONE.value}:
+            continue
         lever = growth_action.value if growth_action is not None else ""
         if not lever:
             continue
@@ -3479,7 +3517,9 @@ def diagnose(
     # is marked and stops being promoted — but it keeps appearing, because a
     # rule that vanishes silently can never be rewritten or deliberately
     # removed, which is what the spec asks for.
-    overridden = _overridden_rule_families(db, client.id)
+    overridden = _overridden_rule_families(
+        db, client.id, reset_days=int(thresholds.get("contested_reset_days", 90))
+    )
     for finding in findings:
         count = overridden.get(finding.evidence_json.get("rule_family", ""), 0)
         if count >= OVERRIDE_RETIREMENT_COUNT:

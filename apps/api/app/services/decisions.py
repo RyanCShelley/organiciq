@@ -15,6 +15,7 @@ from app.models.decision import (
     DecisionStatus,
     DecisionThreshold,
     DecisionType,
+    DismissalReason,
     GrowthAction,
 )
 from app.services.decision_types import DiagnoseResult, LeverFinding
@@ -261,7 +262,17 @@ def update_decision_status(
         return None
     decision.status = status
     if status == DecisionStatus.DISMISSED:
-        decision.dismissal_reason = dismissal_reason
+        # A reason is required, and has to be one of the five. Free text meant
+        # the override rule counted "wrong data" — a bug report — as evidence
+        # the rule is a bad fit. T8.
+        try:
+            reason = DismissalReason(str(dismissal_reason or "").strip())
+        except ValueError as exc:
+            raise ValueError(
+                "dismissal_reason must be one of: "
+                + ", ".join(item.value for item in DismissalReason)
+            ) from exc
+        decision.dismissal_reason = reason.value
     else:
         decision.dismissal_reason = None
     db.commit()
