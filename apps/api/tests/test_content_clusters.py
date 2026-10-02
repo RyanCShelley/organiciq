@@ -11,12 +11,24 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.models.gsc import FactGscQueryPage
+from app.services.decision_impact import SiteBusinessContext
 from app.services.lever_engine import (
     CLUSTER_MIN_IMPRESSIONS,
     _brand_tokens,
     _cluster_tokens,
     _content_cluster_findings,
 )
+
+def _site(rate=2.0, leads=40, goal=50):
+    """A site that converts, so impact can be expressed in leads."""
+    return SiteBusinessContext(
+        site_lead_rate_pct=rate,
+        period_sessions=2000.0,
+        period_leads=leads,
+        period_lead_goal=goal,
+        p90_page_sessions=500.0,
+    )
+
 
 END = date(2026, 8, 31)
 PERIOD = (END - timedelta(days=29), END)
@@ -50,7 +62,7 @@ def test_a_subject_with_demand_and_no_ranking_page_is_found(db, client_a):
         _q(db, client_a.id, query, impressions, 32)
     db.commit()
 
-    findings = _content_cluster_findings(db, client_a, period=PERIOD)
+    findings = _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
 
     assert len(findings) == 1
     evidence = findings[0].evidence_json
@@ -73,7 +85,7 @@ def test_a_subject_that_already_has_an_owner_is_not_a_gap(db, client_a):
         _q(db, client_a.id, query, impressions, position)
     db.commit()
 
-    assert _content_cluster_findings(db, client_a, period=PERIOD) == []
+    assert _content_cluster_findings(db, client_a, period=PERIOD, site=_site()) == []
 
 
 def test_one_or_two_queries_is_a_coincidence_not_a_subject(db, client_a):
@@ -81,7 +93,7 @@ def test_one_or_two_queries_is_a_coincidence_not_a_subject(db, client_a):
     _q(db, client_a.id, "schema markup guide", 900, 40)
     db.commit()
 
-    assert _content_cluster_findings(db, client_a, period=PERIOD) == []
+    assert _content_cluster_findings(db, client_a, period=PERIOD, site=_site()) == []
 
 
 def test_a_subject_with_little_demand_is_not_worth_a_page(db, client_a):
@@ -89,7 +101,7 @@ def test_a_subject_with_little_demand_is_not_worth_a_page(db, client_a):
         _q(db, client_a.id, query, 20, 40)
     db.commit()
 
-    assert _content_cluster_findings(db, client_a, period=PERIOD) == []
+    assert _content_cluster_findings(db, client_a, period=PERIOD, site=_site()) == []
     assert 60 < CLUSTER_MIN_IMPRESSIONS
 
 
@@ -104,7 +116,7 @@ def test_the_brand_is_not_a_content_gap(db, client_a):
 
     tokens = {
         row.evidence_json["cluster_token"]
-        for row in _content_cluster_findings(db, client_a, period=PERIOD)
+        for row in _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
     }
     assert "acme" not in tokens
     assert "acmeroofing" not in tokens
@@ -135,13 +147,13 @@ def test_only_the_strongest_clusters_are_reported(db, client_a):
             _q(db, client_a.id, f"{topic} {suffix}", 500, 40)
     db.commit()
 
-    findings = _content_cluster_findings(db, client_a, period=PERIOD)
+    findings = _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
 
     assert len(findings) == 5
 
 
 def test_no_period_means_no_findings(db, client_a):
-    assert _content_cluster_findings(db, client_a, period=None) == []
+    assert _content_cluster_findings(db, client_a, period=None, site=_site()) == []
 
 
 def test_two_words_over_the_same_queries_are_one_cluster(db, client_a):
@@ -154,7 +166,7 @@ def test_two_words_over_the_same_queries_are_one_cluster(db, client_a):
         _q(db, client_a.id, query, impressions, 35)
     db.commit()
 
-    findings = _content_cluster_findings(db, client_a, period=PERIOD)
+    findings = _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
 
     assert len(findings) == 1
     # Ordered as a person says it, from the busiest query, not alphabetically.
@@ -171,7 +183,7 @@ def test_a_narrower_subject_inside_a_broader_one_stays_separate(db, client_a):
 
     tokens = {
         row.evidence_json["cluster_token"]
-        for row in _content_cluster_findings(db, client_a, period=PERIOD)
+        for row in _content_cluster_findings(db, client_a, period=PERIOD, site=_site())
     }
 
     # "roofing" spans all five queries and is its own, broader cluster.

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
+from app.services.decision_impact import SiteBusinessContext
 from app.services.lever_engine import (
     INDEXATION_BLOCKING_SIGNALS,
     TRACKING_EXPECTED_LEADS,
@@ -23,6 +24,17 @@ from app.services.lever_engine import (
 
 END = date(2026, 8, 31)
 WINDOW = (date(2026, 8, 2), END)
+
+
+def _site(rate=2.0, leads=40, goal=50):
+    """A site that converts, so impact can be expressed in leads."""
+    return SiteBusinessContext(
+        site_lead_rate_pct=rate,
+        period_sessions=2000.0,
+        period_leads=leads,
+        period_lead_goal=goal,
+        p90_page_sessions=500.0,
+    )
 
 
 def _define_lead(db, client_id, name="generate_lead"):
@@ -108,7 +120,7 @@ def test_silence_fires_when_the_tag_should_have_recorded_something(db, client_a)
     _traffic(db, client_a.id, END - timedelta(days=3), 400)
     db.commit()
 
-    finding = _tracking_failure_finding(db, client_a, period=WINDOW)
+    finding = _tracking_failure_finding(db, client_a, period=WINDOW, site=_site())
 
     assert finding is not None
     assert finding.evidence_json["expected_leads"] >= TRACKING_EXPECTED_LEADS
@@ -126,7 +138,7 @@ def test_a_quiet_fortnight_at_a_small_client_is_not_a_tracking_failure(db, clien
     _traffic(db, client_a.id, END - timedelta(days=3), 60)
     db.commit()
 
-    assert _tracking_failure_finding(db, client_a, period=WINDOW) is None
+    assert _tracking_failure_finding(db, client_a, period=WINDOW, site=_site()) is None
 
 
 def test_one_recorded_lead_is_enough_to_say_the_tag_is_alive(db, client_a):
@@ -137,7 +149,7 @@ def test_one_recorded_lead_is_enough_to_say_the_tag_is_alive(db, client_a):
     _leads(db, client_a.id, END - timedelta(days=3), 1)
     db.commit()
 
-    assert _tracking_failure_finding(db, client_a, period=WINDOW) is None
+    assert _tracking_failure_finding(db, client_a, period=WINDOW, site=_site()) is None
 
 
 def test_a_client_with_no_conversions_configured_has_not_broken_anything(db, client_a):
@@ -145,7 +157,7 @@ def test_a_client_with_no_conversions_configured_has_not_broken_anything(db, cli
     _traffic(db, client_a.id, END - timedelta(days=3), 5000)
     db.commit()
 
-    assert _tracking_failure_finding(db, client_a, period=WINDOW) is None
+    assert _tracking_failure_finding(db, client_a, period=WINDOW, site=_site()) is None
 
 
 def test_a_tag_that_never_fired_needs_more_traffic_to_be_sure(db, client_a):
@@ -153,11 +165,11 @@ def test_a_tag_that_never_fired_needs_more_traffic_to_be_sure(db, client_a):
     _define_lead(db, client_a.id)
     _traffic(db, client_a.id, END - timedelta(days=3), 100)
     db.commit()
-    assert _tracking_failure_finding(db, client_a, period=WINDOW) is None
+    assert _tracking_failure_finding(db, client_a, period=WINDOW, site=_site()) is None
 
     _traffic(db, client_a.id, END - timedelta(days=4), 900)
     db.commit()
-    finding = _tracking_failure_finding(db, client_a, period=WINDOW)
+    finding = _tracking_failure_finding(db, client_a, period=WINDOW, site=_site())
     assert finding is not None
     assert finding.evidence_json["previously_recorded"] is False
     assert "never have fired" in finding.diagnosis
@@ -167,7 +179,7 @@ def test_no_period_means_no_finding(db, client_a):
     _define_lead(db, client_a.id)
     db.commit()
 
-    assert _tracking_failure_finding(db, client_a, period=None) is None
+    assert _tracking_failure_finding(db, client_a, period=None, site=_site()) is None
 
 
 # --- Suppression, end to end ------------------------------------------------

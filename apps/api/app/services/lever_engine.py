@@ -60,7 +60,9 @@ from app.services.decision_impact import (
     compute_page_type_lead_rates,
     compute_topic_lead_rates,
     load_page_business_contexts,
+    downstream_lead_opportunity,
     load_site_business_context,
+    normalize_business_impact,
     portfolio_urgency_adjustment,
     score_ai_visibility_impact,
     score_conversion_impact,
@@ -1732,10 +1734,14 @@ def _conversion_page_findings(
             "leads per period."
         )
 
-        # Impact is the shortfall measured against what a lead is worth to this
-        # site, so a page losing ten leads outranks one losing three.
-        reference = business_impact_reference_leads(site)
-        impact = min(100.0, (shortfall / reference) * 100.0) if reference > 0 else 50.0
+        # The shortfall is already a lead count, which is the engine's unit, so
+        # it goes through the shared normaliser rather than its own arithmetic.
+        # High confidence: these are the page's own measured sessions and leads.
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            estimated_incremental_leads=shortfall,
+            data_confidence="high",
+        )
 
         findings.append(
             _make_finding(
@@ -1752,6 +1758,7 @@ def _conversion_page_findings(
                     "shortfall_leads": round(shortfall, 1),
                     "no_conversions_at_all": none_at_all,
                     "promotion_class": "actionable",
+                    **impact_evidence,
                 },
                 baseline_metrics_json={
                     "impressions": page.impressions,
@@ -1784,6 +1791,7 @@ def _visibility_without_traffic_findings(
     pages: list[PageDemand],
     *,
     period: tuple[date, date] | None,
+    site: SiteBusinessContext,
 ) -> list[LeverFinding]:
     """Gate 2: core terms that rank and bring nothing.
 
@@ -1837,6 +1845,20 @@ def _visibility_without_traffic_findings(
             continue
 
         share = (impressions / expected) * 100 if expected else 0.0
+
+        # Scored in leads like everything else. The searches this ranking is
+        # not reaching, converted at the position's own click rate and then at
+        # the site's lead rate. Confidence is low: the volume figure is a
+        # third-party estimate and the lead rate is the site's, not the page's.
+        missed_clicks = (expected - impressions) * (expected_ctr_percent(position) / 100.0)
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            estimated_incremental_leads=downstream_lead_opportunity(
+                missed_clicks, site.site_lead_rate_pct
+            ),
+            recoverable_clicks=missed_clicks,
+            data_confidence="low",
+        )
         findings.append(
             _make_finding(
                 lever=GrowthAction.AI_VISIBILITY.value,
@@ -1859,12 +1881,12 @@ def _visibility_without_traffic_findings(
                     "expected_impressions": round(expected),
                     "actual_impressions": int(impressions),
                     "impression_share_pct": round(share, 1),
+                    "missed_clicks": round(missed_clicks, 1),
                     "promotion_class": "actionable",
+                    **impact_evidence,
                 },
                 baseline_metrics_json={"search_volume": volume, "position": position},
-                # What the term is worth, capped: a 5,000/month phrase earning
-                # nothing matters more than a 150/month one.
-                impact=min(100.0, (volume / 1000.0) * 100.0),
+                impact=impact,
                 page_url=url,
                 query=row.keyword,
             )
@@ -1887,6 +1909,10 @@ CLUSTER_MIN_IMPRESSIONS = 300.0
 CLUSTER_OWNED_POSITION = 10.0
 #: Clusters overlap by construction, so only the strongest few are reported.
 CLUSTER_MAX_FINDINGS = 5
+#: What a new page can realistically reach. Scoring a cluster as if it would
+#: take position one would make every content gap the biggest finding on the
+#: board.
+CLUSTER_TARGET_POSITION = 8.0
 
 
 def _cluster_tokens(query: str, brand: frozenset[str]) -> list[str]:
@@ -1914,6 +1940,7 @@ def _content_cluster_findings(
     client: Client,
     *,
     period: tuple[date, date] | None,
+    site: SiteBusinessContext,
 ) -> list[LeverFinding]:
     """Subjects the site draws demand for and has no page ranking on.
 
@@ -1997,6 +2024,20 @@ def _content_cluster_findings(
     for total, token, entries in candidates[:CLUSTER_MAX_FINDINGS]:
         examples = [row[0] for row in sorted(entries, key=lambda row: -row[1])[:3]]
         best = min(row[2] for row in entries)
+
+        # Scored in leads, like everything else. A new page would not take the
+        # whole cluster, so the estimate is what a modest page-one position
+        # earns, converted at the site's lead rate. Confidence is low — this is
+        # a page that does not exist yet, judged on a heuristic grouping.
+        winnable_clicks = total * (expected_ctr_percent(CLUSTER_TARGET_POSITION) / 100.0)
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            estimated_incremental_leads=downstream_lead_opportunity(
+                winnable_clicks, site.site_lead_rate_pct
+            ),
+            recoverable_clicks=winnable_clicks,
+            data_confidence="low",
+        )
         findings.append(
             _make_finding(
                 lever=GrowthAction.AI_VISIBILITY.value,
@@ -2018,10 +2059,12 @@ def _content_cluster_findings(
                     "impressions": int(total),
                     "best_position": round(best, 1),
                     "example_queries": examples,
+                    "winnable_clicks": round(winnable_clicks, 1),
                     "promotion_class": "actionable",
+                    **impact_evidence,
                 },
                 baseline_metrics_json={"impressions": total, "best_position": best},
-                impact=min(100.0, (total / 2000.0) * 100.0),
+                impact=impact,
                 query=token,
             )
         )
@@ -2098,6 +2141,7 @@ def _decaying_page_findings(
     *,
     period: tuple[date, date] | None,
     fact_min: date | None,
+    site: SiteBusinessContext,
 ) -> list[LeverFinding]:
     """Pages that used to perform and no longer do.
 
@@ -2146,6 +2190,17 @@ def _decaying_page_findings(
 
         lost = prior_clicks - current_clicks
         against = "the same period last year" if yoy else "earlier in the history"
+
+        # Scored in leads: the clicks this page used to bring and no longer
+        # does, at the site's lead rate. Medium confidence — the clicks are
+        # measured, the lead rate is the site's rather than the page's, and a
+        # refresh does not always win all of it back.
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            leads_at_risk=downstream_lead_opportunity(lost, site.site_lead_rate_pct),
+            recoverable_clicks=lost,
+            data_confidence="medium",
+        )
         finding = _make_finding(
             lever=GrowthAction.AI_VISIBILITY.value,
             rule_key=_rule_key("decaying_page", url),
@@ -2170,9 +2225,10 @@ def _decaying_page_findings(
                 "compared_with": [earlier[0].isoformat(), earlier[1].isoformat()],
                 "year_over_year": yoy,
                 "promotion_class": "actionable",
+                **impact_evidence,
             },
             baseline_metrics_json={"clicks": prior_clicks, "impressions": prior_impressions},
-            impact=min(100.0, (lost / 200.0) * 100.0),
+            impact=impact,
             page_url=url,
         )
         candidates.append((lost, finding))
@@ -2186,6 +2242,7 @@ def _tracking_failure_finding(
     client: Client,
     *,
     period: tuple[date, date] | None,
+    site: SiteBusinessContext,
 ) -> LeverFinding | None:
     """Gate 0: are conversions being recorded at all?
 
@@ -2268,6 +2325,13 @@ def _tracking_failure_finding(
     else:
         expected = 0.0
 
+    # Every lead the fortnight should have produced is unaccounted for, so
+    # that is the impact — in leads, like everything else.
+    impact, impact_evidence = normalize_business_impact(
+        site=site,
+        leads_at_risk=expected if expected > 0 else None,
+        data_confidence="high",
+    )
     return _make_finding(
         lever=GrowthAction.CONVERSION_PATH.value,
         rule_key=_rule_key("tracking_silent", str(client.id)),
@@ -2294,11 +2358,16 @@ def _tracking_failure_finding(
             # rest rather than matching on diagnosis text.
             "gate": "tracking",
             "promotion_class": "actionable",
+            **impact_evidence,
         },
         baseline_metrics_json={},
-        impact=100.0,
+        # Before suppression existed this was pinned at 100 to force it to the
+        # top of the list. It no longer has to win on score: when it fires,
+        # nothing else can be promoted at all.
+        impact=impact,
         severity=100.0,
         urgency_override=100.0,
+        action_override=TRACKING_ACTION,
     )
 
 
@@ -2703,7 +2772,7 @@ def diagnose(
 
     # ── Pages that used to perform ──
     findings.extend(
-        _decaying_page_findings(db, client, period=gsc_period, fact_min=fact_min)
+        _decaying_page_findings(db, client, period=gsc_period, fact_min=fact_min, site=site)
     )
     for finding in findings:
         if finding.evidence_json.get("gate") == "decaying_page":
@@ -2714,14 +2783,14 @@ def diagnose(
             )
 
     # ── Subjects with demand and no page at all ──
-    findings.extend(_content_cluster_findings(db, client, period=gsc_period))
+    findings.extend(_content_cluster_findings(db, client, period=gsc_period, site=site))
     for finding in findings:
         if finding.evidence_json.get("gate") == "content_cluster":
             _enrich_finding(finding, classification=None, page_ctx=None)
 
     # ── Gate 2: rankings that bring nothing ──
     findings.extend(
-        _visibility_without_traffic_findings(db, client, pages, period=gsc_period)
+        _visibility_without_traffic_findings(db, client, pages, period=gsc_period, site=site)
     )
     for finding in findings:
         if finding.evidence_json.get("gate") == "visibility_no_traffic":
@@ -2766,7 +2835,7 @@ def diagnose(
     # in the payload — hiding them entirely would make the queue look empty
     # when it is only untrustworthy — but nothing is promoted to a Growth
     # Action until the tag is fixed.
-    tracking = _tracking_failure_finding(db, client, period=ga4_period)
+    tracking = _tracking_failure_finding(db, client, period=ga4_period, site=site)
     if tracking is not None:
         _enrich_finding(tracking, classification=None, page_ctx=None)
         for finding in findings:

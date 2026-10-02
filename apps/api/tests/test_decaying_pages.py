@@ -13,11 +13,23 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.models.gsc import FactGscPage
+from app.services.decision_impact import SiteBusinessContext
 from app.services.lever_engine import (
     DECAY_MIN_PRIOR_CLICKS,
     _decay_comparison_window,
     _decaying_page_findings,
 )
+
+def _site(rate=2.0, leads=40, goal=50):
+    """A site that converts, so impact can be expressed in leads."""
+    return SiteBusinessContext(
+        site_lead_rate_pct=rate,
+        period_sessions=2000.0,
+        period_leads=leads,
+        period_lead_goal=goal,
+        p90_page_sessions=500.0,
+    )
+
 
 END = date(2026, 8, 31)
 START = END - timedelta(days=29)
@@ -80,7 +92,7 @@ def test_a_page_that_lost_most_of_its_traffic_is_found(db, client_a):
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
 
-    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1))
+    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site())
 
     assert len(findings) == 1
     evidence = findings[0].evidence_json
@@ -97,7 +109,7 @@ def test_a_site_wide_fall_does_not_flag_every_page(db, client_a):
         _fact(db, client_a.id, url, END, 40, 2000)
     db.commit()
 
-    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1)) == []
+    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()) == []
 
 
 def test_a_page_falling_further_than_the_site_still_shows(db, client_a):
@@ -109,7 +121,7 @@ def test_a_page_falling_further_than_the_site_still_shows(db, client_a):
     _fact(db, client_a.id, OTHER, END, 320, 7000)
     db.commit()
 
-    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1))
+    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site())
 
     assert [row.page_url for row in findings] == [PAGE]
 
@@ -122,7 +134,7 @@ def test_clicks_falling_while_impressions_hold_is_a_listing_problem(db, client_a
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
 
-    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1)) == []
+    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()) == []
 
 
 def test_a_page_that_never_performed_cannot_have_decayed(db, client_a):
@@ -132,7 +144,7 @@ def test_a_page_that_never_performed_cannot_have_decayed(db, client_a):
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
 
-    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1)) == []
+    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()) == []
     assert 5 < DECAY_MIN_PRIOR_CLICKS
 
 
@@ -143,7 +155,7 @@ def test_a_small_dip_is_not_decay(db, client_a):
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
 
-    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1)) == []
+    assert _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()) == []
 
 
 def test_the_biggest_loss_leads(db, client_a):
@@ -156,10 +168,10 @@ def test_the_biggest_loss_leads(db, client_a):
     _fact(db, client_a.id, OTHER, END, 600, 9000)
     db.commit()
 
-    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1))
+    findings = _decaying_page_findings(db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site())
 
     assert [row.page_url for row in findings] == [PAGE, third]
 
 
 def test_no_period_means_no_findings(db, client_a):
-    assert _decaying_page_findings(db, client_a, period=None, fact_min=date(2024, 1, 1)) == []
+    assert _decaying_page_findings(db, client_a, period=None, fact_min=date(2024, 1, 1), site=_site()) == []
