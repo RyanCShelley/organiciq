@@ -580,3 +580,27 @@ def list_ai_search_prompts_by_target(
         "date": data.get("date"),
         "prompts": [p for p in prompts if isinstance(p, dict)] if isinstance(prompts, list) else [],
     }
+
+
+def list_backlink_pages(
+    api_key: str,
+    target: str,
+    *,
+    mode: str = "domain",
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Pages of `target` that have backlinks, with referring-domain counts.
+
+    `mode="domain"` includes subdomains, which is what a client's site usually
+    is. The response lists http and https as separate rows for the same page,
+    so callers must normalize before storing or the same page is counted twice.
+    """
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/backlinks/indexed-pages",
+        params={"target": target, "mode": mode, "limit": limit, "order_by": "refdomains"},
+    )
+    if isinstance(data, dict):
+        return list(data.get("pages") or [])
+    return list(data or [])

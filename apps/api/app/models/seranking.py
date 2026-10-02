@@ -443,3 +443,40 @@ class FactSerAiSearchPrompt(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerBacklinkPage(Base):
+    """Backlink and referring-domain counts for one page.
+
+    Stored per page rather than per site because the questions that need it are
+    page-level: is this 404 worth reclaiming, which donor has the authority to
+    lend, did a PR push land on this URL.
+
+    `first_seen` is kept so a new referring domain can be read as an event. A
+    count only says how many links exist; the date says when one arrived, which
+    is what makes a PR push measurable rather than merely visible.
+    """
+
+    __tablename__ = "facts_ser_backlink_pages"
+    __table_args__ = (
+        UniqueConstraint("client_id", "normalized_url", name="uq_ser_backlink_pages_grain"),
+        Index("ix_ser_backlink_pages_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    normalized_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    raw_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    backlinks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    refdomains: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dofollow_backlinks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    nofollow_backlinks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_seen: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_visited: Mapped[date | None] = mapped_column(Date, nullable=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -41,7 +41,12 @@ from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.core.settings import get_settings
 from app.core.urls import normalize_url
-from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
+from app.models.seranking import (
+    FactSerAiCheck,
+    FactSerAiPrompt,
+    FactSerBacklinkPage,
+    FactSerKeyword,
+)
 from app.services.action_promotion import promote_findings
 from app.services.dashboard import (
     _effective_range,
@@ -2420,6 +2425,99 @@ def cap_per_url_impact(findings: list[LeverFinding]) -> None:
             )
 
 
+#: A page that picked up links and did not move is worth looking at; one that
+#: picked up a single link is noise.
+PR_MIN_NEW_REFDOMAINS = 2
+#: How long to give a link to show up in rankings before asking why it has not.
+PR_SETTLING_DAYS = 30
+
+
+def _pr_push_findings(
+    db: Session,
+    client: Client,
+    pages: list[PageDemand],
+    *,
+    period: tuple[date, date] | None,
+    site: SiteBusinessContext,
+) -> list[LeverFinding]:
+    """Pages that earned links recently and no traffic with them.
+
+    Backlinks as an authority score is a vanity number. Backlinks as events —
+    this page picked up three referring domains last month — is a question
+    with an answer: did the push work?
+
+    When it did, nothing is reported; the win shows up in the traffic. When it
+    did not, that is a page holding fresh authority it is not converting into
+    rankings, which is a cheap thing to fix compared with earning the links
+    again.
+    """
+    if period is None:
+        return []
+    start, end = period
+    since = end - timedelta(days=PR_SETTLING_DAYS)
+
+    rows = (
+        db.query(FactSerBacklinkPage)
+        .filter(
+            FactSerBacklinkPage.client_id == client.id,
+            FactSerBacklinkPage.first_seen.isnot(None),
+            FactSerBacklinkPage.first_seen >= since,
+            FactSerBacklinkPage.refdomains >= PR_MIN_NEW_REFDOMAINS,
+        )
+        .all()
+    )
+    if not rows:
+        return []
+
+    demand = {page.normalized_url: page for page in pages}
+    findings: list[LeverFinding] = []
+    for row in rows:
+        page = demand.get(row.normalized_url)
+        position = page.average_position if page else None
+        # Already ranking well: the links did their job and there is nothing
+        # to report. Saying "this worked" is the report's job, not a finding's.
+        if position is not None and position <= 10:
+            continue
+
+        clicks = page.clicks if page else 0.0
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            recoverable_clicks=max(0.0, (page.impressions if page else 0.0) * 0.05),
+            data_confidence="low",
+        )
+        where = f"ranking {position:.0f}" if position is not None else "drawing no search traffic"
+        findings.append(
+            _make_finding(
+                lever=GrowthAction.AI_VISIBILITY.value,
+                rule_key=_rule_key("pr_push_unconverted", row.normalized_url),
+                diagnosis=(
+                    f"Earned {row.refdomains} referring domains and is still {where}: "
+                    f"{row.normalized_url}"
+                ),
+                action_override=(
+                    "This page has fresh authority and is not using it. Check it targets "
+                    "a query worth ranking for, that it is internally linked from the "
+                    "pages about the same subject, and that nothing technical is holding "
+                    "it back — earning the links again is far more expensive than this."
+                ),
+                evidence_json={
+                    "gate": "pr_push_unconverted",
+                    "refdomains": row.refdomains,
+                    "backlinks": row.backlinks,
+                    "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+                    "average_position": round(position, 1) if position is not None else None,
+                    "clicks": int(clicks),
+                    "promotion_class": "actionable",
+                    **impact_evidence,
+                },
+                baseline_metrics_json={"refdomains": row.refdomains},
+                impact=impact,
+                page_url=row.normalized_url,
+            )
+        )
+    return findings
+
+
 def _pages_active_before(
     db: Session,
     client_id: UUID,
@@ -3000,6 +3098,12 @@ def diagnose(
     if conversion is not None:
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
+
+    # ── Links earned and not converted ──
+    findings.extend(_pr_push_findings(db, client, pages, period=gsc_period, site=site))
+    for finding in findings:
+        if finding.evidence_json.get("gate") == "pr_push_unconverted":
+            _enrich_finding(finding, classification=None, page_ctx=None)
 
     # ── Blocking problems the demand gate would otherwise hide ──
     findings.extend(
