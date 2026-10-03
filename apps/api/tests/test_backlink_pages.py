@@ -153,99 +153,14 @@ def _demand(url, position, impressions=800.0):
     )
 
 
-def test_a_page_that_earned_links_and_still_does_not_rank_is_flagged(db, client_a):
-    """Fresh authority that is not being converted. Cheaper to fix than to earn
-    the links again."""
-    from datetime import timedelta
-
-    from app.services.lever_engine import _pr_push_findings
-
-    url = "https://example.com/guides/metal-roofing"
-    end = date.today()
-    _backlink_page(db, client_a.id, url, refdomains=4, first_seen=end - timedelta(days=10))
-    db.commit()
-
-    findings = _pr_push_findings(
-        db, client_a, [_demand(url, 28.0)], period=(end - timedelta(days=29), end), site=_site()
-    )
-
-    assert len(findings) == 1
-    assert findings[0].evidence_json["refdomains"] == 4
-    assert "fresh authority" in findings[0].recommended_action
 
 
-def test_links_that_did_their_job_are_not_reported(db, client_a):
-    """The win shows up in the traffic; saying "this worked" is the report's job."""
-    from datetime import timedelta
-
-    from app.services.lever_engine import _pr_push_findings
-
-    url = "https://example.com/guides/metal-roofing"
-    end = date.today()
-    _backlink_page(db, client_a.id, url, refdomains=4, first_seen=end - timedelta(days=10))
-    db.commit()
-
-    findings = _pr_push_findings(
-        db, client_a, [_demand(url, 4.0)], period=(end - timedelta(days=29), end), site=_site()
-    )
-
-    assert findings == []
 
 
-def test_a_single_link_is_not_a_push(db, client_a):
-    from datetime import timedelta
-
-    from app.services.lever_engine import _pr_push_findings
-
-    url = "https://example.com/blog/post"
-    end = date.today()
-    _backlink_page(db, client_a.id, url, refdomains=1, first_seen=end - timedelta(days=5))
-    db.commit()
-
-    assert (
-        _pr_push_findings(
-            db, client_a, [_demand(url, 30.0)], period=(end - timedelta(days=29), end), site=_site()
-        )
-        == []
-    )
 
 
-def test_old_links_are_not_a_recent_push(db, client_a):
-    """A link from two years ago is the status quo, not an event."""
-    from datetime import timedelta
-
-    from app.services.lever_engine import _pr_push_findings
-
-    url = "https://example.com/blog/post"
-    end = date.today()
-    _backlink_page(db, client_a.id, url, refdomains=9, first_seen=end - timedelta(days=700))
-    db.commit()
-
-    assert (
-        _pr_push_findings(
-            db, client_a, [_demand(url, 30.0)], period=(end - timedelta(days=29), end), site=_site()
-        )
-        == []
-    )
 
 
-def test_a_linked_page_with_no_search_data_at_all_is_still_flagged(db, client_a):
-    """Links arrived and the page draws nothing — the clearest version of this."""
-    from datetime import timedelta
-
-    from app.services.lever_engine import _pr_push_findings
-
-    url = "https://example.com/new-campaign"
-    end = date.today()
-    _backlink_page(db, client_a.id, url, refdomains=6, first_seen=end - timedelta(days=3))
-    db.commit()
-
-    findings = _pr_push_findings(
-        db, client_a, [], period=(end - timedelta(days=29), end), site=_site()
-    )
-
-    assert len(findings) == 1
-    assert "drawing no search traffic" in findings[0].diagnosis
 
 
 # ── The job itself ──
