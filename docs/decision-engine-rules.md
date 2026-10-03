@@ -34,7 +34,7 @@ others make *some* scores wrong, and the honest response is to say which.
 | Rule | Fires when | Will not fire when |
 |---|---|---|
 | **Tracking silent** | No conversions in 14 days while sessions arrive | Nothing configured; under 3 leads expected; no history and under 500 sessions |
-| **Partial break** | One page stops converting for `partial_break_days` (14) while the site still does | Under `partial_break_min_expected_leads` (3) expected from that page |
+| **Partial break** | One page stops converting for `partial_break_days` (14) while the site still does | The page gets no traffic in the window — a page with no visitors produces no leads by arithmetic. Under `partial_break_min_expected_leads` (3) expected |
 | **Lead spike** | Leads past `lead_spike_multiple` (3×) the usual rate | Under `lead_spike_min_leads` (10) recorded. Impact is the excess — the leads that may not exist |
 | **Site conversion** | Rate fell `conversion_lead_rate_decline_min_pct` (10%), or sessions grew `conversion_sessions_growth_min_pct` (5%) without leads, or rate is under the client's baseline | Under `gate1_min_expected_leads` (10) expected, measured against the rate each trigger compares to |
 | **Conversion page** | A page converts below its own page type | Page type has under `gate3_page_type_min_pages` (5) pages or `gate3_page_type_min_leads` (10) leads behind it |
@@ -56,7 +56,7 @@ others make *some* scores wrong, and the honest response is to say which.
 |---|---|---|
 | **Internal linking** | Editorial inbound links under the floor — `link_floor_money` (10), `link_floor_industry` (6), `link_floor_blog` (3) — at position 4–20 | **The homepage, ever.** Donors capped at `link_max_donors` (3) |
 | **Content cluster** | The site draws demand for a subject with no page ranking on it | Subjects under `cluster_min_phrase_words` (2) words; anything in `cluster_generic_terms` or `cluster_excluded_topics` |
-| **Keyword not ranking** | A tracked keyword has nothing ranking | Volume under `ai_visibility_min_keyword_volume` (50); top `ai_visibility_keyword_top_n` (25) only |
+| **Keyword not ranking** | A tracked keyword is outside the top 100 | Volume under `ai_visibility_min_keyword_volume` (50); top `ai_visibility_keyword_top_n` (25) only. **If Search Console shows a page already drawing impressions for the term, the action says to strengthen that page, not build one** |
 | **Prompt not cited** | A tracked AI prompt never cites the brand | Under `ai_visibility_prompt_min_checks` (2) checks |
 | **AI share of voice falling** | Brand mentions across tracked prompts fell `ai_sov_drop_pct` (20% relative) over `ai_sov_window_days` (30) | Starting share under `ai_sov_min_presence_pct` (5%) — a 20% fall from 2% is one prompt changing its mind. Flag: `rule_ai_sov_falling_enabled` |
 
@@ -85,6 +85,22 @@ reported, never spending one of the client's flexible actions.
 ## Scoring
 
 One currency: **leads**.
+
+### What an unranked keyword is worth
+
+Not a flat share of search volume. The estimate reads the measured CTR
+curve at `keyword_target_position` (3) — 3.89%, not the 6% a flat weight
+implied — then discounts by keyword difficulty, floored at
+`keyword_difficulty_floor` (0.2), and uses the AI Overview curve when the
+SERP has one (position 3 falls from 3.89% to 1.63%: the answer is already
+on the page, so the ranking buys visibility, not a visit).
+
+It is then capped at `single_opportunity_max_lead_share` (0.5) of the
+period goal. No single unbuilt page is worth more than half the month.
+
+Difficulty comes from `facts_ser_keyword_metrics`, which prices terms the
+client does **not** rank for — the rank tracker has no difficulty column and
+the domain-keywords endpoint only covers terms already ranking.
 
 ```
 reference_leads = 0.25 × period lead goal
@@ -121,3 +137,17 @@ rule is wrong, not the team. Counted by rule family, not by page.
 `wrong_data` and `already_done` don't count; they are complaints about the
 input. A contested rule returns after `contested_reset_days` (90) or as soon
 as the client's thresholds change.
+
+
+---
+
+## Known data defects feeding these rules
+
+The rules are only as good as the URLs and numbers they join on. These are
+open, and they produce findings that look like rule bugs.
+
+| Defect | Effect |
+|---|---|
+| **GA4 is queried with `landingPage` only**, which returns a path. The client's apex domain is then prefixed to rebuild a URL, so any page on a subdomain is rewritten to a URL that does not exist — `offer.example.com/x` becomes `example.com/x`. GA4's `hostName` dimension is not requested. | Every rule joining GA4 to a page inherits it: conversion, partial break, CTA, page-type rates. |
+| **AI Overview presence is only known for terms already ranking.** `keywords/export` returns no SERP features, and the rank tracker's `earned_serp_features` lists what the client *won*, not what is on the page. | Estimates for unranked head terms use the plain curve and run high. |
+| **19 of 24 clients have no Search Console data.** Two causes: a 403 (property not shared with our credentials) and jobs succeeding with zero rows on a correctly configured property. | The engine refuses to run for them entirely. |
