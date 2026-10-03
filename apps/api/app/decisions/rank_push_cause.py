@@ -80,10 +80,16 @@ def classify_rank_push(signals: RankPushSignals) -> Prescription:
                 )
             )
 
-    query = signals.top_query or "its main query"
+    # Quoted only when it is a real query. "Cover what the top five results
+    # for "its main query" cover" reads as a literal search term.
+    subject = (
+        f"“{signals.top_query}”"
+        if signals.top_query
+        else "this page's main query"
+    )
     steps.append(
         Step(
-            f"Cover what the top five results for “{query}” cover and this "
+            f"Cover what the top five results for {subject} cover and this "
             "page does not",
             target=signals.page_url,
             detail=(

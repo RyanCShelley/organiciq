@@ -513,3 +513,10 @@ def test_the_content_comparison_is_the_human_step():
     assert len(human) == 1
     assert "top five results" in human[0].text
     assert "900 words" in human[0].detail
+
+
+def test_a_missing_query_is_not_quoted_as_if_it_were_one():
+    """"Cover what the top five results for "its main query" cover" reads
+    as a literal search term."""
+    assert "this page's main query" in _push(top_query=None).steps[-1].text
+    assert "“" not in _push(top_query=None).steps[-1].text
