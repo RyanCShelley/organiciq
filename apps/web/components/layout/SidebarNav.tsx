@@ -8,6 +8,7 @@ import {
   Gauge,
   LayoutDashboard,
   LayoutGrid,
+  Map,
   Monitor,
   RefreshCw,
   Settings2,
@@ -36,6 +37,7 @@ const ACCOUNT_ICONS: Record<string, LucideIcon> = {
   "Watch List": Eye,
   "Content Opp": FileSearch,
   "Decision Engine": Gauge,
+  "Keyword map": Map,
   Annotations: Bookmark,
   // Anything unmapped falls back to Settings2, so a missing entry here reads as
   // a second "Client settings" in the sidebar.
@@ -69,7 +71,7 @@ export function SidebarNav({
   const pathname = usePathname();
   const platformOnly = isPlatformContext(pathname);
   const accountToolMatch = pathname.match(
-    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|site-crawl|annotations)(\/|$)/,
+    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|keyword-map|site-crawl|annotations)(\/|$)/,
   );
   const clientsWorkspaceMatch = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
   const pathSlug = accountToolMatch?.[1] || clientsWorkspaceMatch?.[1];

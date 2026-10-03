@@ -24,6 +24,7 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
         { href: tool("watch-list"), label: "Watch List" },
         { href: tool("content-opp"), label: "Content Opp" },
         { href: tool("decision-engine"), label: "Decision Engine" },
+        { href: tool("keyword-map"), label: "Keyword map" },
         { href: tool("site-crawl"), label: "Site crawl" },
         { href: settingsHref, label: "Client settings" },
       ],
@@ -42,6 +43,7 @@ export const ACCOUNT_TOOL_SEGMENTS = [
   "watch-list",
   "content-opp",
   "decision-engine",
+  "keyword-map",
   "site-crawl",
   "annotations",
 ] as const;

@@ -317,3 +317,87 @@ def upsert_keyword_page_map(db, client_id, entries):
         .order_by(KeywordPageMap.keyword)
         .all()
     )
+
+
+def keyword_page_map_view(db, client_id, *, period=None):
+    """Every tracked keyword with its mapping and the best guesses at one.
+
+    The map is only useful if it is easy to fill in, and a blank list of
+    keywords is not. Each row carries what the engine would have guessed —
+    the page Search Console shows and where it ranks — so the decision is
+    a confirmation rather than research.
+    """
+    from datetime import date, timedelta
+
+    from app.models.crawl import FactCrawlPageSnapshot
+    from app.models.decision import KeywordPageMap
+    from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
+    from app.services.lever_engine import (
+        _pages_for_queries,
+        _rank_position,
+        active_crawl_source,
+    )
+
+    if period is None:
+        today = date.today()
+        period = (today - timedelta(days=29), today)
+
+    mapped = {
+        (row.keyword or "").strip().lower(): row
+        for row in db.query(KeywordPageMap)
+        .filter(KeywordPageMap.client_id == client_id)
+        .all()
+    }
+    metrics = {
+        (row.keyword or "").strip().lower(): row
+        for row in db.query(FactSerKeywordMetric)
+        .filter(FactSerKeywordMetric.client_id == client_id)
+        .all()
+    }
+    suggestions = _pages_for_queries(db, client_id, period=period)
+
+    rows = []
+    for tracked in (
+        db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
+    ):
+        keyword = (tracked.keyword or "").strip()
+        if not keyword:
+            continue
+        key = keyword.lower()
+        row = mapped.get(key)
+        metric = metrics.get(key)
+        suggested = suggestions.get(key)
+        rows.append(
+            {
+                "keyword": keyword,
+                "page_url": row.page_url if row else None,
+                "note": row.note if row else None,
+                "mapped": row is not None,
+                "volume": float(metric.volume) if metric and metric.volume else None,
+                "difficulty": (
+                    float(metric.difficulty) if metric and metric.difficulty else None
+                ),
+                "current_position": _rank_position(tracked.current_position),
+                "suggested_page_url": suggested.page_url if suggested else None,
+                "suggested_impressions": (
+                    round(suggested.impressions) if suggested else None
+                ),
+            }
+        )
+    rows.sort(key=lambda r: (r["mapped"], -(r["volume"] or 0), r["keyword"]))
+
+    # Candidate pages for the picker: everything the crawl reached that can
+    # actually hold a ranking.
+    pages = sorted(
+        url
+        for (url,) in db.query(FactCrawlPageSnapshot.normalized_url)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_id,
+            FactCrawlPageSnapshot.source == active_crawl_source(),
+            FactCrawlPageSnapshot.indexable.is_(True),
+        )
+        .distinct()
+        .all()
+        if url
+    )
+    return {"keywords": rows, "pages": pages}

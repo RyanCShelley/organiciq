@@ -177,19 +177,14 @@ def put_thresholds(
     )
 
 
-@router.get("/keyword-page-map", response_model=list[KeywordPageMapOut])
+@router.get("/keyword-page-map")
 def get_keyword_page_map(
     client: Annotated[Client, Depends(require_client)],
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
-) -> list[KeywordPageMapOut]:
-    rows = (
-        db.query(KeywordPageMap)
-        .filter(KeywordPageMap.client_id == client.id)
-        .order_by(KeywordPageMap.keyword)
-        .all()
-    )
-    return [KeywordPageMapOut.model_validate(row) for row in rows]
+) -> dict:
+    """Every tracked keyword with its mapping, plus the pages to choose from."""
+    return decision_service.keyword_page_map_view(db, client.id)
 
 
 @router.put("/keyword-page-map", response_model=list[KeywordPageMapOut])
