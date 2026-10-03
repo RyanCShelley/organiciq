@@ -441,3 +441,75 @@ def test_internal_linking_names_which_situation_it_is_in():
     threw that away."""
     assert _link().cause == "under_linked_donors_found"
     assert _link(donors=[]).cause == "under_linked_no_donor"
+
+
+# ── The keyword-to-page map, and the band below the top five ──
+
+
+def test_the_map_beats_search_console():
+    """Search Console on a term the client does not rank for reports either
+    nothing or the wrong page. A person saying it once settles it."""
+    p = _kw(
+        page_url="https://smamarketing.com/",
+        page_impressions=3.0,
+        mapped_url="https://smamarketing.com/capabilities/seo",
+    )
+    assert p.cause == "page_not_competitive"
+    assert p.evidence["matched_page"] == "https://smamarketing.com/capabilities/seo"
+
+
+def test_a_recorded_no_page_is_an_answer_not_a_question():
+    """Asking again is the engine forgetting what it was told."""
+    p = _kw(page_url=None, page_impressions=0.0, page_position=None, mapping_recorded=True)
+    assert p.cause == "no_page_for_term"
+    assert "Write the page that targets" in p.steps[0].text
+    assert not any(s.text.startswith("Name the page") for s in p.steps)
+
+
+def _push(**kwargs):
+    from app.decisions.rank_push_cause import (
+        RankPushDonor,
+        RankPushSignals,
+        classify_rank_push,
+    )
+
+    base = dict(
+        page_url="https://x/guide",
+        top_query="pool leak repair",
+        position=7.4,
+        impressions=4200.0,
+        clicks=28.0,
+        clicks_at_target=45.0,
+        inbound_links=2,
+        link_floor=6,
+        donors=[RankPushDonor("https://x/blog", "pool leak repair", 380.0)],
+        word_count=900,
+    )
+    base.update(kwargs)
+    return classify_rank_push(RankPushSignals(**base))
+
+
+def test_below_the_top_five_the_instruction_is_rank_not_the_listing():
+    """The curve pays 0.73% at position six. There is no click to win back
+    by rewriting a listing, so a better title is not the work."""
+    p = _push()
+    assert p.cause == "rank_push"
+    actions = " ".join(s.text for s in p.steps)
+    assert "title" not in actions.lower()
+    assert "Link to this page" in actions
+
+
+def test_it_quantifies_the_band_in_clicks():
+    assert _push().expected_impact == "about 17 clicks a period at position five"
+
+
+def test_with_no_donor_it_asks_the_hub_for_the_link():
+    p = _push(donors=[])
+    assert "from the section it belongs to" in p.steps[0].text
+
+
+def test_the_content_comparison_is_the_human_step():
+    human = [s for s in _push().steps if s.human]
+    assert len(human) == 1
+    assert "top five results" in human[0].text
+    assert "900 words" in human[0].detail

@@ -54,6 +54,8 @@ CAUSES: dict[str, str] = {
     "ai_crawlers_blocked": "Answer engines are not allowed to fetch the site",
     "no_page_answers_prompt": "No page answers the question",
     "page_not_quotable": "A page answers it in a form an engine cannot quote",
+    # Rank push: the band CTR work cannot reach
+    "rank_push": "It has the demand and sits below where clicks happen",
     # Internal linking (playbook 6)
     "under_linked_donors_found": "Pages that share its subject do not link to it",
     "under_linked_no_donor": "Nothing on the site shares its subject",

@@ -558,3 +558,20 @@ class DecisionThresholdsOut(BaseModel):
 
 class DecisionThresholdsUpdate(BaseModel):
     thresholds: dict[str, float | int]
+
+
+class KeywordPageMapEntry(BaseModel):
+    keyword: str = Field(min_length=1, max_length=512)
+    #: Null records "no page owns this yet" — a decision, not an omission.
+    page_url: str | None = None
+    note: str | None = None
+
+
+class KeywordPageMapUpdate(BaseModel):
+    entries: list[KeywordPageMapEntry]
+
+
+class KeywordPageMapOut(ORMModel):
+    keyword: str
+    page_url: str | None
+    note: str | None

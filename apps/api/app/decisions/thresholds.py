@@ -36,6 +36,14 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "gate1_min_expected_leads": 10,
     # T2/T6: clicks below this share of what the position should earn.
     "gate2_capture_ratio": 0.5,
+    # Where CTR work stops mattering. On the measured curve position six
+    # earns 0.73%, so there is no click to win back by rewriting a listing.
+    # Outside the top five the work is rank, not the listing.
+    "serp_ctr_max_position": 5,
+    # Positions six to ten: the term is winnable and the page earns almost
+    # nothing where it sits, so the work is rank rather than the listing.
+    "rank_push_max_position": 10,
+    "rank_push_min_impressions": 200,
     # T3: a page type needs this much behind it to be a fair comparison.
     "gate3_page_type_min_pages": 5,
     "gate3_page_type_min_leads": 10,

@@ -12,7 +12,10 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.decision import DecisionStatus
+from app.models.decision import KeywordPageMap
 from app.schemas import (
+    KeywordPageMapOut,
+    KeywordPageMapUpdate,
     DecisionEnsureRequest,
     DecisionEvaluateRequest,
     DecisionEvaluateResponse,
@@ -23,6 +26,7 @@ from app.schemas import (
     DiagnoseResponse,
 )
 from app.services import decisions as decision_service
+from app.services.decisions import upsert_keyword_page_map
 from app.services.decision_serialization import serialize_diagnose
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
@@ -171,3 +175,34 @@ def put_thresholds(
         thresholds=merged,
         defaults=decision_service.default_threshold_catalog(),
     )
+
+
+@router.get("/keyword-page-map", response_model=list[KeywordPageMapOut])
+def get_keyword_page_map(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[KeywordPageMapOut]:
+    rows = (
+        db.query(KeywordPageMap)
+        .filter(KeywordPageMap.client_id == client.id)
+        .order_by(KeywordPageMap.keyword)
+        .all()
+    )
+    return [KeywordPageMapOut.model_validate(row) for row in rows]
+
+
+@router.put("/keyword-page-map", response_model=list[KeywordPageMapOut])
+def put_keyword_page_map(
+    payload: KeywordPageMapUpdate,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[KeywordPageMapOut]:
+    """Record which page owns a term.
+
+    A row with no page_url means "no page owns this yet", which is an
+    answer and stops the engine asking again.
+    """
+    rows = upsert_keyword_page_map(db, client.id, payload.entries)
+    return [KeywordPageMapOut.model_validate(row) for row in rows]

@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -129,3 +129,39 @@ class Decision(Base):
     confidence: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     urgency: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     effort: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
+
+class KeywordPageMap(Base):
+    """Which page is meant to own a term.
+
+    The playbook's first source for "which page should rank for this", and
+    the one thing no amount of data could supply: Search Console reports
+    where Google currently shows a page, which on a term the client does
+    not rank for is either nothing or the wrong page. Matching titles was
+    tried and chose a neighbouring service page.
+
+    So a person says it once, and every finding about that term stops
+    guessing.
+    """
+
+    __tablename__ = "keyword_page_map"
+    __table_args__ = (
+        UniqueConstraint("client_id", "keyword", name="uq_keyword_page_map_grain"),
+        Index("ix_keyword_page_map_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    #: Stored lowercase: a watchlist entry and a Search Console query differ
+    #: in case far more often than in substance.
+    keyword: Mapped[str] = mapped_column(String(512), nullable=False)
+    #: Null means "deliberately no page yet" — a decision, and different
+    #: from never having been asked.
+    page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

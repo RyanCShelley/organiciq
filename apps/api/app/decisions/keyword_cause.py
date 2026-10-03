@@ -39,6 +39,14 @@ class KeywordSignals:
     #: The page Search Console already shows for the term, if any.
     page_url: str | None
     page_impressions: float = 0.0
+    #: The page a person said owns this term. Beats Search Console, which
+    #: on a term the client does not rank for reports either nothing or the
+    #: wrong page.
+    mapped_url: str | None = None
+    #: True when someone recorded "no page owns this yet" — a decision, and
+    #: different from never having been asked.
+    mapping_recorded: bool = False
+
     #: Deliberately absent: a page guessed from title similarity.
     #:
     #: Matching "seo services" against page titles chose
@@ -68,7 +76,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
     has_gsc_page = bool(signals.page_url) and (
         signals.page_impressions >= MIN_IMPRESSIONS_FOR_PAGE_MATCH
     )
-    target_url = signals.page_url if has_gsc_page else None
+    target_url = signals.mapped_url or (signals.page_url if has_gsc_page else None)
     evidence = {
         "keyword": signals.keyword,
         "volume": round(signals.volume),
@@ -93,6 +101,41 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
             )
         else:
             seen = "No page on the site draws an impression for the term."
+        if signals.mapping_recorded:
+            # Someone has already answered this. Asking again is the engine
+            # forgetting what it was told.
+            steps = [
+                Step(
+                    f"Write the page that targets “{signals.keyword}”",
+                    detail="The keyword map records that no page owns this term yet. "
+                    "Put the term in the title, the H1 and the first hundred words.",
+                ),
+                Step(
+                    "Link it from the service page and two related posts",
+                    detail="A new page with no internal links is not being put forward "
+                    "by its own site.",
+                ),
+            ]
+            if long_tail:
+                steps.append(
+                    Step(
+                        "Target a long-tail variant first",
+                        detail=f"Difficulty {signals.difficulty:.0f} means the head term "
+                        "is a year of work. Win a narrower version, then widen.",
+                        human=True,
+                    )
+                )
+            return Prescription(
+                cause="no_page_for_term",
+                evidence={**evidence, "mapping_recorded": True},
+                steps=steps,
+                expected_impact=(
+                    f"the term's {signals.volume:,.0f} monthly searches, in part"
+                ),
+                verify_metric="keyword_position",
+                verify_after_days=56,
+            )
+
         steps = [
             Step(
                 f"Name the page that should own “{signals.keyword}”, or "

@@ -18,6 +18,11 @@ from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
 from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
 from app.decisions.link_cause import Donor, LinkSignals, classify_link_gap
+from app.decisions.rank_push_cause import (
+    RankPushDonor,
+    RankPushSignals,
+    classify_rank_push,
+)
 from app.decisions.site_conversion_cause import (
     SiteConversionSignals,
     classify_site_conversion,
@@ -34,6 +39,7 @@ from app.decisions.effort import effort_class, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
+    MIN_RECOVERABLE_CLICKS,
     benchmark_source_label,
     expected_ctr_percent,
     is_ctr_underperforming,
@@ -51,6 +57,7 @@ from app.models.crawl import (
     FactCrawlPageSnapshot,
 )
 from app.models.decision import (
+    KeywordPageMap,
     Decision,
     DecisionStatus,
     DecisionThreshold,
@@ -1682,6 +1689,94 @@ def _branded_impression_share(
     }
 
 
+#: The band between where CTR work stops paying and where a page stops
+#: being close enough to push.
+RANK_PUSH_MIN_POSITION = 5.0
+RANK_PUSH_MAX_POSITION = 10.0
+#: Enough demand that three places is worth a month's work.
+RANK_PUSH_MIN_IMPRESSIONS = 200.0
+
+
+def _rank_push_finding(
+    page: PageDemand,
+    *,
+    site: SiteBusinessContext,
+    crawl: FactCrawlPageSnapshot | None,
+    classification: PageClassification | None,
+    top_query: str | None,
+    donors: list[LinkGap],
+    ctr_curve: dict[int, float],
+    thresholds: dict[str, Any],
+) -> LeverFinding | None:
+    """Positions six to ten: the band CTR work cannot reach.
+
+    Capping SERP CTR at the top five left these pages with nothing said
+    about them, and they are the ones worth most: the term is winnable,
+    Google already shows the page for it, and it earns almost nothing where
+    it sits.
+    """
+    low = float(thresholds.get("serp_ctr_max_position", 5))
+    high = float(thresholds.get("rank_push_max_position", RANK_PUSH_MAX_POSITION))
+    if not (low < page.average_position <= high):
+        return None
+    if page.impressions < float(
+        thresholds.get("rank_push_min_impressions", RANK_PUSH_MIN_IMPRESSIONS)
+    ):
+        return None
+
+    clicks_at_target = page.impressions * (ctr_at(low, ctr_curve) / 100.0)
+    gain = max(0.0, clicks_at_target - page.clicks)
+    if gain < MIN_RECOVERABLE_CLICKS:
+        return None
+
+    floor = _link_floor(crawl.word_count if crawl else 0, classification, thresholds)
+    prescription = classify_rank_push(
+        RankPushSignals(
+            page_url=page.normalized_url,
+            top_query=top_query,
+            position=page.average_position,
+            impressions=page.impressions,
+            clicks=page.clicks,
+            clicks_at_target=clicks_at_target,
+            inbound_links=crawl.inbound_editorial_links if crawl else None,
+            link_floor=int(floor),
+            donors=[
+                RankPushDonor(url=g.source_url, anchor=g.shared_query, clicks=g.source_clicks)
+                for g in donors
+            ],
+            word_count=crawl.word_count if crawl else None,
+        )
+    )
+    impact, impact_evidence = normalize_business_impact(
+        site=site,
+        estimated_incremental_leads=downstream_lead_opportunity(
+            gain, site.site_lead_rate_pct
+        ),
+        recoverable_clicks=gain,
+        data_confidence="medium",
+    )
+    return _make_finding(
+        lever=GrowthAction.SERP_CTR.value,
+        rule_key=_rule_key("rank_push", page.normalized_url),
+        diagnosis=(
+            f"Position {page.average_position:.0f} on {int(page.impressions):,} "
+            f"impressions, below where clicks happen: {page.normalized_url}"
+        ),
+        evidence_json={
+            "gate": "rank_push",
+            "promotion_class": "actionable",
+            **impact_evidence,
+        },
+        baseline_metrics_json={
+            "impressions": page.impressions,
+            "average_position": round(page.average_position, 1),
+        },
+        impact=impact,
+        page_url=page.normalized_url,
+        prescription=prescription,
+    )
+
+
 def _serp_ctr_finding(
     page: PageDemand,
     *,
@@ -1695,13 +1790,23 @@ def _serp_ctr_finding(
     classification: PageClassification | None = None,
     ctr_curve: dict[int, float] | None = None,
     branded_share: float = 0.0,
+    thresholds: dict[str, Any] | None = None,
 ) -> LeverFinding | None:
     if page.impressions < 1000:
         return None
     # Position one included. A page ranking first and under-clicked is the
     # cheapest fix on the site, and excluding it assumed first place cannot
     # under-perform — which an AI Overview above it comfortably disproves. T6.
-    if page.average_position < 1 or page.average_position > 10:
+    #
+    # The top is where it stops. On the measured curve position six earns
+    # 0.73% and position eight 0.47%, so a page there with *zero* clicks has
+    # under four to win back from a thousand impressions — less than the
+    # five-click floor this rule already required. The old range of ten was
+    # therefore dead below about five without saying so. Writing a better
+    # listing cannot buy a click that is not on offer; outside the top five
+    # the work is rank, not the listing.
+    max_position = float((thresholds or {}).get("serp_ctr_max_position", 5))
+    if page.average_position < 1 or page.average_position > max_position:
         return None
     # Brand searches convert at their own rate and are not a listing problem:
     # someone typing the company name clicks whatever is there. T6.
@@ -1903,12 +2008,26 @@ def _per_page_cascade(
                 ctr_curve=ctr_curve,
                 branded_share=branded.get(page.normalized_url, 0.0),
                 top_query=top_queries.get(page.normalized_url),
+                thresholds=thresholds,
                 crawl=crawl,
                 brand=client_brand,
                 ai_overview=bool(
                     ai_overview_queries
                     and top_queries.get(page.normalized_url) in ai_overview_queries
                 ),
+            )
+        if finding is None:
+            # Below the top five a better listing buys nothing, so the work
+            # is rank. This is the band SERP CTR deliberately stops at.
+            finding = _rank_push_finding(
+                page,
+                site=site,
+                crawl=crawl,
+                classification=classification,
+                top_query=top_queries.get(page.normalized_url),
+                donors=(link_gaps or {}).get(page.normalized_url, []),
+                ctr_curve=ctr_curve,
+                thresholds=thresholds or {},
             )
         if finding is None and crawl_ready and crawl is not None:
             # Last resort: nothing else to say about this page, so report the
@@ -2141,12 +2260,32 @@ def _keyword_market_data(
     return out
 
 
+def _keyword_page_map(db: Session, client_id: UUID) -> dict[str, tuple[str | None, bool]]:
+    """What a person said about which page owns each term.
+
+    Returns `(page_url, recorded)`. A recorded row with no URL means "no
+    page owns this yet", which is an answer — asking for it again is the
+    engine forgetting what it was told.
+    """
+    rows = (
+        db.query(KeywordPageMap.keyword, KeywordPageMap.page_url)
+        .filter(KeywordPageMap.client_id == client_id)
+        .all()
+    )
+    return {
+        (keyword or "").strip().lower(): (page_url or None, True)
+        for keyword, page_url in rows
+        if keyword
+    }
+
+
 def _keyword_prescription(
     keyword: str,
     volume: float,
     difficulty: float | None,
     existing: ExistingPageForQuery | None,
     crawl_by_url: dict[str, FactCrawlPageSnapshot],
+    mapping: tuple[str | None, bool] = (None, False),
 ) -> Prescription:
     """Playbook 7's decision tree, with the crawl answering "can it rank".
 
@@ -2157,7 +2296,8 @@ def _keyword_prescription(
     has_gsc_page = bool(existing) and (
         existing.impressions >= KEYWORD_PAGE_MATCH_MIN_IMPRESSIONS
     )
-    target_url = existing.page_url if has_gsc_page else None
+    mapped_url, mapping_recorded = mapping
+    target_url = mapped_url or (existing.page_url if has_gsc_page else None)
     crawl = crawl_by_url.get(target_url) if target_url else None
 
     canonical_elsewhere = False
@@ -2174,6 +2314,8 @@ def _keyword_prescription(
             page_url=existing.page_url if existing else None,
             page_impressions=existing.impressions if existing else 0.0,
             page_position=existing.average_position if existing else None,
+            mapped_url=mapped_url,
+            mapping_recorded=mapping_recorded,
             indexable=crawl.indexable if crawl else None,
             canonical_elsewhere=canonical_elsewhere,
             in_sitemap=crawl.in_sitemap if crawl else None,
@@ -2198,6 +2340,7 @@ def _ai_visibility_keyword_findings(
     rows = db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
     market = _keyword_market_data(db, client_id)
     existing_pages = _pages_for_queries(db, client_id, period=period)
+    keyword_map = _keyword_page_map(db, client_id)
     candidates: list[tuple[float, LeverFinding]] = []
     for row in rows:
         volume = _keyword_volume(row)
@@ -2268,6 +2411,7 @@ def _ai_visibility_keyword_findings(
                     difficulty,
                     existing_pages.get((row.keyword or "").strip().lower()),
                     crawl_by_url,
+                    keyword_map.get((row.keyword or "").strip().lower(), (None, False)),
                 )
                 if signal == "keyword_not_ranking"
                 else None

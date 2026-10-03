@@ -282,3 +282,38 @@ def update_decision_status(
 
 def default_threshold_catalog() -> dict[str, float | int]:
     return dict(DEFAULT_DECISION_THRESHOLDS)
+
+
+def upsert_keyword_page_map(db, client_id, entries):
+    """Record or update which page owns each term.
+
+    Keywords are stored lowercase: a watchlist entry and a Search Console
+    query differ in case far more often than in substance, and the engine
+    looks the mapping up by the lowercased term.
+    """
+    from app.models.decision import KeywordPageMap
+
+    for entry in entries:
+        keyword = entry.keyword.strip().lower()
+        if not keyword:
+            continue
+        row = (
+            db.query(KeywordPageMap)
+            .filter(
+                KeywordPageMap.client_id == client_id,
+                KeywordPageMap.keyword == keyword,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            row = KeywordPageMap(client_id=client_id, keyword=keyword)
+            db.add(row)
+        row.page_url = (entry.page_url or "").strip() or None
+        row.note = (entry.note or "").strip() or None
+    db.commit()
+    return (
+        db.query(KeywordPageMap)
+        .filter(KeywordPageMap.client_id == client_id)
+        .order_by(KeywordPageMap.keyword)
+        .all()
+    )
