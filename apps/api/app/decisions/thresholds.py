@@ -15,6 +15,15 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "ai_visibility_gap_search_min": 0.05,
     "ai_visibility_gap_mention_max_pct": 2.0,
     "ai_visibility_min_keyword_volume": 50,
+    # What a new page can plausibly reach on a term nothing currently ranks
+    # for. Read off the measured CTR curve rather than assumed: position 5 is
+    # 1.08% organic, not the 6% a flat weight was implying.
+    "keyword_target_position": 3,
+    # A hard term is discounted towards this, never below it.
+    "keyword_difficulty_floor": 0.2,
+    # No single unbuilt page may claim more than this share of the period
+    # goal. One keyword was being valued at four times the site's output.
+    "single_opportunity_max_lead_share": 0.5,
     "ai_visibility_keyword_top_n": 25,
     "ai_visibility_prompt_min_checks": 2,
     "ai_visibility_prompt_top_n": 25,

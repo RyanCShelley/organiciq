@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
 from app.decisions.effort import effort_class, ranking_score
+from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
     benchmark_source_label,
@@ -49,6 +50,7 @@ from app.core.settings import get_settings
 from app.core.urls import normalize_url
 from app.models.seranking import (
     FactSerAiCheck,
+    FactSerDomainKeyword,
     FactSerAiPrompt,
     FactSerAiTrackerStats,
     FactSerBacklinkPage,
@@ -1861,6 +1863,39 @@ def detect_keyword_rank_signal(
     return None
 
 
+def _keyword_market_data(
+    db: Session, client_id: UUID
+) -> dict[str, tuple[float | None, bool]]:
+    """Difficulty and SERP shape per keyword, from the domain-keywords fact.
+
+    The rank-tracker fact carries neither. Its `earned_serp_features` lists
+    the features the client *won*, which for a keyword that does not rank is
+    empty — the inverse of the question "is there an AI Overview sitting
+    above this result". The domain-keywords pipeline stores the SERP's own
+    features and a difficulty score, so the two are joined on the keyword
+    text, which is the only key they share.
+    """
+    rows = (
+        db.query(
+            FactSerDomainKeyword.keyword,
+            FactSerDomainKeyword.difficulty,
+            FactSerDomainKeyword.serp_features,
+        )
+        .filter(FactSerDomainKeyword.client_id == client_id)
+        .all()
+    )
+    out: dict[str, tuple[float | None, bool]] = {}
+    for keyword, difficulty, features in rows:
+        key = (keyword or "").strip().lower()
+        if not key:
+            continue
+        out[key] = (
+            float(difficulty) if difficulty is not None else None,
+            has_ai_overview(features),
+        )
+    return out
+
+
 def _ai_visibility_keyword_findings(
     db: Session,
     client_id: UUID,
@@ -1871,9 +1906,11 @@ def _ai_visibility_keyword_findings(
     min_volume = float(thresholds.get("ai_visibility_min_keyword_volume", 50))
     top_n = int(thresholds.get("ai_visibility_keyword_top_n", 25))
     rows = db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
+    market = _keyword_market_data(db, client_id)
     candidates: list[tuple[float, LeverFinding]] = []
     for row in rows:
         volume = _keyword_volume(row)
+        difficulty, ai_overview = market.get((row.keyword or "").strip().lower(), (None, False))
         if volume < min_volume:
             continue
         signal = detect_keyword_rank_signal(
@@ -1886,6 +1923,9 @@ def _ai_visibility_keyword_findings(
             signal=signal,
             volume=volume,
             site=site,
+            difficulty=difficulty,
+            ai_overview=ai_overview,
+            thresholds=thresholds,
         )
         prev = _rank_position(row.previous_position)
         curr = _rank_position(row.current_position)
@@ -3464,15 +3504,27 @@ def _tracking_anomaly_findings(
         return []
 
     # ── Partial break ──
-    # Prior rate per page, from everything before the window.
-    prior = _leads_by_page(db, client.id, lead_events, None, window_start - timedelta(days=1))
-    prior_days = _recorded_day_span(db, client.id, before=window_start)
+    # What the page should have produced is its own prior rate applied to the
+    # traffic it is *still getting*. Reading it from history alone said a
+    # deleted page had stopped converting: smamarketing.com/geo-grader is a
+    # 404, so of course no one filled in its form, and the engine called that
+    # a broken tag. A page with no visitors produces no leads by arithmetic,
+    # which is not a finding — if the page is gone, the status-error and
+    # link-reclamation rules are the ones with something to say.
+    before = window_start - timedelta(days=1)
+    prior = _leads_by_page(db, client.id, lead_events, None, before)
+    prior_sessions = _sessions_by_page(db, client.id, None, before)
+    now_sessions = _sessions_by_page(db, client.id, window_start, end)
     min_expected = float(thresholds.get("partial_break_min_expected_leads", 3))
-    if prior_days > 0:
+    if prior:
         for url, prior_leads in sorted(prior.items(), key=lambda row: -row[1]):
             if current.get(url, 0.0) > 0:
                 continue
-            expected = (prior_leads / prior_days) * days
+            sessions_now = now_sessions.get(url, 0.0)
+            sessions_before = prior_sessions.get(url, 0.0)
+            if sessions_now <= 0 or sessions_before <= 0:
+                continue
+            expected = sessions_now * (prior_leads / sessions_before)
             if expected < min_expected:
                 continue
             impact, impact_evidence = normalize_business_impact(
@@ -3515,8 +3567,13 @@ def _tracking_anomaly_findings(
     # ── Spike ──
     multiple = float(thresholds.get("lead_spike_multiple", 3.0))
     floor = float(thresholds.get("lead_spike_min_leads", 10))
-    if prior_days > 0 and site_leads_now >= floor:
-        expected_site = (sum(prior.values()) / prior_days) * days
+    sessions_now_total = sum(now_sessions.values())
+    sessions_before_total = sum(prior_sessions.values())
+    if sessions_before_total > 0 and sessions_now_total > 0 and site_leads_now >= floor:
+        # Against the rate, not the raw count: a fortnight with twice the
+        # traffic should have twice the leads, and calling that a spike would
+        # flag every good month.
+        expected_site = sessions_now_total * (sum(prior.values()) / sessions_before_total)
         if expected_site > 0 and site_leads_now >= expected_site * multiple:
             # The excess over the usual rate is the number of recorded leads
             # that may not exist. That is a real quantity in the same currency
@@ -3561,6 +3618,22 @@ def _tracking_anomaly_findings(
             )
 
     return findings
+
+
+def _sessions_by_page(
+    db: Session, client_id: UUID, start: date | None, end: date
+) -> dict[str, float]:
+    query = db.query(
+        FactGa4Traffic.normalized_url,
+        func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
+    ).filter(FactGa4Traffic.client_id == client_id, FactGa4Traffic.date <= end)
+    if start is not None:
+        query = query.filter(FactGa4Traffic.date >= start)
+    return {
+        url: float(total)
+        for url, total in query.group_by(FactGa4Traffic.normalized_url).all()
+        if url and float(total) > 0
+    }
 
 
 def _leads_by_page(

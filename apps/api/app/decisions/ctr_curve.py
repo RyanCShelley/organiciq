@@ -84,6 +84,56 @@ def expected_ctr_percent(position: float) -> float:
     return lower_ctr + (upper_ctr - lower_ctr) * weight
 
 
+#: The column to read when the SERP carries an AI Overview. Position one
+#: falls from 20.02% to 12.82% and position two from 10.36% to 5.16%: the
+#: answer is on the page already, so the ranking buys visibility and not a
+#: visit. Ignoring this made every estimate on an AI-answered term too high.
+AI_OVERVIEW_COLUMN = "AI Overviews + Organic"
+
+#: What SE Ranking calls an AI Overview in `serp_features`.
+AI_OVERVIEW_FEATURES = frozenset(
+    {"ai_overview", "ai_overviews", "sge", "generative_ai", "ai_answer"}
+)
+
+
+@lru_cache(maxsize=4)
+def _load_column(column: str) -> dict[int, float]:
+    if not _DATA_PATH.is_file():
+        return {}
+    curve: dict[int, float] = {}
+    with _DATA_PATH.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            position_raw = (row.get("position") or "").strip().strip('"')
+            value_raw = (row.get(column) or "").strip().strip('"')
+            if not position_raw or not value_raw:
+                continue
+            try:
+                curve[int(position_raw)] = float(value_raw)
+            except ValueError:
+                continue
+    return curve
+
+
+def has_ai_overview(serp_features: object) -> bool:
+    if not isinstance(serp_features, (list, tuple, set)):
+        return False
+    return any(
+        str(feature).strip().lower().replace(" ", "_") in AI_OVERVIEW_FEATURES
+        for feature in serp_features
+    )
+
+
+def expected_ctr_at(position: float, *, ai_overview: bool = False) -> float:
+    """Expected CTR, reading the AI-Overview curve when one is present."""
+    if not ai_overview:
+        return expected_ctr_percent(position)
+    curve = _load_column(AI_OVERVIEW_COLUMN)
+    if not curve:
+        return expected_ctr_percent(position)
+    rounded = max(1, min(20, int(round(position))))
+    return curve.get(rounded, expected_ctr_percent(position))
+
+
 def ctr_performance_threshold(expected_ctr: float) -> float:
     """CTR (percent) below this vs benchmark is considered underperforming."""
     return expected_ctr * UNDERPERFORMANCE_RATIO

@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import expected_ctr_at, expected_ctr_percent
+from app.decisions.thresholds import DEFAULT_DECISION_THRESHOLDS
 from app.models.client import Client
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.services.dashboard import period_lead_goal
@@ -903,27 +904,80 @@ def score_ai_visibility_impact(
     signal: str,
     volume: float,
     site: SiteBusinessContext,
+    difficulty: float | None = None,
+    ai_overview: bool = False,
+    thresholds: Mapping[str, Any] | None = None,
 ) -> tuple[float, dict[str, Any]]:
-    """Impact for keyword rank / AI citation gaps (structured data shelved)."""
-    weight = {
+    """Impact for keyword rank and AI citation gaps.
+
+    This used to assume a flat 6% of search volume would arrive as clicks,
+    which is roughly a top-three finish — applied, perversely, to terms the
+    client does not rank for at all. On "seo services" it produced "worth
+    about 60 more leads a period" for a site earning 14 leads a period in
+    total. An estimate four times the whole site's output is not a forecast,
+    it is a tell that nobody checked.
+
+    Three things ground it now:
+
+    * the measured CTR curve at a position a new page could plausibly reach,
+      rather than a flat rate standing in for one;
+    * the AI Overview curve when the SERP has one, because the answer is
+      already on the page — a ranking there buys visibility, not a visit;
+    * difficulty, because a term nothing ranks for is usually a term that is
+      hard to rank for.
+
+    It is then capped against the client's own goal, so no single
+    opportunity can claim more than the business is trying to earn.
+    """
+    # Defaults come from the one table that holds them, or this function and
+    # `DEFAULT_DECISION_THRESHOLDS` drift apart and the number depends on
+    # whether the caller remembered to pass thresholds through.
+    limits = {**DEFAULT_DECISION_THRESHOLDS, **(thresholds or {})}
+    weight_for_signal = {
         "keyword_fell_top5": 0.18,
         "keyword_fell_top10": 0.10,
-        "keyword_not_ranking": 0.06,
         "prompt_not_cited": 0.12,
-    }.get(signal, 0.05)
-    recoverable_clicks = max(0.0, volume) * weight
-    # Converted to leads like every other rule. Passing only the clicks sent
-    # this down the upstream fallback, where the click component caps at 15 and
-    # then takes a low-confidence haircut — so every term above roughly 400
-    # searches a month scored an identical 8.2, and twenty-five tracked
-    # keywords came back indistinguishable from each other and all of them
-    # below the threshold to be worth doing.
+    }.get(signal)
+
+    if weight_for_signal is not None:
+        # A term that was ranking and slipped has shown it can rank, so the
+        # recoverable share is a property of the fall, not of the curve.
+        recoverable_clicks = max(0.0, volume) * weight_for_signal
+        capture_meta: dict[str, Any] = {"capture_basis": "rank_recovery"}
+    else:
+        target = float(limits.get("keyword_target_position", 5))
+        capture_pct = expected_ctr_at(target, ai_overview=ai_overview)
+        share = capture_pct / 100.0
+        if difficulty is not None:
+            floor = float(limits.get("keyword_difficulty_floor", 0.2))
+            share *= max(floor, 1.0 - (float(difficulty) / 100.0))
+        recoverable_clicks = max(0.0, volume) * share
+        capture_meta = {
+            "capture_basis": "ctr_curve",
+            "assumed_position": target,
+            "assumed_ctr_percent": round(capture_pct, 2),
+            "ai_overview_present": ai_overview,
+            "keyword_difficulty": round(float(difficulty), 1) if difficulty is not None else None,
+        }
+
+    leads = downstream_lead_opportunity(recoverable_clicks, site.site_lead_rate_pct)
+
+    # No single unbuilt page is worth more than a share of the whole month's
+    # goal. Without this the estimate is unbounded in volume, and head terms
+    # produce numbers that discredit every other row on the page.
+    capped = False
+    if leads is not None:
+        ceiling_share = float(limits.get("single_opportunity_max_lead_share", 0.5))
+        goal = site.period_lead_goal or site.period_leads or 0
+        ceiling = float(goal) * ceiling_share if goal else None
+        if ceiling is not None and leads > ceiling:
+            leads = ceiling
+            capped = True
+
     confidence = "medium" if volume >= 100 else "low"
     impact, norm_meta = normalize_business_impact(
         site=site,
-        estimated_incremental_leads=downstream_lead_opportunity(
-            recoverable_clicks, site.site_lead_rate_pct
-        ),
+        estimated_incremental_leads=leads,
         recoverable_clicks=recoverable_clicks,
         strategic_priority=4 if signal.startswith("keyword_fell") else 3,
         data_confidence=confidence,
@@ -933,6 +987,8 @@ def score_ai_visibility_impact(
         "audit_signal": signal,
         "volume": round(volume, 1),
         "recoverable_clicks": round(recoverable_clicks, 1),
+        "estimate_capped_at_goal_share": capped,
+        **capture_meta,
         **norm_meta,
     }
 

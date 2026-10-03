@@ -185,3 +185,78 @@ def test_watchlist_findings_prescribe_rather_than_restate():
     assert slipped != never
     assert "tracked keywords and improve AI citation" not in slipped
     assert "citation" in PROMPT_ACTION
+
+
+# ── The keyword estimate, after "worth about 60 more leads a period" ──
+
+
+def _small_site():
+    from app.services.decision_impact import SiteBusinessContext
+
+    # SMA's real shape when the engine claimed one keyword was worth 60
+    # leads: a site earning 14 a period against a goal of 24.
+    return SiteBusinessContext(
+        site_lead_rate_pct=2.0,
+        period_sessions=700.0,
+        period_leads=14,
+        period_lead_goal=24,
+        p90_page_sessions=300.0,
+    )
+
+
+def test_a_head_term_cannot_be_worth_more_than_the_whole_site_earns():
+    """An estimate four times the site's output is a tell, not a forecast."""
+    from app.services.decision_impact import score_ai_visibility_impact
+
+    site = _small_site()
+    _, evidence = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=50_000, site=site
+    )
+    leads = evidence["estimated_incremental_leads"]
+    assert leads <= site.period_lead_goal * 0.5
+    assert leads < site.period_leads
+
+
+def test_an_ai_overview_halves_what_a_ranking_is_worth():
+    """Ranking under an AI Overview buys visibility, not a visit: the
+    measured curve puts position three at 3.89% organic and 1.63% with one."""
+    from app.services.decision_impact import score_ai_visibility_impact
+
+    site = _small_site()
+    _, plain = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=20_000, site=site, ai_overview=False
+    )
+    _, answered = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=20_000, site=site, ai_overview=True
+    )
+    assert answered["estimated_incremental_leads"] < plain["estimated_incremental_leads"]
+    assert answered["ai_overview_present"] is True
+
+
+def test_a_hard_term_is_discounted_towards_the_floor():
+    """A term nothing ranks for is usually a term that is hard to rank for."""
+    from app.services.decision_impact import score_ai_visibility_impact
+
+    site = _small_site()
+    _, easy = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=20_000, site=site, difficulty=10
+    )
+    _, hard = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=20_000, site=site, difficulty=90
+    )
+    assert hard["estimated_incremental_leads"] < easy["estimated_incremental_leads"]
+    assert hard["keyword_difficulty"] == 90
+
+
+def test_the_estimate_reads_off_the_measured_curve_not_a_flat_rate():
+    """The flat 6%-of-volume weight was roughly a top-three finish, applied
+    to terms the client does not rank for at all."""
+    from app.decisions.ctr_curve import expected_ctr_percent
+    from app.services.decision_impact import score_ai_visibility_impact
+
+    _, evidence = score_ai_visibility_impact(
+        signal="keyword_not_ranking", volume=10_000, site=_small_site()
+    )
+    assert evidence["capture_basis"] == "ctr_curve"
+    assert evidence["assumed_ctr_percent"] == round(expected_ctr_percent(3), 2)
+    assert evidence["assumed_ctr_percent"] < 6.0

@@ -256,13 +256,17 @@ def _two_forms(db, client_a, *, quote_still_converts: bool):
     for offset in range(14, 74):
         day = END - timedelta(days=offset)
         _traffic(db, client_a.id, day, CONTACT, 100)
+        _traffic(db, client_a.id, day, QUOTE, 50)
         _leads(db, client_a.id, day, CONTACT, 2)
         _leads(db, client_a.id, day, QUOTE, 1)
 
-    # The window: contact keeps converting, quote may not.
+    # The window: both pages still get visitors, contact still converts,
+    # quote may not. The traffic matters — a page nobody visits produces no
+    # leads by arithmetic, which is not a broken form.
     for offset in range(14):
         day = window_start + timedelta(days=offset)
         _traffic(db, client_a.id, day, CONTACT, 100)
+        _traffic(db, client_a.id, day, QUOTE, 50)
         _leads(db, client_a.id, day, CONTACT, 2)
         if quote_still_converts:
             _leads(db, client_a.id, day, QUOTE, 1)
@@ -430,3 +434,35 @@ def test_the_homepage_is_never_under_linked():
         )
         is None
     )
+
+
+def test_a_page_that_no_longer_gets_visitors_is_not_a_broken_form(db, client_a):
+    """smamarketing.com/geo-grader is a 404. Of course nobody filled in its
+    form; reading expectation from history alone called that a broken tag.
+
+    A page with no visitors produces no leads by arithmetic. If the page is
+    gone, the status-error and link-reclamation rules are the ones with
+    something to say about it.
+    """
+    _lead_def(db, client_a.id)
+    _watermarks(db, client_a.id, END)
+    _gsc(db, client_a.id, END, CONTACT)
+    for offset in range(14, 74):
+        day = END - timedelta(days=offset)
+        _traffic(db, client_a.id, day, CONTACT, 100)
+        _traffic(db, client_a.id, day, QUOTE, 50)
+        _leads(db, client_a.id, day, CONTACT, 2)
+        _leads(db, client_a.id, day, QUOTE, 2)
+    # The window: the quote page has been removed, so no sessions at all.
+    for offset in range(14):
+        day = END - timedelta(days=13) + timedelta(days=offset)
+        _traffic(db, client_a.id, day, CONTACT, 100)
+        _leads(db, client_a.id, day, CONTACT, 2)
+    db.commit()
+    seed_required_sources(db, client_a.id, END)
+
+    result = diagnose(db, client_a, from_date=END - timedelta(days=29), to_date=END)
+    assert not [
+        row for row in result.findings
+        if row.evidence_json.get("gate") == "tracking_partial"
+    ]
