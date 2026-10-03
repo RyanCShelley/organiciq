@@ -356,6 +356,28 @@ def keyword_page_map_view(db, client_id, *, period=None):
     }
     suggestions = _pages_for_queries(db, client_id, period=period)
 
+    # Where each page points its canonical. Search Console happily reports a
+    # retired URL — smamarketing.com/services/local-seo still draws
+    # impressions while telling Google to index /capabilities/local-seo —
+    # and mapping a term to the page that asked to be ignored would bake the
+    # mistake in permanently.
+    canonical_of: dict[str, str] = {}
+    crawled = (
+        db.query(
+            FactCrawlPageSnapshot.normalized_url,
+            FactCrawlPageSnapshot.canonical_url,
+            FactCrawlPageSnapshot.indexable,
+        )
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_id,
+            FactCrawlPageSnapshot.source == active_crawl_source(),
+        )
+        .all()
+    )
+    for url, canonical, _indexable in crawled:
+        if url and canonical and canonical != url:
+            canonical_of[url] = canonical
+
     rows = []
     for tracked in (
         db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
@@ -367,6 +389,10 @@ def keyword_page_map_view(db, client_id, *, period=None):
         row = mapped.get(key)
         metric = metrics.get(key)
         suggested = suggestions.get(key)
+        suggested_url = suggested.page_url if suggested else None
+        redirected_from = None
+        if suggested_url and suggested_url in canonical_of:
+            redirected_from, suggested_url = suggested_url, canonical_of[suggested_url]
         rows.append(
             {
                 "keyword": keyword,
@@ -378,26 +404,26 @@ def keyword_page_map_view(db, client_id, *, period=None):
                     float(metric.difficulty) if metric and metric.difficulty else None
                 ),
                 "current_position": _rank_position(tracked.current_position),
-                "suggested_page_url": suggested.page_url if suggested else None,
+                "suggested_page_url": suggested_url,
                 "suggested_impressions": (
                     round(suggested.impressions) if suggested else None
                 ),
+                #: Set when the page Search Console reports canonicalises
+                #: elsewhere, so the UI can say why it is offering a
+                #: different URL than the data literally shows.
+                "suggested_instead_of": redirected_from,
             }
         )
     rows.sort(key=lambda r: (r["mapped"], -(r["volume"] or 0), r["keyword"]))
 
     # Candidate pages for the picker: everything the crawl reached that can
     # actually hold a ranking.
+    # Only pages that could actually hold the ranking: a page pointing its
+    # canonical elsewhere has asked not to, so offering it in the picker
+    # invites exactly the mistake above.
     pages = sorted(
         url
-        for (url,) in db.query(FactCrawlPageSnapshot.normalized_url)
-        .filter(
-            FactCrawlPageSnapshot.client_id == client_id,
-            FactCrawlPageSnapshot.source == active_crawl_source(),
-            FactCrawlPageSnapshot.indexable.is_(True),
-        )
-        .distinct()
-        .all()
-        if url
+        for url, _canonical, indexable in crawled
+        if url and indexable and url not in canonical_of
     )
     return {"keywords": rows, "pages": pages}

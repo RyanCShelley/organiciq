@@ -17,6 +17,7 @@ export type KeywordMapRow = {
   current_position: number | null;
   suggested_page_url: string | null;
   suggested_impressions: number | null;
+  suggested_instead_of: string | null;
 };
 
 function formatNum(value: number | null): string {
@@ -111,8 +112,18 @@ function Row({
               setSaved("idle");
             }}
           >
-            Search Console shows {row.suggested_page_url} (
-            {formatNum(row.suggested_impressions)} impressions) — use this
+            {row.suggested_instead_of ? (
+              <>
+                Search Console shows {row.suggested_instead_of} (
+                {formatNum(row.suggested_impressions)} impressions), which
+                canonicalises to {row.suggested_page_url} — use the canonical
+              </>
+            ) : (
+              <>
+                Search Console shows {row.suggested_page_url} (
+                {formatNum(row.suggested_impressions)} impressions) — use this
+              </>
+            )}
           </button>
         ) : null}
         {saved === "error" && message ? (
