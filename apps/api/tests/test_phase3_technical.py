@@ -32,10 +32,12 @@ END = date(2026, 8, 31)
 
 
 def _crawl(**kwargs) -> FactCrawlPageSnapshot:
+    from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY
+
     defaults = dict(
         id=uuid4(),
         client_id=uuid4(),
-        source="se_ranking",
+        source=CRAWL_SOURCE_FIRST_PARTY,
         snapshot_date=END,
         raw_url="https://example.com/p",
         normalized_url="https://example.com/p",
@@ -364,3 +366,67 @@ def test_a_normal_fortnight_is_not_a_spike(db, client_a):
         row for row in result.findings
         if row.evidence_json.get("gate") == "tracking_spike"
     ]
+
+
+# ── False positives reported from the live queue ──
+
+
+def test_a_page_canonicalised_to_a_live_page_is_not_a_finding():
+    """smamarketing.com serves /services/ppc with a canonical aimed at
+    /capabilities/ppc. That is correct, deliberate, and was being reported
+    as a High-priority problem — six of them at once."""
+    page = "https://smamarketing.com/services/ppc"
+    target = "https://smamarketing.com/capabilities/ppc"
+    signal = detect_technical_signal(
+        page,
+        _crawl(normalized_url=page, canonical_url=target),
+        crawl_by_url={target: _crawl(normalized_url=target, status_code=200)},
+        thresholds={"orphan_min_impressions": 30},
+    )
+    assert signal is None
+
+
+def test_a_retired_url_canonicalised_to_its_hub_is_not_a_finding():
+    """/industries/legal is not a page; the site answers with the Industries
+    hub and says so in the canonical. Nothing to fix."""
+    page = "https://smamarketing.com/industries/legal"
+    hub = "https://smamarketing.com/industries"
+    signal = detect_technical_signal(
+        page,
+        _crawl(normalized_url=page, canonical_url=hub),
+        crawl_by_url={hub: _crawl(normalized_url=hub, status_code=200)},
+        thresholds={"orphan_min_impressions": 30},
+    )
+    assert signal is None
+
+
+def test_the_homepage_is_never_under_linked():
+    """It is reached from every page on the site. The advice is unactionable,
+    and it was going out with "475 inbound links" printed beside it."""
+    from app.services.decision_impact import SiteBusinessContext
+    from app.services.lever_engine import PageDemand, _internal_linking_finding
+
+    home = "https://smamarketing.com/"
+    page = PageDemand(
+        normalized_url=home,
+        impressions=1266.0,
+        clicks=40.0,
+        ctr_percent=3.2,
+        average_position=9.0,
+    )
+    site = SiteBusinessContext(
+        period_lead_goal=24,
+        period_leads=14,
+        site_lead_rate_pct=2.0,
+        period_sessions=700.0,
+        p90_page_sessions=300.0,
+    )
+    assert (
+        _internal_linking_finding(
+            page,
+            _crawl(normalized_url=home, inbound_editorial_links=0, word_count=1200),
+            page_ctx=None,
+            site=site,
+        )
+        is None
+    )

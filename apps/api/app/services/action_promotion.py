@@ -130,11 +130,21 @@ def passes_actionable_impact_gate(
     finding: LeverFinding,
     thresholds: dict[str, float | int],
 ) -> tuple[bool, str | None]:
+    min_confidence = float(thresholds.get("minimum_recommendation_confidence", 60))
+
     if _critical_override_applied(finding):
+        # The override exists so a 5xx on a page that matters is not buried
+        # under a content idea. It was skipping the impact gate entirely,
+        # which promoted canonical findings worth 0.0 leads as High-priority
+        # recommendations — six of them at the top of one client's queue.
+        # A broken page with nothing behind it is still a page with nothing
+        # behind it, so the floor is lowered, not removed.
+        floor = float(thresholds.get("critical_override_min_impact", 10))
+        if finding.impact < floor:
+            return False, "impact_below_threshold"
         return True, None
 
     min_impact = float(thresholds.get("minimum_actionable_impact", 25))
-    min_confidence = float(thresholds.get("minimum_recommendation_confidence", 60))
 
     if finding.impact < min_impact:
         return False, "impact_below_threshold"

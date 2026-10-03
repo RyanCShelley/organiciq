@@ -170,7 +170,16 @@ export function formatEvidence(evidence: Record<string, unknown>): string {
     parts.push(`avg position ${evidence.average_position}`);
   }
   if (typeof evidence.inbound_internal_links === "number") {
-    parts.push(`${evidence.inbound_internal_links} inbound links (floor ${evidence.link_floor ?? "—"})`);
+    // The number the rule actually compared against the floor. Printing the
+    // total here put "475 inbound links (floor 6)" under the word
+    // "under-linked", which reads as nonsense — the floor is editorial links
+    // only, and navigation makes up most of the total.
+    const counted =
+      typeof evidence.inbound_links_counted === "number"
+        ? evidence.inbound_links_counted
+        : evidence.inbound_internal_links;
+    const basis = evidence.inbound_links_basis === "editorial" ? "editorial " : "";
+    parts.push(`${counted} ${basis}inbound links (floor ${evidence.link_floor ?? "—"})`);
   }
   if (typeof evidence.impressions === "number") {
     parts.push(`${evidence.impressions.toLocaleString()} impressions`);

@@ -1,3 +1,4 @@
+from app.decisions.thresholds import merge_thresholds
 from app.models.decision import GrowthAction
 from app.services.action_promotion import promote_findings
 from app.services.decision_types import LeverFinding
@@ -126,7 +127,52 @@ def test_advisory_audit_signal_stays_in_findings_not_shortlist():
     assert findings[0].promotion_blocked_reason == "advisory_audit_signal"
 
 
-def test_critical_override_promotes_with_high_band_without_score_floor():
+def test_a_critical_fault_on_a_page_worth_nothing_is_not_a_recommendation():
+    """The override was skipping the impact gate outright.
+
+    That put six canonical findings worth 0.0 leads at the top of one
+    client's queue as High-priority recommendations. A broken page with
+    nothing behind it is still a page with nothing behind it; the override
+    lowers the bar, it does not remove it.
+    """
+    from app.models.decision import DiagnosticLayer
+
+    finding = LeverFinding(
+        rule_key="technical:https://example.com/industries/legal",
+        lever=GrowthAction.TECHNICAL_SEO.value,
+        stage=DiagnosticLayer.VISIBILITY,
+        diagnosis="Canonical points somewhere unusable",
+        recommended_action="Point the canonical at this URL",
+        success_metric="Issue clears in the next audit",
+        evidence_json={
+            "impressions": 415,
+            "critical_override": True,
+            "critical_override_reason": "non_indexable_with_demand",
+        },
+        baseline_metrics_json={},
+        impact=0.2,
+        confidence=85,
+        urgency=90,
+        effort=45,
+        priority_score=0.4,
+    )
+    all_findings, recommended = promote_findings(
+        [finding],
+        classifications={},
+        page_contexts={},
+        thresholds=merge_thresholds(None),
+    )
+    assert recommended == []
+    assert all_findings[0].promotion_blocked_reason is not None
+
+
+def test_critical_override_promotes_with_high_band_despite_a_low_score():
+    """A real block on a page with demand still outranks its own score.
+
+    The impact here clears `critical_override_min_impact`; what the override
+    is doing is lifting a finding whose *priority score* would otherwise
+    bury it under content ideas.
+    """
     from app.models.decision import DiagnosticLayer
 
     url = "https://example.com/services/sem"
@@ -144,11 +190,11 @@ def test_critical_override_promotes_with_high_band_without_score_floor():
                 "critical_override_reason": "non_indexable_with_demand",
             },
             baseline_metrics_json={},
-            impact=4.6,
+            impact=14.0,
             confidence=85,
             urgency=90,
             effort=45,
-            priority_score=10.1,
+            priority_score=18.6,
             page_url=url,
         )
     ]
@@ -167,6 +213,6 @@ def test_critical_override_promotes_with_high_band_without_score_floor():
         },
     )
     assert len(actions) == 1
-    assert actions[0].priority_score == 10.1
+    assert actions[0].priority_score == 18.6
     assert actions[0].priority_band == "high"
     assert actions[0].priority_band_reason == "Critical technical override"

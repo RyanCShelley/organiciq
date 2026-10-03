@@ -115,22 +115,53 @@ def test_publish_keeps_the_served_page_when_both_variants_are_crawled(client_a):
     assert _pick_better_row(served, redirecting) is served
 
 
-def test_a_page_canonicalised_to_another_url_reports_as_such(client_a):
-    """
-    Real case from SMA: /blog/schema.org-vs-... is a 200 that permits indexing
-    and canonicalises to /blog/schema-org-vs-... (dot versus hyphen).
+def test_a_duplicate_pointing_at_its_original_is_not_a_finding(client_a):
+    """Correct canonicalization is the point, not a defect.
 
-    SE Ranking folds this into "not indexable". Keeping the two apart is more
-    useful — the page is not broken, it is a duplicate pointing at its original,
-    and "canonicalised elsewhere" is the finding someone can act on.
+    Real case from SMA: /blog/schema.org-vs-... is a 200 that canonicalizes
+    to /blog/schema-org-vs-... (dot versus hyphen). The site is doing
+    exactly the right thing. Reporting it — along with /services/ppc aimed
+    at /capabilities/ppc, and /industries/legal aimed at /industries — put
+    six High-priority "problems" at the top of a queue, every one of them
+    correct behaviour, and that is what made the engine untrustworthy.
     """
     url = "https://smamarketing.com/blog/schema.org-vs-google-structured-data-rich-results"
     canonical = "https://smamarketing.com/blog/schema-org-vs-google-structured-data-rich-results"
 
     row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
     row.normalized_url = url
+    target = _snapshot(client_a.id, raw_url=canonical, indexable=True, status=200)
+    target.normalized_url = canonical
 
-    signal = detect_technical_signal(url, row)
+    signal = detect_technical_signal(url, row, crawl_by_url={canonical: target})
+    # The fixture has no title, so some signal fires. The claim is only that
+    # pointing at a live page is not itself the problem.
+    assert signal is None or signal.audit_signal != "canonical_elsewhere"
 
+
+def test_a_canonical_pointing_at_a_dead_page_is_a_finding(client_a):
+    """The demand arrives somewhere that will never rank."""
+    url = "https://smamarketing.com/old-guide"
+    canonical = "https://smamarketing.com/new-guide"
+
+    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
+    row.normalized_url = url
+    target = _snapshot(client_a.id, raw_url=canonical, indexable=False, status=404)
+    target.normalized_url = canonical
+
+    signal = detect_technical_signal(url, row, crawl_by_url={canonical: target})
+    assert signal is not None
+    assert signal.audit_signal == "canonical_elsewhere"
+
+
+def test_a_canonical_pointing_off_site_is_a_finding(client_a):
+    """Handing your demand to another domain is rarely intended."""
+    url = "https://smamarketing.com/guide"
+    canonical = "https://someone-else.com/guide"
+
+    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
+    row.normalized_url = url
+
+    signal = detect_technical_signal(url, row, crawl_by_url={})
     assert signal is not None
     assert signal.audit_signal == "canonical_elsewhere"

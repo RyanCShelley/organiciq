@@ -93,6 +93,10 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,
+    # A critical technical fault clears a lower bar than ordinary work, but
+    # not a bar of zero: a broken page with no demand behind it is still a
+    # page with no demand behind it.
+    "critical_override_min_impact": 5,
     # Lowered from 60 once C1 made confidence a measured number rather than a
     # per-lever constant. Against constants that started at 70 the old gate had
     # never rejected anything; against the measured score the distribution runs

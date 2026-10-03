@@ -781,6 +781,40 @@ class DetectedTechnicalSignal:
     diagnosis: str
 
 
+def _canonical_is_wrong(
+    canonical: str | None,
+    page_norm: str | None,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None,
+) -> bool:
+    """Whether a page canonicalizing elsewhere is a defect or the point.
+
+    It was treated as a defect every time, which is backwards. Pointing a
+    duplicate or a retired URL at the page that should rank is how
+    canonicalization is supposed to work: smamarketing.com serves its old
+    `/services/ppc` and `/industries/legal` URLs with canonicals aimed at
+    `/capabilities/ppc` and `/industries`, which is correct, deliberate, and
+    was being reported as six High-priority problems.
+
+    It is a defect only when the target cannot do the job: off-site, missing
+    from the crawl, erroring, or itself non-indexable. Then the demand
+    arrives somewhere that will never rank, and nobody is getting it.
+    """
+    if not canonical or not page_norm:
+        return False
+    if urlsplit(canonical).hostname != urlsplit(page_norm).hostname:
+        return True  # Off-site: the demand is being handed to someone else.
+    if not crawl_by_url:
+        # Without the target's row there is no evidence either way, and
+        # guessing produced the false positives this exists to stop.
+        return False
+    target = crawl_by_url.get(canonical)
+    if target is None:
+        return True
+    if target.status_code is not None and target.status_code >= 400:
+        return True
+    return not target.indexable
+
+
 def detect_technical_signal(
     page_url: str,
     crawl: FactCrawlPageSnapshot,
@@ -860,11 +894,11 @@ def detect_technical_signal(
             issue_code=None,
             diagnosis=f"Non-indexable page with demand: {page_url}",
         )
-    if canonicalized_elsewhere:
+    if canonicalized_elsewhere and _canonical_is_wrong(canonical, page_norm, crawl_by_url):
         return DetectedTechnicalSignal(
             audit_signal="canonical_elsewhere",
             issue_code=None,
-            diagnosis=f"Canonicalized elsewhere: {page_url}",
+            diagnosis=f"Canonical points somewhere unusable: {page_url}",
         )
     # A page nothing links to cannot be reached by a crawler following links
     # or by a visitor browsing the site, however well it ranks. Demand is the
@@ -1369,6 +1403,11 @@ def _internal_linking_finding(
 ) -> LeverFinding | None:
     if page.average_position < 4 or page.average_position > 20:
         return None
+    # The homepage is reached from every page on the site by definition.
+    # Telling someone to add internal links to it is advice nobody can act
+    # on, and it was going out with "475 inbound links" printed beside it.
+    if (urlsplit(page.normalized_url).path or "/").rstrip("/") == "":
+        return None
     floor = _link_floor(crawl.word_count, classification, thresholds)
     # Editorial links only. Counting navigation put every page that sits in a
     # menu above the floor regardless of whether anything references it — on
@@ -1433,6 +1472,13 @@ def _internal_linking_finding(
             ],
             "inbound_internal_links": crawl.inbound_internal_links,
             "inbound_editorial_links": crawl.inbound_editorial_links,
+            # The number the floor was actually compared against. Showing the
+            # total beside an editorial floor read as a contradiction — "475
+            # inbound links (floor 6)" on a page called under-linked.
+            "inbound_links_counted": inbound,
+            "inbound_links_basis": (
+                "editorial" if crawl.source == CRAWL_SOURCE_FIRST_PARTY else "all internal"
+            ),
             "inlink_source": "se_ranking_audit",
             "link_floor": floor,
             "word_count": crawl.word_count,
