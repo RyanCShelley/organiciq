@@ -89,6 +89,9 @@ class CrawledPage:
     #: Inbound links that are neither navigation nor site-wide. This is the
     #: number that says whether anyone actually references the page.
     inbound_editorial_links: int = 0
+    #: Scripts and stylesheets this page loads that robots.txt disallows.
+    #: Google renders without them and sees a different page than a visitor.
+    blocked_resources: int = 0
 
     @property
     def indexable(self) -> bool:
@@ -398,6 +401,32 @@ async def crawl_site(
     return result
 
 
+def _blocked_resource_count(
+    parsed: ParsedPage | None, robots: robotparser.RobotFileParser | None
+) -> int:
+    """Scripts and stylesheets this page loads that robots.txt forbids.
+
+    Rendering is what Google indexes now, so a disallowed stylesheet or
+    bundle means it renders the page without them and judges what is left.
+    Nothing in the page's own status code says this is happening.
+
+    Only resources on hosts this robots.txt governs are counted — a CDN has
+    its own rules and we have not read them, and guessing would turn every
+    site using one into a finding.
+    """
+    if parsed is None or robots is None:
+        return 0
+    root = urlsplit(getattr(robots, "url", "") or "")
+    blocked = 0
+    for resource in parsed.resource_urls:
+        parts = urlsplit(resource)
+        if parts.netloc and root.netloc and parts.netloc != root.netloc:
+            continue
+        if not robots.can_fetch(USER_AGENT, resource):
+            blocked += 1
+    return blocked
+
+
 async def _fetch_page(
     client: httpx.AsyncClient,
     url: str,
@@ -499,4 +528,5 @@ async def _fetch_page(
         fetch_error=None,
         parsed=parsed,
         is_page=is_page,
+        blocked_resources=_blocked_resource_count(parsed, robots),
     )

@@ -54,6 +54,9 @@ def _crawl(**kwargs) -> FactCrawlPageSnapshot:
         blocked_by_robots=False,
         redirect_url=None,
         redirect_count=0,
+        soft_404=False,
+        blocked_resources=0,
+        conversion_elements=5,
     )
     defaults.update(kwargs)
     return FactCrawlPageSnapshot(**defaults)

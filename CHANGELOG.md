@@ -1,3 +1,39 @@
+## Three rules that were written off too early, 2 Oct 2026
+
+Soft 404s, render-critical resources blocked by robots.txt, and the no-CTA
+check were all filed as "no data source" because SE Ranking's Website Audit
+has no check for any of them. SE Ranking is not the only crawler here. The
+first-party crawler fetches the DOM with lxml and already loads and parses
+`robots.txt`, which is everything these three needed. The gap was in how far
+I looked, not in the data.
+
+- **Soft 404s.** A page returning 200 whose title or H1 says it is missing.
+  Google drops these exactly as it drops a real 404. The pattern is narrow
+  on purpose: "not found" inside a sentence is ordinary prose, so it only
+  matches a title or H1 that is *about* being missing.
+- **Render-critical resources.** Scripts and stylesheets a page loads that
+  `robots.txt` disallows. Google renders without them and ranks what is
+  left. Only resources on the host that `robots.txt` governs are counted — a
+  CDN has its own rules we have not read, and guessing would turn every site
+  using one into a finding.
+- **Nothing to convert through** (N4's first CRO check). No form, phone or
+  email link, or call-to-action button, on a page taking at least
+  `cta_min_sessions` (30) sessions. Files under Conversion Path, not
+  Technical SEO: it is not a defect, it is the conversion path missing from
+  a page people already reach.
+
+Migration `0038` adds `soft_404`, `blocked_resources` and
+`conversion_elements` to the crawl snapshot. `conversion_elements` is
+nullable with no default — a crawl that ran before this check counted
+nothing, and recording that as zero would report every page crawled so far
+as having no way to convert.
+
+Still open, and genuinely needing a decision rather than more looking: N1's
+competitor citations (SE Visible has the data — 6,207 cited sources for SMA,
+tagged you/competitors/editorial — but it needs a new ingestion pipeline),
+N3 intent mismatch, GA4's device dimension, mobile LCP, and S2's lead-value
+field.
+
 ## Decision engine review — Phases 3–5, 2 Oct 2026
 
 No migration. `decision_thresholds.thresholds` is JSONB merged with the

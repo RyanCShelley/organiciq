@@ -61,6 +61,24 @@ def is_page_url(url: str) -> bool:
 
 _WORD = re.compile(r"[\w'’-]+", re.UNICODE)
 _NOINDEX = re.compile(r"\bnone\b|\bnoindex\b", re.IGNORECASE)
+#: What a page says when it is an error dressed as a success. Deliberately
+#: narrow: "not found" inside a sentence is ordinary prose, so this only
+#: matches a title or H1 that is *about* being missing.
+_NOT_FOUND = re.compile(
+    r"^\s*(404|error\s*404)\b"
+    r"|\b(page|file|content)\s+not\s+found\b"
+    r"|^\s*not\s+found\s*$"
+    r"|\bdoes\s*n[o']?t\s+exist\b"
+    r"|\bno\s+longer\s+(available|exists)\b",
+    re.IGNORECASE,
+)
+#: Button and link text that asks for the next step.
+_CTA_TEXT = re.compile(
+    r"\b(contact|call|book|schedule|request|get\s+(a\s+)?(quote|started|in\s+touch))"
+    r"|\b(free\s+(quote|consultation|trial|demo|audit))"
+    r"|\b(sign\s*up|subscribe|apply|enquire|inquire|buy|order|add\s+to\s+cart)\b",
+    re.IGNORECASE,
+)
 _NOFOLLOW = re.compile(r"\bnone\b|\bnofollow\b", re.IGNORECASE)
 
 
@@ -106,6 +124,15 @@ class ParsedPage:
     meta_nofollow: bool
     internal_links: list[PageLink] = field(default_factory=list)
     schema_blocks: list[SchemaBlock] = field(default_factory=list)
+    #: Scripts and stylesheets the page loads, absolute. Rendering depends on
+    #: these, so one of them being disallowed in robots.txt means Google sees
+    #: a different page than a visitor does.
+    resource_urls: list[str] = field(default_factory=list)
+    #: Anything a visitor could convert through: a form, a phone number, an
+    #: email link, or a button that asks for the next step.
+    conversion_elements: int = 0
+    #: The page says it is a 404 while returning 200.
+    says_not_found: bool = False
 
 
 def _same_site(host: str, other: str) -> bool:
@@ -302,6 +329,29 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
             elif not existing.anchor:
                 existing.anchor = anchor
 
+    # Resources and conversion elements, both read before the strip below
+    # removes <script> and the navigation that usually holds the phone number.
+    resources: list[str] = []
+    for node in doc.xpath("//script[@src]"):
+        src = (node.get("src") or "").strip()
+        if src:
+            resources.append(urljoin(url, src))
+    for node in doc.xpath('//link[contains(translate(@rel,"STYLESHEE","styleshee"),"stylesheet")]'):
+        href = (node.get("href") or "").strip()
+        if href:
+            resources.append(urljoin(url, href))
+
+    conversion_elements = len(doc.xpath("//form"))
+    conversion_elements += len(
+        doc.xpath('//a[starts-with(@href,"tel:") or starts-with(@href,"mailto:")]')
+    )
+    for node in doc.xpath("//a | //button | //input[@type='submit']"):
+        text = " ".join(
+            (node.get("value") or node.text_content() or "").split()
+        )
+        if text and _CTA_TEXT.search(text):
+            conversion_elements += 1
+
     # Destructive, so it runs last: removing these elements is what previously
     # ate the JSON-LD blocks, and then the navigation links.
     for tag in _NON_CONTENT_TAGS:
@@ -323,4 +373,7 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         meta_nofollow=bool(robots and _NOFOLLOW.search(robots)),
         internal_links=list(internal.values()),
         schema_blocks=schema_blocks,
+        resource_urls=sorted(set(resources)),
+        conversion_elements=conversion_elements,
+        says_not_found=bool(_NOT_FOUND.search(title) or _NOT_FOUND.search(h1)),
     )

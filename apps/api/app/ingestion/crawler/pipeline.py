@@ -89,6 +89,16 @@ def _snapshot_rows(
                 "blocked_by_robots": page.blocked_by_robots,
                 "redirect_url": page.redirect_url,
                 "redirect_count": page.redirect_count,
+                # A 200 that says 404. Only meaningful on a page that actually
+                # returned a success — on a real 404 it is just the error text.
+                "soft_404": bool(
+                    parsed
+                    and parsed.says_not_found
+                    and page.status_code is not None
+                    and 200 <= page.status_code < 300
+                ),
+                "blocked_resources": page.blocked_resources,
+                "conversion_elements": parsed.conversion_elements if parsed else None,
             }
         )
     return rows

@@ -83,6 +83,16 @@ class FactCrawlPageSnapshot(Base):
     blocked_by_robots: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     redirect_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     redirect_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: The page says it is a 404 while returning 200. Google treats these as
+    #: errors and drops them; the status code alone never shows it.
+    soft_404: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Scripts and stylesheets this page loads that robots.txt disallows. A
+    #: page whose CSS or JS cannot be fetched renders differently for Google
+    #: than for a visitor, which is a ranking problem no status code reveals.
+    blocked_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Forms, phone and email links, and buttons asking for the next step.
+    #: Null where the crawl predates the check — distinct from a counted zero.
+    conversion_elements: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

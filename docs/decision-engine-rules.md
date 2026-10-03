@@ -143,6 +143,23 @@ Floored at **`ai_sov_min_presence_pct`** (5%): a 20% relative fall from a 2%
 share is one prompt changing its mind. Flag:
 `rule_ai_sov_falling_enabled`.
 
+### Soft 404s
+A page returning 200 whose title or H1 says it is missing. Google drops
+these exactly as it drops a real 404, and nothing in the status code shows
+it. Detected by the first-party crawler; SE Ranking's audit has no such
+check.
+
+### Render-critical resources
+Scripts and stylesheets a page loads that `robots.txt` disallows. Google
+renders the page without them and ranks what is left, which is not the page
+a visitor sees. Only resources on the host that `robots.txt` governs are
+counted — a CDN has its own rules and we have not read them.
+
+### Nothing to convert through
+No form, phone link, email link or call-to-action button on a page taking at
+least **`cta_min_sessions`** (30) sessions. A null count means the crawl
+predates the check, which is not the same as counting zero.
+
 ### Technical
 Titles are **not** here — a missing or duplicate title is SERP & CTR work
 that can be promoted, because the title earns the click. Meta descriptions

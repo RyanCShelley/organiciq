@@ -573,6 +573,11 @@ INDEXATION_BLOCKING_SIGNALS = frozenset(
         # It is blocking in the same sense a noindex is: the page exists and
         # cannot be arrived at. Phase 3.
         "orphan_page",
+        # A 200 that says 404 is dropped by Google exactly as a real 404 is,
+        # and a page whose stylesheet robots.txt forbids is rendered without
+        # it. Both are blocking, and neither shows in a status code.
+        "soft_404",
+        "blocked_resources",
     }
 )
 
@@ -587,6 +592,9 @@ INDEXATION_BLOCKING_SIGNALS = frozenset(
 SIGNAL_LEVERS: dict[str, str] = {
     "title_missing": GrowthAction.SERP_CTR.value,
     "title_duplicate": GrowthAction.SERP_CTR.value,
+    # Nothing to convert through is not a technical defect; it is the whole
+    # conversion path missing from a page people are already reaching.
+    "no_conversion_element": GrowthAction.CONVERSION_PATH.value,
 }
 
 
@@ -636,6 +644,20 @@ TECHNICAL_ACTIONS: dict[str, str] = {
     "canonical_elsewhere": (
         "Point the canonical at this URL, or confirm the target is the page you want "
         "ranking. Right now this page tells Google to ignore it, and it has demand."
+    ),
+    "soft_404": (
+        "Return a real 404 for this URL, or restore the page. It currently "
+        "answers 200 with an error, so Google keeps it in the index and keeps "
+        "sending people to nothing."
+    ),
+    "blocked_resources": (
+        "Allow these files in robots.txt. Google renders the page without them "
+        "and ranks what is left, which is not the page a visitor sees."
+    ),
+    "no_conversion_element": (
+        "Add a way to convert — a form, a phone number, or a link to the one "
+        "that matters. People are reaching this page and it asks them for "
+        "nothing."
     ),
     "orphan_page": (
         "Link to this page from the section it belongs to. It is earning impressions "
@@ -768,6 +790,7 @@ def detect_technical_signal(
     schema_by_url: dict[str, PageSchema] | None = None,
     schema_crawled_urls: frozenset[str] | None = None,
     impressions: float = 0.0,
+    sessions: float = 0.0,
     thresholds: dict[str, Any] | None = None,
 ) -> DetectedTechnicalSignal | None:
     """
@@ -795,6 +818,25 @@ def detect_technical_signal(
             audit_signal="status_error",
             issue_code=None,
             diagnosis=f"HTTP {status} on page with demand: {page_url}",
+        )
+    # A 200 that says 404. Google drops these exactly as it drops a real
+    # error, and nothing in the status code shows it.
+    if getattr(crawl, "soft_404", False):
+        return DetectedTechnicalSignal(
+            audit_signal="soft_404",
+            issue_code=None,
+            diagnosis=f"Page says it is missing but returns HTTP {status}: {page_url}",
+        )
+    if getattr(crawl, "blocked_resources", 0):
+        count = crawl.blocked_resources
+        return DetectedTechnicalSignal(
+            audit_signal="blocked_resources",
+            issue_code=None,
+            diagnosis=(
+                f"{count} script{'' if count == 1 else 's'} or stylesheet"
+                f"{'' if count == 1 else 's'} this page needs "
+                f"{'is' if count == 1 else 'are'} disallowed in robots.txt: {page_url}"
+            ),
         )
     if "redirect45xx" in codes or (is_redirect and redirect_target_bad):
         return DetectedTechnicalSignal(
@@ -868,6 +910,24 @@ def detect_technical_signal(
             diagnosis=f"Duplicate meta description on page with demand: {page_url}",
         )
 
+    # Nothing on the page to convert through, on a page people reach. Last,
+    # because every check above is about the page not working at all, and
+    # null means the crawl predates the check rather than "counted none".
+    cta_min = float((thresholds or {}).get("cta_min_sessions", 0) or 0)
+    if (
+        cta_min > 0
+        and getattr(crawl, "conversion_elements", None) == 0
+        and sessions >= cta_min
+    ):
+        return DetectedTechnicalSignal(
+            audit_signal="no_conversion_element",
+            issue_code=None,
+            diagnosis=(
+                f"No form, phone number or call to action on a page taking "
+                f"{int(sessions):,} sessions: {page_url}"
+            ),
+        )
+
     # Only pages the first-party crawl actually reached can be said to lack
     # schema. Without that evidence, "no structured data" would really mean
     # "not crawled", which is a different statement and a false one.
@@ -926,6 +986,7 @@ def _technical_finding(
         schema_by_url=schema_by_url,
         schema_crawled_urls=schema_crawled_urls,
         impressions=page.impressions,
+        sessions=page_ctx.ga4_sessions if page_ctx else 0.0,
         thresholds=thresholds,
     )
     if detected is None:

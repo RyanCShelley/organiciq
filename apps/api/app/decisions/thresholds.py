@@ -50,6 +50,9 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     # An orphan page needs demand to be worth reporting: most pages nothing
     # links to are drafts and thank-you pages.
     "orphan_min_impressions": 30,
+    # A page needs this much traffic before "nothing to convert through" is
+    # worth saying. From the review's own ">= 30 sessions" for CRO checks.
+    "cta_min_sessions": 30,
     # Gate 0 anomalies. Neither suppresses anything.
     "partial_break_days": 14,
     "partial_break_min_expected_leads": 3,
