@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections import Counter
 import textwrap
 from datetime import date, timedelta
 
@@ -58,13 +59,23 @@ def main() -> int:
                 if row.evidence_json.get("cause"):
                     row.evidence_json.setdefault("_client", client.client_name)
                     rows.append(row)
+        # Counted before the filter, or "0 carrying a prescription" means
+        # "none of this one cause" and reads as everything being broken.
+        prescribed = len(rows)
+        causes = Counter(row.evidence_json["cause"] for row in rows)
         if args.cause:
             rows = [row for row in rows if row.evidence_json["cause"] == args.cause]
         rows.sort(key=lambda row: -row.priority_score)
 
         logger.info("%s — %s to %s", 
                     clients[0].client_name if args.client else f"{len(clients)} clients", start, end)
-        logger.info("%d findings, %d carrying a prescription\n", total, len(rows))
+        logger.info("%d findings, %d carrying a prescription", total, prescribed)
+        logger.info(
+            "  %s\n",
+            "  ".join(f"{name} {count}" for name, count in causes.most_common()),
+        )
+        if args.cause:
+            logger.info("Showing cause=%s (%d)\n", args.cause, len(rows))
 
         for row in rows[: args.limit]:
             evidence = row.evidence_json
