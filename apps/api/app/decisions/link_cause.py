@@ -49,7 +49,7 @@ def classify_link_gap(signals: LinkSignals) -> Prescription:
         # No page shares a subject and has anything to lend. Saying "add
         # internal links" anyway would be the old finding again.
         return Prescription(
-            cause="undetermined",
+            cause="under_linked_no_donor",
             evidence=evidence,
             steps=[
                 Step(
@@ -95,7 +95,7 @@ def classify_link_gap(signals: LinkSignals) -> Prescription:
     )
 
     return Prescription(
-        cause="undetermined",
+        cause="under_linked_donors_found",
         evidence={
             **evidence,
             "donors": [

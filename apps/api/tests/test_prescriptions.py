@@ -434,3 +434,10 @@ def test_with_no_donor_it_says_so_rather_than_repeating_itself():
 def test_placing_the_link_is_the_part_we_cannot_do():
     human = [s for s in _link().steps if s.human]
     assert any("body text is not stored" in (s.detail or "") for s in human)
+
+
+def test_internal_linking_names_which_situation_it_is_in():
+    """It knows whether a donor exists; reporting "undetermined" for both
+    threw that away."""
+    assert _link().cause == "under_linked_donors_found"
+    assert _link(donors=[]).cause == "under_linked_no_donor"
