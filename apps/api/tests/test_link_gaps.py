@@ -238,7 +238,9 @@ def test_without_a_candidate_the_finding_still_stands(db, client_a):
 
     assert finding is not None
     assert finding.evidence_json["link_from"] is None
-    assert "mapped authoritative pages" in finding.recommended_action
+    # The old action named no page and no anchor. With no donor the card
+    # now says so, and asks for the one decision our data cannot make.
+    assert "no page on the site both shares a search query" in finding.recommended_action
 
 
 # --- T4: floors by purpose, donors by authority -----------------------------

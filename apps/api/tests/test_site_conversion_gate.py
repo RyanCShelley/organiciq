@@ -135,7 +135,10 @@ def test_behind_the_plan_is_a_finding_even_when_nothing_is_falling(db, client_a)
     assert finding is not None
     assert finding.evidence_json["triggers"] == ["behind_plan"]
     assert "20 leads against a goal of 50" in finding.diagnosis
-    assert "30-lead gap" in finding.recommended_action
+    # The gap is the expected result; the action names where to go and get it.
+    assert finding.evidence_json["expected_impact"] == "the 30-lead gap to plan"
+    assert finding.evidence_json["cause"] == "behind_plan"
+    assert "Work the conversion path on" in finding.recommended_action
 
 
 def test_a_healthy_site_produces_nothing(db, client_a):

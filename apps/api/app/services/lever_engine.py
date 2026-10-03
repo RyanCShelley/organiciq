@@ -16,6 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
+from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
+from app.decisions.link_cause import Donor, LinkSignals, classify_link_gap
+from app.decisions.site_conversion_cause import (
+    SiteConversionSignals,
+    classify_site_conversion,
+)
 from app.decisions.keyword_cause import (
     MIN_IMPRESSIONS_FOR_PAGE_MATCH as KEYWORD_PAGE_MATCH_MIN_IMPRESSIONS,
     KeywordSignals,
@@ -1575,7 +1581,26 @@ def _internal_linking_finding(
         lever=GrowthAction.INTERNAL_LINKING.value,
         rule_key=_rule_key("internal_linking", page.normalized_url),
         diagnosis=diagnosis,
-        action_override=action,
+        prescription=classify_link_gap(
+            LinkSignals(
+                page_url=page.normalized_url,
+                position=page.average_position,
+                inbound_links=inbound,
+                floor=int(floor),
+                donors=[
+                    Donor(
+                        url=gap.source_url,
+                        anchor=gap.shared_query,
+                        clicks=gap.source_clicks,
+                        refdomains=gap.source_refdomains,
+                    )
+                    for gap in donors
+                ],
+                recoverable_clicks=float(
+                    impact_evidence.get("recoverable_clicks") or 0.0
+                ),
+            )
+        ),
         evidence_json={
             "position": round(page.average_position, 1),
             "link_from": donors[0].source_url if donors else None,
@@ -1661,6 +1686,10 @@ def _serp_ctr_finding(
     page: PageDemand,
     *,
     page_ctx: PageBusinessContext | None,
+    top_query: str | None = None,
+    crawl: FactCrawlPageSnapshot | None = None,
+    brand: str | None = None,
+    ai_overview: bool = False,
     site: SiteBusinessContext,
     lead_rate_ctx: LeadRateContext | None = None,
     classification: PageClassification | None = None,
@@ -1709,6 +1738,23 @@ def _serp_ctr_finding(
         lever=GrowthAction.SERP_CTR.value,
         rule_key=_rule_key("serp_ctr", page.normalized_url),
         diagnosis=diagnosis,
+        prescription=classify_ctr_gap(
+            CtrSignals(
+                page_url=page.normalized_url,
+                top_query=top_query or "",
+                impressions=page.impressions,
+                clicks=page.clicks,
+                ctr_percent=page.ctr_percent,
+                expected_ctr_percent=expected,
+                recoverable_clicks=recoverable,
+                title=crawl.title if crawl else None,
+                description=crawl.description if crawl else None,
+                brand=brand,
+                ai_overview=ai_overview,
+            )
+        )
+        if top_query
+        else None,
         evidence_json={
             "impressions": int(page.impressions),
             "clicks": int(page.clicks),
@@ -1725,6 +1771,57 @@ def _serp_ctr_finding(
         },
         impact=impact,
         page_url=page.normalized_url,
+    )
+
+
+def _top_query_per_page(
+    db: Session, client_id: UUID, *, period: tuple[date, date] | None
+) -> dict[str, str]:
+    """The query each page draws most of its impressions from.
+
+    A title rewrite has to lead with something, and the page's own biggest
+    query is the only honest candidate — guessing from the URL slug would
+    put the wrong phrase in front of a real edit.
+    """
+    if period is None:
+        return {}
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.normalized_url,
+            FactGscQueryPage.query,
+            func.sum(FactGscQueryPage.impressions).label("impressions"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.normalized_url, FactGscQueryPage.query)
+        .all()
+    )
+    best: dict[str, tuple[float, str]] = {}
+    for url, query, impressions in rows:
+        if not url or not query:
+            continue
+        total = float(impressions or 0)
+        current = best.get(url)
+        if current is None or total > current[0]:
+            best[url] = (total, query)
+    return {url: query for url, (_, query) in best.items()}
+
+
+def _ai_overview_queries(db: Session, client_id: UUID) -> frozenset[str]:
+    """Queries whose SERP carries an AI Overview, lowercased."""
+    rows = (
+        db.query(FactSerDomainKeyword.keyword, FactSerDomainKeyword.serp_features)
+        .filter(FactSerDomainKeyword.client_id == client_id)
+        .all()
+    )
+    return frozenset(
+        (keyword or "").strip().lower()
+        for keyword, features in rows
+        if keyword and has_ai_overview(features)
     )
 
 
@@ -1747,12 +1844,16 @@ def _per_page_cascade(
     thresholds: dict[str, float | int] | None = None,
     page_ctr_curve: dict[int, float] | None = None,
     branded_shares: dict[str, float] | None = None,
+    top_queries: dict[str, str] | None = None,
+    ai_overview_queries: frozenset[str] = frozenset(),
+    client_brand: str | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
     gaps = link_gaps or {}
     ctr_curve = page_ctr_curve or {}
     branded = branded_shares or {}
+    top_queries = top_queries or {}
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -1801,6 +1902,13 @@ def _per_page_cascade(
                 classification=classification,
                 ctr_curve=ctr_curve,
                 branded_share=branded.get(page.normalized_url, 0.0),
+                top_query=top_queries.get(page.normalized_url),
+                crawl=crawl,
+                brand=client_brand,
+                ai_overview=bool(
+                    ai_overview_queries
+                    and top_queries.get(page.normalized_url) in ai_overview_queries
+                ),
             )
         if finding is None and crawl_ready and crawl is not None:
             # Last resort: nothing else to say about this page, so report the
@@ -4279,6 +4387,123 @@ CONVERSION_PLAN_SHORTFALL_RATIO = 0.8
 CONVERSION_BASELINE_RATIO = 0.9
 
 
+#: A page needs this much traffic before its rate is worth naming as the
+#: place to start.
+SITE_CONVERSION_MIN_PAGE_SESSIONS = 50.0
+
+
+def _site_conversion_signals(
+    db: Session,
+    client: Client,
+    *,
+    from_date: date,
+    to_date: date,
+    site_goal: float | None = None,
+) -> SiteConversionSignals:
+    """Where the lost leads sit, by page and by channel.
+
+    Device and new-versus-returning are in the playbook and not in our GA4
+    query, so the prescription asks for them by hand rather than pretending
+    the segments were checked.
+    """
+    lead_events = _lead_event_names(db, client.id)
+    span = (to_date - from_date).days + 1
+    prev_end = from_date - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=span - 1)
+
+    now = _leads_by_page(db, client.id, lead_events, from_date, to_date)
+    before = _leads_by_page(db, client.id, lead_events, prev_start, prev_end)
+    loss_by_group = sorted(
+        (
+            (url, before.get(url, 0.0) - now.get(url, 0.0))
+            for url in set(before) | set(now)
+        ),
+        key=lambda row: -row[1],
+    )
+
+    def _by_channel(start: date, end: date) -> dict[str, float]:
+        if not lead_events:
+            return {}
+        rows = (
+            db.query(
+                FactGa4Event.channel,
+                func.coalesce(func.sum(FactGa4Event.event_count), 0),
+            )
+            .filter(
+                FactGa4Event.client_id == client.id,
+                FactGa4Event.date >= start,
+                FactGa4Event.date <= end,
+                FactGa4Event.event_name.in_(lead_events),
+            )
+            .group_by(FactGa4Event.channel)
+            .all()
+        )
+        return {
+            (channel.value if hasattr(channel, "value") else str(channel)): float(total)
+            for channel, total in rows
+        }
+
+    channel_now, channel_before = (
+        _by_channel(from_date, to_date),
+        _by_channel(prev_start, prev_end),
+    )
+    loss_by_channel = sorted(
+        (
+            (name, channel_before.get(name, 0.0) - channel_now.get(name, 0.0))
+            for name in set(channel_before) | set(channel_now)
+        ),
+        key=lambda row: -row[1],
+    )
+
+    def _total(start: date, end: date) -> float | None:
+        if not lead_events:
+            return None
+        value = (
+            db.query(func.coalesce(func.sum(FactGa4Event.event_count), 0))
+            .filter(
+                FactGa4Event.client_id == client.id,
+                FactGa4Event.date >= start,
+                FactGa4Event.date <= end,
+                FactGa4Event.event_name.in_(lead_events),
+            )
+            .scalar()
+        )
+        return float(value or 0)
+
+    year = timedelta(days=365)
+    earliest = (
+        db.query(func.min(FactGa4Event.date))
+        .filter(FactGa4Event.client_id == client.id)
+        .scalar()
+    )
+    has_two_years = earliest is not None and earliest <= from_date - year - timedelta(days=span)
+
+    # Where a site short of plan buys the gap back cheapest: the pages with
+    # the traffic and the worst rate.
+    sessions_now = _sessions_by_page(db, client.id, from_date, to_date)
+    weakest = sorted(
+        (
+            (url, sessions, (now.get(url, 0.0) / sessions * 100.0))
+            for url, sessions in sessions_now.items()
+            if sessions >= SITE_CONVERSION_MIN_PAGE_SESSIONS
+        ),
+        key=lambda row: (row[2], -row[1]),
+    )
+
+    return SiteConversionSignals(
+        weakest_pages=weakest[:5],
+        period_goal=float(site_goal) if site_goal else None,
+        leads_now=sum(now.values()),
+        leads_before=sum(before.values()),
+        loss_by_group=[row for row in loss_by_group if row[1] > 0],
+        loss_by_channel=[row for row in loss_by_channel if row[1] > 0],
+        leads_year_ago=_total(from_date - year, to_date - year) if has_two_years else None,
+        leads_year_before_that=(
+            _total(prev_start - year, prev_end - year) if has_two_years else None
+        ),
+    )
+
+
 def _conversion_portfolio(
     db: Session,
     client: Client,
@@ -4413,7 +4638,15 @@ def _conversion_portfolio(
         lever=GrowthAction.CONVERSION_PATH.value,
         rule_key=_rule_key("conversion_path", str(client.id), from_date.isoformat(), to_date.isoformat()),
         diagnosis=diagnosis,
-        action_override=action,
+        prescription=classify_site_conversion(
+            _site_conversion_signals(
+                db,
+                client,
+                from_date=from_date,
+                to_date=to_date,
+                site_goal=site.period_lead_goal,
+            )
+        ),
         evidence_json={
             "gate": "site_conversion",
             "lead_rate_change_pct": round(lead_rate_change_pct, 1),
@@ -4676,6 +4909,9 @@ def diagnose(
             thresholds=thresholds,
             page_ctr_curve=build_client_ctr_curve(db, client.id, gsc_period)[0],
             branded_shares=_branded_impression_share(db, client, period=gsc_period),
+            top_queries=_top_query_per_page(db, client.id, period=gsc_period),
+            ai_overview_queries=_ai_overview_queries(db, client.id),
+            client_brand=client.client_name,
         )
     )
     for site_finding in _site_technical_findings(

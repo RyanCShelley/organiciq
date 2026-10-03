@@ -38,6 +38,7 @@ CAUSES: dict[str, str] = {
     # Site conversion (playbook 3)
     "drop_concentrated": "Most of the lost leads are on one page group",
     "drop_sitewide": "The drop is even across segments, so something global changed",
+    "behind_plan": "Nothing fell; the site has never converted at the level the plan needs",
     "seasonal": "The same dip happened a year ago",
     "spam_filtered": "Lead count fell while qualified leads held",
     # Decay routing (playbook 5)

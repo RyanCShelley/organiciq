@@ -288,3 +288,149 @@ def test_the_card_never_claims_nothing_exists_beside_an_impression_count():
     detail = p.steps[0].detail
     assert "3 impressions" in detail
     assert "too few to call it the page" in detail
+
+
+# ── Lever 3: where a site-wide drop actually sits ──
+
+
+def _site(**kwargs):
+    from app.decisions.site_conversion_cause import (
+        SiteConversionSignals,
+        classify_site_conversion,
+    )
+
+    base = dict(leads_now=10.0, leads_before=30.0)
+    base.update(kwargs)
+    return classify_site_conversion(SiteConversionSignals(**base))
+
+
+def test_a_drop_sitting_in_one_page_group_is_handed_to_that_page():
+    p = _site(loss_by_group=[("https://x/services", 15.0), ("https://x/blog", 5.0)])
+    assert p.cause == "drop_concentrated"
+    assert p.routed_to == "converting_page_dropped"
+    assert "rather than the site" in p.steps[0].text
+
+
+def test_a_drop_spread_evenly_looks_for_what_changed_globally():
+    p = _site(loss_by_group=[("https://x/a", 7.0), ("https://x/b", 7.0), ("https://x/c", 6.0)])
+    assert p.cause == "drop_sitewide"
+    assert "consent banner" in p.steps[0].detail
+
+
+def test_the_same_fall_as_last_year_is_the_calendar():
+    """Every other cause is a reason to change something. This one is a
+    reason not to, so it is checked first."""
+    p = _site(leads_year_ago=10.0, leads_year_before_that=30.0)
+    assert p.cause == "seasonal"
+    assert "hold the plan" in p.steps[0].text
+
+
+def test_a_site_short_of_plan_that_did_not_fall_is_sent_somewhere_specific():
+    """Telling someone to find what changed, when nothing did, sends them
+    looking for nothing."""
+    p = _site(
+        leads_now=20.0,
+        leads_before=20.0,
+        period_goal=50.0,
+        weakest_pages=[("https://x/pricing", 900.0, 0.2)],
+    )
+    assert p.cause == "behind_plan"
+    assert p.steps[0].target == "https://x/pricing"
+    assert "900 sessions a period converting at 0.20%" in p.steps[0].detail
+
+
+def test_the_segments_we_cannot_read_are_named_not_skipped():
+    p = _site(loss_by_group=[("https://x/a", 7.0), ("https://x/b", 7.0), ("https://x/c", 6.0)])
+    byhand = [s for s in p.steps if s.human]
+    assert any("device or visitor type" in (s.detail or "") for s in byhand)
+
+
+# ── Lever 4: the listing, with a title drafted ──
+
+
+def _ctr(**kwargs):
+    from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
+
+    base = dict(
+        page_url="https://aquamanleakdetection.com/",
+        top_query="pool leak detection",
+        impressions=5000.0,
+        clicks=40.0,
+        ctr_percent=0.8,
+        expected_ctr_percent=3.89,
+        recoverable_clicks=150.0,
+        title="Aquaman Leak Detection | Trusted Since 2004",
+        description="We find leaks.",
+        brand="Aquaman",
+    )
+    base.update(kwargs)
+    return classify_ctr_gap(CtrSignals(**base))
+
+
+def test_the_card_drafts_the_replacement_title():
+    """"Rewrite the title" is not an instruction until it says to what."""
+    p = _ctr()
+    assert "Try: “Pool leak detection" in p.steps[0].detail
+    assert "does not contain the query" in p.steps[0].detail
+
+
+def test_the_drafted_title_does_not_repeat_the_brand():
+    from app.decisions.ctr_cause import draft_title
+
+    assert draft_title(
+        "pool leak detection", "Aquaman", "Aquaman Leak Detection | Trusted Since 2004"
+    ) == "Pool leak detection — Trusted Since 2004 | Aquaman"
+
+
+def test_a_title_that_already_leads_with_the_query_is_told_what_else_to_add():
+    p = _ctr(title="Pool leak detection | Aquaman")
+    assert "reads like every other result" in p.steps[0].detail
+
+
+def test_an_ai_overview_gets_its_own_step():
+    """A better title cannot win back a click the answer already satisfied."""
+    p = _ctr(ai_overview=True)
+    assert any("AI Overview" in step.text for step in p.steps)
+
+
+def test_the_serp_comparison_we_cannot_make_is_named():
+    human = [s for s in _ctr().steps if s.human]
+    assert len(human) == 1
+    assert "rendered titles are not stored" in human[0].detail
+
+
+# ── Lever 6: donor, anchor, target ──
+
+
+def _link(**kwargs):
+    from app.decisions.link_cause import Donor, LinkSignals, classify_link_gap
+
+    base = dict(
+        page_url="https://x/target",
+        position=9.0,
+        inbound_links=2,
+        floor=6,
+        donors=[Donor("https://x/guide", "pool leak detection", 420.0, 5)],
+        recoverable_clicks=60.0,
+    )
+    base.update(kwargs)
+    return classify_link_gap(LinkSignals(**base))
+
+
+def test_the_donor_the_anchor_and_the_target_are_all_named():
+    p = _link()
+    assert p.steps[0].target == "https://x/guide"
+    assert "“pool leak detection” as the anchor" in p.steps[0].detail
+    assert "not the navigation" in p.steps[0].detail
+
+
+def test_with_no_donor_it_says_so_rather_than_repeating_itself():
+    """"Add internal links from mapped authoritative pages" named no page."""
+    p = _link(donors=[])
+    assert p.steps[0].human is True
+    assert "no page on the site both shares a search query" in p.steps[0].detail
+
+
+def test_placing_the_link_is_the_part_we_cannot_do():
+    human = [s for s in _link().steps if s.human]
+    assert any("body text is not stored" in (s.detail or "") for s in human)
