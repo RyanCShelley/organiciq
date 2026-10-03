@@ -175,27 +175,27 @@ def _kw(**kwargs):
 
 def test_no_page_at_all_is_the_only_case_that_says_build_one():
     p = _kw(page_url=None, page_impressions=0.0, page_position=None)
-    assert p.evidence["gap"] == "no_page"
+    assert p.cause == "no_page_for_term"
     assert "Write a page that targets" in p.steps[0].text
 
 
 def test_a_page_that_cannot_be_indexed_is_fixed_before_its_content():
     """No amount of content work moves a page Google cannot index."""
     p = _kw(indexable=False)
-    assert p.evidence["gap"] == "page_cannot_rank"
+    assert p.cause == "page_cannot_rank"
     assert "not indexable" in p.steps[0].text
     assert "No amount of content work" in p.steps[0].detail
 
 
 def test_a_page_nothing_links_to_is_also_blocked():
     p = _kw(inbound_internal_links=1)
-    assert p.evidence["gap"] == "page_cannot_rank"
+    assert p.cause == "page_cannot_rank"
     assert "1 internal links point at it" in p.steps[0].text
 
 
 def test_a_title_missing_the_term_is_named_with_the_current_title():
     p = _kw()
-    assert p.evidence["gap"] == "page_not_competitive"
+    assert p.cause == "page_not_competitive"
     assert "Put “seo services” in the title" in p.steps[0].text
     assert "SEO Agency That Understands AI Search" in p.steps[0].detail
 
@@ -225,19 +225,19 @@ def _prompt(**kwargs):
 def test_a_blocked_ai_crawler_comes_before_everything_else():
     """An engine that cannot fetch the page will never cite it."""
     p = _prompt(blocked_crawlers=("GPTBot", "ClaudeBot"), best_page="https://x/p")
-    assert p.evidence["gap"] == "ai_crawlers_blocked"
+    assert p.cause == "ai_crawlers_blocked"
     assert "Allow GPTBot, ClaudeBot in robots.txt" in p.steps[0].text
 
 
 def test_no_matching_page_asks_for_one_with_the_question_as_its_heading():
     p = _prompt()
-    assert p.evidence["gap"] == "no_page_answers_it"
+    assert p.cause == "no_page_answers_prompt"
     assert "40 to 60 word" in p.steps[0].detail
 
 
 def test_a_page_that_exists_is_made_quotable_rather_than_replaced():
     p = _prompt(best_page="https://x/agencies")
-    assert p.evidence["gap"] == "page_not_quotable"
+    assert p.cause == "page_not_quotable"
     assert all(
         step.target == "https://x/agencies" for step in p.steps if step.target
     )
@@ -250,3 +250,19 @@ def test_the_missing_citation_layer_becomes_a_named_human_check():
     human = [step for step in p.steps if step.human]
     assert len(human) == 1
     assert "not ingested" in human[0].detail
+
+
+def test_a_handful_of_impressions_does_not_make_it_the_page_for_the_term():
+    """The homepage picked up three impressions for "seo services" and the
+    engine told someone to rewrite its title. Three impressions is noise."""
+    p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0, page_position=1.0)
+    assert p.cause == "no_page_for_term"
+    assert "Write a page that targets" in p.steps[0].text
+
+
+def test_the_expected_result_is_not_phrased_as_a_ranking_failure():
+    """"3 impressions at position 1 that are not converting to rank" says a
+    page ranking first is failing to rank."""
+    p = _kw()
+    assert "not converting to rank" not in (p.expected_impact or "")
+    assert "monthly searches" in (p.expected_impact or "")

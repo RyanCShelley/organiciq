@@ -45,6 +45,14 @@ CAUSES: dict[str, str] = {
     "true_decay": "Impressions and rankings both fell",
     "demand_fell": "Rankings held and search demand fell",
     "self_competition": "Another of our URLs took the queries",
+    # Keyword not ranking (playbook 7)
+    "no_page_for_term": "Nothing on the site targets the term",
+    "page_cannot_rank": "A page exists and something stops it ranking",
+    "page_not_competitive": "The page can rank and is being beaten",
+    # Prompt not cited (playbook 8)
+    "ai_crawlers_blocked": "Answer engines are not allowed to fetch the site",
+    "no_page_answers_prompt": "No page answers the question",
+    "page_not_quotable": "A page answers it in a form an engine cannot quote",
     # Always available
     "undetermined": "The checks did not settle on a cause",
 }

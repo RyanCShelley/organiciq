@@ -24,6 +24,11 @@ MIN_INTERNAL_LINKS = 3
 #: Past this, winning the head term is a year's work and a long-tail
 #: variant is the honest first target.
 HARD_DIFFICULTY = 70.0
+#: Below this, Search Console showing a page for the term is noise rather
+#: than evidence the page targets it. The homepage picking up three
+#: impressions for "seo services" does not make it the SEO services page,
+#: and treating it as one sends someone to rewrite the wrong title.
+MIN_IMPRESSIONS_FOR_PAGE_MATCH = 30.0
 
 
 @dataclass(frozen=True)
@@ -62,7 +67,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
 
     # 1. No page at all. Everything else is moot, and this is the only case
     #    where "build a page" is the right instruction.
-    if not signals.page_url:
+    if not signals.page_url or signals.page_impressions < MIN_IMPRESSIONS_FOR_PAGE_MATCH:
         long_tail = signals.difficulty is not None and signals.difficulty >= HARD_DIFFICULTY
         steps = [
             Step(
@@ -87,8 +92,8 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
                 )
             )
         return Prescription(
-            cause="undetermined",
-            evidence={**evidence, "gap": "no_page"},
+            cause="no_page_for_term",
+            evidence=evidence,
             steps=steps,
             expected_impact=f"the term's {signals.volume:,.0f} monthly searches, in part",
             verify_metric="keyword_position",
@@ -111,8 +116,8 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
         )
     if blockers:
         return Prescription(
-            cause="undetermined",
-            evidence={**evidence, "gap": "page_cannot_rank", "blockers": blockers},
+            cause="page_cannot_rank",
+            evidence={**evidence, "blockers": blockers},
             steps=[
                 Step(
                     "Clear what is stopping this page from ranking: " + "; ".join(blockers),
@@ -158,16 +163,13 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
             )
         )
 
-    position = (
-        f" at position {signals.page_position:.0f}" if signals.page_position else ""
-    )
     return Prescription(
-        cause="undetermined",
-        evidence={**evidence, "gap": "page_not_competitive"},
+        cause="page_not_competitive",
+        evidence=evidence,
         steps=steps,
         expected_impact=(
-            f"{signals.page_impressions:,.0f} impressions{position} that are not "
-            "converting to rank"
+            f"a share of the term's {signals.volume:,.0f} monthly searches, against "
+            f"the {signals.page_impressions:,.0f} impressions this page draws for it now"
         ),
         verify_metric="keyword_position",
         verify_after_days=56,

@@ -47,8 +47,8 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
     if signals.blocked_crawlers:
         agents = ", ".join(signals.blocked_crawlers)
         return Prescription(
-            cause="undetermined",
-            evidence={**evidence, "gap": "ai_crawlers_blocked", "agents": list(signals.blocked_crawlers)},
+            cause="ai_crawlers_blocked",
+            evidence={**evidence, "agents": list(signals.blocked_crawlers)},
             steps=[
                 Step(
                     f"Allow {agents} in robots.txt",
@@ -65,8 +65,8 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
     # 2. Nothing on the site answers it.
     if not signals.best_page:
         return Prescription(
-            cause="undetermined",
-            evidence={**evidence, "gap": "no_page_answers_it"},
+            cause="no_page_answers_prompt",
+            evidence=evidence,
             steps=[
                 Step(
                     "Write a page with this question as its H1",
@@ -117,8 +117,8 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
             )
         )
     return Prescription(
-        cause="undetermined",
-        evidence={**evidence, "gap": "page_not_quotable"},
+        cause="page_not_quotable",
+        evidence=evidence,
         steps=steps,
         expected_impact="A citation on this prompt",
         verify_metric="ai_prompt_citations",
