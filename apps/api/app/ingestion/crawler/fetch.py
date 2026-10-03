@@ -184,9 +184,20 @@ async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparse
 
 
 async def _load_sitemap_urls(
-    client: httpx.AsyncClient, sitemaps: list[str], *, host: str, budget: int
+    client: httpx.AsyncClient,
+    sitemaps: list[str],
+    *,
+    host: str,
+    budget: int,
+    scope: str | None = None,
 ) -> set[str]:
-    """URLs listed in the sitemaps, following index files one level down."""
+    """URLs listed in the sitemaps, following index files one level down.
+
+    `scope` keeps a path-scoped client to its own folder. It was being read
+    from the caller's frame rather than passed, which raised NameError the
+    moment a sitemap listed a single page — so every crawl that found a
+    sitemap failed, for every client, scoped or not.
+    """
     found: set[str] = set()
     queue = list(sitemaps)
     seen: set[str] = set()
@@ -268,7 +279,7 @@ async def crawl_site(
         if sitemap_url:
             sitemap_locations = [sitemap_url, *sitemap_locations]
         result.sitemap_urls = await _load_sitemap_urls(
-            client, sitemap_locations, host=host, budget=page_limit * 4
+            client, sitemap_locations, host=host, budget=page_limit * 4, scope=scope
         )
 
         # Nothing declared, or what was declared yielded nothing: try the usual
@@ -277,7 +288,11 @@ async def crawl_site(
         if not result.sitemap_urls:
             for candidate in SITEMAP_CANDIDATES:
                 found = await _load_sitemap_urls(
-                    client, [urljoin(root, candidate)], host=host, budget=page_limit * 4
+                    client,
+                    [urljoin(root, candidate)],
+                    host=host,
+                    budget=page_limit * 4,
+                    scope=scope,
                 )
                 if found:
                     result.sitemap_urls = found

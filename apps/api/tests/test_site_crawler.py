@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 
 from app.ingestion.crawler.fetch import (
+    _load_sitemap_urls,
     MAX_PAGE_LIMIT,
     USER_AGENT,
     _fetch_page,
@@ -526,3 +527,54 @@ def test_a_robots_blocked_crawl_keeps_the_previous_pages(db, client_a, monkeypat
         )
     }
     assert "robots_disallow_crawling" in codes, "the cause must still be reported"
+
+
+# ── Regression: the sitemap reader read `scope` from its caller's frame ──
+
+SITEMAP = (
+    '<?xml version="1.0"?>'
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    "<url><loc>https://example.com/unmanned/drones</loc></url>"
+    "<url><loc>https://example.com/helicopters/tours</loc></url>"
+    "</urlset>"
+)
+
+
+def _sitemap_handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200, headers={"content-type": "application/xml"}, text=SITEMAP
+    )
+
+
+def _load(scope=None) -> set[str]:
+    async def run():
+        async with _client(_sitemap_handler) as client:
+            return await _load_sitemap_urls(
+                client,
+                ["https://example.com/sitemap.xml"],
+                host="example.com",
+                budget=100,
+                scope=scope,
+            )
+
+    return asyncio.run(run())
+
+
+def test_a_sitemap_listing_pages_does_not_raise():
+    """Every crawl that found a sitemap was dying with NameError.
+
+    `_load_sitemap_urls` referenced `scope`, a local of `crawl_site`, so the
+    first `<loc>` in a urlset blew up. Nothing caught it because no test
+    served a sitemap that listed a page — the one path where the name is
+    read. It surfaced as "name 'scope' is not defined" on a job row, and left
+    clients reporting no crawl data at all.
+    """
+    assert _load() == {
+        "https://example.com/unmanned/drones",
+        "https://example.com/helicopters/tours",
+    }
+
+
+def test_a_scoped_sitemap_keeps_only_its_own_folder():
+    """What `scope` was there to do in the first place."""
+    assert _load(scope="/unmanned") == {"https://example.com/unmanned/drones"}
