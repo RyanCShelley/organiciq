@@ -139,3 +139,12 @@ def test_every_prescription_can_be_verified():
         assert p.verify_metric
         assert p.verify_after_days > 0
         assert p.expected_impact
+
+
+def test_traffic_tripling_is_the_mix_changing_not_the_page_breaking():
+    """Element 6's homepage: 4,702 sessions to 13,191, rate 0.66% to 0.14%.
+    The engine said "no cause found" because it only looked for a fall."""
+    p = _drop(sessions_before=4702.0, sessions_now=13191.0, rate_before=0.66, rate_now=0.14)
+    assert p.cause == "traffic_mix_shifted"
+    assert "Leave the page's main offer alone" in p.steps[0].text
+    assert p.evidence["sessions_change_pct"] == 180.5

@@ -98,7 +98,18 @@ def _snapshot_rows(
                     and 200 <= page.status_code < 300
                 ),
                 "blocked_resources": page.blocked_resources,
-                "conversion_elements": parsed.conversion_elements if parsed else None,
+                # Only from a page we actually fetched. A 403 challenge page
+                # parses cleanly and contains no form, so recording zero here
+                # said "this page has no way to convert" about a homepage that
+                # simply blocked the crawler — and prescribed restoring a call
+                # to action that was never missing. Unknown is null.
+                "conversion_elements": (
+                    parsed.conversion_elements
+                    if parsed is not None
+                    and page.status_code is not None
+                    and 200 <= page.status_code < 300
+                    else None
+                ),
             }
         )
     return rows

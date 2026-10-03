@@ -187,3 +187,53 @@ def test_a_crawl_that_predates_the_check_is_not_a_finding():
         )
         is None
     )
+
+
+def test_a_blocked_fetch_is_not_a_page_without_a_call_to_action(db, client_a):
+    """aquamanleakdetection.com returns 403 to our crawler. The challenge
+    page parses cleanly and contains no form, so the count came back zero
+    and the engine told them to restore a call to action that was never
+    missing. Unknown has to stay unknown."""
+    from datetime import date
+
+    from app.ingestion.crawler.fetch import CrawlResult, CrawledPage
+    from app.ingestion.crawler.pipeline import _snapshot_rows
+
+    blocked = CrawledPage(
+        raw_url="https://example.com/",
+        normalized_url="https://example.com/",
+        status_code=403,
+        redirect_url=None,
+        redirect_count=0,
+        blocked_by_robots=False,
+        fetch_error=None,
+        parsed=parse_page(
+            url="https://example.com/",
+            body="<html><body><h1>Access denied</h1></body></html>",
+        ),
+    )
+    rows = _snapshot_rows(client_a.id, CrawlResult(pages=[blocked]), snapshot_date=date.today())
+    assert rows[0]["conversion_elements"] is None
+
+
+def test_a_real_page_with_no_call_to_action_still_counts_zero(db, client_a):
+    from datetime import date
+
+    from app.ingestion.crawler.fetch import CrawlResult, CrawledPage
+    from app.ingestion.crawler.pipeline import _snapshot_rows
+
+    served = CrawledPage(
+        raw_url="https://example.com/thin",
+        normalized_url="https://example.com/thin",
+        status_code=200,
+        redirect_url=None,
+        redirect_count=0,
+        blocked_by_robots=False,
+        fetch_error=None,
+        parsed=parse_page(
+            url="https://example.com/thin",
+            body="<html><body><p>Words, and nothing to do.</p></body></html>",
+        ),
+    )
+    rows = _snapshot_rows(client_a.id, CrawlResult(pages=[served]), snapshot_date=date.today())
+    assert rows[0]["conversion_elements"] == 0

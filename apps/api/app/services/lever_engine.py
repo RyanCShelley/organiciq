@@ -2290,6 +2290,10 @@ CONVERSION_PAGE_RATE_RATIO = 0.5
 #: A page needs this many leads in the earlier window to have been
 #: "converting" at all. Below it a fall to zero is one lead not arriving.
 PAGE_DROP_MIN_PRIOR_LEADS = 3.0
+#: And enough traffic for a rate to mean anything. Five leads from twelve
+#: sessions is a 42% conversion rate, which is an attribution artefact
+#: rather than a page worth prescribing against.
+PAGE_DROP_MIN_PRIOR_SESSIONS = 50.0
 #: How many of these to raise. The list is a queue, not an inventory.
 PAGE_DROP_MAX_FINDINGS = 5
 
@@ -2331,7 +2335,7 @@ def _converting_page_dropped_findings(
         if prior_leads < PAGE_DROP_MIN_PRIOR_LEADS:
             continue
         before_sessions = sessions_before.get(url, 0.0)
-        if before_sessions <= 0:
+        if before_sessions < PAGE_DROP_MIN_PRIOR_SESSIONS:
             continue
         now_sessions = sessions_now.get(url, 0.0)
         now_leads = leads_now.get(url, 0.0)

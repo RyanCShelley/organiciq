@@ -24,6 +24,11 @@ RATE_DROP_PCT = 20.0
 MOBILE_RATE_SHARE = 0.5
 #: Mobile LCP worse than this is slow enough to cost conversions.
 SLOW_LCP_SECONDS = 4.0
+#: Sessions rising by more than this dilutes the rate on its own. A page
+#: does not convert a tripled audience at the rate it converted the old one,
+#: and calling that a page fault sends someone to rewrite a page that is
+#: doing what it always did.
+SESSIONS_SURGE_PCT = 50.0
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,45 @@ def classify_page_drop(signals: PageDropSignals) -> Prescription | None:
 
     if not _fell(signals.rate_now, signals.rate_before, RATE_DROP_PCT):
         return None
+
+    # 1b. Traffic surged. The rate falls arithmetically when a page is shown
+    #     to a much larger and usually broader audience, so this is the mix
+    #     changing rather than the page breaking.
+    grew_pct = (
+        ((signals.sessions_now - signals.sessions_before) / signals.sessions_before) * 100.0
+        if signals.sessions_before > 0
+        else 0.0
+    )
+    if grew_pct >= SESSIONS_SURGE_PCT:
+        return Prescription(
+            cause="traffic_mix_shifted",
+            evidence={**evidence, "sessions_change_pct": round(grew_pct, 1)},
+            steps=[
+                Step(
+                    "Leave the page's main offer alone",
+                    target=signals.page_url,
+                    detail=f"Sessions rose {grew_pct:.0f}% while leads fell. The rate "
+                    "dropped because the audience grew and broadened, not because the "
+                    "page stopped working.",
+                ),
+                Step(
+                    "Add a mid-funnel offer for the new visitors",
+                    target=signals.page_url,
+                    detail="A checklist, grader or case study, linked through to the "
+                    "money page, so the broader audience has a next step.",
+                ),
+                Step(
+                    "Check which queries and sources the new sessions came from",
+                    target=signals.page_url,
+                    detail="If they are informational, the mid-funnel offer is the whole "
+                    "fix. If they are paid or referral, the comparison is not like for like.",
+                    human=True,
+                ),
+            ],
+            expected_impact=f"about {signals.leads_lost:.0f} leads a period",
+            verify_metric="page_lead_rate",
+            verify_after_days=28,
+        )
 
     # 2. The page itself lost its way to convert. Cheapest to confirm, and
     #    the most common cause of a rate falling off a cliff.
