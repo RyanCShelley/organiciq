@@ -8,6 +8,7 @@ parallel period is to diff the two before anything is switched over.
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import urlsplit
 import logging
 from collections import Counter
 from datetime import date, datetime, timezone
@@ -23,6 +24,7 @@ from app.ingestion.crawler.fetch import (
     page_limit_for,
 )
 from app.models.client import Client
+from app.models.gsc import FactGscPage
 from app.models.crawl import (
     CRAWL_SOURCE_FIRST_PARTY,
     FactCrawlInternalLink,
@@ -50,6 +52,33 @@ def _duplicate_keys(pages: list[CrawledPage], attribute: str) -> set[str]:
         if page.parsed is not None and page.indexable and getattr(page.parsed, attribute).strip()
     )
     return {value for value, count in counts.items() if count > 1}
+
+
+def _hosts_from_search_console(db: Session, client: Client) -> tuple[str, ...]:
+    """Subdomains this client actually has, according to Search Console.
+
+    The link graph only reaches a subdomain the main site links to, and the
+    ones that matter often have no inbound link at all: a landing-page host
+    exists so campaigns can point at it directly. Guessing candidates would
+    be a port scan; Search Console already knows, because Google indexed
+    them.
+    """
+    apex = (client.domain or "").strip().lower().removeprefix("www.").split("/", 1)[0]
+    if not apex:
+        return ()
+    rows = (
+        db.query(FactGscPage.normalized_url)
+        .filter(FactGscPage.client_id == client.id)
+        .distinct()
+        .limit(5000)
+        .all()
+    )
+    hosts: set[str] = set()
+    for (url,) in rows:
+        host = (urlsplit(url or "").hostname or "").lower().removeprefix("www.")
+        if host and host != apex and host.endswith(f".{apex}"):
+            hosts.add(host)
+    return tuple(sorted(hosts))
 
 
 def _snapshot_rows(
@@ -162,6 +191,14 @@ def _site_issue_rows(
     elif not result.sitemap_urls:
         codes.append(("sitemap_missing", {}))
 
+    # A page an answer engine cannot fetch cannot be cited by it, however
+    # well it answers the question. Usually a plugin's default rule rather
+    # than a decision anyone made.
+    if result.ai_crawlers_blocked:
+        codes.append(
+            ("ai_crawlers_blocked", {"agents": list(result.ai_crawlers_blocked)})
+        )
+
     return [
         {
             "client_id": client_id,
@@ -249,13 +286,20 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         db.commit()
 
         scope_note = f"{client.domain}{client.path_prefix or ''}"
-        logger.info("Crawling %s (limit=%d)", scope_note, limit)
+        extra_hosts = _hosts_from_search_console(db, client)
+        logger.info(
+            "Crawling %s (limit=%d)%s",
+            scope_note,
+            limit,
+            f" plus {', '.join(extra_hosts)}" if extra_hosts else "",
+        )
         result = asyncio.run(
             crawl_site(
                 client.domain,
                 page_limit=limit,
                 sitemap_url=(client.sitemap_url or "").strip() or None,
                 path_prefix=(client.path_prefix or "").strip() or None,
+                extra_hosts=extra_hosts,
             )
         )
         job.records_fetched = len(result.pages)

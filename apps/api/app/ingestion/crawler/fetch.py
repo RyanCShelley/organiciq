@@ -9,6 +9,7 @@ already a dependency and already carries the timeout conventions used elsewhere.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import logging
 from dataclasses import dataclass, field
 from urllib import robotparser
@@ -118,6 +119,9 @@ class CrawlResult:
     robots_txt_error: str | None = None
     #: robots.txt tells our agent not to crawl the site at all.
     robots_disallows_site: bool = False
+    #: AI crawlers robots.txt turns away. A page an answer engine cannot
+    #: fetch cannot be cited by it, however well it answers the question.
+    ai_crawlers_blocked: list[str] = field(default_factory=list)
     #: A sitemap was declared or found but could not be read.
     sitemap_unreadable: bool = False
     #: Where the sitemap was actually found, for the operator.
@@ -149,6 +153,30 @@ def _same_site(host: str, other: str) -> bool:
     a = (host or "").lower().removeprefix("www.")
     b = (other or "").lower().removeprefix("www.")
     return bool(a) and (a == b or b.endswith(f".{a}"))
+
+
+#: The agents that read pages for answer engines. Blocking one of these is
+#: a decision about whether the brand can appear in that engine's answers,
+#: and it is usually made by accident in a plugin's default rule.
+AI_CRAWLERS: tuple[str, ...] = (
+    "GPTBot",
+    "OAI-SearchBot",
+    "ChatGPT-User",
+    "PerplexityBot",
+    "ClaudeBot",
+    "Claude-Web",
+    "Google-Extended",
+    "CCBot",
+    "Applebot-Extended",
+)
+
+
+def blocked_ai_crawlers(
+    parser: robotparser.RobotFileParser | None, root: str
+) -> list[str]:
+    if parser is None:
+        return []
+    return [agent for agent in AI_CRAWLERS if not parser.can_fetch(agent, root)]
 
 
 async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparser.RobotFileParser | None, list[str]]:
@@ -210,8 +238,15 @@ async def _load_sitemap_urls(
             response = await client.get(url, follow_redirects=True)
             if response.status_code >= 400:
                 continue
-            root = ElementTree.fromstring(response.content)
-        except (httpx.HTTPError, ElementTree.ParseError) as exc:
+            body = response.content
+            # WordPress and Yoast both serve .xml.gz, and httpx only
+            # decompresses what the server declares in Content-Encoding. A
+            # gzipped sitemap arrives as bytes that fail to parse, and the
+            # site reads as having no sitemap at all.
+            if body[:2] == b"\x1f\x8b":
+                body = gzip.decompress(body)
+            root = ElementTree.fromstring(body)
+        except (httpx.HTTPError, ElementTree.ParseError, OSError, EOFError) as exc:
             logger.info("sitemap %s unreadable: %s", url, exc)
             continue
         tag = root.tag.rsplit("}", 1)[-1]
@@ -243,12 +278,20 @@ async def crawl_site(
     respect_robots: bool = True,
     sitemap_url: str | None = None,
     path_prefix: str | None = None,
+    extra_hosts: tuple[str, ...] = (),
 ) -> CrawlResult:
     """Crawl a site breadth-first from its root, bounded by `page_limit`.
 
     `path_prefix` confines the crawl to one folder, for a client whose site is a
     section of a larger domain. Without it the crawl follows the parent brand's
     navigation and reports its pages as this client's.
+
+    `extra_hosts` are subdomains to crawl as well as the apex. The link graph
+    only reaches a subdomain the main site links to, and the ones that matter
+    often have no inbound link at all — a landing-page host like
+    `offer.example.com` is built precisely so campaigns can point at it
+    directly. Search Console knows those hosts, so the caller passes them in
+    rather than the crawler guessing.
     """
     root = _start_url(domain, path_prefix)
     scope = normalize_path_prefix(path_prefix)
@@ -270,6 +313,7 @@ async def crawl_site(
             robots, sitemap_locations = None, []
             result.robots_txt_error = str(exc)[:300]
         result.robots_txt_found = robots is not None
+        result.ai_crawlers_blocked = blocked_ai_crawlers(robots, root)
         if robots is not None and not robots.can_fetch(USER_AGENT, root):
             result.robots_disallows_site = True
 
@@ -285,19 +329,27 @@ async def crawl_site(
         # Nothing declared, or what was declared yielded nothing: try the usual
         # locations before concluding the site has no sitemap. Plenty of sites
         # have one and simply never mention it in robots.txt.
+        #
+        # Every host gets asked, not just the apex. A landing-page subdomain
+        # usually runs its own CMS with its own sitemap, and the apex's
+        # robots.txt says nothing about it.
+        roots = [root, *(f"https://{h}/" for h in extra_hosts if h and h != host)]
         if not result.sitemap_urls:
-            for candidate in SITEMAP_CANDIDATES:
-                found = await _load_sitemap_urls(
-                    client,
-                    [urljoin(root, candidate)],
-                    host=host,
-                    budget=page_limit * 4,
-                    scope=scope,
-                )
-                if found:
-                    result.sitemap_urls = found
-                    result.sitemap_location = urljoin(root, candidate)
-                    break
+            for base in roots:
+                for candidate in SITEMAP_CANDIDATES:
+                    found = await _load_sitemap_urls(
+                        client,
+                        [urljoin(base, candidate)],
+                        host=host,
+                        budget=page_limit * 4,
+                        scope=scope,
+                    )
+                    if found:
+                        result.sitemap_urls |= found
+                        result.sitemap_location = (
+                            result.sitemap_location or urljoin(base, candidate)
+                        )
+                        break
         elif sitemap_locations:
             result.sitemap_location = sitemap_locations[0]
 
@@ -307,8 +359,10 @@ async def crawl_site(
 
         # Sitemap URLs are seeded alongside the root: a page nothing links to is
         # exactly the kind of page worth knowing about.
-        queue: list[str] = [root, *sorted(result.sitemap_urls)]
-        queued: set[str] = {normalize_url(root)} | set(result.sitemap_urls)
+        queue: list[str] = [*roots, *sorted(result.sitemap_urls)]
+        queued: set[str] = {normalize_url(base) for base in roots} | set(
+            result.sitemap_urls
+        )
         inbound: dict[str, int] = {}
         edges: dict[tuple[str, str], InternalLink] = {}
         pages: dict[str, CrawledPage] = {}

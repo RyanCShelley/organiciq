@@ -578,3 +578,76 @@ def test_a_sitemap_listing_pages_does_not_raise():
 def test_a_scoped_sitemap_keeps_only_its_own_folder():
     """What `scope` was there to do in the first place."""
     assert _load(scope="/unmanned") == {"https://example.com/unmanned/drones"}
+
+
+# ── Subdomains and sitemap discovery ──
+
+
+def test_a_gzipped_sitemap_is_read():
+    """Yoast and WordPress both serve .xml.gz. httpx only decompresses what
+    the server declares, so these arrived as bytes that failed to parse and
+    the site read as having no sitemap at all."""
+    import gzip
+
+    body = gzip.compress(SITEMAP.encode())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "application/octet-stream"}, content=body
+        )
+
+    async def run():
+        async with _client(handler) as client:
+            return await _load_sitemap_urls(
+                client,
+                ["https://example.com/sitemap.xml.gz"],
+                host="example.com",
+                budget=100,
+            )
+
+    assert asyncio.run(run()) == {
+        "https://example.com/unmanned/drones",
+        "https://example.com/helicopters/tours",
+    }
+
+
+def test_search_console_hosts_find_a_subdomain_nothing_links_to(db, client_a):
+    """offer.aquamanleakdetection.com exists so campaigns can point at it
+    directly, so no page on the main site links to it and the crawl never
+    reached it."""
+    from datetime import date
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from app.ingestion.crawler.pipeline import _hosts_from_search_console
+    from app.models.gsc import FactGscPage
+
+    client_a.domain = "aquamanleakdetection.com"
+    for url in (
+        "https://aquamanleakdetection.com/",
+        "https://offer.aquamanleakdetection.com/pool-leak-emergency",
+        "https://www.aquamanleakdetection.com/about",
+        "https://someone-else.com/page",
+    ):
+        db.add(
+            FactGscPage(
+                id=uuid4(),
+                client_id=client_a.id,
+                date=date(2026, 10, 1),
+                raw_url=url,
+                normalized_url=url,
+                country="",
+                device="",
+                impressions=Decimal("10"),
+                clicks=Decimal("1"),
+                ctr=Decimal("0.1"),
+                average_position=Decimal("5"),
+            )
+        )
+    db.commit()
+
+    hosts = _hosts_from_search_console(db, client_a)
+
+    # The subdomain, and only that: www is the apex and the other domain is
+    # not ours.
+    assert hosts == ("offer.aquamanleakdetection.com",)

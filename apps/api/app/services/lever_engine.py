@@ -15,6 +15,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
+from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
+from app.decisions.keyword_cause import KeywordSignals, classify_keyword_gap
 from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
 from app.decisions.prescription import Prescription, Step
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
@@ -541,6 +543,25 @@ def _load_page_schema(
         for url, rows in blocks.items()
     }
     return by_url, covered
+
+
+def _site_issue_payloads(db: Session, client_id: UUID) -> dict[str, dict[str, Any]]:
+    """The `raw` payload of each site-level crawl issue, by code.
+
+    Most codes carry nothing, but a few say which thing they are about —
+    which AI crawlers robots.txt turns away, for instance — and the set of
+    codes alone cannot answer that.
+    """
+    rows = (
+        db.query(FactCrawlPageIssue.issue_code, FactCrawlPageIssue.raw)
+        .filter(
+            FactCrawlPageIssue.client_id == client_id,
+            FactCrawlPageIssue.source == active_crawl_source(),
+            FactCrawlPageIssue.normalized_url.is_(None),
+        )
+        .all()
+    )
+    return {code: (raw or {}) for code, raw in rows}
 
 
 def _load_audit_issues(
@@ -2008,6 +2029,38 @@ def _keyword_market_data(
     return out
 
 
+def _keyword_prescription(
+    keyword: str,
+    volume: float,
+    difficulty: float | None,
+    existing: ExistingPageForQuery | None,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot],
+) -> Prescription:
+    """Playbook 7's decision tree, with the crawl answering "can it rank"."""
+    crawl = crawl_by_url.get(existing.page_url) if existing else None
+    canonical_elsewhere = False
+    if crawl is not None and crawl.canonical_url:
+        canonical_elsewhere = (
+            _normalize_canonical(crawl.canonical_url)
+            != _normalize_canonical(existing.page_url if existing else "")
+        )
+    return classify_keyword_gap(
+        KeywordSignals(
+            keyword=keyword,
+            volume=volume,
+            difficulty=difficulty,
+            page_url=existing.page_url if existing else None,
+            page_impressions=existing.impressions if existing else 0.0,
+            page_position=existing.average_position if existing else None,
+            indexable=crawl.indexable if crawl else None,
+            canonical_elsewhere=canonical_elsewhere,
+            in_sitemap=crawl.in_sitemap if crawl else None,
+            inbound_internal_links=crawl.inbound_internal_links if crawl else None,
+            title=crawl.title if crawl else None,
+        )
+    )
+
+
 def _ai_visibility_keyword_findings(
     db: Session,
     client_id: UUID,
@@ -2015,7 +2068,9 @@ def _ai_visibility_keyword_findings(
     site: SiteBusinessContext,
     thresholds: dict[str, float | int],
     period: tuple[date, date] | None = None,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
 ) -> list[LeverFinding]:
+    crawl_by_url = crawl_by_url or {}
     min_volume = float(thresholds.get("ai_visibility_min_keyword_volume", 50))
     top_n = int(thresholds.get("ai_visibility_keyword_top_n", 25))
     rows = db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
@@ -2079,13 +2134,21 @@ def _ai_visibility_keyword_findings(
             impact=impact,
             query=row.keyword,
             page_url=row.ranking_url,
-            action_override=keyword_action(
-                signal,
-                row.keyword,
-                row.ranking_url,
-                existing_pages.get((row.keyword or "").strip().lower())
+            action_override=(
+                keyword_action(signal, row.keyword, row.ranking_url)
+                if signal != "keyword_not_ranking"
+                else None
+            ),
+            prescription=(
+                _keyword_prescription(
+                    row.keyword,
+                    volume,
+                    difficulty,
+                    existing_pages.get((row.keyword or "").strip().lower()),
+                    crawl_by_url,
+                )
                 if signal == "keyword_not_ranking"
-                else None,
+                else None
             ),
         )
         # Prefer fallouts over not-ranking when sorting; volume is secondary.
@@ -2096,6 +2159,45 @@ def _ai_visibility_keyword_findings(
     return [finding for _, finding in candidates[:top_n]]
 
 
+#: Words too common to tell two pages apart.
+_PROMPT_STOPWORDS = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "best", "by", "can", "do",
+        "does", "for", "from", "how", "in", "is", "it", "me", "my", "of", "on",
+        "or", "should", "that", "the", "to", "top", "what", "when", "which",
+        "who", "why", "with", "you", "your",
+    }
+)
+
+
+def _best_page_for_prompt(prompt: str, page_titles: dict[str, str]) -> str | None:
+    """The page whose title shares most with the prompt's wording.
+
+    Vector similarity is what the playbook asks for and there are no
+    embeddings yet, so this is the honest first version: shared terms,
+    stopwords removed, and nothing returned when the overlap is one word —
+    which would match every page on the site.
+    """
+    terms = {
+        word
+        for word in re.findall(r"[a-z0-9]+", prompt.lower())
+        if word not in _PROMPT_STOPWORDS and len(word) > 2
+    }
+    if not terms:
+        return None
+    best: tuple[int, str] | None = None
+    for url, title in page_titles.items():
+        title_terms = {
+            word
+            for word in re.findall(r"[a-z0-9]+", (title or "").lower())
+            if word not in _PROMPT_STOPWORDS and len(word) > 2
+        }
+        shared = len(terms & title_terms)
+        if shared >= 2 and (best is None or shared > best[0]):
+            best = (shared, url)
+    return best[1] if best else None
+
+
 def _ai_visibility_prompt_findings(
     db: Session,
     client_id: UUID,
@@ -2103,9 +2205,14 @@ def _ai_visibility_prompt_findings(
     *,
     site: SiteBusinessContext,
     thresholds: dict[str, float | int],
+    blocked_crawlers: tuple[str, ...] = (),
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
 ) -> list[LeverFinding]:
     if period is None:
         return []
+    page_titles = {
+        url: crawl.title or "" for url, crawl in (crawl_by_url or {}).items()
+    }
     start, end = period
     min_checks = int(thresholds.get("ai_visibility_prompt_min_checks", 2))
     top_n = int(thresholds.get("ai_visibility_prompt_top_n", 25))
@@ -2182,12 +2289,32 @@ def _ai_visibility_prompt_findings(
             },
             impact=impact,
             query=prompt_text[:200],
-            action_override=PROMPT_ACTION,
+            prescription=classify_prompt_gap(
+                PromptSignals(
+                    prompt=prompt_text,
+                    checks=len(rows),
+                    blocked_crawlers=blocked_crawlers,
+                    best_page=_best_page_for_prompt(prompt_text, page_titles),
+                    # SE Visible holds who is cited instead; it is not
+                    # ingested, so the card asks a person to read it.
+                    citations_known=False,
+                )
+            ),
         )
         candidates.append((volume + len(rows), finding))
 
     candidates.sort(key=lambda row: row[0], reverse=True)
     return [finding for _, finding in candidates[:top_n]]
+
+
+def _blocked_ai_crawlers(
+    site_codes: set[str], raw_by_code: dict[str, dict[str, Any]]
+) -> tuple[str, ...]:
+    """AI crawlers robots.txt turns away, from the site-level crawl issue."""
+    if "ai_crawlers_blocked" not in site_codes:
+        return ()
+    agents = (raw_by_code.get("ai_crawlers_blocked") or {}).get("agents") or []
+    return tuple(str(agent) for agent in agents)
 
 
 def _ai_visibility_findings(
@@ -2197,17 +2324,30 @@ def _ai_visibility_findings(
     *,
     site: SiteBusinessContext,
     thresholds: dict[str, float | int],
+    crawl_by_url: dict[str, FactCrawlPageSnapshot] | None = None,
+    blocked_crawlers: tuple[str, ...] = (),
 ) -> list[LeverFinding]:
     """Ranking + AI citation findings.
 
     Structured data / GEO Grader schema signals are deferred to Content Opportunities.
     """
     findings = _ai_visibility_keyword_findings(
-        db, client_id, site=site, thresholds=thresholds, period=period
+        db,
+        client_id,
+        site=site,
+        thresholds=thresholds,
+        period=period,
+        crawl_by_url=crawl_by_url,
     )
     findings.extend(
         _ai_visibility_prompt_findings(
-            db, client_id, period, site=site, thresholds=thresholds
+            db,
+            client_id,
+            period,
+            site=site,
+            thresholds=thresholds,
+            blocked_crawlers=blocked_crawlers,
+            crawl_by_url=crawl_by_url,
         )
     )
     return findings
@@ -4422,6 +4562,7 @@ def diagnose(
     pages = _load_page_demand(db, client_id=client.id, period=gsc_period)
     crawl_by_url = _load_crawl_by_url(db, client.id)
     issues_by_url, site_issue_codes = _load_audit_issues(db, client.id)
+    issue_raw_by_code = _site_issue_payloads(db, client.id)
     schema_by_url, schema_crawled_urls = _load_page_schema(db, client.id)
 
     lead_events = _lead_event_names(db, client.id)
@@ -4506,6 +4647,8 @@ def diagnose(
         ai_period,
         site=site,
         thresholds=thresholds,
+        crawl_by_url=crawl_by_url,
+        blocked_crawlers=_blocked_ai_crawlers(site_issue_codes, issue_raw_by_code),
     ):
         _enrich_finding(ai_finding, classification=None, page_ctx=None)
         findings.append(ai_finding)
