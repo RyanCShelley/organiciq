@@ -706,7 +706,24 @@ TECHNICAL_ACTIONS: dict[str, str] = {
 #: What to do about a watchlist term, per shape of the problem. A term that
 #: slipped has a page to recover; a term that never ranked has no page at all,
 #: and telling someone to "recover rankings" for it is telling them nothing.
-def keyword_action(signal: str, keyword: str, ranking_url: str | None) -> str:
+def keyword_action(
+    signal: str,
+    keyword: str,
+    ranking_url: str | None,
+    existing: ExistingPageForQuery | None = None,
+) -> str:
+    """What to do about a keyword, given whether a page for it already exists.
+
+    This used to tell every client with an unranked term to "build a page
+    that targets it properly, or drop it from the watchlist — a term tracked
+    for months with no page behind it". On smamarketing.com that went out for
+    "seo services", "seo agency" and "seo company", all three of which are
+    answered by /capabilities/seo. The advice was to build a page they have.
+
+    Not ranking in the top hundred and having no page are different problems
+    with opposite fixes, and Search Console already knows which one it is:
+    it reports the page Google shows for the query.
+    """
     where = f" on {ranking_url}" if ranking_url else ""
     if signal in {"keyword_fell_top5", "keyword_fell_top10"}:
         return (
@@ -714,11 +731,76 @@ def keyword_action(signal: str, keyword: str, ranking_url: str | None) -> str:
             "outranks it for coverage and freshness, and check nothing changed on it "
             "when the slip began."
         )
+    if existing is not None:
+        position = (
+            f" at position {existing.average_position:.0f}"
+            if existing.average_position
+            else ""
+        )
+        return (
+            f"A page for \u201c{keyword}\u201d already exists: {existing.page_url}. "
+            f"It draws {int(existing.impressions):,} impressions{position} and is not "
+            "competing. Strengthen that page rather than building another — a second "
+            "page on the same term splits what the first one has earned."
+        )
     return (
-        f"Nothing ranks for \u201c{keyword}\u201d. Decide whether to build a page that "
-        "targets it properly, or drop it from the watchlist — a term tracked for "
-        "months with no page behind it is measuring an intention, not the work."
+        f"Nothing on the site answers \u201c{keyword}\u201d — no page draws an "
+        "impression for it. Build one that targets it properly, or drop it from the "
+        "watchlist, because a term tracked for months with nothing behind it is "
+        "measuring an intention rather than the work."
     )
+
+
+@dataclass(frozen=True)
+class ExistingPageForQuery:
+    page_url: str
+    impressions: float
+    average_position: float | None
+
+
+def _pages_for_queries(
+    db: Session,
+    client_id: UUID,
+    *,
+    period: tuple[date, date] | None,
+) -> dict[str, ExistingPageForQuery]:
+    """The page Search Console already shows for each query.
+
+    Keyed on the lowercased query, because a watchlist entry and a Search
+    Console query differ in case far more often than in substance.
+    """
+    if period is None:
+        return {}
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.query,
+            FactGscQueryPage.normalized_url,
+            func.sum(FactGscQueryPage.impressions).label("impressions"),
+            func.avg(FactGscQueryPage.average_position).label("position"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
+        .all()
+    )
+    best: dict[str, ExistingPageForQuery] = {}
+    for query, url, impressions, position in rows:
+        key = (query or "").strip().lower()
+        if not key or not url:
+            continue
+        found = ExistingPageForQuery(
+            page_url=url,
+            impressions=float(impressions or 0),
+            average_position=float(position) if position is not None else None,
+        )
+        current = best.get(key)
+        if current is None or found.impressions > current.impressions:
+            best[key] = found
+    return best
 
 
 PROMPT_ACTION = (
@@ -1923,11 +2005,13 @@ def _ai_visibility_keyword_findings(
     *,
     site: SiteBusinessContext,
     thresholds: dict[str, float | int],
+    period: tuple[date, date] | None = None,
 ) -> list[LeverFinding]:
     min_volume = float(thresholds.get("ai_visibility_min_keyword_volume", 50))
     top_n = int(thresholds.get("ai_visibility_keyword_top_n", 25))
     rows = db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
     market = _keyword_market_data(db, client_id)
+    existing_pages = _pages_for_queries(db, client_id, period=period)
     candidates: list[tuple[float, LeverFinding]] = []
     for row in rows:
         volume = _keyword_volume(row)
@@ -1986,7 +2070,14 @@ def _ai_visibility_keyword_findings(
             impact=impact,
             query=row.keyword,
             page_url=row.ranking_url,
-            action_override=keyword_action(signal, row.keyword, row.ranking_url),
+            action_override=keyword_action(
+                signal,
+                row.keyword,
+                row.ranking_url,
+                existing_pages.get((row.keyword or "").strip().lower())
+                if signal == "keyword_not_ranking"
+                else None,
+            ),
         )
         # Prefer fallouts over not-ranking when sorting; volume is secondary.
         rank_boost = {"keyword_fell_top5": 1e9, "keyword_fell_top10": 1e8}.get(signal, 0.0)
@@ -2103,7 +2194,7 @@ def _ai_visibility_findings(
     Structured data / GEO Grader schema signals are deferred to Content Opportunities.
     """
     findings = _ai_visibility_keyword_findings(
-        db, client_id, site=site, thresholds=thresholds
+        db, client_id, site=site, thresholds=thresholds, period=period
     )
     findings.extend(
         _ai_visibility_prompt_findings(
