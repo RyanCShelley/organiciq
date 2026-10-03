@@ -17,6 +17,7 @@ import {
   stringField,
   impactExplanation,
   findingState,
+  promotionBlockedHint,
   promotionBlockedLabel,
   scoreBar,
   type Finding,
@@ -109,7 +110,8 @@ function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys
     default:
       return {
         label: promotionBlockedLabel(item.promotion_blocked_reason),
-        variant: "warning",
+        variant: "neutral",
+        hint: promotionBlockedHint(item.promotion_blocked_reason),
       };
   }
 }
@@ -339,9 +341,17 @@ export function FindingsReviewPanel({
   decisionsByRule?: Map<string, StoredDecision>;
 }) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const needsReview = findings.filter(
-    (item) => !recommendedKeys.has(item.rule_key) && !suggestedKeys.has(item.rule_key),
-  ).length;
+  // Twenty rows reading "too small" is a tail, not a queue. Folded away by
+  // default so the handful worth reading are not competing with it.
+  const [showTail, setShowTail] = useState(false);
+  const tail = findings.filter(
+    (item) =>
+      findingState(item, recommendedKeys, suggestedKeys) === "deferred" &&
+      item.promotion_blocked_reason === "impact_below_threshold",
+  );
+  const shown = showTail
+    ? findings
+    : findings.filter((item) => !tail.includes(item));
 
   return (
     <section id="findings-review" className="workspace-section scroll-mt-24">
@@ -351,7 +361,7 @@ export function FindingsReviewPanel({
         actions={
           <span className="text-xs text-[var(--text-tertiary)]">
             {findings.length} total
-            {needsReview > 0 ? ` · ${needsReview} not promoted` : ""}
+            {tail.length > 0 ? ` · ${findings.length - tail.length} worth reading` : ""}
           </span>
         }
       />
@@ -373,7 +383,7 @@ export function FindingsReviewPanel({
                 <th aria-label="Expand" />
               </tr>
             </thead>
-            {groupByStage(findings).map(([stage, rows]) => (
+            {groupByStage(shown).map(([stage, rows]) => (
             <tbody key={stage}>
               <tr>
                 <th
@@ -456,6 +466,18 @@ export function FindingsReviewPanel({
           </table>
         </div>
       )}
+
+      {tail.length > 0 ? (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm mt-3"
+          onClick={() => setShowTail((open) => !open)}
+        >
+          {showTail
+            ? `Hide ${tail.length} worth less than the threshold`
+            : `Show ${tail.length} worth less than the threshold`}
+        </button>
+      ) : null}
     </section>
   );
 }

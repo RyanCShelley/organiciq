@@ -79,13 +79,36 @@ const STAGE_LABELS: Record<string, string> = {
   conversion: "Outcomes",
 };
 
+/**
+ * Badges, not sentences.
+ *
+ * "Estimated business impact below actionable threshold." was the chip on
+ * twenty rows at once, which is a paragraph repeated down a column. The
+ * reason belongs in the hint underneath, where it is read once.
+ */
 const PROMOTION_BLOCKED_LABELS: Record<string, string> = {
-  impact_below_threshold: "Estimated business impact below actionable threshold.",
-  confidence_below_threshold: "Confidence below actionable threshold.",
-  insufficient_business_signal: "Insufficient business signal for promotion.",
-  page_ineligible: "Page is not eligible for Growth Actions.",
-  opt_out_preferences: "Utility or preference page excluded from Growth Actions.",
+  impact_below_threshold: "Too small",
+  confidence_below_threshold: "Low confidence",
+  insufficient_business_signal: "Not enough data",
+  page_ineligible: "Page excluded",
+  opt_out_preferences: "Page excluded",
 };
+
+export const PROMOTION_BLOCKED_HINTS: Record<string, string> = {
+  impact_below_threshold:
+    "Worth less than the threshold this period, so it does not spend a growth action.",
+  confidence_below_threshold:
+    "The evidence behind the number is too thin to act on yet.",
+  insufficient_business_signal:
+    "Not enough traffic or leads on this page for the comparison to mean anything.",
+  page_ineligible: "This page is not eligible for Growth Actions.",
+  opt_out_preferences:
+    "A utility or preference page, excluded from Growth Actions.",
+};
+
+export function promotionBlockedHint(reason: string | null | undefined): string | undefined {
+  return reason ? PROMOTION_BLOCKED_HINTS[reason] : undefined;
+}
 
 const LEVER_STATUS_LABELS: Record<string, string> = {
   clear: "Clear",
