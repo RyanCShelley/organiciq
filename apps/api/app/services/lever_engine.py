@@ -51,6 +51,7 @@ from app.core.urls import normalize_url
 from app.models.seranking import (
     FactSerAiCheck,
     FactSerDomainKeyword,
+    FactSerKeywordMetric,
     FactSerAiPrompt,
     FactSerAiTrackerStats,
     FactSerBacklinkPage,
@@ -1875,7 +1876,11 @@ def _keyword_market_data(
     features and a difficulty score, so the two are joined on the keyword
     text, which is the only key they share.
     """
-    rows = (
+    out: dict[str, tuple[float | None, bool]] = {}
+
+    # Domain keywords first: they are the only source carrying the SERP's own
+    # features, so they are what can say an AI Overview sits above a result.
+    for keyword, difficulty, features in (
         db.query(
             FactSerDomainKeyword.keyword,
             FactSerDomainKeyword.difficulty,
@@ -1883,16 +1888,32 @@ def _keyword_market_data(
         )
         .filter(FactSerDomainKeyword.client_id == client_id)
         .all()
-    )
-    out: dict[str, tuple[float | None, bool]] = {}
-    for keyword, difficulty, features in rows:
+    ):
+        key = (keyword or "").strip().lower()
+        if key:
+            out[key] = (
+                float(difficulty) if difficulty is not None else None,
+                has_ai_overview(features),
+            )
+
+    # Then the keyword database, which covers terms the client does not rank
+    # for — the ones every "nothing ranks for this" estimate is about, and
+    # the ones the domain endpoint by definition cannot see. It carries no
+    # SERP features, so an AI Overview already found above is kept.
+    for keyword, difficulty in (
+        db.query(FactSerKeywordMetric.keyword, FactSerKeywordMetric.difficulty)
+        .filter(
+            FactSerKeywordMetric.client_id == client_id,
+            FactSerKeywordMetric.difficulty.isnot(None),
+        )
+        .all()
+    ):
         key = (keyword or "").strip().lower()
         if not key:
             continue
-        out[key] = (
-            float(difficulty) if difficulty is not None else None,
-            has_ai_overview(features),
-        )
+        _, ai_overview = out.get(key, (None, False))
+        out[key] = (float(difficulty), ai_overview)
+
     return out
 
 

@@ -47,7 +47,12 @@ SOURCE_LAG_DAYS = {"gsc_pages": 3, "gsc_queries": 3, "ga4": 2}
 #: takes a single-day window like the Run crawl button does. It lives here
 #: because this is where one-off jobs are queued from a terminal, which is the
 #: only route when the database is not reachable.
-SAME_DAY_SOURCES = ("site_crawl", "se_ranking_backlinks", "se_ranking_domain_keywords")
+SAME_DAY_SOURCES = (
+    "site_crawl",
+    "se_ranking_backlinks",
+    "se_ranking_domain_keywords",
+    "se_ranking_keyword_metrics",
+)
 
 BACKFILLABLE = ("gsc_pages", "gsc_queries", "ga4", *SAME_DAY_SOURCES)
 

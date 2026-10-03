@@ -59,6 +59,8 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     "site_crawl": (),
     # One request, merged in memory, upserted into facts.
     "se_ranking_backlinks": (),
+    # Writes straight to facts; no staging tables to purge.
+    "se_ranking_keyword_metrics": (),
 }
 
 

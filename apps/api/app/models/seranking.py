@@ -480,3 +480,40 @@ class FactSerBacklinkPage(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerKeywordMetric(Base):
+    """Market data for a keyword, whether or not the client ranks for it.
+
+    The rank tracker knows what position a term holds; the domain-keywords
+    fact only covers terms the domain already ranks for. Neither can say how
+    hard a term the client has *no* page for would be to win, which is the
+    question behind every "nothing ranks for this" finding.
+    """
+
+    __tablename__ = "facts_ser_keyword_metrics"
+    __table_args__ = (
+        UniqueConstraint("client_id", "keyword", "source", name="uq_ser_keyword_metrics_grain"),
+        Index("ix_ser_keyword_metrics_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    keyword: Mapped[str] = mapped_column(String(512), nullable=False)
+    #: Regional database the numbers came from, e.g. "us".
+    source: Mapped[str] = mapped_column(String(8), nullable=False, default="us")
+    volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    difficulty: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cpc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    competition: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    intents: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    #: False when SE Ranking has no data for the term, which is itself an
+    #: answer — a keyword nobody searches is not an opportunity.
+    data_found: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    fetched_at: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

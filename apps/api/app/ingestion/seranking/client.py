@@ -34,6 +34,7 @@ def _request(
     method: str,
     path: str,
     params: dict[str, Any] | None = None,
+    json_body: Any | None = None,
     retries: int = 3,
 ) -> Any:
     url = f"{BASE_URL}{path}"
@@ -42,7 +43,13 @@ def _request(
         _throttle()
         try:
             with httpx.Client(timeout=120.0, trust_env=False) as client:
-                res = client.request(method, url, headers=_headers(api_key), params=params or {})
+                res = client.request(
+                    method,
+                    url,
+                    headers=_headers(api_key),
+                    params=params or {},
+                    json=json_body,
+                )
             if res.status_code == 429:
                 time.sleep(1.0 * (attempt + 1))
                 continue
@@ -604,3 +611,34 @@ def list_backlink_pages(
     if isinstance(data, dict):
         return list(data.get("pages") or [])
     return list(data or [])
+
+
+#: SE Ranking bills this per keyword looked up, so the caller chunks and the
+#: engine stores the answer rather than asking again every run.
+KEYWORD_METRICS_BATCH = 500
+
+
+def fetch_keyword_metrics(
+    api_key: str, keywords: list[str], *, source: str = "us"
+) -> list[dict[str, Any]]:
+    """Volume, difficulty, CPC and intent for arbitrary keywords.
+
+    The domain-keywords endpoint only returns terms the client already ranks
+    for, so it cannot price the ones they do not — which are exactly the
+    terms the "nothing ranks for this" rule is about. This one takes any
+    list.
+    """
+    out: list[dict[str, Any]] = []
+    unique = list(dict.fromkeys(k.strip() for k in keywords if k and k.strip()))
+    for start in range(0, len(unique), KEYWORD_METRICS_BATCH):
+        batch = unique[start : start + KEYWORD_METRICS_BATCH]
+        data = _request(
+            api_key=api_key,
+            method="POST",
+            path="/keywords/export",
+            params={"source": source},
+            json_body={"keywords": batch},
+        )
+        if isinstance(data, list):
+            out.extend(row for row in data if isinstance(row, dict))
+    return out
