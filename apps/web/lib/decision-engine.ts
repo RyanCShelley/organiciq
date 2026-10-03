@@ -206,6 +206,63 @@ export function impactExplanation(evidence: Record<string, unknown>): string[] {
   return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : [];
 }
 
+export type FindingAction = {
+  text: string;
+  target?: string;
+  detail?: string;
+  human?: boolean;
+};
+
+export type ScoreTerm = {
+  name: string;
+  value: number;
+  weight: number;
+  contribution: number;
+  scaled_by_impact: boolean;
+};
+
+export type ScoreBreakdown = {
+  terms: ScoreTerm[];
+  impact_relevance: number;
+  impact_relevance_scale: number;
+  total: number;
+};
+
+/** The prescribed steps, as steps. */
+export function findingActions(evidence: Record<string, unknown>): FindingAction[] {
+  const actions = evidence.actions;
+  if (!Array.isArray(actions)) return [];
+  return actions.filter(
+    (row): row is FindingAction =>
+      typeof row === "object" && row !== null && typeof (row as FindingAction).text === "string",
+  );
+}
+
+export function scoreBreakdown(
+  evidence: Record<string, unknown>,
+): ScoreBreakdown | null {
+  const value = evidence.score_breakdown;
+  if (typeof value !== "object" || value === null) return null;
+  const breakdown = value as ScoreBreakdown;
+  return Array.isArray(breakdown.terms) ? breakdown : null;
+}
+
+export function stringField(
+  evidence: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = evidence[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+export function numberField(
+  evidence: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = evidence[key];
+  return typeof value === "number" && !Number.isNaN(value) ? value : null;
+}
+
 export function scoreBar(value: number): string {
   return `${Math.max(0, Math.min(100, value))}%`;
 }

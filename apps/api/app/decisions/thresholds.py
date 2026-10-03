@@ -121,6 +121,17 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     # 50 the gate keeps today's recommendations and rejects the band that rests
     # on both a weak source and thin evidence.
     "minimum_recommendation_confidence": 50,
+    # The priority formula itself, so the ranking can be argued with rather
+    # than only read. Impact leads; the rest are scaled by how real the
+    # impact is, so a tidy and urgent finding worth nothing cannot climb on
+    # confidence and ease alone.
+    "score_weight_impact": 0.60,
+    "score_weight_confidence": 0.15,
+    "score_weight_urgency": 0.15,
+    "score_weight_effort": 0.10,
+    #: Impact at or above this counts in full; below it the secondary terms
+    #: are scaled down in proportion.
+    "score_impact_relevance_scale": 20,
     "high_priority_threshold": 70,
     "medium_priority_threshold": 50,
     "meaningful_gsc_impressions": 100,

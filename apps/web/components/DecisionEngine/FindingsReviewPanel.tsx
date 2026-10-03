@@ -9,8 +9,12 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import {
   decisionStatusBadgeVariant,
   decisionStatusLabel,
+  findingActions,
   findingSubject,
   formatEvidence,
+  numberField,
+  scoreBreakdown,
+  stringField,
   impactExplanation,
   findingState,
   promotionBlockedLabel,
@@ -126,6 +130,11 @@ function ExpandedFinding({
   statusLabel: string;
 }) {
   const explanations = impactExplanation(item.evidence_json);
+  const actions = findingActions(item.evidence_json);
+  const expected = stringField(item.evidence_json, "expected_impact");
+  const verifyMetric = stringField(item.evidence_json, "verify_metric");
+  const verifyDays = numberField(item.evidence_json, "verify_after_days") ?? 28;
+  const breakdown = scoreBreakdown(item.evidence_json);
   const canAct = Boolean(clientId && from && to);
   const isEnginePick = statusLabel === "Recommendation" || statusLabel === "Suggested";
 
@@ -135,7 +144,61 @@ function ExpandedFinding({
           do, and leading with the diagnosis made them read past the problem to
           reach the answer. The evidence sits underneath, for whoever wants to
           check the reasoning before committing to it. */}
-      {item.recommended_action ? (
+      {/* The steps as steps. Rendered from the single action string they
+          ran together as "1. Do this ... 2. Do that ...", which is three
+          instructions in one paragraph and reads as none. */}
+      {actions.length > 0 ? (
+        <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
+          <p className="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            Do this
+          </p>
+          <ol className="mt-2 space-y-2.5">
+            {actions.map((action, index) => (
+              <li key={`${action.text}-${index}`} className="flex gap-2.5">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[11px] font-semibold text-[var(--text-secondary)]">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[var(--text-primary)]">
+                    {action.text}
+                    {action.human ? (
+                      <span className="ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)] ring-1 ring-[var(--border)]">
+                        by hand
+                      </span>
+                    ) : null}
+                  </p>
+                  {action.target ? (
+                    <p className="mt-0.5 break-all text-xs text-[var(--brand-teal-hover)]">
+                      {action.target}
+                    </p>
+                  ) : null}
+                  {action.detail ? (
+                    <p className="mt-0.5 text-[13px] leading-snug text-[var(--text-secondary)]">
+                      {action.detail}
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {(expected || verifyMetric) && (
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-[var(--border)] pt-2 text-xs">
+              {expected ? (
+                <span>
+                  <span className="text-[var(--text-tertiary)]">Expected: </span>
+                  <span className="text-[var(--text-primary)]">{expected}</span>
+                </span>
+              ) : null}
+              {verifyMetric ? (
+                <span>
+                  <span className="text-[var(--text-tertiary)]">Check in {verifyDays} days: </span>
+                  <span className="text-[var(--text-primary)]">{verifyMetric}</span>
+                </span>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ) : item.recommended_action ? (
         <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
           <p className="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
             Do this
@@ -156,10 +219,64 @@ function ExpandedFinding({
 
       <details className="mt-3">
         <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
-          How this was scored
+          How this was scored — {item.priority_score.toFixed(1)}
         </summary>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-        {[
+        {breakdown ? (
+          <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
+            <table className="w-full">
+              <thead>
+                <tr className="text-[var(--text-tertiary)]">
+                  <th className="pb-1 text-left font-normal">Term</th>
+                  <th className="pb-1 text-right font-normal">Value</th>
+                  <th className="pb-1 text-right font-normal">Weight</th>
+                  <th className="pb-1 text-right font-normal">Adds</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.terms.map((term) => (
+                  <tr key={term.name}>
+                    <td className="py-0.5">
+                      {term.name}
+                      {term.scaled_by_impact && breakdown.impact_relevance < 1 ? (
+                        <span className="ml-1 text-[var(--text-tertiary)]">
+                          ×{breakdown.impact_relevance}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-0.5 text-right tabular-nums">{term.value}</td>
+                    <td className="py-0.5 text-right tabular-nums text-[var(--text-tertiary)]">
+                      {term.weight}
+                    </td>
+                    <td className="py-0.5 text-right font-medium tabular-nums">
+                      {term.contribution.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t border-[var(--border)]">
+                  <td className="pt-1 font-semibold" colSpan={3}>
+                    Priority score
+                  </td>
+                  <td className="pt-1 text-right font-semibold tabular-nums">
+                    {breakdown.total.toFixed(1)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {breakdown.impact_relevance < 1 ? (
+              <p className="mt-2 text-[var(--text-tertiary)]">
+                Impact is under {breakdown.impact_relevance_scale}, so confidence,
+                urgency and ease are scaled to {breakdown.impact_relevance} of their
+                weight. A tidy, urgent finding worth nothing cannot climb on those
+                alone.
+              </p>
+            ) : null}
+            <p className="mt-2 text-[var(--text-tertiary)]">
+              Weights are per client. Change them in Client settings.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            {[
           ["Impact", item.impact],
           ...(item.severity != null ? [["Severity", item.severity] as const] : []),
           ["Confidence", item.confidence],
@@ -178,8 +295,9 @@ function ExpandedFinding({
               />
             </div>
           </div>
-        ))}
-        </div>
+            ))}
+          </div>
+        )}
       </details>
 
       {canAct && clientId && from && to ? (

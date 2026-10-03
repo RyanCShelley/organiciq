@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+from contextvars import ContextVar
 import logging
 import re
 from urllib.parse import urlsplit
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID
 
 from sqlalchemy import func
@@ -111,6 +112,14 @@ from app.services.decision_impact import (
 )
 from app.services.decision_types import DiagnoseResult, LeverFinding, LeverSummary
 from app.services.page_eligibility import PageClassification, PageType, classify_pages
+
+#: The client's scoring weights for the run in progress.
+#:
+#: `_make_finding` is called from forty places and none of them care about
+#: the formula, so threading the weights through every signature would be
+#: noise. A context variable is the smaller lie: set once per `diagnose`,
+#: read where the score is computed.
+_SCORE_WEIGHTS: ContextVar[dict[str, Any]] = ContextVar("score_weights", default={})
 
 SCORE_FORMULA = (
     "0.6·impact + (0.15·confidence + 0.15·urgency + 0.1·(100−effort)) × min(1, impact÷20)"
@@ -335,22 +344,92 @@ LEVER_INPUTS: dict[str, LeverInputs] = {
 }
 
 
+def score_breakdown(
+    *,
+    impact: float,
+    confidence: float,
+    urgency: float,
+    effort: float,
+    thresholds: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Every term of the priority score, with its weight and contribution.
+
+    The score was a number with a formula printed somewhere else, which is
+    not the same as being able to see why one finding outranks another.
+    This returns the arithmetic so the card can show it and so the weights
+    can be argued with.
+    """
+    limits = thresholds or {}
+
+    def weight(key: str, fallback: float) -> float:
+        value = limits.get(key)
+        return float(value) if isinstance(value, (int, float)) else fallback
+
+    w_impact = weight("score_weight_impact", PRIORITY_IMPACT_WEIGHT)
+    w_confidence = weight("score_weight_confidence", PRIORITY_CONFIDENCE_WEIGHT)
+    w_urgency = weight("score_weight_urgency", PRIORITY_URGENCY_WEIGHT)
+    w_effort = weight("score_weight_effort", PRIORITY_EFFORT_WEIGHT)
+    scale = weight("score_impact_relevance_scale", PRIORITY_IMPACT_RELEVANCE_SCALE) or 1.0
+
+    # Secondary inputs are scaled by how real the impact is, so a tidy,
+    # confident, urgent finding worth nothing cannot climb on those alone.
+    relevance = min(1.0, max(0.0, impact / scale))
+    terms = [
+        {
+            "name": "Impact",
+            "value": round(impact, 1),
+            "weight": w_impact,
+            "contribution": round(w_impact * impact, 2),
+            "scaled_by_impact": False,
+        },
+        {
+            "name": "Confidence",
+            "value": round(confidence, 1),
+            "weight": w_confidence,
+            "contribution": round(w_confidence * confidence * relevance, 2),
+            "scaled_by_impact": True,
+        },
+        {
+            "name": "Urgency",
+            "value": round(urgency, 1),
+            "weight": w_urgency,
+            "contribution": round(w_urgency * urgency * relevance, 2),
+            "scaled_by_impact": True,
+        },
+        {
+            "name": "Ease",
+            "value": round(100.0 - effort, 1),
+            "weight": w_effort,
+            "contribution": round(w_effort * (100.0 - effort) * relevance, 2),
+            "scaled_by_impact": True,
+        },
+    ]
+    total = min(100.0, sum(term["contribution"] for term in terms))
+    return {
+        "terms": terms,
+        "impact_relevance": round(relevance, 3),
+        "impact_relevance_scale": scale,
+        "capped_at_100": sum(term["contribution"] for term in terms) > 100.0,
+        "total": round(total, 1),
+    }
+
+
 def score_finding(
     *,
     impact: float,
     confidence: float,
     urgency: float,
     effort: float,
+    thresholds: Mapping[str, Any] | None = None,
 ) -> float:
     """Impact-led priority: secondary inputs only contribute when impact is meaningful."""
-    impact_relevance = min(1.0, max(0.0, impact / PRIORITY_IMPACT_RELEVANCE_SCALE))
-    secondary = (
-        PRIORITY_CONFIDENCE_WEIGHT * confidence
-        + PRIORITY_URGENCY_WEIGHT * urgency
-        + PRIORITY_EFFORT_WEIGHT * (100.0 - effort)
-    )
-    score = PRIORITY_IMPACT_WEIGHT * impact + secondary * impact_relevance
-    return round(min(100.0, score), 1)
+    return score_breakdown(
+        impact=impact,
+        confidence=confidence,
+        urgency=urgency,
+        effort=effort,
+        thresholds=thresholds,
+    )["total"]
 
 
 def _rule_key(*parts: str) -> str:
@@ -1368,12 +1447,15 @@ def _make_finding(
         evidence_json = {**evidence_json, **prescription.as_dict()}
         action_override = action_override or prescription.action_text()
     urgency = urgency_override if urgency_override is not None else inputs.urgency
-    priority_score = score_finding(
+    breakdown = score_breakdown(
         impact=impact,
         confidence=inputs.confidence,
         urgency=urgency,
         effort=inputs.effort,
+        thresholds=_SCORE_WEIGHTS.get(),
     )
+    priority_score = breakdown["total"]
+    evidence_json = {**evidence_json, "score_breakdown": breakdown}
     return LeverFinding(
         rule_key=rule_key,
         lever=lever,
@@ -3713,6 +3795,56 @@ def _blocking_only_findings(
     return findings
 
 
+def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """One card per URL, keeping the highest-scoring and noting the rest.
+
+    Several rules can be right about the same page at once. Listing each
+    one makes a single page look like a backlog, and whoever opens it has
+    to work out that three rows are one job.
+    """
+    best: dict[str, LeverFinding] = {}
+    others: dict[str, list[LeverFinding]] = {}
+    out: list[LeverFinding] = []
+    for finding in findings:
+        url = finding.page_url
+        # Suppressed and core-work rows are not competing for attention, so
+        # collapsing them would hide them rather than tidy them. Nor is a
+        # tracking fault the same kind of thing as a page converting badly:
+        # one says the page is weak, the other says the number saying so
+        # cannot be trusted, and folding the second into the first loses it.
+        gate = str(finding.evidence_json.get("gate") or "")
+        if (
+            not url
+            or finding.core_work
+            or finding.suppressed_by
+            or gate.startswith("tracking")
+        ):
+            out.append(finding)
+            continue
+        current = best.get(url)
+        if current is None:
+            best[url] = finding
+        elif finding.priority_score > current.priority_score:
+            best[url] = finding
+            others.setdefault(url, []).append(current)
+        else:
+            others.setdefault(url, []).append(finding)
+
+    for url, finding in best.items():
+        hidden = others.get(url) or []
+        if hidden:
+            finding.evidence_json["also_found_on_this_page"] = [
+                {
+                    "diagnosis": row.diagnosis,
+                    "cause": row.evidence_json.get("cause"),
+                    "score": row.priority_score,
+                }
+                for row in sorted(hidden, key=lambda r: -r.priority_score)
+            ]
+        out.append(finding)
+    return out
+
+
 def cap_per_url_impact(findings: list[LeverFinding]) -> None:
     """Stop several rules claiming the same upside on one page. B4.
 
@@ -5010,6 +5142,9 @@ def diagnose(
     )
     site = with_p90_sessions(site, page_contexts)
     thresholds = _load_thresholds(db, client.id)
+    # Set for the whole run so every finding is scored on this client's
+    # weights, including the ones built deep inside the per-page cascade.
+    _SCORE_WEIGHTS.set(thresholds)
     classifications = classify_pages(page_urls)
     page_type_rates = compute_page_type_lead_rates(page_contexts, classifications)
     topic_rates = compute_topic_lead_rates(page_contexts, classifications)
@@ -5273,6 +5408,13 @@ def diagnose(
 
     # Before sorting, or a page counted three times outranks pages counted once.
     cap_per_url_impact(findings)
+
+    # And one card per page. Aquaman's /pool-leak-emergency appeared three
+    # times — as a page that stopped converting, as the page a site-wide
+    # drop was concentrated on, and again below the threshold — which reads
+    # as three problems and is one. The highest-scoring card wins and the
+    # rest ride along in its evidence, so nothing is lost.
+    findings = _collapse_by_page(findings)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
 

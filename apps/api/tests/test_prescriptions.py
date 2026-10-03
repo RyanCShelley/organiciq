@@ -520,3 +520,112 @@ def test_a_missing_query_is_not_quoted_as_if_it_were_one():
     as a literal search term."""
     assert "this page's main query" in _push(top_query=None).steps[-1].text
     assert "“" not in _push(top_query=None).steps[-1].text
+
+
+# ── The queue as a queue ──
+
+
+def test_the_score_is_shown_term_by_term():
+    """A number with the formula printed somewhere else is not the same as
+    being able to see why one finding outranks another."""
+    from app.services.lever_engine import score_breakdown
+
+    b = score_breakdown(impact=56, confidence=70, urgency=65, effort=40)
+    assert b["total"] == 59.9
+    assert [t["name"] for t in b["terms"]] == ["Impact", "Confidence", "Urgency", "Ease"]
+    assert sum(t["contribution"] for t in b["terms"]) == 59.85
+
+
+def test_the_weights_can_be_argued_with():
+    from app.services.lever_engine import score_breakdown
+
+    impact_only = score_breakdown(
+        impact=56,
+        confidence=70,
+        urgency=65,
+        effort=40,
+        thresholds={
+            "score_weight_impact": 1.0,
+            "score_weight_confidence": 0,
+            "score_weight_urgency": 0,
+            "score_weight_effort": 0,
+        },
+    )
+    assert impact_only["total"] == 56.0
+
+
+def test_secondary_terms_are_scaled_down_when_impact_is_small():
+    """A tidy, confident, urgent finding worth nothing cannot climb on
+    those alone."""
+    from app.services.lever_engine import score_breakdown
+
+    b = score_breakdown(impact=2, confidence=90, urgency=90, effort=10)
+    assert b["impact_relevance"] == 0.1
+    confidence = next(t for t in b["terms"] if t["name"] == "Confidence")
+    assert confidence["contribution"] == round(0.15 * 90 * 0.1, 2)
+
+
+def test_one_card_per_page():
+    """Aquaman's /pool-leak-emergency appeared three times, which reads as
+    three problems and is one job."""
+    from app.models.decision import DiagnosticLayer
+    from app.services.decision_types import LeverFinding
+    from app.services.lever_engine import _collapse_by_page
+
+    def _finding(score: float, gate: str) -> LeverFinding:
+        return LeverFinding(
+            rule_key=f"k{score}",
+            lever="conversion_path",
+            stage=DiagnosticLayer.CONVERSION,
+            diagnosis=f"something at {score}",
+            recommended_action="do it",
+            success_metric="m",
+            evidence_json={"gate": gate},
+            baseline_metrics_json={},
+            impact=score,
+            confidence=70,
+            urgency=65,
+            effort=40,
+            priority_score=score,
+            page_url="https://x/pool-leak-emergency",
+        )
+
+    kept = _collapse_by_page([_finding(48.5, "a"), _finding(36.3, "b")])
+    assert len(kept) == 1
+    assert kept[0].priority_score == 48.5
+    # Nothing is lost: the quieter one rides along.
+    assert kept[0].evidence_json["also_found_on_this_page"][0]["score"] == 36.3
+
+
+def test_a_tracking_fault_is_never_folded_into_a_page_finding():
+    """One says the page is weak; the other says the number saying so
+    cannot be trusted."""
+    from app.models.decision import DiagnosticLayer
+    from app.services.decision_types import LeverFinding
+    from app.services.lever_engine import _collapse_by_page
+
+    def _finding(score: float, gate: str) -> LeverFinding:
+        return LeverFinding(
+            rule_key=f"k{gate}",
+            lever="conversion_path",
+            stage=DiagnosticLayer.CONVERSION,
+            diagnosis=gate,
+            recommended_action="do it",
+            success_metric="m",
+            evidence_json={"gate": gate},
+            baseline_metrics_json={},
+            impact=score,
+            confidence=70,
+            urgency=65,
+            effort=40,
+            priority_score=score,
+            page_url="https://x/quote",
+        )
+
+    kept = _collapse_by_page(
+        [_finding(60.0, "converting_page_dropped"), _finding(20.0, "tracking_partial")]
+    )
+    assert {f.evidence_json["gate"] for f in kept} == {
+        "converting_page_dropped",
+        "tracking_partial",
+    }
