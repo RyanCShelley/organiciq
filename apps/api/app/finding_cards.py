@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from app.core.db import SessionLocal
 from app.models.client import Client
-from app.services.lever_engine import diagnose
+from app.services.lever_engine import LEVER_LABELS, diagnose
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("organiciq.finding_cards")
@@ -28,7 +28,7 @@ def _wrap(text: str, indent: str = "     ") -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--client", required=True)
+    parser.add_argument("--client", help="one slug; default is every client")
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--cause", help="only cards with this cause")
@@ -36,26 +36,40 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        client = db.query(Client).filter(Client.slug == args.client).one_or_none()
-        if client is None:
-            logger.error("No client with slug %r", args.client)
-            return 1
+        if args.client:
+            clients = db.query(Client).filter(Client.slug == args.client).all()
+            if not clients:
+                logger.error("No client with slug %r", args.client)
+                return 1
+        else:
+            clients = db.query(Client).order_by(Client.client_name).all()
+
         end = date.today()
         start = end - timedelta(days=args.days - 1)
-        result = diagnose(db, client, from_date=start, to_date=end)
 
-        rows = [row for row in result.findings if row.evidence_json.get("cause")]
+        rows = []
+        total = 0
+        for client in clients:
+            result = diagnose(db, client, from_date=start, to_date=end)
+            if not result.ready:
+                continue
+            total += len(result.findings)
+            for row in result.findings:
+                if row.evidence_json.get("cause"):
+                    row.evidence_json.setdefault("_client", client.client_name)
+                    rows.append(row)
         if args.cause:
             rows = [row for row in rows if row.evidence_json["cause"] == args.cause]
         rows.sort(key=lambda row: -row.priority_score)
 
-        logger.info("%s — %s to %s", client.client_name, start, end)
-        logger.info("%d findings, %d carrying a prescription\n", len(result.findings), len(rows))
+        logger.info("%s — %s to %s", 
+                    clients[0].client_name if args.client else f"{len(clients)} clients", start, end)
+        logger.info("%d findings, %d carrying a prescription\n", total, len(rows))
 
         for row in rows[: args.limit]:
             evidence = row.evidence_json
             logger.info("=" * 92)
-            logger.info("%s  ·  score %.1f", row.label.upper(), row.priority_score)
+            logger.info("%s  ·  %s  ·  score %.1f", LEVER_LABELS.get(row.lever, row.lever).upper(), evidence.get("_client", ""), row.priority_score)
             logger.info("")
             logger.info("  WHAT HAPPENED")
             logger.info(_wrap(row.diagnosis))
