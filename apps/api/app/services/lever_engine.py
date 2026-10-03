@@ -2037,13 +2037,24 @@ def _keyword_prescription(
     crawl_by_url: dict[str, FactCrawlPageSnapshot],
 ) -> Prescription:
     """Playbook 7's decision tree, with the crawl answering "can it rank"."""
+    # Search Console's query-to-page data is thin on terms the site barely
+    # ranks for, which is every term this rule is about. The crawl's titles
+    # are the second opinion: /capabilities/seo is plainly the SEO services
+    # page whatever Search Console reports about it.
+    title_match = _best_page_for_prompt(
+        keyword, {url: row.title or "" for url, row in crawl_by_url.items()}
+    )
+
     crawl = crawl_by_url.get(existing.page_url) if existing else None
+    if crawl is None and title_match:
+        crawl = crawl_by_url.get(title_match)
+
     canonical_elsewhere = False
     if crawl is not None and crawl.canonical_url:
-        canonical_elsewhere = (
-            _normalize_canonical(crawl.canonical_url)
-            != _normalize_canonical(existing.page_url if existing else "")
-        )
+        canonical_elsewhere = _normalize_canonical(
+            crawl.canonical_url
+        ) != _normalize_canonical(crawl.normalized_url)
+
     return classify_keyword_gap(
         KeywordSignals(
             keyword=keyword,
@@ -2052,6 +2063,7 @@ def _keyword_prescription(
             page_url=existing.page_url if existing else None,
             page_impressions=existing.impressions if existing else 0.0,
             page_position=existing.average_position if existing else None,
+            title_match_url=title_match,
             indexable=crawl.indexable if crawl else None,
             canonical_elsewhere=canonical_elsewhere,
             in_sitemap=crawl.in_sitemap if crawl else None,

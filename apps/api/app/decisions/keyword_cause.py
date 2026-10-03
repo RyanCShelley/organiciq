@@ -39,6 +39,12 @@ class KeywordSignals:
     #: The page Search Console already shows for the term, if any.
     page_url: str | None
     page_impressions: float = 0.0
+    #: A page whose title targets the term, found by matching the crawl when
+    #: Search Console has nothing substantial. `/capabilities/seo` exists and
+    #: draws three impressions for "seo services", which is below the match
+    #: threshold — without this the engine declares the page does not exist
+    #: and asks someone to build it a second time.
+    title_match_url: str | None = None
     page_position: float | None = None
     #: From the crawl of that page. None where it was not crawled.
     indexable: bool | None = None
@@ -56,25 +62,41 @@ def _title_misses_keyword(title: str | None, keyword: str) -> bool:
 
 
 def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
+    has_gsc_page = bool(signals.page_url) and (
+        signals.page_impressions >= MIN_IMPRESSIONS_FOR_PAGE_MATCH
+    )
+    target_url = signals.page_url if has_gsc_page else signals.title_match_url
     evidence = {
         "keyword": signals.keyword,
         "volume": round(signals.volume),
         "difficulty": signals.difficulty,
         "page_url": signals.page_url,
+        "matched_page": target_url,
         "page_impressions": round(signals.page_impressions),
         "page_position": signals.page_position,
     }
 
     # 1. No page at all. Everything else is moot, and this is the only case
     #    where "build a page" is the right instruction.
-    if not signals.page_url or signals.page_impressions < MIN_IMPRESSIONS_FOR_PAGE_MATCH:
+    if not target_url:
         long_tail = signals.difficulty is not None and signals.difficulty >= HARD_DIFFICULTY
+        # What was looked at, so the card never claims nothing exists while
+        # printing an impression count beside it.
+        if signals.page_url:
+            seen = (
+                f"The closest page is {signals.page_url}, drawing "
+                f"{signals.page_impressions:,.0f} impressions for the term — too few to "
+                "call it the page for it, and no page title targets it either. "
+            )
+        else:
+            seen = (
+                "No page draws an impression for it and no page title targets it. "
+            )
         steps = [
             Step(
                 f"Write a page that targets “{signals.keyword}”",
-                detail="Nothing on the site draws a single impression for it, so there "
-                "is nothing to strengthen. Put the term in the title, the H1 and the "
-                "first hundred words.",
+                detail=seen
+                + "Put the term in the title, the H1 and the first hundred words.",
             ),
             Step(
                 "Link it from the service page and two related posts",
@@ -121,7 +143,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
             steps=[
                 Step(
                     "Clear what is stopping this page from ranking: " + "; ".join(blockers),
-                    target=signals.page_url,
+                    target=target_url,
                     detail="No amount of content work moves a page that Google cannot "
                     "index or that the site does not link to.",
                 ),
@@ -138,7 +160,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
         steps.append(
             Step(
                 f"Put “{signals.keyword}” in the title and H1",
-                target=signals.page_url,
+                target=target_url,
                 detail=f"The title currently reads “{signals.title}” and does "
                 "not contain the term the page is meant to win.",
             )
@@ -146,7 +168,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
     steps.append(
         Step(
             "List the sections the top three results cover and this page does not",
-            target=signals.page_url,
+            target=target_url,
             detail="Those sections are the brief. The SERP is not stored, so this is "
             "the one step that needs a person.",
             human=True,
@@ -156,7 +178,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
         steps.append(
             Step(
                 "Target a long-tail variant alongside it",
-                target=signals.page_url,
+                target=target_url,
                 detail=f"Difficulty {signals.difficulty:.0f}. The page can rank for a "
                 "narrower version far sooner than for the head term.",
                 human=True,

@@ -266,3 +266,27 @@ def test_the_expected_result_is_not_phrased_as_a_ranking_failure():
     p = _kw()
     assert "not converting to rank" not in (p.expected_impact or "")
     assert "monthly searches" in (p.expected_impact or "")
+
+
+def test_a_page_title_finds_what_search_console_missed():
+    """/capabilities/seo is plainly the SEO services page. Search Console
+    reported the homepage on three impressions, so the engine declared the
+    page did not exist and asked for it to be built a second time."""
+    p = _kw(
+        page_url="https://smamarketing.com/",
+        page_impressions=3.0,
+        title_match_url="https://smamarketing.com/capabilities/seo",
+    )
+    assert p.cause == "page_not_competitive"
+    assert p.evidence["matched_page"] == "https://smamarketing.com/capabilities/seo"
+    assert p.steps[0].target == "https://smamarketing.com/capabilities/seo"
+
+
+def test_the_card_never_claims_nothing_exists_beside_an_impression_count():
+    """It read "nothing draws a single impression" with "page impressions 3"
+    printed directly above it."""
+    p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0, title_match_url=None)
+    assert p.cause == "no_page_for_term"
+    detail = p.steps[0].detail
+    assert "3 impressions" in detail
+    assert "too few to call it the page" in detail
