@@ -90,7 +90,13 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,
-    "minimum_recommendation_confidence": 60,
+    # Lowered from 60 once C1 made confidence a measured number rather than a
+    # per-lever constant. Against constants that started at 70 the old gate had
+    # never rejected anything; against the measured score the distribution runs
+    # 45-76 with a median of 54, so 60 would have rejected 83% of findings. At
+    # 50 the gate keeps today's recommendations and rejects the band that rests
+    # on both a weak source and thin evidence.
+    "minimum_recommendation_confidence": 50,
     "high_priority_threshold": 70,
     "medium_priority_threshold": 50,
     "meaningful_gsc_impressions": 100,

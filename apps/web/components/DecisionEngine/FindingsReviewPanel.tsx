@@ -131,7 +131,20 @@ function ExpandedFinding({
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface-muted)] px-3 py-3 text-sm">
-      <p className="font-medium text-[var(--text-primary)]">{item.diagnosis}</p>
+      {/* The action comes first. Someone opening a finding is deciding what to
+          do, and leading with the diagnosis made them read past the problem to
+          reach the answer. The evidence sits underneath, for whoever wants to
+          check the reasoning before committing to it. */}
+      {item.recommended_action ? (
+        <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
+          <p className="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            Do this
+          </p>
+          <p className="mt-1 text-[var(--text-primary)]">{item.recommended_action}</p>
+        </div>
+      ) : null}
+
+      <p className="mt-3 font-medium text-[var(--text-primary)]">{item.diagnosis}</p>
       <p className="mt-1.5 text-[var(--text-secondary)]">{formatEvidence(item.evidence_json)}</p>
       {explanations.length > 0 ? (
         <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[var(--text-secondary)]">
@@ -140,7 +153,12 @@ function ExpandedFinding({
           ))}
         </ul>
       ) : null}
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
+          How this was scored
+        </summary>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         {[
           ["Impact", item.impact],
           ...(item.severity != null ? [["Severity", item.severity] as const] : []),
@@ -161,16 +179,8 @@ function ExpandedFinding({
             </div>
           </div>
         ))}
-      </div>
-
-      {item.recommended_action ? (
-        <div className="mt-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3">
-          <p className="text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
-            Suggested action
-          </p>
-          <p className="mt-1 text-[var(--text-primary)]">{item.recommended_action}</p>
         </div>
-      ) : null}
+      </details>
 
       {canAct && clientId && from && to ? (
         <>

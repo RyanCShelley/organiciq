@@ -290,64 +290,82 @@ def build_impact_explanation(
     classification: PageClassification | None = None,
     page_ctx: PageBusinessContext | None = None,
 ) -> list[str]:
+    """What is at stake on this page, in a sentence or two.
+
+    This used to print how the score was computed — the normalization basis,
+    the reference scale, the lead-rate source, the severity integer. All of
+    it true, none of it anything a person deciding what to do on Tuesday can
+    use. "Impact reference (period leads scale): 8.75" answers a question
+    nobody asked.
+
+    What someone needs is what the page is worth, what it is currently
+    earning, and anything that changes the shape of the job. The arithmetic
+    stays in `evidence_json` for anyone debugging a number.
+    """
     lines: list[str] = []
-    basis = evidence.get("impact_basis")
-    if evidence.get("critical_override"):
-        lines.append("Critical technical override applied")
-        override_reason = evidence.get("critical_override_reason")
-        if override_reason:
-            lines.append(f"Override reason: {str(override_reason).replace('_', ' ')}")
-    if evidence.get("severity") is not None:
-        lines.append(f"Technical severity: {evidence['severity']}")
-    if basis == "downstream":
-        lines.append("Impact driven by available business opportunity evidence")
-    elif basis == "fallback":
-        lines.append("Impact uses upstream fallback signals (downstream data unavailable)")
 
-    normalization_basis = evidence.get("impact_normalization_basis")
-    if normalization_basis:
-        lines.append(f"Impact normalization: {str(normalization_basis).replace('_', ' ')}")
-    reference = evidence.get("impact_reference_leads")
-    if reference is not None:
-        lines.append(f"Impact reference (period leads scale): {reference}")
-
-    if evidence.get("indexable") is False:
-        lines.append("Non-indexable URL blocks organic visibility")
-    if evidence.get("status_code") and int(evidence["status_code"]) >= 400:
-        lines.append(f"HTTP {evidence['status_code']} prevents page delivery")
-
-    if classification is not None:
-        if classification.page_type == PageType.COMMERCIAL:
-            lines.append("Primary commercial page")
-        elif classification.page_type == PageType.CONVERSION:
-            lines.append("Primary conversion page")
-        if classification.commercial_priority >= 4:
-            lines.append(f"Commercial priority {classification.commercial_priority}/5")
-        if classification.strategic_priority >= 4:
-            lines.append(f"Strategic priority {classification.strategic_priority}/5")
-        if not classification.eligible_for_growth_action and classification.excluded_reason:
-            lines.append(f"Page excluded from growth actions: {classification.excluded_reason}")
-
-    if page_ctx is not None and page_ctx.ga4_leads > 0:
-        lines.append(f"Page generated {page_ctx.ga4_leads} lead(s) in period")
-    if page_ctx is not None and page_ctx.ga4_sessions > 0:
-        lines.append(f"{int(page_ctx.ga4_sessions)} GA4 sessions in period")
-
-    lead_rate_source = evidence.get("lead_rate_source")
-    if lead_rate_source:
-        lines.append(f"Lead rate source: {str(lead_rate_source).replace('_', ' ')}")
-
-    for key, label in (
-        ("estimated_lead_opportunity", "Estimated lead opportunity"),
-        ("leads_at_risk", "Leads at risk"),
-        ("recoverable_clicks", "Recoverable clicks"),
-        ("unlock_clicks", "Visibility unlock clicks"),
+    # What the fix is worth, in leads, which is the only currency here.
+    for key, template in (
+        ("estimated_incremental_leads", "Worth about {value} more leads a period"),
+        ("estimated_leads_at_risk", "About {value} leads a period at risk"),
+        ("leads_at_risk", "About {value} leads a period at risk"),
+        ("estimated_lead_opportunity", "Worth about {value} more leads a period"),
     ):
         value = evidence.get(key)
-        if value is not None:
-            lines.append(f"{label}: {value}")
+        if value is not None and float(value) > 0:
+            lines.append(template.format(value=_leads(float(value))))
+            break
+
+    # Clicks, when leads could not be estimated — better than nothing, and
+    # honest about being a step further from the money.
+    if not lines:
+        for key, template in (
+            ("recoverable_clicks", "About {value} clicks a period being left behind"),
+            ("unlock_clicks", "About {value} clicks a period behind the block"),
+        ):
+            value = evidence.get(key)
+            if value is not None and float(value) > 0:
+                lines.append(template.format(value=f"{round(float(value)):,}"))
+                break
+
+    # What the page does now, so the estimate has something to sit against.
+    if page_ctx is not None and page_ctx.ga4_sessions > 0:
+        current = f"{int(page_ctx.ga4_sessions):,} sessions"
+        if page_ctx.ga4_leads > 0:
+            current += f" and {int(page_ctx.ga4_leads)} leads"
+        lines.append(f"Currently {current} a period")
+
+    # Things that change the job rather than the number.
+    if evidence.get("status_code") and int(evidence["status_code"]) >= 400:
+        lines.append(f"The page returns HTTP {evidence['status_code']} — nobody can read it")
+    elif evidence.get("indexable") is False:
+        lines.append("The page is not indexable, so none of this is reachable yet")
+
+    if classification is not None:
+        if classification.page_type == PageType.CONVERSION:
+            lines.append("This is a conversion page")
+        elif classification.page_type == PageType.COMMERCIAL:
+            lines.append("This is a commercial page")
+        if not classification.eligible_for_growth_action and classification.excluded_reason:
+            lines.append(
+                "Excluded from growth actions: "
+                f"{str(classification.excluded_reason).replace('_', ' ')}"
+            )
+
+    ai_leads = evidence.get("ai_referral_leads")
+    ai_sessions = evidence.get("ai_referral_sessions")
+    if ai_sessions is not None and float(ai_sessions) > 0:
+        segment = f"{round(float(ai_sessions)):,} sessions"
+        if ai_leads is not None and float(ai_leads) > 0:
+            segment += f" and {round(float(ai_leads))} leads"
+        lines.append(f"AI assistants sent {segment} a period")
 
     return lines
+
+
+def _leads(value: float) -> str:
+    """Leads read as whole things unless there are very few of them."""
+    return f"{value:,.0f}" if value >= 10 else f"{value:,.1f}"
 
 
 def downstream_lead_opportunity(
