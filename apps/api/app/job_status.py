@@ -21,7 +21,9 @@ from sqlalchemy import func
 from app.core.db import SessionLocal
 from app.models.client import Client
 from app.models.job import DataWatermark, SyncJob
+from app.models.crawl import FactCrawlPageSnapshot
 from app.models.seranking import FactSerBacklinkPage
+from app.services.lever_engine import active_crawl_source
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("organiciq.job_status")
@@ -75,6 +77,41 @@ def _print_backlinks(db, client: Client) -> None:
         )
 
 
+def _print_crawl(db, client: Client) -> None:
+    """What the crawl saw, including the checks added after it last ran.
+
+    A rule that finds nothing and a column nobody populated look identical
+    from the outside, and only one of them is good news.
+    """
+    rows = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client.id,
+            FactCrawlPageSnapshot.source == active_crawl_source(),
+        )
+        .all()
+    )
+    if not rows:
+        logger.info("\nNo crawl snapshot rows stored.")
+        return
+
+    counted = [row for row in rows if row.conversion_elements is not None]
+    logger.info("\n%d pages in the crawl snapshot, %s", len(rows), rows[0].snapshot_date)
+    logger.info("  soft 404s                 %d", sum(1 for r in rows if r.soft_404))
+    logger.info(
+        "  pages with blocked JS/CSS %d", sum(1 for r in rows if r.blocked_resources)
+    )
+    logger.info(
+        "  conversion elements read  %d of %d pages", len(counted), len(rows)
+    )
+    if counted:
+        logger.info(
+            "    with none at all        %d",
+            sum(1 for r in counted if r.conversion_elements == 0),
+        )
+    logger.info("  orphans (no inbound link) %d", sum(1 for r in rows if not r.inbound_internal_links))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", help="client slug")
@@ -95,6 +132,8 @@ def main() -> int:
             _print_job(job)
             if job.source == "se_ranking_backlinks":
                 _print_backlinks(db, client)
+            elif job.source == "site_crawl":
+                _print_crawl(db, client)
             return 0
 
         if not args.client:
@@ -133,6 +172,8 @@ def main() -> int:
             job.source == "se_ranking_backlinks" for job in jobs
         ):
             _print_backlinks(db, client)
+        if args.source == "site_crawl" or any(job.source == "site_crawl" for job in jobs):
+            _print_crawl(db, client)
         return 0
     finally:
         db.close()
