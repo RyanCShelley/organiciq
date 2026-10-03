@@ -39,12 +39,15 @@ class KeywordSignals:
     #: The page Search Console already shows for the term, if any.
     page_url: str | None
     page_impressions: float = 0.0
-    #: A page whose title targets the term, found by matching the crawl when
-    #: Search Console has nothing substantial. `/capabilities/seo` exists and
-    #: draws three impressions for "seo services", which is below the match
-    #: threshold — without this the engine declares the page does not exist
-    #: and asks someone to build it a second time.
-    title_match_url: str | None = None
+    #: Deliberately absent: a page guessed from title similarity.
+    #:
+    #: Matching "seo services" against page titles chose
+    #: `/capabilities/local-seo`, because it shares both words while
+    #: `/capabilities/seo` shares one — and "local seo services" is a
+    #: different term with a different page. A wrong page is worse than no
+    #: page, because someone acts on it. The playbook's first source is a
+    #: keyword-to-page map maintained by a person, and until that exists
+    #: the card asks for the mapping instead of inventing it.
     page_position: float | None = None
     #: From the crawl of that page. None where it was not crawled.
     indexable: bool | None = None
@@ -65,7 +68,7 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
     has_gsc_page = bool(signals.page_url) and (
         signals.page_impressions >= MIN_IMPRESSIONS_FOR_PAGE_MATCH
     )
-    target_url = signals.page_url if has_gsc_page else signals.title_match_url
+    target_url = signals.page_url if has_gsc_page else None
     evidence = {
         "keyword": signals.keyword,
         "volume": round(signals.volume),
@@ -84,19 +87,25 @@ def classify_keyword_gap(signals: KeywordSignals) -> Prescription:
         # printing an impression count beside it.
         if signals.page_url:
             seen = (
-                f"The closest page is {signals.page_url}, drawing "
-                f"{signals.page_impressions:,.0f} impressions for the term — too few to "
-                "call it the page for it, and no page title targets it either. "
+                f"The closest page Search Console reports is {signals.page_url}, on "
+                f"{signals.page_impressions:,.0f} impressions for the term — too few "
+                "to call it the page for it."
             )
         else:
-            seen = (
-                "No page draws an impression for it and no page title targets it. "
-            )
+            seen = "No page on the site draws an impression for the term."
         steps = [
             Step(
-                f"Write a page that targets “{signals.keyword}”",
+                f"Name the page that should own “{signals.keyword}”, or "
+                "confirm there is none",
                 detail=seen
-                + "Put the term in the title, the H1 and the first hundred words.",
+                + " Nothing in our data maps terms to pages, so this one decision "
+                "cannot be made from it — and guessing from page titles picked a "
+                "neighbouring service page.",
+                human=True,
+            ),
+            Step(
+                f"If no page owns it, write one that targets “{signals.keyword}”",
+                detail="Put the term in the title, the H1 and the first hundred words.",
             ),
             Step(
                 "Link it from the service page and two related posts",

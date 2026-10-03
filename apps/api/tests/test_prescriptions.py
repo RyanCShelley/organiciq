@@ -173,10 +173,12 @@ def _kw(**kwargs):
     return classify_keyword_gap(KeywordSignals(**base))
 
 
-def test_no_page_at_all_is_the_only_case_that_says_build_one():
+def test_no_page_at_all_asks_for_the_mapping_before_building():
     p = _kw(page_url=None, page_impressions=0.0, page_position=None)
     assert p.cause == "no_page_for_term"
-    assert "Write a page that targets" in p.steps[0].text
+    assert p.steps[0].human is True
+    assert "Name the page that should own" in p.steps[0].text
+    assert "write one that targets" in p.steps[1].text
 
 
 def test_a_page_that_cannot_be_indexed_is_fixed_before_its_content():
@@ -257,7 +259,7 @@ def test_a_handful_of_impressions_does_not_make_it_the_page_for_the_term():
     engine told someone to rewrite its title. Three impressions is noise."""
     p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0, page_position=1.0)
     assert p.cause == "no_page_for_term"
-    assert "Write a page that targets" in p.steps[0].text
+    assert "Name the page that should own" in p.steps[0].text
 
 
 def test_the_expected_result_is_not_phrased_as_a_ranking_failure():
@@ -268,24 +270,20 @@ def test_the_expected_result_is_not_phrased_as_a_ranking_failure():
     assert "monthly searches" in (p.expected_impact or "")
 
 
-def test_a_page_title_finds_what_search_console_missed():
-    """/capabilities/seo is plainly the SEO services page. Search Console
-    reported the homepage on three impressions, so the engine declared the
-    page did not exist and asked for it to be built a second time."""
-    p = _kw(
-        page_url="https://smamarketing.com/",
-        page_impressions=3.0,
-        title_match_url="https://smamarketing.com/capabilities/seo",
-    )
-    assert p.cause == "page_not_competitive"
-    assert p.evidence["matched_page"] == "https://smamarketing.com/capabilities/seo"
-    assert p.steps[0].target == "https://smamarketing.com/capabilities/seo"
+def test_the_page_is_never_guessed_from_a_title():
+    """Matching "seo services" against titles chose /capabilities/local-seo,
+    which is a different term with a different page. A wrong page is worse
+    than no page, because someone acts on it."""
+    p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0)
+    assert p.cause == "no_page_for_term"
+    assert p.steps[0].human is True
+    assert "guessing from page titles" in p.steps[0].detail
 
 
 def test_the_card_never_claims_nothing_exists_beside_an_impression_count():
     """It read "nothing draws a single impression" with "page impressions 3"
     printed directly above it."""
-    p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0, title_match_url=None)
+    p = _kw(page_url="https://smamarketing.com/", page_impressions=3.0)
     assert p.cause == "no_page_for_term"
     detail = p.steps[0].detail
     assert "3 impressions" in detail

@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
-from app.decisions.keyword_cause import KeywordSignals, classify_keyword_gap
+from app.decisions.keyword_cause import (
+    MIN_IMPRESSIONS_FOR_PAGE_MATCH as KEYWORD_PAGE_MATCH_MIN_IMPRESSIONS,
+    KeywordSignals,
+    classify_keyword_gap,
+)
 from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
 from app.decisions.prescription import Prescription, Step
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
@@ -2036,18 +2040,17 @@ def _keyword_prescription(
     existing: ExistingPageForQuery | None,
     crawl_by_url: dict[str, FactCrawlPageSnapshot],
 ) -> Prescription:
-    """Playbook 7's decision tree, with the crawl answering "can it rank"."""
-    # Search Console's query-to-page data is thin on terms the site barely
-    # ranks for, which is every term this rule is about. The crawl's titles
-    # are the second opinion: /capabilities/seo is plainly the SEO services
-    # page whatever Search Console reports about it.
-    title_match = _best_page_for_prompt(
-        keyword, {url: row.title or "" for url, row in crawl_by_url.items()}
-    )
+    """Playbook 7's decision tree, with the crawl answering "can it rank".
 
-    crawl = crawl_by_url.get(existing.page_url) if existing else None
-    if crawl is None and title_match:
-        crawl = crawl_by_url.get(title_match)
+    Which page we are talking about is decided once, here, and everything
+    downstream reads that page. Deciding it in two places named one page
+    and quoted another's title.
+    """
+    has_gsc_page = bool(existing) and (
+        existing.impressions >= KEYWORD_PAGE_MATCH_MIN_IMPRESSIONS
+    )
+    target_url = existing.page_url if has_gsc_page else None
+    crawl = crawl_by_url.get(target_url) if target_url else None
 
     canonical_elsewhere = False
     if crawl is not None and crawl.canonical_url:
@@ -2063,7 +2066,6 @@ def _keyword_prescription(
             page_url=existing.page_url if existing else None,
             page_impressions=existing.impressions if existing else 0.0,
             page_position=existing.average_position if existing else None,
-            title_match_url=title_match,
             indexable=crawl.indexable if crawl else None,
             canonical_elsewhere=canonical_elsewhere,
             in_sitemap=crawl.in_sitemap if crawl else None,
@@ -2182,32 +2184,61 @@ _PROMPT_STOPWORDS = frozenset(
 )
 
 
-def _best_page_for_prompt(prompt: str, page_titles: dict[str, str]) -> str | None:
-    """The page whose title shares most with the prompt's wording.
+def _best_page_for_prompt(
+    prompt: str, page_titles: dict[str, str], *, require_clear_winner: bool = False
+) -> str | None:
+    """The page whose title and URL best match a phrase.
 
     Vector similarity is what the playbook asks for and there are no
-    embeddings yet, so this is the honest first version: shared terms,
-    stopwords removed, and nothing returned when the overlap is one word —
-    which would match every page on the site.
+    embeddings yet, so this is shared terms over the title and the URL
+    slug, with two guards learnt from getting it wrong.
+
+    A candidate carrying qualifiers the phrase does not is penalised: for
+    "seo services", `/capabilities/local-seo` shares both words and is
+    still the wrong page, because "local" narrows it to a different term.
+
+    `require_clear_winner` refuses to answer on a tie. Naming a page is a
+    claim that someone will act on, and two pages scoring the same means we
+    do not know which.
     """
-    terms = {
-        word
-        for word in re.findall(r"[a-z0-9]+", prompt.lower())
-        if word not in _PROMPT_STOPWORDS and len(word) > 2
-    }
+    terms = _match_terms(prompt)
     if not terms:
         return None
-    best: tuple[int, str] | None = None
+
+    scored: list[tuple[float, str]] = []
     for url, title in page_titles.items():
-        title_terms = {
-            word
-            for word in re.findall(r"[a-z0-9]+", (title or "").lower())
-            if word not in _PROMPT_STOPWORDS and len(word) > 2
-        }
-        shared = len(terms & title_terms)
-        if shared >= 2 and (best is None or shared > best[0]):
-            best = (shared, url)
-    return best[1] if best else None
+        candidate = _match_terms(title) | _match_terms(
+            urlsplit(url).path.replace("-", " ").replace("/", " ")
+        )
+        shared = terms & candidate
+        if len(shared) < 2:
+            continue
+        # Words the candidate adds that the phrase never asked for. "Local"
+        # on a page matched to "seo services" is not a near miss, it is a
+        # different service.
+        extra = len(candidate - terms - _MATCH_GENERIC)
+        scored.append((len(shared) - 0.5 * extra, url))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    if require_clear_winner and len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None
+    return scored[0][1]
+
+
+#: Words that appear on every page of a site and say nothing about which.
+_MATCH_GENERIC = frozenset(
+    {"capabilities", "services", "service", "solutions", "page", "home", "index"}
+)
+
+
+def _match_terms(text: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if word not in _PROMPT_STOPWORDS and len(word) > 2
+    }
 
 
 def _ai_visibility_prompt_findings(
