@@ -1,4 +1,8 @@
-import { accountToolHref } from "@/lib/account-routes";
+import {
+  ACCOUNT_TOOLS,
+  accountToolFromPath,
+  accountToolHref,
+} from "@/lib/account-routes";
 
 export type NavItem = {
   href: string;
@@ -38,15 +42,9 @@ export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/platform/jobs", label: "Sync jobs" },
 ];
 
-export const ACCOUNT_TOOL_SEGMENTS = [
-  "dashboard",
-  "watch-list",
-  "content-opp",
-  "decision-engine",
-  "keyword-map",
-  "site-crawl",
-  "annotations",
-] as const;
+//: The same list as ACCOUNT_TOOLS, re-exported rather than repeated. It
+//: was a sixth hand-maintained copy of the route names.
+export const ACCOUNT_TOOL_SEGMENTS = ACCOUNT_TOOLS;
 
 /**
  * The client encoded in the URL, if any. The layout only knows the cookie
@@ -77,15 +75,7 @@ export function isNavActive(pathname: string, href: string, exact = false): bool
 
 function pathEncodesClient(href: string): boolean {
   if (href.startsWith("/clients/")) return true;
-  // /{slug}/dashboard|watch-list|…
-  const parts = href.split("/").filter(Boolean);
-  if (parts.length >= 2) {
-    const tool = parts[1];
-    return ["dashboard", "watch-list", "content-opp", "decision-engine", "annotations"].includes(
-      tool,
-    );
-  }
-  return false;
+  return accountToolFromPath(href) !== null;
 }
 
 export function withNavContext(

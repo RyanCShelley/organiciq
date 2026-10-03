@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useTransition } from "react";
 
+import { ACCOUNT_TOOL_PATH } from "@/lib/account-routes";
 import {
   COMPARE_OPTIONS,
   RANGE_OPTIONS,
@@ -104,9 +105,7 @@ export function useWorkspaceParams({
     params.delete("clientId");
     // Prefer slug in the path for account tools and /clients/* — do not put clientId in the query.
     const onClientsPath = pathname.startsWith("/clients/");
-    const accountMatch = pathname.match(
-      /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|annotations)(\/|$)/,
-    );
+    const accountMatch = pathname.match(ACCOUNT_TOOL_PATH);
     if (nextClientId && !onClientsPath && !accountMatch) {
       params.set("clientId", nextClientId);
     }

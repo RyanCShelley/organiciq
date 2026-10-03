@@ -24,7 +24,7 @@ export default async function KeywordMapPage({
   let payload: MapPayload = EMPTY;
   let error: string | null = null;
   try {
-    payload = await apiFetch<MapPayload>("/keyword-page-map", {
+    payload = await apiFetch<MapPayload>("/decisions/keyword-page-map", {
       clientId: client.id,
     });
   } catch (caught) {

@@ -36,7 +36,7 @@ export async function saveKeywordPageMapAction(formData: FormData) {
   };
 
   try {
-    await apiFetch("/keyword-page-map", {
+    await apiFetch("/decisions/keyword-page-map", {
       method: "PUT",
       clientId,
       body: { entries: [entry] },

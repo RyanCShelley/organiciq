@@ -20,7 +20,7 @@ import { Suspense } from "react";
 
 import { LogoWordmark } from "@/components/brand/Logo";
 import { ClientSwitcher } from "@/components/layout/ClientSwitcher";
-import { accountToolHref } from "@/lib/account-routes";
+import { ACCOUNT_TOOL_PATH, accountToolHref } from "@/lib/account-routes";
 import type { Client } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/cn";
@@ -71,7 +71,7 @@ export function SidebarNav({
   const pathname = usePathname();
   const platformOnly = isPlatformContext(pathname);
   const accountToolMatch = pathname.match(
-    /^\/([^/]+)\/(dashboard|watch-list|content-opp|decision-engine|keyword-map|site-crawl|annotations)(\/|$)/,
+    ACCOUNT_TOOL_PATH,
   );
   const clientsWorkspaceMatch = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
   const pathSlug = accountToolMatch?.[1] || clientsWorkspaceMatch?.[1];
