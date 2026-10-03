@@ -39,7 +39,7 @@ PAGE = "https://example.com/blog/metal-roofing-guide"
 OTHER = "https://example.com/blog/tile-roofing"
 
 
-def _fact(db, client_id, url, on, clicks, impressions):
+def _fact(db, client_id, url, on, clicks, impressions, position="8"):
     db.add(
         FactGscPage(
             id=uuid4(),
@@ -52,7 +52,7 @@ def _fact(db, client_id, url, on, clicks, impressions):
             impressions=Decimal(impressions),
             clicks=Decimal(clicks),
             ctr=Decimal("0.05"),
-            average_position=Decimal("8"),
+            average_position=Decimal(position),
         )
     )
 
@@ -85,8 +85,9 @@ def test_too_little_history_compares_against_nothing():
 
 
 def test_a_page_that_lost_most_of_its_traffic_is_found(db, client_a):
-    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
-    _fact(db, client_a.id, PAGE, END, 40, 2000)
+    """Rankings slip with the impressions here: that is decay, not demand."""
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000, position="4")
+    _fact(db, client_a.id, PAGE, END, 40, 2000, position="19")
     # A steady page, so the site has not simply fallen with it.
     _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
     _fact(db, client_a.id, OTHER, END, 300, 6000)
@@ -99,7 +100,9 @@ def test_a_page_that_lost_most_of_its_traffic_is_found(db, client_a):
     assert evidence["prior_clicks"] == 400
     assert evidence["current_clicks"] == 40
     assert evidence["year_over_year"] is True
-    assert "Deep refresh this page" in findings[0].recommended_action
+    assert evidence["cause"] == "true_decay"
+    # The brief, not the verdict.
+    assert "subtopics" in findings[0].recommended_action
 
 
 def test_a_site_wide_fall_does_not_flag_every_page(db, client_a):
@@ -140,20 +143,19 @@ def test_clicks_falling_while_impressions_hold_is_routed_not_dropped(db, client_
     )
 
     assert len(findings) == 1
-    assert findings[0].evidence_json["cause"] == "serp_feature_or_ctr"
+    assert findings[0].evidence_json["cause"] == "ctr_loss"
     assert findings[0].lever == "serp_ctr"
     assert "impressions flat" in findings[0].diagnosis
-    assert "what now appears above it" in findings[0].recommended_action
+    action = findings[0].recommended_action
+    assert "record what sits above it" in action
+    assert "first 40 characters" in action
 
 
-def test_a_smaller_slide_is_a_light_refresh(db, client_a):
-    """Down a third is worth reviewing, not reworking.
-
-    The rest of the site is large and steady here on purpose: the page must
-    still clear the 25-point excess over the site, so on a small site a page's
-    own fall drags the average down and masks it."""
-    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
-    _fact(db, client_a.id, PAGE, END, 280, 3000)
+def test_impressions_down_with_rankings_holding_is_demand_not_decay(db, client_a):
+    """Fewer people searched. A refresh cannot buy back demand that is not
+    there, so the only honest instruction is to record it and leave the page."""
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000, position="6")
+    _fact(db, client_a.id, PAGE, END, 40, 800, position="6")
     _fact(db, client_a.id, OTHER, LAST_YEAR, 3000, 60000)
     _fact(db, client_a.id, OTHER, END, 3000, 60000)
     db.commit()
@@ -163,14 +165,16 @@ def test_a_smaller_slide_is_a_light_refresh(db, client_a):
     )
 
     assert len(findings) == 1
-    assert findings[0].evidence_json["cause"] == "light_refresh"
-    assert findings[0].diagnosis.startswith("Slipping")
-    assert "Review this page" in findings[0].recommended_action
+    assert findings[0].evidence_json["cause"] == "demand_fell"
+    assert "leave the page alone" in findings[0].recommended_action
+    assert findings[0].evidence_json["expected_impact"] == (
+        "No recovery available — demand, not the page"
+    )
 
 
-def test_a_big_drop_with_impressions_gone_is_still_a_deep_refresh(db, client_a):
-    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000)
-    _fact(db, client_a.id, PAGE, END, 40, 2000)
+def test_impressions_and_rankings_both_down_is_a_refresh_brief(db, client_a):
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000, position="5")
+    _fact(db, client_a.id, PAGE, END, 40, 2000, position="22")
     _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
     _fact(db, client_a.id, OTHER, END, 300, 6000)
     db.commit()
@@ -179,8 +183,28 @@ def test_a_big_drop_with_impressions_gone_is_still_a_deep_refresh(db, client_a):
         db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()
     )
 
-    assert findings[0].evidence_json["cause"] == "decay"
-    assert "Deep refresh" in findings[0].recommended_action
+    assert findings[0].evidence_json["cause"] == "true_decay"
+    actions = findings[0].evidence_json["actions"]
+    assert len(actions) == 3
+    assert all(step["target"] == PAGE for step in actions)
+
+
+def test_every_decay_finding_carries_a_verification(db, client_a):
+    """A prescription with no way to tell whether it worked is an opinion."""
+    _fact(db, client_a.id, PAGE, LAST_YEAR, 400, 8000, position="5")
+    _fact(db, client_a.id, PAGE, END, 40, 2000, position="22")
+    _fact(db, client_a.id, OTHER, LAST_YEAR, 300, 6000)
+    _fact(db, client_a.id, OTHER, END, 300, 6000)
+    db.commit()
+
+    findings = _decaying_page_findings(
+        db, client_a, period=PERIOD, fact_min=date(2024, 1, 1), site=_site()
+    )
+
+    evidence = findings[0].evidence_json
+    assert evidence["verify_metric"]
+    assert evidence["verify_after_days"] > 0
+    assert evidence["expected_impact"]
 
 
 def test_a_page_that_never_performed_cannot_have_decayed(db, client_a):

@@ -146,7 +146,11 @@ def test_score_is_recorded_without_changing_recommendations(db, client_a):
     _seed_falling_lead_rate(db, client_a, end, prev_end)
 
     result = diagnose(db, client_a, from_date=date(2026, 8, 2), to_date=end)
-    conversion = [row for row in result.recommendations if row.lever == "conversion_path"]
+    conversion = [
+        row
+        for row in result.recommendations
+        if row.evidence_json.get("gate") == "site_conversion"
+    ]
     assert len(conversion) == 1
 
     finding = conversion[0]
@@ -168,7 +172,9 @@ def test_enabling_the_flag_applies_the_score(db, client_a):
     db.commit()
 
     result = diagnose(db, client_a, from_date=date(2026, 8, 2), to_date=end)
-    conversion = [row for row in result.findings if row.lever == "conversion_path"]
+    conversion = [
+        row for row in result.findings if row.evidence_json.get("gate") == "site_conversion"
+    ]
     assert len(conversion) == 1
     finding = conversion[0]
     assert finding.confidence == finding.evidence_json["data_driven_confidence"]

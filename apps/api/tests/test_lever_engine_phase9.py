@@ -302,7 +302,11 @@ def test_conversion_portfolio_rule(db, client_a):
 
     seed_required_sources(db, client_a.id, end)
     result = diagnose(db, client_a, from_date=start, to_date=end)
-    conversion = [row for row in result.recommendations if row.lever == "conversion_path"]
+    conversion = [
+        row
+        for row in result.recommendations
+        if row.evidence_json.get("gate") == "site_conversion"
+    ]
     assert len(conversion) == 1
     assert conversion[0].confidence == 70
     assert conversion[0].evidence_json["leads_at_risk"] > 0

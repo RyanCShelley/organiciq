@@ -15,6 +15,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.confidence import data_confidence
+from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
+from app.decisions.prescription import Prescription, Step
+from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
 from app.decisions.effort import effort_class, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
@@ -1315,11 +1318,17 @@ def _make_finding(
     urgency_override: float | None = None,
     severity: float | None = None,
     action_override: str | None = None,
+    prescription: Prescription | None = None,
 ) -> LeverFinding:
     inputs = LEVER_INPUTS[lever]
     # Recorded rather than derived later: the finding knows its own kind, and
     # a dismissal has to be countable against it long after the finding is gone.
     evidence_json = {**evidence_json, "rule_family": rule_family(lever, evidence_json)}
+    # The prescription is the finding's point, so it rides in the evidence
+    # where every consumer — card, API, report — already looks.
+    if prescription is not None:
+        evidence_json = {**evidence_json, **prescription.as_dict()}
+        action_override = action_override or prescription.action_text()
     urgency = urgency_override if urgency_override is not None else inputs.urgency
     priority_score = score_finding(
         impact=impact,
@@ -2278,6 +2287,113 @@ CONVERSION_PAGE_MIN_SHORTFALL = 3.0
 CONVERSION_PAGE_RATE_RATIO = 0.5
 
 
+#: A page needs this many leads in the earlier window to have been
+#: "converting" at all. Below it a fall to zero is one lead not arriving.
+PAGE_DROP_MIN_PRIOR_LEADS = 3.0
+#: How many of these to raise. The list is a queue, not an inventory.
+PAGE_DROP_MAX_FINDINGS = 5
+
+
+def _converting_page_dropped_findings(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+    site: SiteBusinessContext,
+    crawl_by_url: dict[str, FactCrawlPageSnapshot],
+    thresholds: dict[str, Any],
+) -> list[LeverFinding]:
+    """Pages that used to convert and stopped. Playbook lever 2.
+
+    Leads are sessions times conversion rate, so this never says "the page
+    is underperforming" without first saying which of the two moved. When
+    the traffic went, the card says so and points at the lever that can do
+    something about it, rather than prescribing a rewrite that cannot work.
+    """
+    if period is None:
+        return []
+    lead_events = _lead_event_names(db, client.id)
+    if not lead_events:
+        return []
+
+    start, end = period
+    span = (end - start).days + 1
+    before_end = start - timedelta(days=1)
+    before_start = before_end - timedelta(days=span - 1)
+
+    leads_now = _leads_by_page(db, client.id, lead_events, start, end)
+    leads_before = _leads_by_page(db, client.id, lead_events, before_start, before_end)
+    sessions_now = _sessions_by_page(db, client.id, start, end)
+    sessions_before = _sessions_by_page(db, client.id, before_start, before_end)
+
+    candidates: list[tuple[float, LeverFinding]] = []
+    for url, prior_leads in leads_before.items():
+        if prior_leads < PAGE_DROP_MIN_PRIOR_LEADS:
+            continue
+        before_sessions = sessions_before.get(url, 0.0)
+        if before_sessions <= 0:
+            continue
+        now_sessions = sessions_now.get(url, 0.0)
+        now_leads = leads_now.get(url, 0.0)
+        lost = prior_leads - now_leads
+        if lost <= 0:
+            continue
+
+        crawl = crawl_by_url.get(url)
+        prescription = classify_page_drop(
+            PageDropSignals(
+                page_url=url,
+                sessions_now=now_sessions,
+                sessions_before=before_sessions,
+                rate_now=(now_leads / now_sessions * 100.0) if now_sessions else 0.0,
+                rate_before=prior_leads / before_sessions * 100.0,
+                leads_lost=lost,
+                conversion_elements=(
+                    crawl.conversion_elements if crawl is not None else None
+                ),
+                # GA4 carries no device dimension and no Core Web Vitals are
+                # stored, so the mobile and speed branches cannot fire yet.
+                # Passing None is the honest input; inventing one is not.
+                mobile_rate=None,
+                desktop_rate=None,
+                mobile_lcp_seconds=None,
+                changed_on=None,
+            )
+        )
+        if prescription is None:
+            continue
+
+        impact, impact_evidence = normalize_business_impact(
+            site=site,
+            leads_at_risk=lost,
+            data_confidence="high",
+        )
+        finding = _make_finding(
+            lever=GrowthAction.CONVERSION_PATH.value,
+            rule_key=_rule_key("page_dropped", url),
+            diagnosis=(
+                f"{prior_leads:.0f} leads to {now_leads:.0f} on {url} — "
+                f"{prescription.summary.lower()}"
+            ),
+            evidence_json={
+                "gate": "converting_page_dropped",
+                "promotion_class": "actionable",
+                "prior_leads": round(prior_leads, 1),
+                "current_leads": round(now_leads, 1),
+                "compared_with": [before_start.isoformat(), before_end.isoformat()],
+                **impact_evidence,
+            },
+            baseline_metrics_json={"leads": prior_leads, "sessions": before_sessions},
+            impact=impact,
+            page_url=url,
+            prescription=prescription,
+        )
+        candidates.append((lost, finding))
+
+    candidates.sort(key=lambda row: -row[0])
+    return [finding for _, finding in candidates[:PAGE_DROP_MAX_FINDINGS]]
+
+
 def _conversion_page_findings(
     pages: list[PageDemand],
     *,
@@ -2773,6 +2889,53 @@ def _page_totals(
     return {url: (float(clicks or 0), float(impressions or 0)) for url, clicks, impressions in rows}
 
 
+#: A page whose average position moved less than this did not lose its
+#: rankings, whatever happened to its impressions.
+RANKING_SLIP_POSITIONS = 3.0
+
+
+def _page_positions(
+    db: Session, client_id: UUID, now: tuple[date, date], before: tuple[date, date]
+) -> dict[str, tuple[float | None, float | None]]:
+    """Average position per URL in each window, for telling demand from decay.
+
+    Impressions falling says nothing on its own: a page can lose them by
+    slipping down the results or because fewer people are searching. The
+    position is what separates the two, and the fixes are opposite —
+    rewrite the page, or leave it alone.
+    """
+
+    def _avg(window: tuple[date, date]) -> dict[str, float]:
+        start, end = window
+        rows = (
+            db.query(
+                FactGscPage.normalized_url,
+                func.sum(FactGscPage.average_position * FactGscPage.impressions),
+                func.sum(FactGscPage.impressions),
+            )
+            .filter(
+                FactGscPage.client_id == client_id,
+                FactGscPage.date >= start,
+                FactGscPage.date <= end,
+                FactGscPage.impressions > 0,
+            )
+            .group_by(FactGscPage.normalized_url)
+            .all()
+        )
+        out: dict[str, float] = {}
+        for url, weighted, impressions in rows:
+            total = float(impressions or 0)
+            if url and total > 0:
+                out[url] = float(weighted or 0) / total
+        return out
+
+    current, prior = _avg(now), _avg(before)
+    return {
+        url: (current.get(url), prior.get(url))
+        for url in set(current) | set(prior)
+    }
+
+
 def _decay_comparison_window(
     current: tuple[date, date], fact_min: date | None
 ) -> tuple[date, date] | None:
@@ -2837,6 +3000,7 @@ def _decaying_page_findings(
     before = _page_totals(db, client.id, earlier)
     if not before:
         return []
+    positions = _page_positions(db, client.id, period, earlier)
 
     site_now = sum(clicks for clicks, _ in now.values())
     site_before = sum(clicks for clicks, _ in before.values())
@@ -2866,33 +3030,116 @@ def _decaying_page_findings(
         held = abs(impressions_change) <= flat_band
         lost = prior_clicks - current_clicks
         against = "the same period last year" if yoy else "earlier in the history"
-        light = drop_pct < DECAY_MIN_DROP_PCT
+
+        # ── Playbook 5: impressions tell three stories apart ──
+        # Clicks down with impressions holding is the listing losing the
+        # click, which is a different job from rewriting the page and routes
+        # to SERP CTR. Clicks and impressions both down with rankings holding
+        # is the market, and there is nothing to do about that.
+        position_now, position_before = positions.get(url, (None, None))
+        rankings_held = (
+            position_now is not None
+            and position_before is not None
+            and position_now - position_before <= RANKING_SLIP_POSITIONS
+        )
+        evidence = {
+            "prior_clicks": int(prior_clicks),
+            "current_clicks": int(current_clicks),
+            "prior_impressions": int(prior_impressions),
+            "current_impressions": int(current_impressions),
+            "drop_pct": round(drop_pct, 1),
+            "impressions_change_pct": round(impressions_change, 1),
+            "average_position_before": (
+                round(position_before, 1) if position_before is not None else None
+            ),
+            "average_position_now": (
+                round(position_now, 1) if position_now is not None else None
+            ),
+        }
 
         if held:
-            cause = "serp_feature_or_ctr"
+            prescription = Prescription(
+                cause="ctr_loss",
+                evidence=evidence,
+                steps=[
+                    Step(
+                        "Open the SERP for this page's top query and record what sits above it",
+                        target=url,
+                        detail="An AI Overview, a video carousel or a new local pack "
+                        "takes the click without taking the ranking.",
+                        human=True,
+                    ),
+                    Step(
+                        "Rewrite the title to lead with the query in the first 40 characters",
+                        target=url,
+                        detail="Keep it under 60 characters, add one specific — a number, "
+                        "an audience or an outcome — and move the brand to the end.",
+                    ),
+                    Step(
+                        "Rewrite the meta description to answer the query in sentence one",
+                        target=url,
+                        detail="Proof in sentence two, call to action third, 155 characters.",
+                    ),
+                ],
+                expected_impact=f"about {int(lost):,} clicks a period",
+                verify_metric="ctr_top5_queries",
+                verify_after_days=28,
+                routed_to=GrowthAction.SERP_CTR.value,
+            )
             diagnosis = (
                 f"Clicks down {drop_pct:.0f}% on {against} with impressions flat: {url}"
             )
-            action = (
-                "The page is shown as often and chosen less, so this is the listing "
-                "rather than the content. Check what now appears above it — an AI "
-                "Overview or a new feature — and rewrite the title and description "
-                "against what is actually winning the click."
+        elif rankings_held:
+            prescription = Prescription(
+                cause="demand_fell",
+                evidence=evidence,
+                steps=[
+                    Step(
+                        "Record the volume trend for this page's terms and leave the page alone",
+                        target=url,
+                        detail="Rankings held and impressions fell, so fewer people are "
+                        "searching. A refresh cannot buy back demand that is not there.",
+                        human=True,
+                    ),
+                ],
+                expected_impact="No recovery available — demand, not the page",
+                verify_metric="keyword_volume_trend",
+                verify_after_days=56,
+            )
+            diagnosis = (
+                f"Search demand for {url} fell {drop_pct:.0f}% on {against} while its "
+                f"rankings held"
             )
         else:
-            cause = "light_refresh" if light else "decay"
-            verb = "Slipping" if light else "Down"
+            prescription = Prescription(
+                cause="true_decay",
+                evidence=evidence,
+                steps=[
+                    Step(
+                        "List the subtopics the pages now outranking this one cover and it does not",
+                        target=url,
+                        detail="Those sections are the refresh brief.",
+                        human=True,
+                    ),
+                    Step(
+                        "Update the facts, figures and screenshots, then add the missing sections",
+                        target=url,
+                        detail="Change the visible date only once the content really changed.",
+                    ),
+                    Step(
+                        "Reclaim the referring domains this page lost",
+                        target=url,
+                    ),
+                ],
+                expected_impact=f"about {int(lost):,} clicks a period",
+                verify_metric="average_position_lost_queries",
+                verify_after_days=56,
+            )
             diagnosis = (
-                f"{verb} {drop_pct:.0f}% on {against}: {url} "
+                f"Down {drop_pct:.0f}% on {against}: {url} "
                 f"({int(prior_clicks):,} clicks to {int(current_clicks):,})"
             )
-            action = (
-                f"{'Review' if light else 'Deep refresh'} this page. It earned "
-                f"{int(prior_clicks):,} clicks {against} and now earns "
-                f"{int(current_clicks):,}, while the site as a whole moved "
-                f"{-site_drop_pct:+.0f}% — so this is the page losing ground, not the "
-                "market. Rework the content against what currently ranks."
-            )
+        cause = prescription.cause
 
         # Scored in leads: the clicks this page used to bring and no longer
         # does, at the site's lead rate. Medium confidence — the clicks are
@@ -2905,12 +3152,14 @@ def _decaying_page_findings(
             data_confidence="medium",
         )
         finding = _make_finding(
+            # Routed by cause, not by lever of origin: a page losing the
+            # click is CTR work wherever it was found.
             lever=(
                 GrowthAction.SERP_CTR.value if held else GrowthAction.AI_VISIBILITY.value
             ),
             rule_key=_rule_key("decaying_page", url),
             diagnosis=diagnosis,
-            action_override=action,
+            prescription=prescription,
             evidence_json={
                 "gate": "decaying_page",
                 "prior_clicks": int(prior_clicks),
@@ -3208,6 +3457,33 @@ def survives_tracking_gate(finding: LeverFinding, active_before: set[str]) -> bo
     return bool(finding.page_url) and finding.page_url in active_before
 
 
+def _sessions_between(db: Session, client_id: UUID, start: date, end: date) -> float:
+    return float(
+        db.query(func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        .filter(
+            FactGa4Traffic.client_id == client_id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _search_clicks_between(db: Session, client_id: UUID, start: date, end: date) -> float:
+    """Search clicks, as the witness that does not depend on our own tag."""
+    return float(
+        db.query(func.coalesce(func.sum(FactGscPage.clicks), 0))
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .scalar()
+        or 0
+    )
+
+
 def _tracking_failure_finding(
     db: Session,
     client: Client,
@@ -3303,6 +3579,27 @@ def _tracking_failure_finding(
         leads_at_risk=expected if expected > 0 else None,
         data_confidence="high",
     )
+
+    # Which part of tracking broke. Four faults wear this one label and they
+    # have four different fixes, so the finding has to say which. Playbook 1.
+    prior_window_start = window_start - timedelta(days=TRACKING_SILENCE_DAYS)
+    prescription = classify_tracking_break(
+        TrackingSignals(
+            sessions_now=sessions,
+            sessions_before=_sessions_between(
+                db, client.id, prior_window_start, window_start - timedelta(days=1)
+            ),
+            search_clicks_now=_search_clicks_between(db, client.id, window_start, end),
+            search_clicks_before=_search_clicks_between(
+                db, client.id, prior_window_start, window_start - timedelta(days=1)
+            ),
+            leads_now=leads,
+            # No CRM is wired, so the form and the event cannot be told apart
+            # from data. The prescription says so and asks for one test that
+            # separates them, rather than guessing at one of the two.
+            crm_leads_now=None,
+        )
+    )
     return _make_finding(
         lever=GrowthAction.CONVERSION_PATH.value,
         rule_key=_rule_key("tracking_silent", str(client.id)),
@@ -3338,7 +3635,7 @@ def _tracking_failure_finding(
         impact=impact,
         severity=100.0,
         urgency_override=100.0,
-        action_override=TRACKING_ACTION,
+        prescription=prescription,
     )
 
 
@@ -4222,11 +4519,22 @@ def diagnose(
         _enrich_finding(conversion, classification=None, page_ctx=None)
         findings.append(conversion)
 
-    # ── Links earned and not converted ──
-    findings.extend(_pr_push_findings(db, client, pages, period=gsc_period, site=site))
-    for finding in findings:
-        if finding.evidence_json.get("gate") == "pr_push_unconverted":
-            _enrich_finding(finding, classification=None, page_ctx=None)
+    # ── Pages that were converting and stopped ──
+    dropped = _converting_page_dropped_findings(
+        db,
+        client,
+        period=ga4_period,
+        site=site,
+        crawl_by_url=crawl_by_url,
+        thresholds=thresholds,
+    )
+    for finding in dropped:
+        _enrich_finding(
+            finding,
+            classification=classifications.get(finding.page_url or ""),
+            page_ctx=page_contexts.get(finding.page_url or ""),
+        )
+    findings.extend(dropped)
 
     # ── Blocking problems the demand gate would otherwise hide ──
     findings.extend(
@@ -4267,26 +4575,6 @@ def diagnose(
                 classification=classifications.get(finding.page_url or ""),
                 page_ctx=page_contexts.get(finding.page_url or ""),
             )
-
-    # ── Subjects with demand and no page at all ──
-    findings.extend(
-        _content_cluster_findings(
-            db, client, period=gsc_period, site=site, thresholds=thresholds
-        )
-    )
-    for finding in findings:
-        if finding.evidence_json.get("gate") == "content_cluster":
-            _enrich_finding(finding, classification=None, page_ctx=None)
-
-    # ── Gate 2: rankings that bring nothing ──
-    findings.extend(
-        _visibility_without_traffic_findings(
-            db, client, pages, period=gsc_period, site=site, thresholds=thresholds
-        )
-    )
-    for finding in findings:
-        if finding.evidence_json.get("gate") == "visibility_no_traffic":
-            _enrich_finding(finding, classification=None, page_ctx=None)
 
     # ── Gate 3: traffic that is not turning into anything ──
     # The layer closest to leads, which is the order the product works in:
@@ -4335,13 +4623,6 @@ def diagnose(
     # ── Phase 4 ──
     # Each behind a flag that defaults on, so a client who disagrees with a
     # new rule can switch it off without waiting for a deploy.
-    sov = _ai_sov_falling_finding(
-        db, client, period=gsc_period or ga4_period, site=site, thresholds=thresholds
-    )
-    if sov is not None:
-        _enrich_finding(sov, classification=None, page_ctx=None)
-        findings.append(sov)
-
     reclaimed = _link_reclamation_findings(
         db, client, crawl_by_url=crawl_by_url, site=site, thresholds=thresholds
     )

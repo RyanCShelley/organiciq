@@ -117,9 +117,6 @@ def _sov(db, client_id, day, pct):
     )
 
 
-# ── N1: AI share of voice falling ──
-
-
 def _run(db, client_a, thresholds=None):
     db.commit()
     seed_required_sources(db, client_a.id, END)
@@ -127,63 +124,15 @@ def _run(db, client_a, thresholds=None):
         from app.models.decision import DecisionThreshold
 
         db.add(
-            DecisionThreshold(
-                id=uuid4(), client_id=client_a.id, thresholds=thresholds
-            )
+            DecisionThreshold(id=uuid4(), client_id=client_a.id, thresholds=thresholds)
         )
         db.commit()
     return diagnose(db, client_a, from_date=START, to_date=END)
 
 
-def test_a_falling_share_of_voice_is_a_finding(db, client_a):
-    _minimal_site(db, client_a)
-    _sov(db, client_a.id, END - timedelta(days=28), 40.0)
-    _sov(db, client_a.id, END, 20.0)
-
-    result = _run(db, client_a)
-    sov = [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "ai_sov_falling"
-    ]
-    assert len(sov) == 1
-    assert sov[0].evidence_json["relative_drop_pct"] == 50.0
-
-
-def test_a_steady_share_of_voice_is_not(db, client_a):
-    _minimal_site(db, client_a)
-    _sov(db, client_a.id, END - timedelta(days=28), 40.0)
-    _sov(db, client_a.id, END, 38.0)
-
-    result = _run(db, client_a)
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "ai_sov_falling"
-    ]
-
-
-def test_a_relative_fall_from_almost_nothing_is_not_a_finding(db, client_a):
-    """20% off a 2% share is one prompt changing its mind."""
-    _minimal_site(db, client_a)
-    _sov(db, client_a.id, END - timedelta(days=28), 2.0)
-    _sov(db, client_a.id, END, 1.0)
-
-    result = _run(db, client_a)
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "ai_sov_falling"
-    ]
-
-
-def test_the_flag_turns_the_rule_off(db, client_a):
-    _minimal_site(db, client_a)
-    _sov(db, client_a.id, END - timedelta(days=28), 40.0)
-    _sov(db, client_a.id, END, 20.0)
-
-    result = _run(db, client_a, {"rule_ai_sov_falling_enabled": 0})
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "ai_sov_falling"
-    ]
+# ── N1 removed ──
+# AI share of voice falling was cut from the rule set on 3 Oct 2026: it
+# reports a trend, and the engine's job is to say what to do about one.
 
 
 # ── N2: link reclamation ──
