@@ -4,16 +4,11 @@ from copy import deepcopy
 from typing import Any
 
 DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
-    "gsc_high_impression_min": 100,
-    "gsc_low_ctr_max_pct": 1.0,
     "gsc_striking_distance_min_pos": 8,
     "gsc_striking_distance_max_pos": 20,
     "gsc_striking_distance_min_impressions": 50,
     "conversion_sessions_growth_min_pct": 5.0,
     "conversion_lead_rate_decline_min_pct": 10.0,
-    # Legacy portfolio gap (unused by lever_engine AI Visibility rules).
-    "ai_visibility_gap_search_min": 0.05,
-    "ai_visibility_gap_mention_max_pct": 2.0,
     "ai_visibility_min_keyword_volume": 50,
     # What a new page can plausibly reach on a term nothing currently ranks
     # for. Read off the measured CTR curve rather than assumed: position 5 is
@@ -34,8 +29,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     # --- Phase 2 ---
     # T1: a rate that moved on four expected leads moved on noise.
     "gate1_min_expected_leads": 10,
-    # T2/T6: clicks below this share of what the position should earn.
-    "gate2_capture_ratio": 0.5,
     # Where CTR work stops mattering. On the measured curve position six
     # earns 0.73%, so there is no click to win back by rewriting a listing.
     # Outside the top five the work is rank, not the listing.
@@ -52,15 +45,9 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "link_floor_industry": 6,
     "link_floor_blog": 3,
     "link_max_donors": 3,
-    # T5: a subject needs a phrase, not a word.
-    "cluster_min_phrase_words": 2,
     # Lists rather than numbers, but this is the per-client config store and a
     # separate column for two lists would not earn its migration.
     "cluster_generic_terms": [],
-    "cluster_excluded_topics": [],
-    # T7: clicks down this far, with impressions holding, is a listing problem.
-    "decay_impressions_flat_pct": 10.0,
-    "light_refresh_min_drop_pct": 20.0,
     # T8: a rule gets another chance once the work has moved on.
     "contested_reset_days": 90,
     # --- Growth actions: valued in expected leads per month ---
@@ -130,18 +117,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "lead_spike_multiple": 3.0,
     # 3x of two leads is six, which is a good week, not a spike.
     "lead_spike_min_leads": 10,
-    # --- Phase 4: new rules, each behind a flag that defaults on ---
-    "rule_ai_sov_falling_enabled": 1,
-    "rule_link_reclamation_enabled": 1,
-    # Share of the tracked prompt set mentioning the brand, read over this
-    # many days. A relative fall past the percentage is the finding.
-    "ai_sov_window_days": 30,
-    "ai_sov_drop_pct": 20.0,
-    # Below this the share is too small for a 20% relative move to mean
-    # anything: 2% to 1.5% is one prompt changing its mind.
-    "ai_sov_min_presence_pct": 5.0,
-    # A broken URL worth reclaiming has at least this many referring domains.
-    "reclaim_min_refdomains": 1,
     # --- Phase 5: effort ---
     # Between two findings worth the same, the cheaper one should come first.
     # These re-order the queue; they never promote or block anything.
@@ -161,8 +136,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "confidence_min_sample_impressions": 100,
     "confidence_stale_after_days": 14,
     "confidence_stale_factor": 0.85,
-    "property_low_ctr_max_pct": 0.05,
-    "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,
     # A growth action is a small task that moves the account forward. One
     # worth this much, and doable inside an hour, is worth doing whatever
