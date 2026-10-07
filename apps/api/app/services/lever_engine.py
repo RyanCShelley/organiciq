@@ -2979,7 +2979,12 @@ def _t1_inputs(
         # GA4 is pulled. Zero means the visit started here and produced
         # nothing anywhere, not that this page lacks a form.
         leads_by_url = _leads_by_page(
-            db, client.id, _lead_event_names(db, client.id), start, end
+            db,
+            client.id,
+            _lead_event_names(db, client.id),
+            start,
+            end,
+            channels=MANAGED_CHANNELS,
         )
         rows = (
             db.query(
@@ -4347,7 +4352,16 @@ def _leads_by_page(
     lead_events: list[str],
     start: date | None,
     end: date,
+    *,
+    channels: tuple[OrganicChannel, ...] | None = None,
 ) -> dict[str, float]:
+    """Conversions credited to the landing page of the session.
+
+    `channels` matters wherever the caller is also counting sessions by
+    channel. Comparing organic sessions against leads from every channel
+    makes a page that a paid campaign converted look like an organic page
+    that converts, and so hides it.
+    """
     query = db.query(
         FactGa4Event.normalized_url,
         func.coalesce(func.sum(FactGa4Event.event_count), 0),
@@ -4358,6 +4372,8 @@ def _leads_by_page(
     )
     if start is not None:
         query = query.filter(FactGa4Event.date >= start)
+    if channels is not None:
+        query = query.filter(FactGa4Event.channel.in_(channels))
     return {
         url: float(total)
         for url, total in query.group_by(FactGa4Event.normalized_url).all()

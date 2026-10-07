@@ -74,6 +74,11 @@ def main() -> int:
                 .scalar()
                 or 0
             )
+            # Organic only, matching what the engine counts. Measuring
+            # across every channel inflated the page counts and made the
+            # gate look broken when it was filtering correctly.
+            from app.services.lever_engine import MANAGED_CHANNELS
+
             rows = (
                 db.query(
                     FactGa4Traffic.normalized_url,
@@ -85,6 +90,7 @@ def main() -> int:
                     FactGa4Traffic.client_id == client.id,
                     FactGa4Traffic.date >= start,
                     FactGa4Traffic.date <= end,
+                    FactGa4Traffic.channel.in_(MANAGED_CHANNELS),
                 )
                 .group_by(FactGa4Traffic.normalized_url)
                 .all()
@@ -158,6 +164,7 @@ def main() -> int:
                             FactGa4Event.date >= start,
                             FactGa4Event.date <= end,
                             FactGa4Event.event_name.in_(lead_events),
+                            FactGa4Event.channel.in_(MANAGED_CHANNELS),
                         )
                         .group_by(FactGa4Event.normalized_url)
                         .all()
