@@ -69,6 +69,9 @@ def _serialize_search_opportunity(row) -> SearchOpportunityOut:
 def serialize_diagnose(result) -> DiagnoseResponse:
     findings = [_serialize_finding(row) for row in result.findings]
     recommended_actions = [_serialize_finding(row) for row in result.recommended_actions]
+    growth_actions = [_serialize_finding(row) for row in result.growth_actions]
+    below_floor_actions = [_serialize_finding(row) for row in result.below_floor_actions]
+    unvalued_actions = [_serialize_finding(row) for row in result.unvalued_actions]
     search_opportunities = [
         _serialize_search_opportunity(row) for row in result.search_opportunities
     ]
@@ -82,6 +85,7 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         analysis_from=result.analysis_from,
         analysis_to=result.analysis_to,
         partial_message=result.partial_message,
+        source_freshness=result.source_freshness,
         findings_count=result.findings_count,
         recommended_actions_count=result.recommended_actions_count,
         levers=[
@@ -96,6 +100,9 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         ],
         findings=findings,
         recommended_actions=recommended_actions,
+        growth_actions=growth_actions,
+        below_floor_actions=below_floor_actions,
+        unvalued_actions=unvalued_actions,
         search_opportunities=search_opportunities,
         recommendations=recommended_actions,
     )
