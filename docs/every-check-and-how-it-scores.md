@@ -34,7 +34,6 @@ lower bar of 5 — lower, not absent.
 | `tracking_partial` | growth action |  | 70 | 65 | 40 | M |
 | `tracking_spike` | growth action |  | 70 | 65 | 40 | M |
 | `site_conversion` | growth action |  | 70 | 65 | 40 | M |
-| `converting_page_dropped` | growth action |  | 70 | 65 | 40 | M |
 | `conversion_page` | growth action |  | 70 | 65 | 40 | M |
 | `no_conversion_element` | growth action |  | 70 | 65 | 40 | M |
 
@@ -70,14 +69,6 @@ lower bar of 5 — lower, not absent.
 
 **Note:** Routes to one page when 60% of the loss sits there; says 'hold the plan' when last year fell the same way.
 
-### `converting_page_dropped` — Did a page that was converting stop?
-
-**Fires when:** A page with at least 3 prior leads and 50 prior sessions loses leads. Traffic down 15% is a traffic problem and routes away; otherwise the rate has to have fallen 20%.
-
-**Impact:** Leads lost on that page.
-
-**Note:** Never prescribes a rewrite without first saying which side of leads = sessions x rate moved.
-
 ### `conversion_page` — Does a page earn traffic and convert below its own page type?
 
 **Fires when:** The page type has at least `gate3_page_type_min_pages` (5) pages and `gate3_page_type_min_leads` (10) leads behind it to compare against.
@@ -112,7 +103,6 @@ lower bar of 5 — lower, not absent.
 |---|---|---|---|---|---|---|
 | `serp_ctr` | growth action |  | 80 | 50 | 20 | M |
 | `rank_push` | growth action |  | 80 | 50 | 20 | S |
-| `decaying_page` | growth action |  | 80 | 50 | 20 | S |
 | `title_missing` | growth action |  | 80 | 50 | 20 | S |
 | `title_duplicate` | growth action |  | 80 | 50 | 20 | S |
 
@@ -131,14 +121,6 @@ lower bar of 5 — lower, not absent.
 **Impact:** Clicks gained reaching position five, converted at the site's lead rate.
 
 **Note:** The band CTR work cannot reach. The instruction is rank, not the listing.
-
-### `decaying_page` — Did a page that used to perform stop?
-
-**Fires when:** Clicks down 20% against a year ago (or the nearest window with history), and down 25 points more than the site as a whole, on a page with at least 20 prior clicks.
-
-**Impact:** Clicks lost, converted at the site's lead rate.
-
-**Note:** Splits three ways. Impressions flat within `decay_impressions_flat_pct` (10.0)% is the listing losing the click and routes to SERP CTR. Impressions down with rankings holding within 3 places is demand, and the instruction is to leave the page alone. Both down is a refresh brief.
 
 ### `title_missing` — Does the page have a title?
 
@@ -216,7 +198,6 @@ lower bar of 5 — lower, not absent.
 | `blocked_resources` | growth action | yes | 85 | 80 | 45 | M |
 | `broken_redirect` | growth action | yes | 85 | 80 | 45 | M |
 | `redirect_chain` | core work |  | 85 | 80 | 45 | M |
-| `link_reclamation` | growth action |  | 85 | 80 | 45 | S |
 | `description_missing` | core work |  | 85 | 80 | 45 | S |
 | `description_duplicate` | core work |  | 85 | 80 | 45 | S |
 | `missing_schema` | core work |  | 85 | 80 | 45 | M |
@@ -282,14 +263,6 @@ lower bar of 5 — lower, not absent.
 **Fires when:** Three or more.
 
 **Impact:** As above.
-
-### `link_reclamation` — Is a broken URL still being linked to?
-
-**Fires when:** A 4xx, or a redirect to the homepage, with at least `reclaim_min_refdomains` (1) referring domains.
-
-**Impact:** Referring domains as recoverable clicks, at medium confidence.
-
-**Note:** A redirect to the homepage keeps the link and throws away what it was about.
 
 ### `description_missing` — Does the page have a meta description?
 
@@ -392,6 +365,12 @@ lower bar of 5 — lower, not absent.
 | `no_page_answers_prompt` | No page answers the question |
 | `page_not_quotable` | A page answers it in a form an engine cannot quote |
 | `rank_push` | It has the demand and sits below where clicks happen |
+| `conversion_proof_missing` | Visitors leave before the page says anything |
+| `conversion_cta_missing` | Nothing in the page's content asks for the next step |
+| `conversion_offer_missing` | No page is declared as where a lead goes |
+| `ai_readiness_gaps` | Structured data misidentifies or under-describes the brand |
+| `topic_no_hub` | A cluster of pages has nothing tying it together |
+| `no_asset_for_query` | People search for a tool the site does not have |
 | `under_linked_donors_found` | Pages that share its subject do not link to it |
 | `under_linked_no_donor` | Nothing on the site shares its subject |
 | `undetermined` | The checks did not settle on a cause |

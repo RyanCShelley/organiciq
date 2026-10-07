@@ -182,71 +182,14 @@ def _linked(db, client_id, url, refdomains):
 DEAD = "https://example.com/old-study"
 
 
-def test_a_404_other_sites_link_to_is_worth_reclaiming(db, client_a):
-    _minimal_site(db, client_a)
-    _crawled(db, client_a.id, DEAD, status=404)
-    _linked(db, client_a.id, DEAD, 8)
-
-    result = _run(db, client_a)
-    reclaim = [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "link_reclamation"
-    ]
-    assert len(reclaim) == 1
-    assert reclaim[0].page_url == DEAD
-    assert reclaim[0].evidence_json["refdomains"] == 8
 
 
-def test_a_404_nobody_links_to_is_housekeeping(db, client_a):
-    _minimal_site(db, client_a)
-    _crawled(db, client_a.id, DEAD, status=404)
-
-    result = _run(db, client_a)
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "link_reclamation"
-    ]
 
 
-def test_links_dumped_on_the_homepage_are_reported(db, client_a):
-    """The link survives the redirect; what it was about does not."""
-    _minimal_site(db, client_a)
-    _crawled(db, client_a.id, DEAD, status=301, redirect_url="https://example.com/")
-    _linked(db, client_a.id, DEAD, 5)
-
-    result = _run(db, client_a)
-    reclaim = [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "link_reclamation"
-    ]
-    assert len(reclaim) == 1
-    assert "homepage" in reclaim[0].diagnosis
 
 
-def test_a_redirect_to_a_relevant_page_is_fine(db, client_a):
-    _minimal_site(db, client_a)
-    _crawled(
-        db, client_a.id, DEAD, status=301, redirect_url="https://example.com/research/study"
-    )
-    _linked(db, client_a.id, DEAD, 5)
-
-    result = _run(db, client_a)
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "link_reclamation"
-    ]
 
 
-def test_the_reclamation_flag_turns_the_rule_off(db, client_a):
-    _minimal_site(db, client_a)
-    _crawled(db, client_a.id, DEAD, status=404)
-    _linked(db, client_a.id, DEAD, 8)
-
-    result = _run(db, client_a, {"rule_link_reclamation_enabled": 0})
-    assert not [
-        row for row in result.findings
-        if row.evidence_json.get("audit_signal") == "link_reclamation"
-    ]
 
 
 # ── N4: AI referrals as their own segment ──

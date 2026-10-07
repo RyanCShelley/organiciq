@@ -91,16 +91,6 @@ CHECKS: dict[str, dict[str, str]] = {
         "impact": "Leads lost against the previous period, or the gap to plan.",
         "notes": "Routes to one page when 60% of the loss sits there; says 'hold the plan' when last year fell the same way.",
     },
-    "converting_page_dropped": {
-        "question": "Did a page that was converting stop?",
-        "fires": (
-            "A page with at least 3 prior leads and 50 prior sessions loses leads. "
-            "Traffic down 15% is a traffic problem and routes away; otherwise the rate "
-            "has to have fallen 20%."
-        ),
-        "impact": "Leads lost on that page.",
-        "notes": "Never prescribes a rewrite without first saying which side of leads = sessions x rate moved.",
-    },
     "conversion_page": {
         "question": "Does a page earn traffic and convert below its own page type?",
         "fires": (
@@ -140,21 +130,6 @@ CHECKS: dict[str, dict[str, str]] = {
         ),
         "impact": "Clicks gained reaching position five, converted at the site's lead rate.",
         "notes": "The band CTR work cannot reach. The instruction is rank, not the listing.",
-    },
-    "decaying_page": {
-        "question": "Did a page that used to perform stop?",
-        "fires": (
-            "Clicks down 20% against a year ago (or the nearest window with history), and "
-            "down 25 points more than the site as a whole, on a page with at least 20 prior "
-            "clicks."
-        ),
-        "impact": "Clicks lost, converted at the site's lead rate.",
-        "notes": (
-            f"Splits three ways. Impressions flat within {_t('decay_impressions_flat_pct')}% "
-            "is the listing losing the click and routes to SERP CTR. Impressions down with "
-            "rankings holding within 3 places is demand, and the instruction is to leave the "
-            "page alone. Both down is a refresh brief."
-        ),
     },
     # ── Visibility ──
     "internal_linking": {
@@ -249,15 +224,6 @@ CHECKS: dict[str, dict[str, str]] = {
         "fires": "Three or more.",
         "impact": "As above.",
         "notes": "",
-    },
-    "link_reclamation": {
-        "question": "Is a broken URL still being linked to?",
-        "fires": (
-            f"A 4xx, or a redirect to the homepage, with at least "
-            f"{_t('reclaim_min_refdomains')} referring domains."
-        ),
-        "impact": "Referring domains as recoverable clicks, at medium confidence.",
-        "notes": "A redirect to the homepage keeps the link and throws away what it was about.",
     },
     "title_missing": {
         "question": "Does the page have a title?",
