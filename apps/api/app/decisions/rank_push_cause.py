@@ -38,11 +38,20 @@ class RankPushSignals:
     clicks_at_target: float
     inbound_links: int | None = None
     link_floor: int | None = None
+    #: How many donor links one action may ask for. The cap is what makes
+    #: the hour true.
+    donor_cap: int = 5
     donors: list[RankPushDonor] = field(default_factory=list)
     word_count: int | None = None
 
 
-def classify_rank_push(signals: RankPushSignals) -> Prescription:
+def classify_rank_push(signals: RankPushSignals) -> Prescription | None:
+    """The links to add, or None when there is no hour-sized move.
+
+    With the content comparison removed, a page that already has its links
+    and shares no query with a donor leaves nothing that fits an hour.
+    Saying so is better than keeping a card with no step on it.
+    """
     gain = max(0.0, signals.clicks_at_target - signals.clicks)
     evidence = {
         "top_query": signals.top_query,
@@ -58,7 +67,7 @@ def classify_rank_push(signals: RankPushSignals) -> Prescription:
 
     # Links first: it is the only lever here our own data can both find and
     # name, and it is the cheapest of the three.
-    for donor in signals.donors[:2]:
+    for donor in signals.donors[: signals.donor_cap]:
         steps.append(
             Step(
                 f"Link to this page from {donor.url}",
@@ -80,32 +89,13 @@ def classify_rank_push(signals: RankPushSignals) -> Prescription:
                 )
             )
 
-    # Quoted only when it is a real query. "Cover what the top five results
-    # for "its main query" cover" reads as a literal search term.
-    subject = (
-        f"“{signals.top_query}”"
-        if signals.top_query
-        else "this page's main query"
-    )
-    steps.append(
-        Step(
-            f"Cover what the top five results for {subject} cover and this "
-            "page does not",
-            target=signals.page_url,
-            detail=(
-                f"It holds position {signals.position:.0f} on "
-                f"{signals.impressions:,.0f} impressions, so the term is winnable — the "
-                "page is simply thinner than what sits above it. The SERP is not "
-                "stored, so the comparison is a person's."
-            )
-            + (
-                f" Currently {signals.word_count:,} words."
-                if signals.word_count
-                else ""
-            ),
-            human=True,
-        )
-    )
+    # The "cover what the top five results cover" step is gone. It is a
+    # content project measured in days, and a growth action is an hour.
+    # Leaving it on the card made the action look like one thing and cost
+    # another, which is how an hour's budget gets spent on a week's work.
+
+    if not steps:
+        return None
 
     return Prescription(
         cause="rank_push",

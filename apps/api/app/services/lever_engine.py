@@ -1837,9 +1837,13 @@ def _rank_push_finding(
                 RankPushDonor(url=g.source_url, anchor=g.shared_query, clicks=g.source_clicks)
                 for g in donors
             ],
+            donor_cap=int(thresholds.get("donor_link_cap", 5)),
             word_count=crawl.word_count if crawl else None,
         )
     )
+    if prescription is None:
+        return None
+
     impact, impact_evidence = normalize_business_impact(
         site=site,
         estimated_incremental_leads=downstream_lead_opportunity(
@@ -3223,6 +3227,11 @@ def _conversion_page_findings(
                 rule_key=_rule_key("conversion_page", page.normalized_url),
                 diagnosis=diagnosis,
                 prescription=prescription,
+                # Only when there is no prescription: `_make_finding`
+                # prefers an explicit override, so passing both meant T1's
+                # named steps lost to "work the conversion path on this
+                # page", which is the sentence this rebuild exists to kill.
+                action_override=None if prescription is not None else action,
                 evidence_json={
                     "gate": "conversion_page",
                     "trigger_id": "T1",
@@ -3246,7 +3255,6 @@ def _conversion_page_findings(
                 impact=impact,
                 severity=impact,
                 page_url=page.normalized_url,
-                action_override=action,
             )
         )
     # What the gate did, so a silent trigger can be told apart from a
@@ -5337,9 +5345,10 @@ def diagnose(
     # nothing on a site selling subscriptions and several thousand pounds
     # on one selling air-conditioning installs.
     for finding in findings:
-        size = str(finding.evidence_json.get("effort_class") or "")
-        if size:
-            finding.evidence_json["estimated_minutes"] = minutes_for(size)
+        # `estimated_minutes` belongs to the action's own definition, which
+        # is set when it is valued. Deriving it from the lever's effort
+        # class here overwrote it — a fifteen-minute CTA addition arrived
+        # as two hours because its lever is scored at medium.
         leads = finding.evidence_json.get("estimated_incremental_leads")
         if leads is None:
             leads = finding.evidence_json.get("estimated_leads_at_risk")

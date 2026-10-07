@@ -508,18 +508,26 @@ def test_with_no_donor_it_asks_the_hub_for_the_link():
     assert "from the section it belongs to" in p.steps[0].text
 
 
-def test_the_content_comparison_is_the_human_step():
-    human = [s for s in _push().steps if s.human]
-    assert len(human) == 1
-    assert "top five results" in human[0].text
-    assert "900 words" in human[0].detail
+def test_the_content_comparison_step_is_gone():
+    """It is a content project measured in days, and a growth action is an
+    hour. Leaving it on the card made the action look like one thing and
+    cost another."""
+    actions = " ".join(step.text for step in _push().steps)
+    assert "top five results" not in actions
+    assert all(not step.human for step in _push().steps)
 
 
-def test_a_missing_query_is_not_quoted_as_if_it_were_one():
-    """"Cover what the top five results for "its main query" cover" reads
-    as a literal search term."""
-    assert "this page's main query" in _push(top_query=None).steps[-1].text
-    assert "“" not in _push(top_query=None).steps[-1].text
+def test_the_donor_cap_is_what_makes_the_hour_true():
+    from app.decisions.rank_push_cause import RankPushDonor
+
+    many = [RankPushDonor(f"https://x/{i}", "q", 100.0) for i in range(12)]
+    assert len(_push(donors=many, donor_cap=5).steps) == 5
+
+
+def test_a_rank_push_with_no_donor_still_says_something_actionable():
+    p = _push(donors=[])
+    assert p.steps
+    assert "from the section it belongs to" in p.steps[0].text
 
 
 # ── The queue as a queue ──
