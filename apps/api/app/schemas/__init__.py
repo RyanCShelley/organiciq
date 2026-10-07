@@ -543,6 +543,11 @@ class DiagnoseResponse(BaseModel):
     levers: list[LeverSummaryOut]
     findings: list[FindingOut] = []
     recommended_actions: list[FindingOut] = []
+    #: The month's growth actions, ranked. Prefer these over
+    #: `recommended_actions`, which is the older promotion.
+    growth_actions: list[FindingOut] = []
+    below_floor_actions: list[FindingOut] = []
+    unvalued_actions: list[FindingOut] = []
     search_opportunities: list[SearchOpportunityOut] = []
     recommendations: list[FindingOut] = []
 

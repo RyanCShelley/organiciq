@@ -71,6 +71,14 @@ class DiagnoseResult:
     levers: list[LeverSummary] = field(default_factory=list)
     findings: list[LeverFinding] = field(default_factory=list)
     recommended_actions: list[LeverFinding] = field(default_factory=list)
+    #: What can spend the client's monthly allowance, ranked. Distinct from
+    #: `recommended_actions`, which is the older impact-and-confidence
+    #: promotion and includes report-only work that carries no lead value.
+    growth_actions: list[LeverFinding] = field(default_factory=list)
+    #: Valued, and under the floor. Shown so the floor can be argued with.
+    below_floor_actions: list[LeverFinding] = field(default_factory=list)
+    #: Actions the valuer could not price, which is a bug worth seeing.
+    unvalued_actions: list[LeverFinding] = field(default_factory=list)
     search_opportunities: list[LeverFinding] = field(default_factory=list)
     #: Which rules ran this period and why the rest did not. "No findings"
     #: and "never looked" are different answers and must not share a row.

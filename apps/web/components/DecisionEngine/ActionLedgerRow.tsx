@@ -15,6 +15,15 @@ import {
   type StoredDecision,
 } from "@/lib/decision-engine";
 
+/**
+ * What kind of number this is — or that there isn't one.
+ *
+ * The third branch is the one that matters: this defaulted to "Measured"
+ * for anything that was not a flat credit, including rows that carried no
+ * valuation at all. Eight of those reached the screen, each showing an em
+ * dash for leads and for time under a green badge claiming it was
+ * measured. An unvalued row is a bug, and it has to look like one.
+ */
 function basisChip(finding: Finding) {
   const basis = stringField(finding.evidence_json ?? {}, "value_basis");
   if (basis === "flat_credit") {
@@ -23,6 +32,14 @@ function basisChip(finding: Finding) {
       className: "bg-[#f6ead0] text-[#614a16]",
       title:
         "A placeholder credit. There is no honest clicks-to-leads model for this action yet, so every one of its kind carries the same value and the search volume breaks the tie.",
+    };
+  }
+  if (basis === null || expectedLeadsMonthly(finding) === null) {
+    return {
+      label: "Not valued",
+      className: "bg-[#f3e2e2] text-[#6b2b2b]",
+      title:
+        "The engine could not put a lead estimate on this. It should not be competing for an action; please report it.",
     };
   }
   return {

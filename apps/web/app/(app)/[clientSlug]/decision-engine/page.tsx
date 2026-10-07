@@ -11,9 +11,7 @@ import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 import {
   countSelectedTowardPlan,
-  isBelowFloor,
   normalizeDiagnoseResponse,
-  rankActions,
   SOURCE_LABELS,
   type DiagnoseResponse,
   type Finding,
@@ -66,12 +64,16 @@ export default async function DecisionEnginePage({
   const allFindings: Finding[] = data?.findings ?? [];
   const searchOpportunities = data?.search_opportunities ?? [];
 
-  // Ranked by expected leads a month, and never truncated to the
-  // allowance: the plan says how many are included this month, not how
-  // many are worth seeing. The line is drawn inside the ledger instead.
-  const ranked = rankActions(data?.recommended_actions ?? []);
-  const actions = ranked.filter((item) => !isBelowFloor(item));
-  const belowFloor = ranked.filter(isBelowFloor);
+  // The engine decides what a growth action is and what order they come
+  // in; this reads its answer. Reading `recommended_actions` instead —
+  // the older impact promotion — put eight keyword findings on screen with
+  // no lead estimate and no time, while the CLI printed three real ones.
+  //
+  // Never truncated to the allowance: the plan says how many are included
+  // this month, not how many are worth seeing. The ledger draws the line.
+  const actions = data?.growth_actions ?? [];
+  const belowFloor = data?.below_floor_actions ?? [];
+  const unvalued = data?.unvalued_actions ?? [];
 
   const recommendedKeys = new Set(actions.map((item) => item.rule_key));
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
@@ -140,6 +142,7 @@ export default async function DecisionEnginePage({
           <ActionLedger
             actions={actions}
             belowFloor={belowFloor}
+            unvalued={unvalued}
             allowance={growthPlanAllowance}
             planLabel={planLabel}
             clientId={clientId}

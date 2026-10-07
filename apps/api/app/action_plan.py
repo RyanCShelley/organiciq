@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from app.core.db import SessionLocal
 from app.services.plan_allowances import resolve_plan_allowances
 from app.models.client import Client
-from app.services.lever_engine import action_rule_id, diagnose
+from app.services.lever_engine import diagnose
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("organiciq.action_plan")
@@ -65,19 +65,13 @@ def main() -> int:
                 logger.info("  engine blocked: %s\n", (result.message or "")[:120])
                 continue
 
-            actions = [
-                row
-                for row in result.findings
-                if action_rule_id(row) is not None
-                and not row.evidence_json.get("below_floor")
-                and not row.evidence_json.get("value_error")
-            ]
-            below = [
-                row for row in result.findings if row.evidence_json.get("below_floor")
-            ]
-            broken = [
-                row for row in result.findings if row.evidence_json.get("value_error")
-            ]
+            # The same three lists the API serves and the screen reads.
+            # These were open-coded here while the web read a different
+            # field entirely, so this command and that page disagreed about
+            # what the client's actions even were.
+            actions = result.growth_actions
+            below = result.below_floor_actions
+            broken = result.unvalued_actions
 
             logger.info(
                 "  %d actions above the floor, %d below, %d unvalued\n",
@@ -125,12 +119,7 @@ def main() -> int:
                 # an assertion: the reader is told there was nothing better
                 # without being shown what came closest, which is the one
                 # thing that says whether the floor is set right.
-                for row in sorted(
-                    below,
-                    key=lambda r: -float(
-                        r.evidence_json.get("expected_leads_monthly") or 0.0
-                    ),
-                )[:5]:
+                for row in below[:5]:
                     evidence = row.evidence_json
                     logger.info(
                         "        below the floor: %-4s %5.3f leads/mo  %s",

@@ -3311,6 +3311,48 @@ ACTION_RULE_IDS: dict[str, str] = {
 }
 
 
+def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """The month's growth actions, best first.
+
+    One definition, because there were two. The CLI read this predicate off
+    `findings`; the web read `recommended_actions`, which is the older
+    impact-and-confidence promotion and contains report-only work that was
+    never valued in leads. So the screen listed keyword findings with no
+    lead estimate and no time, while the command used to verify the same
+    client printed three real actions.
+
+    Ranked here rather than in each caller, so the order a client is shown
+    is the order the engine decided.
+    """
+    actions = [
+        finding
+        for finding in findings
+        if action_rule_id(finding) is not None
+        and not finding.evidence_json.get("below_floor")
+        and not finding.evidence_json.get("value_error")
+    ]
+    return sorted(
+        actions,
+        key=lambda row: (
+            -float(row.evidence_json.get("expected_leads_monthly") or 0.0),
+            -float(row.evidence_json.get("tiebreak_volume") or 0.0),
+        ),
+    )
+
+
+def below_floor_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """Valued, and not worth an hour. Shown so the floor can be argued with."""
+    return sorted(
+        (f for f in findings if f.evidence_json.get("below_floor")),
+        key=lambda row: -float(row.evidence_json.get("expected_leads_monthly") or 0.0),
+    )
+
+
+def unvalued_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """Actions the valuer could not price. A bug, surfaced rather than hidden."""
+    return [f for f in findings if f.evidence_json.get("value_error")]
+
+
 def action_rule_id(finding: LeverFinding) -> str | None:
     """The action id, or None for a finding that cannot spend an action."""
     explicit = finding.evidence_json.get("rule_id")
@@ -5041,6 +5083,9 @@ def diagnose(
         levers=_lever_summaries(all_findings, recommended_actions),
         findings=all_findings,
         recommended_actions=recommended_actions,
+        growth_actions=growth_actions(all_findings),
+        below_floor_actions=below_floor_actions(all_findings),
+        unvalued_actions=unvalued_actions(all_findings),
         search_opportunities=search_opportunities,
         coverage=coverage.as_list(),
         **base_result,

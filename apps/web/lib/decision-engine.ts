@@ -68,6 +68,12 @@ export type DiagnoseResponse = {
   levers: LeverSummary[];
   findings: Finding[];
   recommended_actions: Finding[];
+  /** The month's growth actions, ranked by the engine. Prefer these over
+   *  `recommended_actions`, which is the older impact promotion and carries
+   *  report-only work that was never valued in leads. */
+  growth_actions?: Finding[];
+  below_floor_actions?: Finding[];
+  unvalued_actions?: Finding[];
   search_opportunities?: SearchOpportunity[];
   content_planning_signals?: SearchOpportunity[];
   recommendations: Finding[];
@@ -304,38 +310,6 @@ export function expectedLeadsMonthly(finding: Finding): number | null {
   return typeof value === "number" ? value : null;
 }
 
-/**
- * The month's actions, best first.
- *
- * Growth actions are valued in expected leads per month, so that is what
- * orders them. `priority_score` is the old 0–100 scale and still ranks the
- * report-only work, which has no lead value — sorting everything by it put
- * a finding worth 0.63 leads below one worth nothing.
- *
- * Nothing is truncated to the plan allowance. The allowance says how many
- * are included this month, not how many are worth knowing about: a Launch
- * client with two good actions should see both and choose.
- */
-export function rankActions(findings: Finding[]): Finding[] {
-  return [...findings].sort((a, b) => {
-    const aLeads = expectedLeadsMonthly(a);
-    const bLeads = expectedLeadsMonthly(b);
-    if (aLeads !== null && bLeads !== null) {
-      if (bLeads !== aLeads) return bLeads - aLeads;
-      // Every prompt action carries the same flat credit, so without this
-      // the order among them is whatever the database returned.
-      const aTie = Number(a.evidence_json?.tiebreak_volume ?? 0);
-      const bTie = Number(b.evidence_json?.tiebreak_volume ?? 0);
-      if (bTie !== aTie) return bTie - aTie;
-    } else if (aLeads !== null) {
-      return -1;
-    } else if (bLeads !== null) {
-      return 1;
-    }
-    return b.priority_score - a.priority_score;
-  });
-}
-
 export const SOURCE_LABELS: Record<string, string> = {
   search_console: "Search Console",
   analytics: "GA4 conversions",
@@ -372,17 +346,6 @@ export function staleSources(
     if (daysBehind > STALE_AFTER_DAYS) rows.push({ key, through, daysBehind });
   }
   return rows.sort((a, b) => b.daysBehind - a.daysBehind);
-}
-
-/**
- * Valued, and not worth an hour.
- *
- * These are shown rather than hidden: the floor is the engine telling
- * someone there was nothing better, and a floor nobody can see is a floor
- * nobody can argue with.
- */
-export function isBelowFloor(finding: Finding): boolean {
-  return finding.evidence_json?.below_floor === true;
 }
 
 /** Everything the card needs to show how a measured estimate was built. */

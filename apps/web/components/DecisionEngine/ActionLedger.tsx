@@ -1,7 +1,6 @@
 import { ActionLedgerRow } from "@/components/DecisionEngine/ActionLedgerRow";
 import {
   expectedLeadsMonthly,
-  isBelowFloor,
   numberField,
   type Finding,
   type StoredDecision,
@@ -22,6 +21,7 @@ function planWord(count: number): string {
 export function ActionLedger({
   actions,
   belowFloor,
+  unvalued = [],
   allowance,
   planLabel,
   clientId,
@@ -31,6 +31,8 @@ export function ActionLedger({
 }: {
   actions: Finding[];
   belowFloor: Finding[];
+  /** Actions the engine could not price. A bug, shown rather than hidden. */
+  unvalued?: Finding[];
   allowance: number;
   planLabel: string;
   clientId?: string;
@@ -129,6 +131,25 @@ export function ActionLedger({
         ) : null}
       </div>
 
+      {unvalued.length > 0 ? (
+        <div className="mt-4 rounded-[var(--radius-lg,14px)] border border-[var(--danger-border,#e0bcbc)] bg-[var(--danger-soft,#fdf3f3)] px-6 py-4">
+          <p className="text-[14px] font-semibold text-[var(--text-primary)]">
+            {unvalued.length} {unvalued.length === 1 ? "action" : "actions"} could not be valued
+          </p>
+          <p className="mt-1.5 max-w-[80ch] text-[13px] leading-relaxed text-[var(--text-secondary)]">
+            They are held back rather than ranked against work that has a number. This is a bug in
+            the engine, not a judgement about the work.
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {unvalued.map((item) => (
+              <li key={item.rule_key} className="text-[13px] text-[var(--text-secondary)]">
+                {item.diagnosis}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {belowFloor.length > 0 ? (
         <details className="mt-4 rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] px-6 py-4">
           <summary className="flex min-h-[44px] cursor-pointer items-center text-[13.5px] font-semibold text-[var(--brand-teal-deep)]">
@@ -184,5 +205,3 @@ function describeShortfall(item: Finding): string {
     .filter(Boolean)
     .join(", ");
 }
-
-export { isBelowFloor };
