@@ -63,6 +63,11 @@ class DiagnoseResult:
     analysis_from: date | None = None
     analysis_to: date | None = None
     partial_message: str | None = None
+    #: The last day each source has facts for. A boolean readiness flag says
+    #: a source reported; it cannot say that Search Console stopped a
+    #: fortnight ago while GA4 is current, which is the difference between
+    #: a run worth reading and one worth re-syncing first.
+    source_freshness: dict[str, str | None] = field(default_factory=dict)
     levers: list[LeverSummary] = field(default_factory=list)
     findings: list[LeverFinding] = field(default_factory=list)
     recommended_actions: list[LeverFinding] = field(default_factory=list)

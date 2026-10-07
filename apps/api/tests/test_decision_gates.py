@@ -319,3 +319,18 @@ def test_the_technical_finding_carries_its_own_action(db, client_a):
 
     assert finding.recommended_action == TECHNICAL_ACTIONS["canonical_elsewhere"]
     assert "Point the canonical" in finding.recommended_action
+
+
+def test_the_response_says_how_far_each_source_runs(db, client_a):
+    """A boolean readiness flag says a source reported. It cannot say that
+    Search Console stopped a fortnight ago while GA4 is current, which is
+    the difference between a run worth reading and one worth re-syncing."""
+    from datetime import date as date_cls, timedelta as td
+
+    from app.services.lever_engine import diagnose
+
+    end = date_cls.today()
+    result = diagnose(db, client_a, from_date=end - td(days=29), to_date=end)
+    assert set(result.source_freshness) == set(result.readiness), (
+        "freshness and readiness must describe the same four sources"
+    )

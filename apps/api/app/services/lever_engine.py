@@ -4700,12 +4700,29 @@ def diagnose(
         "crawl_audit": crawl_ready,
         "ai_visibility": ai_period is not None,
     }
+    #: Keyed the same as `readiness`, so the two read as one statement.
+    freshness_sources = {
+        "search_console": "gsc_pages",
+        "analytics": "ga4",
+        "crawl_audit": "site_crawl",
+        "ai_visibility": "se_ranking_ai",
+    }
+    source_freshness = {
+        name: (
+            watermarks[source].fact_through_date.isoformat()
+            if watermarks.get(source) is not None
+            and watermarks[source].fact_through_date is not None
+            else None
+        )
+        for name, source in freshness_sources.items()
+    }
     base_result = {
         "requested_from": from_date,
         "requested_to": to_date,
         "analysis_from": gsc_period[0] if gsc_period else None,
         "analysis_to": gsc_period[1] if gsc_period else None,
         "partial_message": partial_message,
+        "source_freshness": source_freshness,
     }
     # All four sources are required, and a missing one stops the run.
     #

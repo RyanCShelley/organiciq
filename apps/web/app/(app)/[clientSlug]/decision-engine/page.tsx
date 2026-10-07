@@ -1,39 +1,26 @@
 import Link from "next/link";
 
+import { ActionLedger } from "@/components/DecisionEngine/ActionLedger";
+import { EngineStatusBand } from "@/components/DecisionEngine/EngineStatusBand";
 import { FindingsReviewPanel } from "@/components/DecisionEngine/FindingsReviewPanel";
-import { GrowthActionFilter } from "@/components/DecisionEngine/GrowthActionFilter";
-import { GrowthActionGrid } from "@/components/DecisionEngine/GrowthActionGrid";
-import { RecommendedActionCard } from "@/components/DecisionEngine/RecommendedActionCard";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
-import { SummaryStrip } from "@/components/DecisionEngine/SummaryStrip";
 import { Alert } from "@/components/ui/Alert";
-import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type Client, type Tier } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 import {
-  applySuggestedAlternatives,
   countSelectedTowardPlan,
+  isBelowFloor,
   normalizeDiagnoseResponse,
   rankActions,
+  SOURCE_LABELS,
   type DiagnoseResponse,
   type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
 import { resolvePlanAllowances } from "@/lib/plan-allowances";
 import { withNavContext } from "@/lib/navigation";
-
-const READINESS_LABELS: Record<string, string> = {
-  search_console: "Search Console",
-  analytics: "GA4 conversions",
-  crawl_audit: "Site crawl",
-  ai_visibility: "AI visibility",
-};
-
-function readinessLabel(key: string): string {
-  return READINESS_LABELS[key] ?? key.replaceAll("_", " ");
-}
 
 export default async function DecisionEnginePage({
   params,
@@ -47,12 +34,11 @@ export default async function DecisionEnginePage({
   const selectedClient = await requireAccountClient(clientSlug, "decision-engine");
   const clientId = selectedClient.id;
   const { from, to } = await resolveDateRange(query);
-  const leverFilter =
-    typeof query.lever === "string" && query.lever.length > 0 ? query.lever : "all";
 
   let data: DiagnoseResponse | null = null;
   let decisions: StoredDecision[] = [];
   let growthPlanAllowance = 0;
+  let planLabel = "This plan";
   let error: string | null = null;
 
   try {
@@ -72,66 +58,49 @@ export default async function DecisionEnginePage({
     decisions = stored;
     const tier = tiers.find((row) => row.id === client.tier_id);
     growthPlanAllowance = resolvePlanAllowances(client, tier).growthActionAllowance;
+    if (tier?.tier_name) planLabel = `${tier.tier_name} plan`;
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load Decision Engine";
   }
 
   const allFindings: Finding[] = data?.findings ?? [];
-  const additionalFindings = allFindings.filter((finding) => !finding.is_recommended_action);
   const searchOpportunities = data?.search_opportunities ?? [];
-  // Ranked by expected leads a month, and not cut to the allowance: the
-  // allowance says how many are included this month, not how many are
-  // worth seeing. A Launch client with two good actions sees both.
-  const recommendations = rankActions(data?.recommended_actions ?? []);
-  const suggestions = applySuggestedAlternatives(
-    recommendations,
-    additionalFindings,
-    growthPlanAllowance,
-  );
-  const recommendedKeys = new Set(recommendations.map((item) => item.rule_key));
-  const suggestedKeys = new Set(suggestions.map((item) => item.rule_key));
-  const filteredRecommendations =
-    leverFilter === "all"
-      ? recommendations
-      : recommendations.filter((item) => item.lever === leverFilter);
-  const filteredSuggestions =
-    leverFilter === "all"
-      ? suggestions
-      : suggestions.filter((item) => item.lever === leverFilter);
-  const filteredFindings =
-    leverFilter === "all" ? allFindings : allFindings.filter((item) => item.lever === leverFilter);
+
+  // Ranked by expected leads a month, and never truncated to the
+  // allowance: the plan says how many are included this month, not how
+  // many are worth seeing. The line is drawn inside the ledger instead.
+  const ranked = rankActions(data?.recommended_actions ?? []);
+  const actions = ranked.filter((item) => !isBelowFloor(item));
+  const belowFloor = ranked.filter(isBelowFloor);
+
+  const recommendedKeys = new Set(actions.map((item) => item.rule_key));
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const selectedTowardPlan = countSelectedTowardPlan(decisions);
+  const coreWork = allFindings.filter((item) => !recommendedKeys.has(item.rule_key));
   const contentOppHref = withNavContext(
     accountToolHref(selectedClient.slug, "content-opp"),
     clientId,
     from,
     to,
   );
-  const decisionEngineHref = accountToolHref(selectedClient.slug, "decision-engine");
-
-  const analysisWindow =
-    data?.analysis_from && data?.analysis_to
-      ? data.analysis_from === from && data.analysis_to === to
-        ? null
-        : data.analysis_from === data.analysis_to
-          ? data.analysis_from
-          : `${data.analysis_from} → ${data.analysis_to}`
-      : null;
 
   return (
     <section>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-xs text-[var(--text-tertiary)]">
-          Period:{" "}
-          <strong className="text-[var(--text-primary)]">{from}</strong> to{" "}
-          <strong className="text-[var(--text-primary)]">{to}</strong>
-          {analysisWindow ? (
-            <>
-              {" "}
-              · Analyzing <strong className="text-[var(--text-primary)]">{analysisWindow}</strong>
-            </>
-          ) : null}
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            Growth actions
+          </p>
+          <h1 className="mt-1.5 font-[family-name:var(--font-display)] text-[30px] font-black leading-tight tracking-[-0.02em] text-[var(--text-primary)]">
+            {selectedClient.client_name ?? selectedClient.slug}
+          </h1>
+          <p className="mt-1.5 text-[13.5px] text-[var(--text-secondary)]">
+            {planLabel}
+            {growthPlanAllowance > 0
+              ? ` · ${growthPlanAllowance} included this month`
+              : ""}{" "}
+            · {from} to {to}
+          </p>
         </div>
         {clientId ? <RunEngineButton clientId={clientId} from={from} to={to} /> : null}
       </div>
@@ -141,137 +110,67 @@ export default async function DecisionEnginePage({
       {data && !data.ready ? (
         <Alert variant="danger">
           {data.message ?? "Decision Engine is not ready for this client and date range."}
+          <span className="mt-2 block text-xs">
+            Missing:{" "}
+            {Object.entries(data.readiness)
+              .filter(([, ready]) => !ready)
+              .map(([key]) => SOURCE_LABELS[key] ?? key)
+              .join(", ")}
+          </span>
         </Alert>
       ) : null}
 
-      {data ? (
-        <div className="mt-3">
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            Data feeding this run
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {Object.entries(data.readiness).map(([key, ready]) => (
-              <span key={key} className={`badge ${ready ? "badge-success" : "badge-danger"}`}>
-                {readinessLabel(key)}
-                {ready ? "" : " · missing"}
-              </span>
-            ))}
-          </div>
-          <p className="mt-1.5 text-xs text-[var(--text-tertiary)]">
-            All four sources are required. A score built from a partial set is not
-            comparable to a full one, so the engine stops until every source reports.
-          </p>
-        </div>
-      ) : null}
-
       {data?.ready && clientId ? (
-        <div className="mt-4 space-y-[var(--section-gap)]">
-          <GrowthActionGrid
-            levers={data.levers}
-            contentOppHref={contentOppHref}
-            contentOppCount={searchOpportunities.length}
+        <div className="space-y-[var(--section-gap)]">
+          <EngineStatusBand
+            data={data}
+            findingsCount={data.findings_count}
+            from={from}
+            to={to}
           />
 
-          <SummaryStrip
-            findingsCount={data.findings_count}
-            recommendationsCount={recommendations.length}
-            selectedCount={selectedTowardPlan}
-            growthPlanAllowance={growthPlanAllowance}
-            suggestedCount={suggestions.length}
-            contentOppHref={contentOppHref}
-            contentOppCount={searchOpportunities.length}
+          <p className="max-w-[76ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
+            Everything the engine found that could be done in an hour, ranked by what it is worth.
+            The line falls where the plan does — the ranking is advice, not a rule.
+            {selectedTowardPlan > 0
+              ? ` ${selectedTowardPlan} accepted so far this period.`
+              : ""}
+          </p>
+
+          <ActionLedger
+            actions={actions}
+            belowFloor={belowFloor}
+            allowance={growthPlanAllowance}
+            planLabel={planLabel}
+            clientId={clientId}
+            from={from}
+            to={to}
+            decisionsByRule={decisionByRule}
           />
 
           <section className="workspace-section">
-            <SectionHeader
-              title="Filter by Growth Action"
-              description="Narrow recommendations, suggestions, and the findings list without changing scores."
-            />
-            <GrowthActionFilter
-              hrefBase={decisionEngineHref}
-              from={from}
-              to={to}
-              active={leverFilter}
-            />
-          </section>
-
-          <section id="recommended-actions" className="workspace-section scroll-mt-24">
-            <SectionHeader
-              title="Recommendations"
-              description="Cleared the engine’s impact and confidence thresholds for this period."
-              actions={
-                <span className="text-xs text-[var(--text-tertiary)]">
-                  {filteredRecommendations.length} shown
-                </span>
-              }
-            />
-
-            {filteredRecommendations.length === 0 ? (
-              <Alert variant="info">
-                No hard recommendations for this filter. Check{" "}
-                {filteredSuggestions.length > 0 ? (
-                  <>
-                    <a href="#suggested-alternatives" className="underline">
-                      Suggested alternatives
-                    </a>
-                    ,{" "}
-                  </>
-                ) : null}
-                <a href="#findings-review" className="underline">
-                  All findings
-                </a>
-                , or{" "}
-                <Link href={contentOppHref} className="underline">
-                  Content Opp
-                </Link>
-                .
-              </Alert>
-            ) : (
-              <div className="space-y-3">
-                {filteredRecommendations.map((item) => (
-                  <RecommendedActionCard
-                    key={item.rule_key}
-                    item={item}
-                    clientId={clientId}
-                    from={from}
-                    to={to}
-                    decision={decisionByRule.get(item.rule_key) ?? null}
-                  />
-                ))}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="font-[family-name:var(--font-display)] text-[16px] font-extrabold text-[var(--text-primary)]">
+                  Not competing for a slot
+                </h2>
+                <p className="mt-1.5 max-w-[70ch] text-[13.5px] text-[var(--text-secondary)]">
+                  {coreWork.length.toLocaleString()} findings are core work the plan already covers,
+                  or opportunities that need a decision before they can become a task.
+                </p>
               </div>
-            )}
+              <Link
+                href={contentOppHref}
+                className="inline-flex min-h-[44px] items-center rounded-lg border border-[var(--border)] px-4 text-[13.5px] font-semibold no-underline"
+              >
+                Content Opp ({searchOpportunities.length})
+              </Link>
+            </div>
           </section>
-
-          {filteredSuggestions.length > 0 ? (
-            <section id="suggested-alternatives" className="workspace-section scroll-mt-24">
-              <SectionHeader
-                title="Suggested alternatives"
-                description="Optional extras when recommendations are below your growth-plan allowance. Not threshold promotions."
-                actions={
-                  <span className="text-xs text-[var(--text-tertiary)]">
-                    {filteredSuggestions.length} shown
-                  </span>
-                }
-              />
-              <div className="space-y-3">
-                {filteredSuggestions.map((item) => (
-                  <RecommendedActionCard
-                    key={item.rule_key}
-                    item={item}
-                    clientId={clientId}
-                    from={from}
-                    to={to}
-                    decision={decisionByRule.get(item.rule_key) ?? null}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
 
           <FindingsReviewPanel
-            findings={filteredFindings}
+            findings={allFindings}
             recommendedKeys={recommendedKeys}
-            suggestedKeys={suggestedKeys}
             clientId={clientId}
             from={from}
             to={to}

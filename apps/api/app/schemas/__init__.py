@@ -516,6 +516,7 @@ class DiagnoseResponse(BaseModel):
     analysis_from: Date | None = None
     analysis_to: Date | None = None
     partial_message: str | None = None
+    source_freshness: dict[str, str | None] = {}
     findings_count: int = 0
     recommended_actions_count: int = 0
     levers: list[LeverSummaryOut]

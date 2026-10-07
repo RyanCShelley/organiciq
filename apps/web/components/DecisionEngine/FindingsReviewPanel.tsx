@@ -79,12 +79,12 @@ function EffortChip({ item }: { item: Finding }) {
   );
 }
 
-function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys: Set<string>): {
+function engineStatus(item: Finding, recommendedKeys: Set<string>): {
   label: string;
   variant: "success" | "warning" | "neutral" | "accent" | "danger";
   hint?: string;
 } {
-  switch (findingState(item, recommendedKeys, suggestedKeys)) {
+  switch (findingState(item, recommendedKeys)) {
     case "blocked":
       return {
         label: "Blocked",
@@ -105,8 +105,6 @@ function engineStatus(item: Finding, recommendedKeys: Set<string>, suggestedKeys
         variant: "neutral",
         hint: "Monthly upkeep, already in the plan — it does not spend a growth action.",
       };
-    case "suggested":
-      return { label: "Suggested", variant: "accent" };
     default:
       return {
         label: promotionBlockedLabel(item.promotion_blocked_reason),
@@ -326,7 +324,6 @@ function ExpandedFinding({
 export function FindingsReviewPanel({
   findings,
   recommendedKeys,
-  suggestedKeys,
   clientId,
   from,
   to,
@@ -334,7 +331,6 @@ export function FindingsReviewPanel({
 }: {
   findings: Finding[];
   recommendedKeys: Set<string>;
-  suggestedKeys: Set<string>;
   clientId?: string;
   from?: string;
   to?: string;
@@ -346,7 +342,7 @@ export function FindingsReviewPanel({
   const [showTail, setShowTail] = useState(false);
   const tail = findings.filter(
     (item) =>
-      findingState(item, recommendedKeys, suggestedKeys) === "deferred" &&
+      findingState(item, recommendedKeys) === "deferred" &&
       item.promotion_blocked_reason === "impact_below_threshold",
   );
   const shown = showTail
@@ -399,7 +395,7 @@ export function FindingsReviewPanel({
               {rows.map((item) => {
                 const isOpen = expandedKey === item.rule_key;
                 const decision = decisionsByRule?.get(item.rule_key) ?? null;
-                const status = engineStatus(item, recommendedKeys, suggestedKeys);
+                const status = engineStatus(item, recommendedKeys);
                 return (
                   <Fragment key={item.rule_key}>
                     <tr className="align-top">

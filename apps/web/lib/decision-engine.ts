@@ -33,8 +33,6 @@ export type Finding = {
   override_count?: number;
   priority_band?: string;
   priority_band_reason?: string | null;
-  /** UI-only: optional alternative surfaced when hard recommendations are below the plan allowance */
-  is_suggested?: boolean;
 };
 
 export type SearchOpportunity = {
@@ -63,6 +61,8 @@ export type DiagnoseResponse = {
   analysis_from?: string | null;
   analysis_to?: string | null;
   partial_message?: string | null;
+  /** The last day each source has facts for, keyed as `readiness` is. */
+  source_freshness?: Record<string, string | null>;
   findings_count: number;
   recommended_actions_count: number;
   levers: LeverSummary[];
@@ -152,17 +152,12 @@ export function promotionBlockedLabel(reason: string | null | undefined): string
  */
 export type FindingState =
   | "recommended"
-  | "suggested"
   | "core-work"
   | "blocked"
   | "retired"
   | "deferred";
 
-export function findingState(
-  item: Finding,
-  recommendedKeys: Set<string>,
-  suggestedKeys: Set<string>,
-): FindingState {
+export function findingState(item: Finding, recommendedKeys: Set<string>): FindingState {
   // A gate failing outranks everything: the score behind any other state was
   // computed from data the gate says is wrong.
   if (item.suppressed_by) return "blocked";
@@ -171,15 +166,7 @@ export function findingState(
   if ((item.override_count ?? 0) >= 3) return "retired";
   if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) return "recommended";
   if (item.core_work) return "core-work";
-  if (suggestedKeys.has(item.rule_key) || item.is_suggested) return "suggested";
   return "deferred";
-}
-
-export function formatPriorityBand(band: string | undefined): string | null {
-  if (band === "high") return "High";
-  if (band === "medium") return "Medium";
-  if (band === "low") return "Low";
-  return null;
 }
 
 export function findingSubject(item: Finding): string {
@@ -355,22 +342,81 @@ export function rankActions(findings: Finding[]): Finding[] {
   });
 }
 
+export const SOURCE_LABELS: Record<string, string> = {
+  search_console: "Search Console",
+  analytics: "GA4 conversions",
+  crawl_audit: "Site crawl",
+  ai_visibility: "AI visibility",
+};
+
+/** How far behind a source has to fall before it is worth interrupting over. */
+const STALE_AFTER_DAYS = 4;
+
+export type StaleSource = { key: string; through: string | null; daysBehind: number };
+
 /**
- * When hard recommendations are below the growth-plan allowance, surface additional
- * findings as suggested alternatives (sorted by priority_score — no score inflation).
+ * Sources whose facts stop well before the end of the window.
+ *
+ * ACC Tek's Search Console sync reported success while returning no rows,
+ * so its facts stopped on 22 Sep while GA4 ran to 6 Oct. Readiness showed
+ * four green badges. The rules that read Search Console were measured over
+ * half the window and nothing on screen said so.
  */
-export function applySuggestedAlternatives(
-  recommended: Finding[],
-  additional: Finding[],
-  allowance: number,
-): Finding[] {
-  if (allowance <= 0 || recommended.length >= allowance) return [];
-  const used = new Set(recommended.map((item) => item.rule_key));
-  return [...additional]
-    .filter((item) => !used.has(item.rule_key))
-    .sort((a, b) => b.priority_score - a.priority_score)
-    .slice(0, allowance - recommended.length)
-    .map((item) => ({ ...item, is_suggested: true }));
+export function staleSources(
+  data: Pick<DiagnoseResponse, "readiness" | "source_freshness">,
+  to: string,
+): StaleSource[] {
+  const end = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(end)) return [];
+  const rows: StaleSource[] = [];
+  for (const key of Object.keys(data.readiness ?? {})) {
+    const through = data.source_freshness?.[key] ?? null;
+    if (!through) continue;
+    const at = Date.parse(`${through}T00:00:00Z`);
+    if (Number.isNaN(at)) continue;
+    const daysBehind = Math.round((end - at) / 86_400_000);
+    if (daysBehind > STALE_AFTER_DAYS) rows.push({ key, through, daysBehind });
+  }
+  return rows.sort((a, b) => b.daysBehind - a.daysBehind);
+}
+
+/**
+ * Valued, and not worth an hour.
+ *
+ * These are shown rather than hidden: the floor is the engine telling
+ * someone there was nothing better, and a floor nobody can see is a floor
+ * nobody can argue with.
+ */
+export function isBelowFloor(finding: Finding): boolean {
+  return finding.evidence_json?.below_floor === true;
+}
+
+/** Everything the card needs to show how a measured estimate was built. */
+export type ValueDerivation = { label: string; value: string }[];
+
+export function valueDerivation(finding: Finding): ValueDerivation {
+  const evidence = finding.evidence_json ?? {};
+  const rows: ValueDerivation = [];
+  const sessions = numberField(evidence, "sessions");
+  const leads = numberField(evidence, "leads");
+  const benchmark = numberField(evidence, "benchmark_rate_pct");
+  const shortfall = numberField(evidence, "shortfall_leads");
+  const reliability = numberField(evidence, "reliability_prior");
+
+  if (sessions !== null) rows.push({ label: "Organic sessions", value: formatNum(sessions, 0) });
+  if (leads !== null) rows.push({ label: "Leads from them", value: formatNum(leads, 0) });
+  if (benchmark !== null) {
+    const source = stringField(evidence, "benchmark_source");
+    rows.push({
+      label: source && source !== "site" ? `${source} pages convert at` : "Site converts at",
+      value: `${benchmark.toFixed(2)}%`,
+    });
+  }
+  if (shortfall !== null) rows.push({ label: "Shortfall", value: formatNum(shortfall, 2) });
+  if (reliability !== null && reliability !== 1) {
+    rows.push({ label: "Discounted for a claim not yet observed", value: `×${reliability}` });
+  }
+  return rows;
 }
 
 const SELECTED_TOWARD_PLAN_STATUSES = new Set([
