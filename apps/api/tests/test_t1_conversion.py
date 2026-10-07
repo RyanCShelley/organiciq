@@ -204,3 +204,14 @@ def test_a_page_that_matches_nothing_emits_nothing():
     assert prescription is None
     assert rule is None
     assert skip is SkipReason.NO_RULE_MATCHED
+
+
+def test_the_offer_falls_back_to_a_pattern_matched_page():
+    """With nothing declared, the classifier's own /contact and /quote
+    pages are the offer. Without this every client got "declare a
+    conversion page" instead of the CTA they could add today — the old
+    guess withheld rather than improved."""
+    from app.services.lever_engine import _offer_label
+
+    assert _offer_label("https://x.com/get-a-quote") == "Get a quote"
+    assert _offer_label("https://x.com/contact") == "Contact"

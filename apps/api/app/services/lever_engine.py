@@ -2924,6 +2924,18 @@ def _converting_page_dropped_findings(
     return [finding for _, finding in candidates[:PAGE_DROP_MAX_FINDINGS]]
 
 
+def _offer_label(url: str) -> str:
+    """A readable name for a page nobody has named.
+
+    The last path segment, tidied. "Get a quote" beats the full URL in the
+    middle of a sentence, and a declared page carries a real label anyway.
+    """
+    slug = (urlsplit(url).path or "/").rstrip("/").rsplit("/", 1)[-1]
+    if not slug:
+        return "the homepage"
+    return slug.replace("-", " ").replace("_", " ").strip().capitalize()
+
+
 def _t1_inputs(
     db: Session,
     client: Client,
@@ -2944,6 +2956,17 @@ def _t1_inputs(
         Offer(url=row.normalized_url, label=row.label, stage=row.stage)
         for row in sorted(declared, key=lambda r: (not r.is_primary, r.label))
     ]
+    if not offers:
+        # Nothing declared, so fall back to the pages the classifier reads
+        # as conversion pages — the /contact and /quote patterns it has
+        # always used. Without this every client with no declared page got
+        # "declare a conversion page" instead of the CTA they can add
+        # today, which is the old guess being withheld rather than improved.
+        offers = [
+            Offer(url=url, label=_offer_label(url), stage=None)
+            for url, classification in sorted(classifications.items())
+            if classification.page_type == PageType.CONVERSION
+        ]
     offer_urls = {offer.url for offer in offers}
     has_crawl = bool(crawl_by_url)
 
