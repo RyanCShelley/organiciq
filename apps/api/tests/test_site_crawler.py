@@ -529,6 +529,114 @@ def test_a_robots_blocked_crawl_keeps_the_previous_pages(db, client_a, monkeypat
     assert "robots_disallow_crawling" in codes, "the cause must still be reported"
 
 
+def test_a_challenge_page_crawl_keeps_the_previous_pages(db, client_a, monkeypatch):
+    """
+    A few 403s is the same failure as a blocked crawl, wearing a status
+    code. aquamanleakdetection.com answers a handful of requests and then
+    serves a challenge page: 3 pages, 0 indexable, no sitemap. The old
+    guard only fired when nothing was fetched at all, so this was recorded
+    as a clean success and replaced 148 real pages and 2,507 schema blocks
+    with five rows.
+    """
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.job import SyncJob, SyncJobStatus
+
+    db.add(_snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, PAGE))
+    db.commit()
+
+    challenged = CrawlResult(
+        pages=[
+            CrawledPage(
+                raw_url=f"https://example.com/p{i}",
+                normalized_url=f"https://example.com/p{i}",
+                status_code=403,
+                redirect_url=None,
+                redirect_count=0,
+                blocked_by_robots=False,
+                fetch_error=None,
+                parsed=None,
+            )
+            for i in range(3)
+        ],
+        robots_txt_found=True,
+    )
+    monkeypatch.setattr(
+        pipeline.asyncio, "run", lambda coro: (coro.close(), challenged)[1]
+    )
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+
+    assert job.status == SyncJobStatus.PARTIAL
+    assert "nothing indexable came back" in (job.error_message or "")
+
+    survivors = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_a.id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+        )
+        .all()
+    )
+    assert [row.normalized_url for row in survivors] == [PAGE]
+
+
+def test_a_first_crawl_with_nothing_indexable_is_still_published(db, client_a, monkeypatch):
+    """There is nothing to protect on a first run, and refusing to publish
+    would leave the client with no crawl at all and no explanation."""
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.job import SyncJob, SyncJobStatus
+
+    result = CrawlResult(
+        pages=[
+            CrawledPage(
+                raw_url="https://example.com/",
+                normalized_url="https://example.com/",
+                status_code=403,
+                redirect_url=None,
+                redirect_count=0,
+                blocked_by_robots=False,
+                fetch_error=None,
+                parsed=None,
+            )
+        ],
+        robots_txt_found=True,
+    )
+    monkeypatch.setattr(pipeline.asyncio, "run", lambda coro: (coro.close(), result)[1])
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+    assert job.status == SyncJobStatus.SUCCESSFUL
+
+
 # ── Regression: the sitemap reader read `scope` from its caller's frame ──
 
 SITEMAP = (

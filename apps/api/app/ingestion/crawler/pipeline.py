@@ -14,6 +14,7 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -314,11 +315,36 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         # The site-level issue is still recorded, so the engine reports the
         # cause at its proper severity.
         fetched = [page for page in result.pages if page.status_code is not None]
-        if not fetched:
+        # A crawl that fetched something but nothing usable is the same
+        # failure wearing a status code. Aquaman's host answers a few
+        # requests and then serves a challenge page: 3 pages, 0 indexable,
+        # no sitemap — recorded as a clean success, which replaced 148 real
+        # pages and 2,507 schema blocks with five rows. The engine then
+        # reported a site with no content as if that were the finding.
+        #
+        # Nothing indexable is categorically a failed crawl rather than a
+        # small site: a site with no indexable page has nothing for the
+        # engine to act on either way, so keeping the previous crawl costs
+        # nothing and losing it costs everything.
+        indexable_now = sum(1 for page in result.pages if page.indexable)
+        indexable_before = (
+            db.query(func.count(FactCrawlPageSnapshot.id))
+            .filter(
+                FactCrawlPageSnapshot.client_id == job.client_id,
+                FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+                FactCrawlPageSnapshot.indexable.is_(True),
+            )
+            .scalar()
+            or 0
+        )
+        collapsed = indexable_now == 0 and indexable_before > 0
+        if not fetched or collapsed:
             blocked = sum(1 for page in result.pages if page.blocked_by_robots)
             reason = (
                 "robots.txt disallows crawling"
                 if blocked
+                else f"nothing indexable came back, where the last crawl had {indexable_before}"
+                if collapsed
                 else "no page could be fetched"
             )
             db.query(FactCrawlPageIssue).filter(
