@@ -3091,6 +3091,7 @@ def _conversion_page_findings(
 
     matched = {"1a": 0, "1b": 0}
     skipped: dict[str, int] = {}
+    entered = 0
     for page in pages:
         ctx = page_contexts.get(page.normalized_url)
         if ctx is None or ctx.ga4_sessions <= 0:
@@ -3100,6 +3101,7 @@ def _conversion_page_findings(
             continue
         if in_gate is not None and page.normalized_url not in in_gate:
             continue
+        entered += 1
 
         benchmark, benchmark_source = comparison_for(classification)
         expected = ctx.ga4_sessions * (benchmark / 100.0)
@@ -3185,6 +3187,18 @@ def _conversion_page_findings(
                 action_override=action,
             )
         )
+    # What the gate did, so a silent trigger can be told apart from a
+    # healthy one. This is the difference between "no pages convert
+    # badly" and "no page cleared the gate".
+    if coverage is not None and t1_inputs is not None:
+        for rule_id in ("1a", "1b"):
+            coverage.ran(
+                f"T1.{rule_id}",
+                findings=matched.get(rule_id, 0),
+                pages_in_gate=entered,
+                eligible_pages=len(t1_inputs.pages),
+                skips=skipped,
+            )
     return findings
 
 
@@ -5179,5 +5193,6 @@ def diagnose(
         findings=all_findings,
         recommended_actions=recommended_actions,
         search_opportunities=search_opportunities,
+        coverage=coverage.as_list(),
         **base_result,
     )

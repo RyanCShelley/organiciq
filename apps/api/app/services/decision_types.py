@@ -67,6 +67,9 @@ class DiagnoseResult:
     findings: list[LeverFinding] = field(default_factory=list)
     recommended_actions: list[LeverFinding] = field(default_factory=list)
     search_opportunities: list[LeverFinding] = field(default_factory=list)
+    #: Which rules ran this period and why the rest did not. "No findings"
+    #: and "never looked" are different answers and must not share a row.
+    coverage: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def findings_count(self) -> int:
