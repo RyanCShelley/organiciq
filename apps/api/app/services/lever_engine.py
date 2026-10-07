@@ -35,6 +35,14 @@ from app.decisions.keyword_cause import (
 )
 from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
 from app.decisions.prescription import Prescription, Step
+from app.decisions.triggers.coverage import Coverage, SkipReason
+from app.decisions.triggers.t1_conversion import (
+    Offer,
+    PageSignals,
+    T1Inputs,
+    classify_page,
+    eligible_gate,
+)
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
 from app.decisions.effort import effort_class, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
@@ -48,8 +56,9 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
-from app.models.config import OrganicChannel
+from app.models.config import ClientConversionPage, OrganicChannel
 from app.models.crawl import (
+    FactCrawlInternalLink,
     CRAWL_SOURCE_FIRST_PARTY,
     CRAWL_SOURCE_SE_RANKING,
     FactCrawlInternalLink,
@@ -2915,6 +2924,98 @@ def _converting_page_dropped_findings(
     return [finding for _, finding in candidates[:PAGE_DROP_MAX_FINDINGS]]
 
 
+def _t1_inputs(
+    db: Session,
+    client: Client,
+    *,
+    period: tuple[date, date] | None,
+    classifications: dict[str, PageClassification],
+    crawl_by_url: dict[str, FactCrawlPageSnapshot],
+    declared: list[ClientConversionPage],
+) -> T1Inputs:
+    """Everything T1 needs about this client's pages, read once.
+
+    `in_content_links_to_offers` is None where the client has no crawl.
+    That is deliberately different from zero: no crawl means we do not
+    know whether a link exists, and reading it as "no link" would
+    prescribe adding one that may already be there.
+    """
+    offers = [
+        Offer(url=row.normalized_url, label=row.label, stage=row.stage)
+        for row in sorted(declared, key=lambda r: (not r.is_primary, r.label))
+    ]
+    offer_urls = {offer.url for offer in offers}
+    has_crawl = bool(crawl_by_url)
+
+    links_to_offers: dict[str, int] = {}
+    if has_crawl and offer_urls:
+        rows = (
+            db.query(
+                FactCrawlInternalLink.from_url,
+                func.count(FactCrawlInternalLink.id),
+            )
+            .filter(
+                FactCrawlInternalLink.client_id == client.id,
+                FactCrawlInternalLink.source == active_crawl_source(),
+                FactCrawlInternalLink.to_url.in_(offer_urls),
+                FactCrawlInternalLink.in_content.is_(True),
+                FactCrawlInternalLink.is_template.is_(False),
+            )
+            .group_by(FactCrawlInternalLink.from_url)
+            .all()
+        )
+        links_to_offers = {url: int(count) for url, count in rows}
+
+    stage_of = {
+        PageType.INFORMATIONAL: "tofu",
+        PageType.CONSIDERATION: "mofu",
+        PageType.COMMERCIAL: "bofu",
+    }
+
+    signals: list[PageSignals] = []
+    if period is not None:
+        start, end = period
+        rows = (
+            db.query(
+                FactGa4Traffic.normalized_url,
+                func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
+                func.coalesce(func.sum(FactGa4Traffic.engaged_sessions), 0),
+            )
+            .filter(
+                FactGa4Traffic.client_id == client.id,
+                FactGa4Traffic.date >= start,
+                FactGa4Traffic.date <= end,
+                FactGa4Traffic.channel.in_(MANAGED_CHANNELS),
+            )
+            .group_by(FactGa4Traffic.normalized_url)
+            .all()
+        )
+        for url, sessions, engaged in rows:
+            if not url or float(sessions) <= 0:
+                continue
+            classification = classifications.get(url)
+            page_type = classification.page_type if classification else None
+            # Eligible pages only: a conversion page is the destination,
+            # not a page that fails to send anyone there, and a utility
+            # page is not meant to convert at all.
+            if page_type in (PageType.CONVERSION, PageType.UTILITY):
+                continue
+            signals.append(
+                PageSignals(
+                    url=url,
+                    sessions=float(sessions),
+                    engaged_sessions=float(engaged),
+                    page_stage=stage_of.get(page_type) if page_type else None,
+                    in_content_links_to_offers=(
+                        links_to_offers.get(url, 0) if has_crawl else None
+                    ),
+                    in_crawl=url in crawl_by_url,
+                )
+            )
+
+    return T1Inputs(pages=signals, offers=offers, has_crawl=has_crawl)
+
+
 def _conversion_page_findings(
     pages: list[PageDemand],
     *,
@@ -2924,8 +3025,10 @@ def _conversion_page_findings(
     page_type_rates: dict[str, float] | None = None,
     page_type_support: dict[str, tuple[int, int]] | None = None,
     thresholds: dict[str, float | int] | None = None,
+    t1_inputs: T1Inputs | None = None,
+    coverage: Coverage | None = None,
 ) -> list[LeverFinding]:
-    """Gate 3: pages earning traffic and not turning it into anything.
+    """T1: pages earning traffic and not turning it into anything.
 
     The engine spent its attention on whether pages could be *found*. This asks
     the question the client is actually paying for — the traffic arrived, so
@@ -2969,12 +3072,33 @@ def _conversion_page_findings(
         return site_rate, "site"
 
     findings: list[LeverFinding] = []
+
+    # ── T1 entry gate ──
+    # The old gating was "any page with sessions above zero", which on a
+    # busy site admits everything and makes the trigger a list. It is now
+    # the client's own top quartile with a floor, computed once.
+    limits = thresholds or {}
+    in_gate: set[str] | None = None
+    if t1_inputs is not None:
+        gate = eligible_gate(
+            t1_inputs.pages,
+            min_sessions=float(limits.get("t1_min_sessions", 30)),
+            top_share=float(limits.get("t1_top_share", 0.25)),
+        )
+        in_gate = {page.url for page in gate}
+        if coverage is not None and not in_gate:
+            coverage.skipped("T1", SkipReason.NO_PAGES_IN_GATE)
+
+    matched = {"1a": 0, "1b": 0}
+    skipped: dict[str, int] = {}
     for page in pages:
         ctx = page_contexts.get(page.normalized_url)
         if ctx is None or ctx.ga4_sessions <= 0:
             continue
         classification = classifications.get(page.normalized_url)
         if classification is not None and not classification.eligible_for_growth_action:
+            continue
+        if in_gate is not None and page.normalized_url not in in_gate:
             continue
 
         benchmark, benchmark_source = comparison_for(classification)
@@ -2996,6 +3120,23 @@ def _conversion_page_findings(
                 f"{page.normalized_url}"
             )
         )
+        # Which of the two things is wrong with it. No fallback: a page
+        # that matches neither is recorded and emits nothing.
+        prescription = None
+        rule_id = None
+        if t1_inputs is not None:
+            signals = t1_inputs.by_url.get(page.normalized_url)
+            if signals is not None:
+                prescription, skip, rule_id = classify_page(
+                    signals, t1_inputs, thresholds=dict(limits)
+                )
+                if rule_id:
+                    matched[rule_id] = matched.get(rule_id, 0) + 1
+                elif skip is not None:
+                    skipped[skip.value] = skipped.get(skip.value, 0) + 1
+        if t1_inputs is not None and prescription is None:
+            continue
+
         action = (
             "Work the conversion path on this page — CTA placement, form length, and "
             "whether the offer matches what the visitor searched for. "
@@ -3017,8 +3158,11 @@ def _conversion_page_findings(
                 lever=GrowthAction.CONVERSION_PATH.value,
                 rule_key=_rule_key("conversion_page", page.normalized_url),
                 diagnosis=diagnosis,
+                prescription=prescription,
                 evidence_json={
                     "gate": "conversion_page",
+                    "trigger_id": "T1",
+                    "rule_id": rule_id,
                     "sessions": int(ctx.ga4_sessions),
                     "leads": int(ctx.ga4_leads),
                     "page_lead_rate_pct": round(page_rate, 2),
@@ -4701,6 +4845,14 @@ def diagnose(
     # Set for the whole run so every finding is scored on this client's
     # weights, including the ones built deep inside the per-page cascade.
     _SCORE_WEIGHTS.set(thresholds)
+    # Which rules ran, and why the others did not. Carried through the run
+    # so "no findings" can be told apart from "never looked".
+    coverage = Coverage()
+    declared_pages = (
+        db.query(ClientConversionPage)
+        .filter(ClientConversionPage.client_id == client.id)
+        .all()
+    )
     classifications = classify_pages(page_urls)
     page_type_rates = compute_page_type_lead_rates(page_contexts, classifications)
     topic_rates = compute_topic_lead_rates(page_contexts, classifications)
@@ -4841,6 +4993,14 @@ def diagnose(
     # The layer closest to leads, which is the order the product works in:
     # visibility earns traffic, traffic earns leads, and a page that takes the
     # traffic and stops is the most expensive thing on the site.
+    t1_inputs = _t1_inputs(
+        db,
+        client,
+        period=ga4_period,
+        classifications=classifications,
+        crawl_by_url=crawl_by_url,
+        declared=declared_pages,
+    )
     findings.extend(
         _conversion_page_findings(
             pages,
@@ -4850,6 +5010,8 @@ def diagnose(
             page_type_rates=page_type_rates,
             page_type_support=page_type_rate_support(page_contexts, classifications),
             thresholds=thresholds,
+            t1_inputs=t1_inputs,
+            coverage=coverage,
         )
     )
     for finding in findings:

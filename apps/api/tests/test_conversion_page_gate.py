@@ -196,7 +196,7 @@ def test_it_reaches_the_queue_end_to_end(db, client_a):
             )
         )
 
-    def traffic(url, sessions, on):
+    def traffic(url, sessions, on, engaged=None):
         db.add(
             FactGa4Traffic(
                 id=uuid4(),
@@ -210,14 +210,21 @@ def test_it_reaches_the_queue_end_to_end(db, client_a):
                 sessions=Decimal(sessions),
                 active_users=Decimal(sessions),
                 views=Decimal(sessions),
+                engaged_sessions=Decimal(engaged if engaged is not None else sessions),
             )
         )
 
-    # The offender: lots of traffic, nothing to show for it.
-    traffic(page, 2000, end)
+    # The offender: lots of traffic, nothing to show for it, and visitors
+    # leaving before the page says anything — which is what T1 now has to
+    # name rather than reporting a generic conversion gap.
+    traffic(page, 2000, end, engaged=200)
     # The rest of the site converts, which is what gives us a site rate — and
     # keeps Gate 0 quiet so this finding is not suppressed.
-    traffic(other, 1000, end)
+    traffic(other, 1000, end, engaged=800)
+    # A third page, so T1's bounce baseline has something to average over.
+    # Conversion pages are excluded from the eligible set and therefore from
+    # the baseline, which on a two-page fixture leaves nothing.
+    traffic("https://example.com/blog/roof-care", 1200, end, engaged=960)
     db.add(
         FactGa4Event(
             id=uuid4(),
@@ -242,6 +249,11 @@ def test_it_reaches_the_queue_end_to_end(db, client_a):
     assert gate3[0].suppressed_by is None
     assert gate3[0].core_work is False
     assert gate3[0].evidence_json["leads"] == 0
+    # T1 names which of its two rules matched, and the card says what to do
+    # rather than "work the conversion path".
+    assert gate3[0].evidence_json["trigger_id"] == "T1"
+    assert gate3[0].evidence_json["rule_id"] == "1a"
+    assert gate3[0].evidence_json["cause"] == "conversion_proof_missing"
 
 
 # --- T3: judged against its own kind of page --------------------------------

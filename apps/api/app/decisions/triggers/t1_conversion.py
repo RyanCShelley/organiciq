@@ -46,6 +46,10 @@ class T1Inputs:
     offers: list[Offer] = field(default_factory=list)
     has_crawl: bool = False
 
+    @property
+    def by_url(self) -> dict[str, PageSignals]:
+        return {page.url: page for page in self.pages}
+
 
 def eligible_gate(
     pages: list[PageSignals], *, min_sessions: float, top_share: float
