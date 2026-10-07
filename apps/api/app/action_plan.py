@@ -120,6 +120,23 @@ def main() -> int:
                     "\n  SHORT: %d of %d. Nothing is padded — weaker work is not an action.",
                     len(actions), allowance,
                 )
+                # What a short plan nearly offered. Without this the floor is
+                # an assertion: the reader is told there was nothing better
+                # without being shown what came closest, which is the one
+                # thing that says whether the floor is set right.
+                for row in sorted(
+                    below,
+                    key=lambda r: -float(
+                        r.evidence_json.get("expected_leads_monthly") or 0.0
+                    ),
+                )[:5]:
+                    evidence = row.evidence_json
+                    logger.info(
+                        "        below the floor: %-4s %5.3f leads/mo  %s",
+                        evidence.get("rule_id", "?"),
+                        evidence.get("expected_leads_monthly", 0.0),
+                        (row.page_url or row.query or "site-wide")[-44:],
+                    )
             logger.info("")
         return 0
     finally:
