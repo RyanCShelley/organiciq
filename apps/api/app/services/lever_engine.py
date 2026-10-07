@@ -4638,21 +4638,29 @@ def diagnose(
         "crawl_audit": crawl_ready,
         "ai_visibility": ai_period is not None,
     }
-    #: Keyed the same as `readiness`, so the two read as one statement.
-    freshness_sources = {
-        "search_console": "gsc_pages",
-        "analytics": "ga4",
-        "crawl_audit": "site_crawl",
-        "ai_visibility": "se_ranking_ai",
-    }
-    source_freshness = {
-        name: (
-            watermarks[source].fact_through_date.isoformat()
-            if watermarks.get(source) is not None
-            and watermarks[source].fact_through_date is not None
-            else None
+    # The last day each source has a row for, read from the rows.
+    #
+    # This used to read the watermark, which is a claim rather than an
+    # observation — and the claim is exactly what goes wrong. ACC Tek's
+    # Search Console sync returns zero rows and still advances its
+    # watermark, so the watermark said 7 Oct while the newest fact was 24
+    # Sep. The screen reported "through Oct 7", the engine quietly analysed
+    # to 24 Sep because that is where the data stops, and the date someone
+    # picked appeared to be ignored for no stated reason.
+    def _last_fact(model, column=None) -> str | None:
+        field = column if column is not None else model.date
+        value = (
+            db.query(func.max(field)).filter(model.client_id == client.id).scalar()
         )
-        for name, source in freshness_sources.items()
+        return value.isoformat() if value is not None else None
+
+    source_freshness = {
+        "search_console": _last_fact(FactGscPage),
+        "analytics": _last_fact(FactGa4Traffic),
+        "crawl_audit": _last_fact(
+            FactCrawlPageSnapshot, FactCrawlPageSnapshot.snapshot_date
+        ),
+        "ai_visibility": _last_fact(FactSerAiCheck),
     }
     base_result = {
         "requested_from": from_date,

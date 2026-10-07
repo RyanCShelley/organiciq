@@ -117,3 +117,51 @@ def test_growth_actions_are_not_the_legacy_promotion(db, client_a):
         f"the legacy list has {len(unvalued_in_legacy)} such rows, which is why "
         "the two are separate"
     )
+
+
+def test_freshness_is_read_from_the_rows_not_the_watermark(db, client_a):
+    """A watermark is a claim; a fact is an observation, and here they
+    disagree. ACC Tek's Search Console sync returns no rows and still
+    advances its watermark, so the watermark said 7 Oct while the newest
+    row was 24 Sep. Reporting the claim made the engine's own narrowing of
+    the window look arbitrary."""
+    from datetime import date as date_cls
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from app.models.gsc import FactGscPage
+    from app.models.job import DataWatermark, ValidationStatus
+
+    newest_fact = date_cls(2026, 9, 24)
+    db.add(
+        FactGscPage(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=newest_fact,
+            raw_url="https://example.com/",
+            normalized_url="https://example.com/",
+            country="",
+            device="",
+            impressions=Decimal("10"),
+            clicks=Decimal("1"),
+            ctr=Decimal("0.1"),
+            average_position=Decimal("5"),
+        )
+    )
+    db.add(
+        DataWatermark(
+            id=uuid4(),
+            client_id=client_a.id,
+            source="gsc_pages",
+            fact_through_date=date_cls(2026, 10, 7),
+            validation_status=ValidationStatus.PASSED,
+        )
+    )
+    db.commit()
+
+    result = diagnose(
+        db, client_a, from_date=date_cls(2026, 9, 1), to_date=date_cls(2026, 10, 7)
+    )
+    assert result.source_freshness["search_console"] == newest_fact.isoformat(), (
+        "freshness must come from the newest row, not the watermark's claim"
+    )

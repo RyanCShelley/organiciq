@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import { ActionLedger } from "@/components/DecisionEngine/ActionLedger";
 import { EngineStatusBand } from "@/components/DecisionEngine/EngineStatusBand";
-import { FindingsReviewPanel } from "@/components/DecisionEngine/FindingsReviewPanel";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch, type Client } from "@/lib/api";
@@ -14,7 +13,6 @@ import {
   normalizeDiagnoseResponse,
   SOURCE_LABELS,
   type DiagnoseResponse,
-  type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
 import { withNavContext } from "@/lib/navigation";
@@ -61,7 +59,6 @@ export default async function DecisionEnginePage({
     error = e instanceof Error ? e.message : "Failed to load Decision Engine";
   }
 
-  const allFindings: Finding[] = data?.findings ?? [];
   const searchOpportunities = data?.search_opportunities ?? [];
 
   // The engine decides what a growth action is and what order they come
@@ -75,10 +72,8 @@ export default async function DecisionEnginePage({
   const belowFloor = data?.below_floor_actions ?? [];
   const unvalued = data?.unvalued_actions ?? [];
 
-  const recommendedKeys = new Set(actions.map((item) => item.rule_key));
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const selectedTowardPlan = countSelectedTowardPlan(decisions);
-  const coreWork = allFindings.filter((item) => !recommendedKeys.has(item.rule_key));
   const contentOppHref = withNavContext(
     accountToolHref(selectedClient.slug, "content-opp"),
     clientId,
@@ -124,13 +119,6 @@ export default async function DecisionEnginePage({
 
       {data?.ready && clientId ? (
         <div className="space-y-[var(--section-gap)]">
-          <EngineStatusBand
-            data={data}
-            findingsCount={data.findings_count}
-            from={from}
-            to={to}
-          />
-
           <p className="max-w-[76ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
             Everything the engine found that could be done in an hour, ranked by what it is worth.
             The line falls where the plan does — the ranking is advice, not a rule.
@@ -151,33 +139,28 @@ export default async function DecisionEnginePage({
             decisionsByRule={decisionByRule}
           />
 
-          <section className="workspace-section">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="font-[family-name:var(--font-display)] text-[16px] font-extrabold text-[var(--text-primary)]">
-                  Not competing for a slot
-                </h2>
-                <p className="mt-1.5 max-w-[70ch] text-[13.5px] text-[var(--text-secondary)]">
-                  {coreWork.length.toLocaleString()} findings are core work the plan already covers,
-                  or opportunities that need a decision before they can become a task.
-                </p>
-              </div>
-              <Link
-                href={contentOppHref}
-                className="inline-flex min-h-[44px] items-center rounded-lg border border-[var(--border)] px-4 text-[13.5px] font-semibold no-underline"
-              >
-                Content Opp ({searchOpportunities.length})
-              </Link>
-            </div>
-          </section>
+          {/* One way out of this page, to the list that is not actions.
+              What stood here was a count of "findings not competing for a
+              slot" beside a panel that re-ranked those same findings on
+              the old 0-100 scale — so the screen ranked by leads at the
+              top and by a different, unexplained number at the bottom. */}
+          <Link
+            href={contentOppHref}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 text-[13.5px] font-semibold no-underline"
+          >
+            See content opportunities
+            {searchOpportunities.length > 0 ? (
+              <span className="text-[var(--text-tertiary)]">
+                ({searchOpportunities.length})
+              </span>
+            ) : null}
+          </Link>
 
-          <FindingsReviewPanel
-            findings={allFindings}
-            recommendedKeys={recommendedKeys}
-            clientId={clientId}
+          <EngineStatusBand
+            data={data}
+            findingsCount={data.findings_count}
             from={from}
             to={to}
-            decisionsByRule={decisionByRule}
           />
         </div>
       ) : null}

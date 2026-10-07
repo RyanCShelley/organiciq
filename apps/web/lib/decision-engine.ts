@@ -85,37 +85,6 @@ const STAGE_LABELS: Record<string, string> = {
   conversion: "Outcomes",
 };
 
-/**
- * Badges, not sentences.
- *
- * "Estimated business impact below actionable threshold." was the chip on
- * twenty rows at once, which is a paragraph repeated down a column. The
- * reason belongs in the hint underneath, where it is read once.
- */
-const PROMOTION_BLOCKED_LABELS: Record<string, string> = {
-  impact_below_threshold: "Too small",
-  confidence_below_threshold: "Low confidence",
-  insufficient_business_signal: "Not enough data",
-  page_ineligible: "Page excluded",
-  opt_out_preferences: "Page excluded",
-};
-
-export const PROMOTION_BLOCKED_HINTS: Record<string, string> = {
-  impact_below_threshold:
-    "Worth less than the threshold this period, so it does not spend a growth action.",
-  confidence_below_threshold:
-    "The evidence behind the number is too thin to act on yet.",
-  insufficient_business_signal:
-    "Not enough traffic or leads on this page for the comparison to mean anything.",
-  page_ineligible: "This page is not eligible for Growth Actions.",
-  opt_out_preferences:
-    "A utility or preference page, excluded from Growth Actions.",
-};
-
-export function promotionBlockedHint(reason: string | null | undefined): string | undefined {
-  return reason ? PROMOTION_BLOCKED_HINTS[reason] : undefined;
-}
-
 const LEVER_STATUS_LABELS: Record<string, string> = {
   clear: "Clear",
   findings: "Findings",
@@ -136,42 +105,6 @@ export function normalizeDiagnoseResponse(data: DiagnoseResponse): DiagnoseRespo
 }
 
 
-
-export function promotionBlockedLabel(reason: string | null | undefined): string {
-  if (!reason) return "Not promoted for this period.";
-  return PROMOTION_BLOCKED_LABELS[reason] ?? reason.replaceAll("_", " ");
-}
-
-/**
- * How a finding should read on screen.
- *
- * Three states the old UI collapsed into one amber "not promoted" chip:
- * work the plan already covers, work that cannot be judged until a gate is
- * cleared, and work that simply did not score high enough this period. They
- * call for different responses, so they should not look the same.
- */
-export type FindingState =
-  | "recommended"
-  | "core-work"
-  | "blocked"
-  | "retired"
-  | "deferred";
-
-export function findingState(item: Finding, recommendedKeys: Set<string>): FindingState {
-  // A gate failing outranks everything: the score behind any other state was
-  // computed from data the gate says is wrong.
-  if (item.suppressed_by) return "blocked";
-  // Three dismissals across different pages: the rule is what needs changing,
-  // and that is a different message from "not important enough this month".
-  if ((item.override_count ?? 0) >= 3) return "retired";
-  if (recommendedKeys.has(item.rule_key) || item.is_recommended_action) return "recommended";
-  if (item.core_work) return "core-work";
-  return "deferred";
-}
-
-export function findingSubject(item: Finding): string {
-  return item.page_url ?? item.query ?? item.diagnosis;
-}
 
 export function formatEvidence(evidence: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -211,31 +144,11 @@ export function formatEvidence(evidence: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
-export function impactExplanation(evidence: Record<string, unknown>): string[] {
-  const lines = evidence.impact_explanation;
-  return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : [];
-}
-
 export type FindingAction = {
   text: string;
   target?: string;
   detail?: string;
   human?: boolean;
-};
-
-export type ScoreTerm = {
-  name: string;
-  value: number;
-  weight: number;
-  contribution: number;
-  scaled_by_impact: boolean;
-};
-
-export type ScoreBreakdown = {
-  terms: ScoreTerm[];
-  impact_relevance: number;
-  impact_relevance_scale: number;
-  total: number;
 };
 
 /** The prescribed steps, as steps. */
@@ -246,15 +159,6 @@ export function findingActions(evidence: Record<string, unknown>): FindingAction
     (row): row is FindingAction =>
       typeof row === "object" && row !== null && typeof (row as FindingAction).text === "string",
   );
-}
-
-export function scoreBreakdown(
-  evidence: Record<string, unknown>,
-): ScoreBreakdown | null {
-  const value = evidence.score_breakdown;
-  if (typeof value !== "object" || value === null) return null;
-  const breakdown = value as ScoreBreakdown;
-  return Array.isArray(breakdown.terms) ? breakdown : null;
 }
 
 export function stringField(
@@ -271,10 +175,6 @@ export function numberField(
 ): number | null {
   const value = evidence[key];
   return typeof value === "number" && !Number.isNaN(value) ? value : null;
-}
-
-export function scoreBar(value: number): string {
-  return `${Math.max(0, Math.min(100, value))}%`;
 }
 
 export function formatNum(value: number | null | undefined, digits = 1): string {
@@ -317,37 +217,6 @@ export const SOURCE_LABELS: Record<string, string> = {
   ai_visibility: "AI visibility",
 };
 
-/** How far behind a source has to fall before it is worth interrupting over. */
-const STALE_AFTER_DAYS = 4;
-
-export type StaleSource = { key: string; through: string | null; daysBehind: number };
-
-/**
- * Sources whose facts stop well before the end of the window.
- *
- * ACC Tek's Search Console sync reported success while returning no rows,
- * so its facts stopped on 22 Sep while GA4 ran to 6 Oct. Readiness showed
- * four green badges. The rules that read Search Console were measured over
- * half the window and nothing on screen said so.
- */
-export function staleSources(
-  data: Pick<DiagnoseResponse, "readiness" | "source_freshness">,
-  to: string,
-): StaleSource[] {
-  const end = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(end)) return [];
-  const rows: StaleSource[] = [];
-  for (const key of Object.keys(data.readiness ?? {})) {
-    const through = data.source_freshness?.[key] ?? null;
-    if (!through) continue;
-    const at = Date.parse(`${through}T00:00:00Z`);
-    if (Number.isNaN(at)) continue;
-    const daysBehind = Math.round((end - at) / 86_400_000);
-    if (daysBehind > STALE_AFTER_DAYS) rows.push({ key, through, daysBehind });
-  }
-  return rows.sort((a, b) => b.daysBehind - a.daysBehind);
-}
-
 /** Everything the card needs to show how a measured estimate was built. */
 export type ValueDerivation = { label: string; value: string }[];
 
@@ -387,48 +256,3 @@ const SELECTED_TOWARD_PLAN_STATUSES = new Set([
 export function countSelectedTowardPlan(decisions: StoredDecision[]): number {
   return decisions.filter((row) => SELECTED_TOWARD_PLAN_STATUSES.has(row.status)).length;
 }
-
-export function decisionStatusLabel(status: string): string {
-  switch (status) {
-    case "new":
-      return "New";
-    case "reviewed":
-      return "Reviewed";
-    case "accepted":
-      return "Accepted";
-    case "dismissed":
-      return "Dismissed";
-    case "task_created":
-      return "Task created";
-    case "completed":
-      return "Completed";
-    case "measuring":
-      return "Measuring";
-    case "validated":
-      return "Validated";
-    default:
-      return status.replaceAll("_", " ");
-  }
-}
-
-export function decisionStatusBadgeVariant(
-  status: string,
-): "neutral" | "success" | "warning" | "accent" {
-  switch (status) {
-    case "accepted":
-    case "completed":
-    case "validated":
-      return "success";
-    case "dismissed":
-      return "warning";
-    case "task_created":
-    case "measuring":
-      return "accent";
-    case "reviewed":
-    case "new":
-      return "neutral";
-    default:
-      return "neutral";
-  }
-}
-
