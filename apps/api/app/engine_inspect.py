@@ -181,6 +181,27 @@ def main() -> int:
                         floor, len(busy), len(dry),
                     )
 
+                # Prompt volume, and the keyword volume that would stand
+                # in for it. A tiebreak that reaches for a column nobody
+                # populates is a tiebreak that does nothing.
+                from app.models.seranking import FactSerAiPrompt, FactSerKeywordMetric
+
+                prompts = db.query(FactSerAiPrompt).filter(
+                    FactSerAiPrompt.client_id == client.id
+                ).all()
+                with_volume = [
+                    p for p in prompts if p.search_volume and float(p.search_volume) > 0
+                ]
+                logger.info(
+                    "   prompts %d, carrying a search volume %d",
+                    len(prompts), len(with_volume),
+                )
+                metrics = db.query(FactSerKeywordMetric).filter(
+                    FactSerKeywordMetric.client_id == client.id,
+                    FactSerKeywordMetric.volume.isnot(None),
+                ).count()
+                logger.info("   keywords priced in facts_ser_keyword_metrics: %d", metrics)
+
                 topics = (
                     db.query(func.count(FactSerKeyword.id))
                     .filter(
