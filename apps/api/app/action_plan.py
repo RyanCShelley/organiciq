@@ -95,6 +95,9 @@ def main() -> int:
                     (row.page_url or row.query or "site-wide")[-44:],
                     taken,
                 )
+                tie = evidence.get("tiebreak_volume")
+                if tie:
+                    logger.info("        (tiebreak: %s searches/mo)", int(tie))
                 logger.info(
                     "%s",
                     textwrap.fill(
@@ -103,6 +106,14 @@ def main() -> int:
                         initial_indent="        ",
                         subsequent_indent="        ",
                     )[:400],
+                )
+            for row in broken:
+                logger.info(
+                    "  UNVALUED  %-6s %s",
+                    row.evidence_json.get("rule_id")
+                    or row.evidence_json.get("gate")
+                    or row.evidence_json.get("audit_signal"),
+                    (row.page_url or row.query or "site-wide")[-50:],
                 )
             if allowance and len(actions) < allowance:
                 logger.info(
