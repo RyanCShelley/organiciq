@@ -32,13 +32,3 @@ export const BRAND = {
 } as const;
 
 /** CSS variable names for programmatic use (charts, etc.) */
-export const CSS_VARS = {
-  brandTeal: "var(--brand-teal)",
-  brandLime: "var(--brand-lime)",
-  textPrimary: "var(--text-primary)",
-  textSecondary: "var(--text-secondary)",
-  border: "var(--border)",
-  surface: "var(--surface)",
-  success: "var(--success)",
-  danger: "var(--danger)",
-} as const;

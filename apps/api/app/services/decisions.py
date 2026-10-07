@@ -178,18 +178,20 @@ def evaluate_and_store(
     thresholds = get_thresholds(db, client.id)
     created: list[Decision] = []
     skipped = 0
-    for finding in result.recommended_actions:
-        existing = (
-            db.query(Decision)
-            .filter(
-                Decision.client_id == client.id,
-                Decision.rule_key == finding.rule_key,
-                Decision.date_range_start == from_date,
-                Decision.date_range_end == to_date,
-            )
-            .one_or_none()
+    # Which rules already have a decision for this window, in one query.
+    # Asking per finding meant one round trip each: twenty-six of them on
+    # SMA, every time someone pressed Run.
+    already = {
+        row[0]
+        for row in db.query(Decision.rule_key).filter(
+            Decision.client_id == client.id,
+            Decision.date_range_start == from_date,
+            Decision.date_range_end == to_date,
+            Decision.rule_key.in_([f.rule_key for f in result.recommended_actions]),
         )
-        if existing is not None:
+    }
+    for finding in result.recommended_actions:
+        if finding.rule_key in already:
             skipped += 1
             continue
         decision = _finding_to_model(client.id, finding, from_date, to_date, thresholds)
@@ -293,21 +295,28 @@ def upsert_keyword_page_map(db, client_id, entries):
     """
     from app.models.decision import KeywordPageMap
 
+    wanted = [k for k in ((e.keyword or "").strip().lower() for e in entries) if k]
+    # Every row this save might touch, in one query rather than one per
+    # entry — a bulk save of a hundred keywords was a hundred round trips.
+    existing = {
+        row.keyword: row
+        for row in db.query(KeywordPageMap).filter(
+            KeywordPageMap.client_id == client_id,
+            KeywordPageMap.keyword.in_(wanted),
+        )
+    }
     for entry in entries:
         keyword = entry.keyword.strip().lower()
         if not keyword:
             continue
-        row = (
-            db.query(KeywordPageMap)
-            .filter(
-                KeywordPageMap.client_id == client_id,
-                KeywordPageMap.keyword == keyword,
-            )
-            .one_or_none()
-        )
+        row = existing.get(keyword)
         if row is None:
             row = KeywordPageMap(client_id=client_id, keyword=keyword)
             db.add(row)
+            # The batched lookup only saw what was in the table when it ran,
+            # so a keyword repeated inside one payload has to be matched
+            # against what this call has already added.
+            existing[keyword] = row
         row.page_url = (entry.page_url or "").strip() or None
         row.note = (entry.note or "").strip() or None
     db.commit()

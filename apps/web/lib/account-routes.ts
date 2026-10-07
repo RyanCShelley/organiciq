@@ -24,10 +24,6 @@ export const RESERVED_ROOT_SLUGS = new Set<string>([
   "auth",
 ]);
 
-export function isAccountTool(value: string): value is AccountTool {
-  return (ACCOUNT_TOOLS as readonly string[]).includes(value);
-}
-
 /**
  * Matches `/{slug}/{tool}` for any account tool.
  *
@@ -53,13 +49,3 @@ export function accountToolHref(slug: string, tool: AccountTool | string): strin
   return `/${slug}/${tool}`;
 }
 
-export function parseAccountToolPath(
-  pathname: string,
-): { slug: string; tool: AccountTool } | null {
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length < 2) return null;
-  const [slug, tool] = parts;
-  if (!slug || RESERVED_ROOT_SLUGS.has(slug)) return null;
-  if (!isAccountTool(tool)) return null;
-  return { slug, tool };
-}

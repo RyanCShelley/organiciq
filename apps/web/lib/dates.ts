@@ -14,16 +14,3 @@ export function syncJobWindow(days: number): { start_date: string; end_date: str
   return { start_date: from, end_date: to };
 }
 
-export function previousPeriod(from: string, to: string): { from: string; to: string } {
-  const start = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
-  const prevEnd = new Date(start);
-  prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
-  const prevStart = new Date(prevEnd);
-  prevStart.setUTCDate(prevStart.getUTCDate() - (days - 1));
-  return {
-    from: prevStart.toISOString().slice(0, 10),
-    to: prevEnd.toISOString().slice(0, 10),
-  };
-}

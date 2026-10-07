@@ -129,13 +129,7 @@ export function normalizeDiagnoseResponse(data: DiagnoseResponse): DiagnoseRespo
   };
 }
 
-export function stageLabel(stage: string): string {
-  return STAGE_LABELS[stage] ?? stage;
-}
 
-export function leverStatusLabel(status: string): string {
-  return LEVER_STATUS_LABELS[status] ?? status.replaceAll("_", " ");
-}
 
 export function promotionBlockedLabel(reason: string | null | undefined): string {
   if (!reason) return "Not promoted for this period.";
