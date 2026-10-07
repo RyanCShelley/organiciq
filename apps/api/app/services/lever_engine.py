@@ -3122,11 +3122,21 @@ def _conversion_page_findings(
         benchmark, benchmark_source = comparison_for(classification)
         expected = ctx.ga4_sessions * (benchmark / 100.0)
         shortfall = expected - ctx.ga4_leads
-        if shortfall < CONVERSION_PAGE_MIN_SHORTFALL:
-            continue
         page_rate = ctx.page_lead_rate_pct or 0.0
-        if page_rate >= benchmark * CONVERSION_PAGE_RATE_RATIO:
-            continue
+
+        # Weak conversion is the shortfall test *or* no leads at all, not
+        # both. A page in the leak gate has already answered it: people
+        # landed there and the visit produced nothing anywhere. Applying
+        # the shortfall minimum on top dropped every one of them — four of
+        # four on Element 6 — before the tree was ever called, because a
+        # page with no leads and modest traffic is below a minimum
+        # expressed in leads.
+        leaking = in_gate is not None and page.normalized_url in in_gate
+        if not leaking:
+            if shortfall < CONVERSION_PAGE_MIN_SHORTFALL:
+                continue
+            if page_rate >= benchmark * CONVERSION_PAGE_RATE_RATIO:
+                continue
 
         none_at_all = ctx.ga4_leads == 0
         diagnosis = (
