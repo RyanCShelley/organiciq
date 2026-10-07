@@ -4764,6 +4764,7 @@ def diagnose(
             period=gsc_period,
             lead_events=lead_events,
             normalized_urls=page_urls,
+            channels=MANAGED_CHANNELS,
         )
         if gsc_period is not None and page_urls
         else {}

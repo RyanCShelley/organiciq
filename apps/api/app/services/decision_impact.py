@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import UUID
 
 from sqlalchemy import func
@@ -596,7 +596,19 @@ def load_page_business_contexts(
     period: tuple[date, date],
     lead_events: list[str],
     normalized_urls: list[str],
+    channels: Sequence[Any] | None = None,
 ) -> dict[str, PageBusinessContext]:
+    """Sessions and leads per page, for the channels the plan manages.
+
+    `channels` is not optional in practice. These numbers set the site and
+    page-type lead rates, every conversion shortfall, and whether a page
+    looks like it converts — and the trigger that picks the page counts
+    organic sessions only. Left unfiltered the engine gated ACC Tek's
+    homepage on 103 organic sessions that converted nothing, then valued
+    the fix against 5 leads from every channel, four of them referral,
+    decided the page was over-performing and scored the only real action
+    that client had at zero.
+    """
     if not normalized_urls:
         return {}
 
@@ -611,6 +623,11 @@ def load_page_business_contexts(
             FactGa4Traffic.date >= start,
             FactGa4Traffic.date <= end,
             FactGa4Traffic.normalized_url.in_(normalized_urls),
+            *(
+                [FactGa4Traffic.channel.in_(tuple(channels))]
+                if channels is not None
+                else []
+            ),
         )
         .group_by(FactGa4Traffic.normalized_url)
         .all()
@@ -630,6 +647,11 @@ def load_page_business_contexts(
                 FactGa4Event.date <= end,
                 FactGa4Event.event_name.in_(lead_events),
                 FactGa4Event.normalized_url.in_(normalized_urls),
+                *(
+                    [FactGa4Event.channel.in_(tuple(channels))]
+                    if channels is not None
+                    else []
+                ),
             )
             .group_by(FactGa4Event.normalized_url)
             .all()
