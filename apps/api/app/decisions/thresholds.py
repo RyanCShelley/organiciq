@@ -63,6 +63,15 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "light_refresh_min_drop_pct": 20.0,
     # T8: a rule gets another chance once the work has moved on.
     "contested_reset_days": 90,
+    # --- Decision engine v1.1: the six triggers ---
+    # T1 asks which pages people land on and never convert from. Ranked by
+    # traffic instead, the gate was one page per client — the homepage,
+    # which converts.
+    "t1_min_sessions": 30,
+    "t1_max_findings": 5,
+    "t1_bounce_multiple": 1.2,
+    #: Below this the site's own bounce rate is not an average.
+    "t1_baseline_min_sessions": 200,
     # --- Phase 3 ---
     # An orphan page needs demand to be worth reporting: most pages nothing
     # links to are drafts and thank-you pages.

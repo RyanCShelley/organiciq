@@ -5,16 +5,24 @@ page that enters the gate and matches neither is recorded as
 `no_rule_matched` and nothing is emitted, because a generic finding on a
 page we could not diagnose is the thing this rebuild exists to remove.
 
-The entry gate is relative, not absolute. A fixed session floor was tried
-and would have emptied the trigger: SMA has six pages above thirty
-sessions in a month and two above a hundred. "High traffic" has to mean
-high for this client, so it is the top quartile of their own eligible
-pages with a floor underneath it.
+The entry gate asks the question directly: which pages do people arrive
+on and then leave without converting anywhere?
+
+Both GA4 pulls are keyed on `landingPage`, so a lead is credited to the
+page the visit started on rather than the page holding the form. A page
+with sessions and no leads therefore means the visit began there and
+produced nothing on the whole site — which is a far stronger statement
+than "this page has no form", and it is the statement worth acting on.
+
+Ranking by traffic was tried first and was wrong for these sites. The top
+quartile of a client's busy pages is one page, that page is the homepage,
+and the homepage converts. Meanwhile four of SMA's six busy pages, and
+six of Aquaman's nine, take visits and return nothing. The gate was
+sorting the wrong list.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 from app.decisions.prescription import Prescription, Step
@@ -33,6 +41,9 @@ class PageSignals:
     url: str
     sessions: float
     engaged_sessions: float
+    #: Conversions credited to sessions that *started* here, anywhere on
+    #: the site. Zero means the visit produced nothing at all.
+    leads: float
     page_stage: str | None
     #: None when the client has no crawl, which is not the same as a page
     #: with no links.
@@ -51,23 +62,24 @@ class T1Inputs:
         return {page.url: page for page in self.pages}
 
 
-def eligible_gate(
-    pages: list[PageSignals], *, min_sessions: float, top_share: float
+def leaking_pages(
+    pages: list[PageSignals], *, min_sessions: float, max_pages: int
 ) -> list[PageSignals]:
-    """The client's own busiest pages, not a number from another client.
+    """Pages people land on, in numbers, and never convert from.
 
-    Ranked by sessions, floored, then cut to the top share. On a six-page
-    site that admits two; on a site with three eligible pages, one. Never
-    more than the share, however large the site.
+    Enough sessions to be judged, and nothing to show for them. Ranked by
+    how many visits are leaking, because that is the size of the problem,
+    and capped so the trigger stays a queue rather than an inventory.
     """
-    qualifying = sorted(
-        (page for page in pages if page.sessions >= min_sessions),
+    leaking = sorted(
+        (
+            page
+            for page in pages
+            if page.sessions >= min_sessions and page.leads <= 0
+        ),
         key=lambda page: -page.sessions,
     )
-    if not qualifying:
-        return []
-    keep = max(1, math.ceil(len(qualifying) * top_share))
-    return qualifying[:keep]
+    return leaking[:max_pages]
 
 
 def baseline_bounce(pages: list[PageSignals], *, exclude: str) -> tuple[float | None, float]:

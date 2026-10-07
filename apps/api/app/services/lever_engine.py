@@ -41,7 +41,7 @@ from app.decisions.triggers.t1_conversion import (
     PageSignals,
     T1Inputs,
     classify_page,
-    eligible_gate,
+    leaking_pages,
 )
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
 from app.decisions.effort import effort_class, ranking_score
@@ -2975,6 +2975,12 @@ def _t1_inputs(
     signals: list[PageSignals] = []
     if period is not None:
         start, end = period
+        # Conversions credited to the session's landing page, which is how
+        # GA4 is pulled. Zero means the visit started here and produced
+        # nothing anywhere, not that this page lacks a form.
+        leads_by_url = _leads_by_page(
+            db, client.id, _lead_event_names(db, client.id), start, end
+        )
         rows = (
             db.query(
                 FactGa4Traffic.normalized_url,
@@ -3005,6 +3011,7 @@ def _t1_inputs(
                     url=url,
                     sessions=float(sessions),
                     engaged_sessions=float(engaged),
+                    leads=leads_by_url.get(url, 0.0),
                     page_stage=stage_of.get(page_type) if page_type else None,
                     in_content_links_to_offers=(
                         links_to_offers.get(url, 0) if has_crawl else None
@@ -3080,21 +3087,14 @@ def _conversion_page_findings(
     limits = thresholds or {}
     in_gate: set[str] | None = None
     if t1_inputs is not None:
-        # Ranked over the pages T1 can actually score. The gate was built
-        # from every page with GA4 traffic while the loop below walks pages
-        # with Search Console demand; on SMA those two sets overlapped by
-        # one page out of eighty-four, so the trigger ranked a population
-        # it then never visited.
-        scorable = {
-            page.normalized_url
-            for page in pages
-            if (ctx := page_contexts.get(page.normalized_url)) is not None
-            and ctx.ga4_sessions > 0
-        }
-        gate = eligible_gate(
-            [page for page in t1_inputs.pages if page.url in scorable],
+        # Pages people land on and never convert from. Ranked by traffic
+        # the gate was one page per client — the homepage, which converts —
+        # while four of SMA's six busy pages took visits and returned
+        # nothing. The gate was sorting the wrong list.
+        gate = leaking_pages(
+            t1_inputs.pages,
             min_sessions=float(limits.get("t1_min_sessions", 30)),
-            top_share=float(limits.get("t1_top_share", 0.25)),
+            max_pages=int(limits.get("t1_max_findings", 5)),
         )
         in_gate = {page.url for page in gate}
         if coverage is not None and not in_gate:

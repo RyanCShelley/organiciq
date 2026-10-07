@@ -16,7 +16,7 @@ from app.decisions.triggers.t1_conversion import (
     T1Inputs,
     baseline_bounce,
     classify_page,
-    eligible_gate,
+    leaking_pages,
     pick_offer,
 )
 
@@ -28,6 +28,7 @@ def _page(url: str, sessions: float, engaged: float, **kwargs) -> PageSignals:
         url=url,
         sessions=sessions,
         engaged_sessions=engaged,
+        leads=kwargs.pop("leads", 0.0),
         page_stage=kwargs.pop("stage", "tofu"),
         in_content_links_to_offers=kwargs.pop("links", 2),
         in_crawl=kwargs.pop("in_crawl", True),
@@ -37,26 +38,37 @@ def _page(url: str, sessions: float, engaged: float, **kwargs) -> PageSignals:
 # ── The gate ──
 
 
-def test_a_six_page_site_admits_its_top_two():
-    pages = [_page(f"https://x/{i}", 600 - i * 50, 300) for i in range(6)]
-    gate = eligible_gate(pages, min_sessions=30, top_share=0.25)
-    assert [p.url for p in gate] == ["https://x/0", "https://x/1"]
+def test_it_raises_pages_people_land_on_and_never_convert_from():
+    """GA4 is pulled by landing page, so no leads means the visit started
+    here and produced nothing anywhere — not that the page has no form."""
+    pages = [
+        _page("https://x/guide", 600, 180),
+        _page("https://x/pricing", 300, 240, leads=12),
+        _page("https://x/service", 120, 96),
+        _page("https://x/thin", 20, 16),
+    ]
+    gate = leaking_pages(pages, min_sessions=30, max_pages=5)
+    assert [p.url for p in gate] == ["https://x/guide", "https://x/service"]
 
 
-def test_a_site_with_three_eligible_pages_admits_one():
-    """Never zero: the busiest page of three is still the busiest page."""
-    pages = [_page(f"https://x/{i}", 100 - i, 50) for i in range(3)]
-    assert len(eligible_gate(pages, min_sessions=30, top_share=0.25)) == 1
+def test_a_page_that_converts_is_not_leaking():
+    pages = [_page("https://x/a", 900, 700, leads=1)]
+    assert leaking_pages(pages, min_sessions=30, max_pages=5) == []
 
 
-def test_the_floor_still_applies():
-    pages = [_page("https://x/a", 29, 10), _page("https://x/b", 12, 4)]
-    assert eligible_gate(pages, min_sessions=30, top_share=0.25) == []
+def test_too_few_visits_to_judge():
+    assert leaking_pages([_page("https://x/a", 29, 10)], min_sessions=30, max_pages=5) == []
 
 
-def test_a_large_site_is_still_cut_to_the_share():
-    pages = [_page(f"https://x/{i}", 1000 - i, 500) for i in range(100)]
-    assert len(eligible_gate(pages, min_sessions=30, top_share=0.25)) == 25
+def test_the_biggest_leak_comes_first():
+    pages = [_page("https://x/small", 40, 30), _page("https://x/big", 900, 700)]
+    gate = leaking_pages(pages, min_sessions=30, max_pages=5)
+    assert [p.url for p in gate] == ["https://x/big", "https://x/small"]
+
+
+def test_it_stays_a_queue_rather_than_an_inventory():
+    pages = [_page(f"https://x/{i}", 1000 - i, 500) for i in range(40)]
+    assert len(leaking_pages(pages, min_sessions=30, max_pages=5)) == 5
 
 
 # ── 1a ──
