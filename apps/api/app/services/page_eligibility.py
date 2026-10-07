@@ -89,7 +89,27 @@ def _conversion_signals(path: str) -> bool:
     )
 
 
-def classify_page_url(normalized_url: str) -> PageClassification:
+def classify_page_url(
+    normalized_url: str, declared: frozenset[str] | None = None
+) -> PageClassification:
+    """What a page is for.
+
+    `declared` is the client's own list of conversion pages. It wins over
+    every guess below, because the guesses are URL fragments written for
+    somebody else's site: a client whose offer lives at /get-a-leak-check
+    was never going to match /contact, and a /contact page that is a staff
+    directory matched anyway.
+    """
+    if declared and normalized_url in declared:
+        return PageClassification(
+            normalized_url=normalized_url,
+            page_type=PageType.CONVERSION,
+            eligible_for_growth_action=True,
+            commercial_priority=5,
+            strategic_priority=5,
+            excluded_reason=None,
+        )
+
     path = normalized_url.lower().rstrip("/")
 
     for pattern, reason in UTILITY_PATH_PATTERNS:
@@ -172,5 +192,7 @@ def _extract_topic_slug(path: str, prefix: str) -> str | None:
     return segments[0].replace("-", " ")
 
 
-def classify_pages(normalized_urls: list[str]) -> dict[str, PageClassification]:
-    return {url: classify_page_url(url) for url in normalized_urls}
+def classify_pages(
+    normalized_urls: list[str], declared: frozenset[str] | None = None
+) -> dict[str, PageClassification]:
+    return {url: classify_page_url(url, declared) for url in normalized_urls}

@@ -56,6 +56,17 @@ CAUSES: dict[str, str] = {
     "page_not_quotable": "A page answers it in a form an engine cannot quote",
     # Rank push: the band CTR work cannot reach
     "rank_push": "It has the demand and sits below where clicks happen",
+    # T1 — the page takes traffic and does not convert it
+    "conversion_proof_missing": "Visitors leave before the page says anything",
+    "conversion_cta_missing": "Nothing in the page's content asks for the next step",
+    "conversion_offer_missing": "No page is declared as where a lead goes",
+    # T2b — two of our own pages competing
+    # (self_competition already defined under decay routing)
+    # T5 — answer engines cannot read the brand correctly
+    "ai_readiness_gaps": "Structured data misidentifies or under-describes the brand",
+    # T3c, T4b (Phase B)
+    "topic_no_hub": "A cluster of pages has nothing tying it together",
+    "no_asset_for_query": "People search for a tool the site does not have",
     # Internal linking (playbook 6)
     "under_linked_donors_found": "Pages that share its subject do not link to it",
     "under_linked_no_donor": "Nothing on the site shares its subject",
