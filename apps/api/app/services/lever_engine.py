@@ -3080,8 +3080,19 @@ def _conversion_page_findings(
     limits = thresholds or {}
     in_gate: set[str] | None = None
     if t1_inputs is not None:
+        # Ranked over the pages T1 can actually score. The gate was built
+        # from every page with GA4 traffic while the loop below walks pages
+        # with Search Console demand; on SMA those two sets overlapped by
+        # one page out of eighty-four, so the trigger ranked a population
+        # it then never visited.
+        scorable = {
+            page.normalized_url
+            for page in pages
+            if (ctx := page_contexts.get(page.normalized_url)) is not None
+            and ctx.ga4_sessions > 0
+        }
         gate = eligible_gate(
-            t1_inputs.pages,
+            [page for page in t1_inputs.pages if page.url in scorable],
             min_sessions=float(limits.get("t1_min_sessions", 30)),
             top_share=float(limits.get("t1_top_share", 0.25)),
         )
