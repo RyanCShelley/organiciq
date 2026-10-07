@@ -124,3 +124,59 @@ def test_the_raw_estimate_is_taken_directly_when_stated():
         window_days=30,
     )
     assert out[0].evidence_json["expected_leads_monthly"] == 0.6
+
+
+def test_a_page_with_work_settling_is_not_recommended_again():
+    """Recommending the same page a fortnight after someone rewrote it
+    asks them to do it twice."""
+    out = value_actions(
+        [
+            _finding(
+                evidence={"rule_id": "1a", "raw_leads_for_window": 0.9},
+                page_url="https://x/done",
+            )
+        ],
+        thresholds=LIMITS,
+        window_days=30,
+        settling={"https://x/done"},
+    )
+    assert out[0].is_recommended_action is False
+    assert out[0].promotion_blocked_reason == "settling"
+    assert out[0].evidence_json["settling"] is True
+
+
+def test_a_page_booked_for_refresh_keeps_its_steps_and_stops_counting():
+    """The work is paid for out of the content allowance. Spending a growth
+    action on it would charge the client twice for one job."""
+    out = value_actions(
+        [
+            _finding(
+                evidence={"rule_id": "1b", "raw_leads_for_window": 0.9},
+                page_url="https://x/booked",
+            )
+        ],
+        thresholds=LIMITS,
+        window_days=30,
+        refreshing={"https://x/booked"},
+    )
+    assert out[0].is_recommended_action is False
+    assert out[0].evidence_json["folded_into_refresh"] is True
+    # It is still a finding: someone needs to know it is on the list.
+    assert out[0].recommended_action
+
+
+def test_an_untouched_page_is_unaffected():
+    out = value_actions(
+        [
+            _finding(
+                evidence={"rule_id": "1a", "raw_leads_for_window": 0.9},
+                page_url="https://x/fresh",
+            )
+        ],
+        thresholds=LIMITS,
+        window_days=30,
+        settling={"https://x/other"},
+        refreshing={"https://x/another"},
+    )
+    assert "settling" not in out[0].evidence_json
+    assert "folded_into_refresh" not in out[0].evidence_json

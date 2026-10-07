@@ -100,6 +100,10 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     #: How many donor links one rank-push action may ask for. The cap is
     #: what keeps it inside an hour.
     "donor_link_cap": 5,
+    #: Rankings take weeks to move, so a page with work completed or being
+    #: measured inside this window is left alone rather than recommended
+    #: again.
+    "rank_settle_days": 60,
     # --- Decision engine v1.1: the six triggers ---
     # T1 asks which pages people land on and never convert from. Ranked by
     # traffic instead, the gate was one page per client — the homepage,

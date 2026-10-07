@@ -58,7 +58,7 @@ from app.decisions.ctr_curve import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
-from app.models.config import ClientConversionPage, OrganicChannel
+from app.models.config import ClientConversionPage, RefreshQueueEntry, OrganicChannel
 from app.models.crawl import (
     FactCrawlInternalLink,
     CRAWL_SOURCE_FIRST_PARTY,
@@ -69,6 +69,8 @@ from app.models.crawl import (
     FactCrawlPageSnapshot,
 )
 from app.models.decision import (
+    Decision,
+    DecisionStatus,
     KeywordPageMap,
     Decision,
     DecisionStatus,
@@ -3806,6 +3808,53 @@ def _prompt_tiebreak_volume(
     return best
 
 
+def _settling_urls(db: Session, client_id: UUID, *, days: int) -> set[str]:
+    """Pages where work has been done and has not had time to land. G3.
+
+    Recommending the same page again a fortnight after someone rewrote it
+    asks them to do it twice and makes the engine look like it is not
+    paying attention. Rankings take weeks to move, so a page with work
+    completed or being measured inside the window is left alone.
+    """
+    cutoff = date.today() - timedelta(days=days)
+    rows = (
+        db.query(Decision.page_url)
+        .filter(
+            Decision.client_id == client_id,
+            Decision.page_url.isnot(None),
+            Decision.status.in_(
+                (DecisionStatus.COMPLETED, DecisionStatus.MEASURING)
+            ),
+            # `created_at`, because `decisions` has no updated_at: this is
+            # when the decision was raised, not when the work finished. A
+            # decision raised ten weeks ago and completed yesterday is
+            # therefore not caught, and the page can be recommended again.
+            Decision.created_at >= cutoff,
+        )
+        .all()
+    )
+    return {url for (url,) in rows if url}
+
+
+def _refresh_queue_urls(db: Session, client_id: UUID) -> set[str]:
+    """Pages already booked for a content refresh this month.
+
+    The work is paid for out of the content allowance, so spending a
+    growth action on it would charge the client twice for one job. The
+    finding stays — someone still needs to know — it just stops counting.
+    """
+    first_of_month = date.today().replace(day=1)
+    rows = (
+        db.query(RefreshQueueEntry.normalized_url)
+        .filter(
+            RefreshQueueEntry.client_id == client_id,
+            RefreshQueueEntry.month == first_of_month,
+        )
+        .all()
+    )
+    return {url for (url,) in rows if url}
+
+
 def value_actions(
     findings: list[LeverFinding],
     *,
@@ -3813,6 +3862,8 @@ def value_actions(
     window_days: int,
     keyword_volumes: dict[str, float] | None = None,
     site_lead_rate: float | None = None,
+    settling: set[str] | None = None,
+    refreshing: set[str] | None = None,
 ) -> list[LeverFinding]:
     """Value every action in expected leads per month, and drop the tiny.
 
@@ -3862,6 +3913,20 @@ def value_actions(
             continue
 
         evidence.update(value.as_dict())
+
+        url = finding.page_url or ""
+        if settling and url in settling:
+            evidence["settling"] = True
+            finding.is_recommended_action = False
+            finding.promotion_blocked_reason = "settling"
+            kept.append(finding)
+            continue
+        if refreshing and url in refreshing:
+            evidence["folded_into_refresh"] = True
+            finding.is_recommended_action = False
+            kept.append(finding)
+            continue
+
         if not value.above_floor:
             evidence["below_floor"] = True
             finding.is_recommended_action = False
@@ -5372,6 +5437,10 @@ def diagnose(
         thresholds=thresholds,
         window_days=window_days,
         site_lead_rate=site.site_lead_rate_pct,
+        settling=_settling_urls(
+            db, client.id, days=int(thresholds.get("rank_settle_days", 60))
+        ),
+        refreshing=_refresh_queue_urls(db, client.id),
         keyword_volumes={
             keyword: float(volume)
             for keyword, volume in db.query(
