@@ -19,6 +19,27 @@ from typing import Any, Mapping
 
 SMALL, MEDIUM, LARGE = "S", "M", "L"
 
+#: Roughly how long each size takes, in minutes.
+#:
+#: A growth action is meant to be a small task — under an hour — that
+#: moves the account in the right direction. Scoring one against a month
+#: of content work on a single "effort" axis of 0 to 100 hid that
+#: entirely: adding a link to a blog post and rebuilding a service page
+#: both arrived as "conversion_path, effort 40".
+MINUTES_BY_SIZE: dict[str, int] = {SMALL: 20, MEDIUM: 120, LARGE: 600}
+
+#: Over this, it is not a growth action: it is a project, and it belongs
+#: in the plan rather than in the month's small wins.
+GROWTH_ACTION_MAX_MINUTES = 60
+
+
+def minutes_for(size: str) -> int:
+    return MINUTES_BY_SIZE.get(size, MINUTES_BY_SIZE[MEDIUM])
+
+
+def is_small_task(size: str) -> bool:
+    return minutes_for(size) <= GROWTH_ACTION_MAX_MINUTES
+
 #: Size by rule, from the audit signal or gate the finding carries.
 #: Anything unlisted falls back to the lever default below.
 EFFORT_BY_SIGNAL: dict[str, str] = {
@@ -32,6 +53,10 @@ EFFORT_BY_SIGNAL: dict[str, str] = {
     "orphan_page": SMALL,
     "internal_linking": SMALL,
     "link_reclamation": SMALL,
+    # T1: both are edits to one page, measured in minutes.
+    "conversion_cta_missing": SMALL,
+    "conversion_proof_missing": SMALL,
+    "conversion_offer_missing": SMALL,
     # A page's worth of work.
     "missing_schema": MEDIUM,
     "invalid_schema": MEDIUM,

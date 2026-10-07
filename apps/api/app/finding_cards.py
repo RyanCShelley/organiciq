@@ -103,6 +103,19 @@ def main() -> int:
                 if action.get("detail"):
                     logger.info(_wrap(action["detail"], indent="        "))
             logger.info("")
+            worth = evidence.get("estimated_value")
+            minutes = evidence.get("estimated_minutes")
+            if worth is not None or minutes is not None:
+                parts = []
+                if worth is not None:
+                    parts.append(f"about ${float(worth):,.0f}")
+                if minutes is not None:
+                    parts.append(
+                        f"{int(minutes)} minutes"
+                        if int(minutes) < 90
+                        else f"{int(minutes) / 60:.0f} hours"
+                    )
+                logger.info("  WORTH / TIME      %s", "  ·  ".join(parts))
             logger.info("  EXPECTED RESULT   %s", evidence.get("expected_impact") or "—")
             logger.info(
                 "  CHECK ON          %s  (%s)",

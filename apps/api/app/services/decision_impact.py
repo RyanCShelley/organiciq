@@ -69,6 +69,9 @@ class SiteBusinessContext:
     period_leads: int
     period_lead_goal: int | None
     p90_page_sessions: float
+    #: What one lead is worth here. None where the client has not said,
+    #: and the engine then ranks by lead count alone.
+    lead_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -582,6 +585,7 @@ def load_site_business_context(
         period_leads=period_leads,
         period_lead_goal=period_goal,
         p90_page_sessions=0.0,
+        lead_value=float(client.lead_value) if client.lead_value else None,
     )
 
 

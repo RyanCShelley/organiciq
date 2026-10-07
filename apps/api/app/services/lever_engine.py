@@ -45,7 +45,7 @@ from app.decisions.triggers.t1_conversion import (
     leaking_pages,
 )
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
-from app.decisions.effort import effort_class, ranking_score
+from app.decisions.effort import effort_class, minutes_for, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
@@ -5238,6 +5238,23 @@ def diagnose(
     head = findings[:top_n]
     head.sort(key=lambda row: row.evidence_json["ranking_score"], reverse=True)
     findings[:top_n] = head
+
+    # What the finding is worth, and how long it takes. Leads alone cannot
+    # be weighed by someone deciding where an hour goes: 0.4 leads is
+    # nothing on a site selling subscriptions and several thousand pounds
+    # on one selling air-conditioning installs.
+    for finding in findings:
+        size = str(finding.evidence_json.get("effort_class") or "")
+        if size:
+            finding.evidence_json["estimated_minutes"] = minutes_for(size)
+        leads = finding.evidence_json.get("estimated_incremental_leads")
+        if leads is None:
+            leads = finding.evidence_json.get("estimated_leads_at_risk")
+        if leads is not None and site.lead_value:
+            finding.evidence_json["estimated_value"] = round(
+                float(leads) * site.lead_value, 2
+            )
+            finding.evidence_json["lead_value"] = site.lead_value
 
     all_findings, recommended_actions = promote_findings(
         findings,

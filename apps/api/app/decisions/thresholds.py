@@ -119,6 +119,12 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "property_low_ctr_max_pct": 0.05,
     "property_low_ctr_min_impressions": 10000,
     "minimum_actionable_impact": 25,
+    # A growth action is a small task that moves the account forward. One
+    # worth this much, and doable inside an hour, is worth doing whatever
+    # share of the monthly goal it represents. Needs the client's
+    # `lead_value` to be set; without it the engine falls back to counting
+    # leads and this route never opens.
+    "growth_action_min_value": 250,
     # A critical technical fault clears a lower bar than ordinary work, but
     # not a bar of zero: a broken page with no demand behind it is still a
     # page with no demand behind it.

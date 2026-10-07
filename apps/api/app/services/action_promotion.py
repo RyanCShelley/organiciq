@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.models.decision import GrowthAction
 from app.services.decision_impact import ADVISORY_AUDIT_SIGNALS, PageBusinessContext
+from app.decisions.effort import is_small_task
 from app.services.decision_types import LeverFinding
 from app.services.page_eligibility import PageClassification
 
@@ -142,6 +143,27 @@ def passes_actionable_impact_gate(
         floor = float(thresholds.get("critical_override_min_impact", 10))
         if finding.impact < floor:
             return False, "impact_below_threshold"
+        return True, None
+
+    # ── The cheap, valuable route ──
+    # Impact is a share of the monthly lead goal, which is the right axis
+    # for a month of content work and the wrong one for a twenty-minute
+    # edit. On a client where one lead is five figures, "0.4 leads" is
+    # several thousand pounds for ten minutes' work, and the share-of-goal
+    # threshold called it a 5.9 and dropped it.
+    #
+    # So a finding also promotes when it is worth real money and takes
+    # under an hour. It is a second route, not a lower bar: both the value
+    # and the size have to hold, and the value is only known for clients
+    # who have said what a lead is worth.
+    value = finding.evidence_json.get("estimated_value")
+    size = finding.evidence_json.get("effort_class")
+    if (
+        value is not None
+        and size is not None
+        and is_small_task(str(size))
+        and float(value) >= float(thresholds.get("growth_action_min_value", 250))
+    ):
         return True, None
 
     min_impact = float(thresholds.get("minimum_actionable_impact", 25))

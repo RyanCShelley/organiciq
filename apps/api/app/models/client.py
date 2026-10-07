@@ -1,5 +1,6 @@
 import enum
 import uuid
+from decimal import Decimal
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, func
@@ -52,6 +53,13 @@ class Client(Base):
     #: Fallback goal, used only when there is no projection to read a
     #: checkpoint from. The dashboard's goal comes from the curve.
     monthly_lead_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: What one lead is worth to this client, in their currency.
+    #:
+    #: Without it every client's lead is worth the same, and the engine
+    #: ranks a leaking blog post on an AC company's site — where one job is
+    #: five figures — the same as one on a site selling a $40 subscription.
+    #: Null means unknown, and the engine falls back to counting leads.
+    lead_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     #: Hand corrections to the projected goals, keyed by checkpoint month
     #: ("3", "6", "12"). Held apart from the frozen projection so re-running it
     #: does not quietly discard a correction someone made on purpose.
