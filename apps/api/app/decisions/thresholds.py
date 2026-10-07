@@ -63,6 +63,43 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "light_refresh_min_drop_pct": 20.0,
     # T8: a rule gets another chance once the work has moved on.
     "contested_reset_days": 90,
+    # --- Growth actions: valued in expected leads per month ---
+    # Nothing is dropped for being small. Going from 36 leads to 37 is
+    # worth doing; only work worth less than a tenth of a lead a month
+    # falls away.
+    "min_expected_leads_monthly": 0.1,
+    #: Per-rule discount, for when measured outcomes exist. Until then
+    #: every rule is trusted at face value and the learning loop is not
+    #: built.
+    "reliability_default": 1.0,
+    #: Per rule, so one can be discounted without touching the rest.
+    "reliability_1a": 1.0,
+    "reliability_1b": 1.0,
+    "reliability_2a": 1.0,
+    "reliability_2c": 1.0,
+    "reliability_6": 1.0,
+    "reliability_5a": 1.0,
+    "reliability_ai_crawlers_unblock": 1.0,
+    #: How long each action takes. Estimates, not measurements. The cap
+    #: that makes an action an action is sixty minutes, enforced by a test.
+    "estimated_minutes": {
+        "1a": 45,
+        "1b": 15,
+        "2a": 30,
+        "2c": 45,
+        "6": 45,
+        "5a": 45,
+        "ai_crawlers_unblock": 15,
+    },
+    #: Actions with no honest clicks-to-leads model. Placeholders whose
+    #: only job is to order them sensibly against the search actions, and
+    #: they are shown openly as such.
+    "flat_credit_6_prompt_gap": 0.3,
+    "flat_credit_5a_entity_fix": 0.2,
+    "flat_credit_ai_crawlers_unblock": 1.0,
+    #: How many donor links one rank-push action may ask for. The cap is
+    #: what keeps it inside an hour.
+    "donor_link_cap": 5,
     # --- Decision engine v1.1: the six triggers ---
     # T1 asks which pages people land on and never convert from. Ranked by
     # traffic instead, the gate was one page per client — the homepage,
@@ -168,6 +205,12 @@ def merge_thresholds(overrides: dict[str, Any] | None) -> dict[str, Any]:
             if isinstance(merged[key], list):
                 if isinstance(value, list):
                     merged[key] = [str(item) for item in value]
+            elif isinstance(merged[key], dict):
+                # Per-rule maps, like how long each action takes. Merged
+                # key by key so overriding one rule's minutes does not
+                # silently delete the others.
+                if isinstance(value, dict):
+                    merged[key] = {**merged[key], **value}
             elif isinstance(value, (int, float)) and not isinstance(value, bool):
                 merged[key] = value
     return merged
