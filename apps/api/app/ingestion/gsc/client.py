@@ -6,7 +6,6 @@ from urllib.parse import quote
 
 import httpx
 
-from app.ingestion.google_auth import credentials_from_tokens, ensure_access_token
 from app.ingestion.google_http import get as http_get, post_json
 
 SEARCH_ANALYTICS_URL = "https://www.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"

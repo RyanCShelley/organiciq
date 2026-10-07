@@ -2,14 +2,11 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
-from app.models.config import OrganicChannel
 from app.models.crawl import FactCrawlPageSnapshot
 from app.services.lever_engine import active_crawl_source
-from app.models.ga4 import FactGa4Traffic
-from app.models.crawl import FactCrawlPageSnapshot
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.services.decisions import evaluate_and_store, run_diagnose
+from app.services.decisions import evaluate_and_store
 from tests.conftest import client_header, date_window, seed_required_sources
 
 

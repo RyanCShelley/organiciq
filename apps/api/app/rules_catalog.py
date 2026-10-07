@@ -55,7 +55,7 @@ CHECKS: dict[str, dict[str, str]] = {
         "question": "Are conversions being recorded at all?",
         "fires": (
             "No conversions in 14 days while sessions still arrive, and the "
-            f"fortnight should have produced at least 3 leads (or, with no history, "
+            "fortnight should have produced at least 3 leads (or, with no history, "
             "500 sessions arrived)."
         ),
         "impact": "Leads the fortnight should have produced, as leads at risk.",

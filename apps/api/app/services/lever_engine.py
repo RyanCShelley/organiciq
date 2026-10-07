@@ -35,7 +35,6 @@ from app.decisions.keyword_cause import (
     KeywordSignals,
     classify_keyword_gap,
 )
-from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
 from app.decisions.prescription import Prescription, Step
 from app.decisions.triggers.coverage import Coverage, SkipReason
 from app.decisions.triggers.t1_conversion import (
@@ -47,7 +46,7 @@ from app.decisions.triggers.t1_conversion import (
     leaking_pages,
 )
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
-from app.decisions.effort import effort_class, minutes_for, ranking_score
+from app.decisions.effort import effort_class, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
@@ -61,7 +60,6 @@ from app.decisions.thresholds import merge_thresholds
 from app.models.client import Client
 from app.models.config import ClientConversionPage, RefreshQueueEntry, OrganicChannel
 from app.models.crawl import (
-    FactCrawlInternalLink,
     CRAWL_SOURCE_FIRST_PARTY,
     CRAWL_SOURCE_SE_RANKING,
     FactCrawlInternalLink,
@@ -70,8 +68,6 @@ from app.models.crawl import (
     FactCrawlPageSnapshot,
 )
 from app.models.decision import (
-    Decision,
-    DecisionStatus,
     KeywordPageMap,
     Decision,
     DecisionStatus,
@@ -90,7 +86,6 @@ from app.models.seranking import (
     FactSerDomainKeyword,
     FactSerKeywordMetric,
     FactSerAiPrompt,
-    FactSerAiTrackerStats,
     FactSerBacklinkPage,
     FactSerKeyword,
 )
@@ -108,7 +103,6 @@ from app.services.decision_impact import (
     PageBusinessContext,
     SiteBusinessContext,
     build_impact_explanation,
-    business_impact_reference_leads,
     compute_page_type_lead_rates,
     page_type_rate_support,
     compute_topic_lead_rates,
@@ -1664,25 +1658,7 @@ def _internal_linking_finding(
     diagnosis = (
         f"Under-linked page ranking {page.average_position:.0f}: {page.normalized_url}"
     )
-    # Naming the source turns the finding into the work. Without one the
-    # generic lever text still applies — there is simply no page that both
-    # shares a subject and has the authority to lend.
-    action = None
     donors = link_gaps or ([link_gap] if link_gap else [])
-    if donors:
-        lines = [
-            f"{gap.source_url} (anchor: \u201c{gap.shared_query}\u201d"
-            + (f", {gap.source_refdomains} referring domains" if gap.source_refdomains else "")
-            + ")"
-            for gap in donors
-        ]
-        action = (
-            "Add links to this page from: "
-            + "; ".join(lines)
-            + ". Each ranks for the same query and has the authority this page is "
-            "missing. The anchor is the shared query — confirm it reads naturally "
-            "in the donor's copy before using it verbatim."
-        )
     return _make_finding(
         lever=GrowthAction.INTERNAL_LINKING.value,
         rule_key=_rule_key("internal_linking", page.normalized_url),
@@ -4440,29 +4416,15 @@ def _conversion_portfolio(
     # is not landing, behind plan is the ongoing story.
     if falling:
         diagnosis = "Managed traffic holding but lead rate falling"
-        action = (
-            "Find what changed on the conversion path in the last period — form, "
-            "CTA, page template, or a tracking change that moved the goalposts."
-        )
     elif below_baseline:
         diagnosis = (
             f"Lead rate {current_rate:.2f}% is below the {baseline_rate:.2f}% baseline "
             "the engagement started from"
         )
-        action = (
-            "Review the conversion path against what the site was doing at baseline. "
-            "Converting worse than the starting point means the work is not landing "
-            "where it matters."
-        )
     else:
-        short = float(period_goal) - float(period_leads)
         diagnosis = (
             f"{int(float(period_leads))} leads against a goal of {int(float(period_goal))} "
             f"for this period"
-        )
-        action = (
-            f"Close a {short:.0f}-lead gap: take the pages with the most traffic and the "
-            "worst conversion first, since that is where the shortfall is cheapest to buy back."
         )
 
     impact, impact_evidence = score_conversion_impact(

@@ -12,7 +12,6 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.decision import DecisionStatus
-from app.models.decision import KeywordPageMap
 from app.schemas import (
     KeywordPageMapOut,
     KeywordPageMapUpdate,

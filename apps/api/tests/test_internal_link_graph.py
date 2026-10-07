@@ -15,7 +15,6 @@ import httpx
 from app.ingestion.crawler.fetch import (
     TEMPLATE_LINK_PREVALENCE,
     TEMPLATE_PREVALENCE_MIN_PAGES,
-    USER_AGENT,
     crawl_site,
 )
 from app.ingestion.crawler.parse import parse_page
@@ -119,7 +118,7 @@ def test_site_wide_links_are_template_even_in_body_markup(monkeypatch):
     Position alone is not enough. On element6composites.com the navigation is
     plain divs, so every nav link looks editorial; prevalence catches it.
     """
-    pages = {f"/p{i}": f'<p>text <a href="/services">our services</a></p>' for i in range(14)}
+    pages = {f"/p{i}": '<p>text <a href="/services">our services</a></p>' for i in range(14)}
     pages["/"] = "<p>home</p>"
     pages["/services"] = "<p>services</p>"
     pages["/blog"] = "<p>blog</p>"

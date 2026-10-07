@@ -298,7 +298,6 @@ def test_the_engine_reads_the_first_party_crawl_by_default():
 
 
 def test_an_unknown_configured_source_falls_back_rather_than_reading_nothing(monkeypatch):
-    from app.core import settings as settings_module
     from app.services import lever_engine
 
     monkeypatch.setattr(

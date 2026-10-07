@@ -9,7 +9,6 @@ from app.services.lever_engine import active_crawl_source
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.models.seranking import FactSerAiTrackerStats, FactSerSiteSummary
 from app.services.lever_engine import diagnose, score_finding
 from tests.conftest import date_window, seed_required_sources
 
@@ -227,7 +226,6 @@ def test_diagnose_not_ready_when_range_has_no_overlap(db, client_a):
 def test_conversion_portfolio_rule(db, client_a):
     start = date(2026, 8, 2)
     end = date(2026, 8, 31)
-    prev_start = date(2026, 7, 3)
     prev_end = date(2026, 8, 1)
     _watermark(db, client_a.id, "ga4", end)
     db.add(

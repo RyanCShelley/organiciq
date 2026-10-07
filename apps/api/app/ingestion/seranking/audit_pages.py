@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
-from urllib.parse import urlparse
 
 from app.core.urls import normalize_url
 from app.ingestion.seranking import client as ser_client

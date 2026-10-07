@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 from alembic.script import ScriptDirectory

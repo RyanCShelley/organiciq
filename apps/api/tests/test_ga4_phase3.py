@@ -8,7 +8,7 @@ from app.ingestion.channels import classify_channel
 from app.ingestion.ga4.pipeline import run_ga4_job
 from app.ingestion.ga4.publish import publish_ga4
 from app.models.config import ChannelRule, OrganicChannel
-from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Event, StagingGa4Traffic
+from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Traffic
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
 

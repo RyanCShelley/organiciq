@@ -247,10 +247,7 @@ def seed_required_sources(
     from decimal import Decimal
 
     from app.models.config import OrganicChannel
-    from app.models.crawl import FactCrawlPageSnapshot
     from app.services.lever_engine import active_crawl_source
-    from app.models.ga4 import FactGa4Traffic
-    from app.models.gsc import FactGscPage
     from app.models.job import DataWatermark, ValidationStatus
 
     def _watermark(source: str) -> None:

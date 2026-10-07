@@ -11,7 +11,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
-import pytest
 
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic

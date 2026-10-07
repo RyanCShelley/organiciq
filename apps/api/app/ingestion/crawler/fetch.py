@@ -19,7 +19,7 @@ from xml.etree import ElementTree
 import httpx
 
 from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
-from app.ingestion.crawler.parse import PageLink, ParsedPage, is_page_url, parse_page
+from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
 
