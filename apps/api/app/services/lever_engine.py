@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.decisions.actions.value import value_for
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
 from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
@@ -1856,6 +1857,7 @@ def _rank_push_finding(
         ),
         evidence_json={
             "gate": "rank_push",
+            "rule_id": "2c",
             "promotion_class": "actionable",
             **impact_evidence,
         },
@@ -1953,6 +1955,7 @@ def _serp_ctr_finding(
         if top_query
         else None,
         evidence_json={
+            "rule_id": "2a",
             "impressions": int(page.impressions),
             "clicks": int(page.clicks),
             "ctr_percent": round(page.ctr_percent, 2),
@@ -3737,6 +3740,87 @@ def _blocking_only_findings(
     return findings
 
 
+#: Which growth action a finding is, by the gate or signal it carries.
+#: Only these can spend a client's monthly allowance; everything else the
+#: engine reports is recurring work already covered by the plan.
+ACTION_RULE_IDS: dict[str, str] = {
+    "serp_ctr": "2a",
+    "rank_push": "2c",
+    "prompt_not_cited": "6",
+    "ai_crawlers_blocked": "ai_crawlers_unblock",
+    "ai_readiness": "5a",
+}
+
+
+def action_rule_id(finding: LeverFinding) -> str | None:
+    """The action id, or None for a finding that cannot spend an action."""
+    explicit = finding.evidence_json.get("rule_id")
+    if explicit:
+        return str(explicit)
+    key = finding.evidence_json.get("gate") or finding.evidence_json.get("audit_signal")
+    return ACTION_RULE_IDS.get(str(key or ""))
+
+
+def value_actions(
+    findings: list[LeverFinding],
+    *,
+    thresholds: dict[str, Any],
+    window_days: int,
+) -> list[LeverFinding]:
+    """Value every action in expected leads per month, and drop the tiny.
+
+    The raw estimate is the one the rule already computed — stored in
+    evidence before `normalize_business_impact` applied the goal-relative
+    scale and the evidence haircut — restated per month. Nothing is
+    discounted twice.
+    """
+    kept: list[LeverFinding] = []
+    for finding in findings:
+        rule_id = action_rule_id(finding)
+        if rule_id is None:
+            # Report-only work. It keeps the old scoring and never spends
+            # an action.
+            finding.is_recommended_action = False
+            kept.append(finding)
+            continue
+
+        evidence = finding.evidence_json
+        raw = evidence.get("estimated_incremental_leads")
+        if raw is None:
+            raw = evidence.get("estimated_leads_at_risk")
+        try:
+            value = value_for(
+                rule_id,
+                thresholds=thresholds,
+                window_days=window_days,
+                raw_leads_for_window=float(raw) if raw is not None else None,
+                evidence_label=str(evidence.get("data_confidence") or "estimated"),
+            )
+        except ValueError:
+            # A rule tagged as an action with neither an estimate nor a
+            # credit is a bug, not a silent zero.
+            evidence["value_error"] = "no_raw_lead_estimate"
+            finding.is_recommended_action = False
+            kept.append(finding)
+            continue
+
+        evidence.update(value.as_dict())
+        if not value.above_floor:
+            evidence["below_floor"] = True
+            finding.is_recommended_action = False
+            finding.promotion_blocked_reason = "below_floor"
+        kept.append(finding)
+
+    # Ranked by what they are worth, so the web can take the top N.
+    kept.sort(
+        key=lambda row: (
+            row.evidence_json.get("expected_leads_monthly") or 0.0,
+        ),
+        reverse=True,
+    )
+    return kept
+
+
 def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
     """One card per URL, keeping the highest-scoring and noting the rest.
 
@@ -5217,6 +5301,15 @@ def diagnose(
     # as three problems and is one. The highest-scoring card wins and the
     # rest ride along in its evidence, so nothing is lost.
     findings = _collapse_by_page(findings)
+
+    # ── Growth actions ──
+    # Valued in expected leads per month, which is the unit the business
+    # uses, and ranked by it so the web can take the top N for the
+    # client's plan. Everything else stays report-only.
+    window_days = (
+        (gsc_period[1] - gsc_period[0]).days + 1 if gsc_period else 30
+    )
+    findings = value_actions(findings, thresholds=thresholds, window_days=window_days)
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
 
