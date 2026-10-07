@@ -297,6 +297,31 @@ CHECKS: dict[str, dict[str, str]] = {
         "impact": "Reported through the prompt rule rather than scored on its own.",
         "notes": "Usually a plugin's default rule rather than a decision anyone made.",
     },
+    "ai_readiness": {
+        "question": "Does the structured data say who the brand is, consistently?",
+        "fires": (
+            "Any of three checks fail across the Organization, LocalBusiness or "
+            "ProfessionalService blocks in the latest crawl: the site gives itself "
+            "more than one name; a `url` property points at a host that is not the "
+            "client's; or the homepage block is missing a required property."
+        ),
+        "impact": (
+            f"A flat credit of {_t('flat_credit_5a_entity_fix')} leads a month, "
+            "normalised against the client's own reference like every other rule. "
+            "Nothing here is measurable per-page, so a measured estimate would be invented."
+        ),
+        "notes": (
+            "One finding per run carrying every failing check, because they are one "
+            "edit to one block — split per page it would be five actions for one "
+            "forty-five-minute job. Growth action 5a."
+        ),
+    },
+    "entity_fix": {
+        "question": "Which rule key does `ai_readiness` file under?",
+        "fires": "See `ai_readiness`.",
+        "impact": "See `ai_readiness`.",
+        "notes": "Same check, named twice: the signal the UI shows and the key the finding is stored under.",
+    },
 }
 
 

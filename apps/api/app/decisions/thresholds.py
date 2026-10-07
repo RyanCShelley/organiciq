@@ -94,7 +94,11 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     #: Actions with no honest clicks-to-leads model. Placeholders whose
     #: only job is to order them sensibly against the search actions, and
     #: they are shown openly as such.
-    "flat_credit_6_prompt_gap": 0.3,
+    # Lowered from 0.3 after the first dry run: at 0.3 the placeholder
+    # outranked every measured estimate SMA had, and twenty-five prompt
+    # actions decided the whole month. A guess should sit below a
+    # measurement, not above it.
+    "flat_credit_6_prompt_gap": 0.15,
     "flat_credit_5a_entity_fix": 0.2,
     "flat_credit_ai_crawlers_unblock": 1.0,
     #: How many donor links one rank-push action may ask for. The cap is

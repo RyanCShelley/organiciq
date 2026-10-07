@@ -97,7 +97,7 @@ def test_a_bigger_action_outranks_a_smaller_one():
 def test_flat_credit_actions_say_so():
     value = value_for("6", thresholds=LIMITS, window_days=28)
     assert value.value_basis == "flat_credit"
-    assert value.expected_leads_monthly == pytest.approx(0.3)
+    assert value.expected_leads_monthly == pytest.approx(0.15)
 
 
 def test_a_rule_with_neither_an_estimate_nor_a_credit_is_a_bug():

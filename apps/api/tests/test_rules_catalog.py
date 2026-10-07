@@ -7,7 +7,14 @@ code is worse than none, because it is believed.
 
 from __future__ import annotations
 
+from app.decisions.actions.value import (
+    DEFAULT_MINUTES,
+    GROWTH_ACTION_MAX_MINUTES,
+    _minutes,
+)
+from app.decisions.thresholds import DEFAULT_DECISION_THRESHOLDS as LIMITS
 from app.rules_catalog import CHECKS, _row, _signals_in_code
+from app.services.lever_engine import ACTION_RULE_IDS
 
 
 def test_every_check_the_engine_emits_is_described():
@@ -54,3 +61,21 @@ def test_every_check_has_a_question_and_a_trigger():
         assert check["question"].endswith("?"), signal
         assert check["fires"].strip(), signal
         assert check["impact"].strip(), signal
+
+
+def test_every_growth_action_fits_in_an_hour():
+    """An action is a task someone does in an hour or less. A rule that
+    takes longer is a project, and spending a client's monthly allowance
+    on it misrepresents what they are buying."""
+    for rule_id in sorted(set(ACTION_RULE_IDS.values()) | set(DEFAULT_MINUTES)):
+        minutes = _minutes(rule_id, LIMITS)
+        assert 0 < minutes <= GROWTH_ACTION_MAX_MINUTES, (
+            f"{rule_id} is estimated at {minutes} minutes"
+        )
+
+
+def test_every_action_the_engine_can_emit_has_an_estimate():
+    """Without one the rule silently inherits the hour cap, which reads as
+    a measurement and is a default."""
+    missing = sorted(set(ACTION_RULE_IDS.values()) - set(DEFAULT_MINUTES))
+    assert missing == [], "no estimated_minutes for: " + ", ".join(missing)

@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
 from app.decisions.actions.value import value_for
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
@@ -736,6 +737,10 @@ SIGNAL_LEVERS: dict[str, str] = {
     # Nothing to convert through is not a technical defect; it is the whole
     # conversion path missing from a page people are already reaching.
     "no_conversion_element": GrowthAction.CONVERSION_PATH.value,
+    # How answer engines identify the brand. Not upkeep: one wrong name
+    # across three blocks makes the site unidentifiable, and no amount of
+    # content work fixes that.
+    "ai_readiness": GrowthAction.TECHNICAL_SEO.value,
 }
 
 
@@ -3472,6 +3477,106 @@ def _refresh_queue_urls(db: Session, client_id: UUID) -> set[str]:
     return {url for (url,) in rows if url}
 
 
+def _entity_fix_finding(
+    db: Session,
+    client: Client,
+    *,
+    site: SiteBusinessContext,
+    coverage: Coverage,
+    thresholds: dict[str, Any],
+) -> LeverFinding | None:
+    """5a — correct the markup that says who the brand is.
+
+    One finding per run carrying every failing check, because they are one
+    edit to one block. Split per page it would be five actions for one
+    forty-five-minute job.
+    """
+    latest = (
+        db.query(func.max(FactCrawlPageSchema.snapshot_date))
+        .filter(FactCrawlPageSchema.client_id == client.id)
+        .scalar()
+    )
+    if latest is None:
+        coverage.skipped("5a", SkipReason.CRAWL_NOT_READY)
+        return None
+
+    rows = (
+        db.query(FactCrawlPageSchema)
+        .filter(
+            FactCrawlPageSchema.client_id == client.id,
+            FactCrawlPageSchema.snapshot_date == latest,
+        )
+        .all()
+    )
+    apex = (client.domain or "").strip().lower().removeprefix("www.").split("/", 1)[0]
+    blocks = [
+        EntityBlock(
+            url=row.normalized_url,
+            schema_type=str(row.schema_type or ""),
+            raw=row.raw if isinstance(row.raw, dict) else {},
+            is_homepage=(urlsplit(row.normalized_url).path or "/").rstrip("/") == "",
+        )
+        for row in rows
+        if row.normalized_url
+    ]
+    failures = check_entity(blocks, domain=apex)
+    if not failures:
+        coverage.ran("5a", findings=0)
+        return None
+
+    prescription = Prescription(
+        cause="ai_readiness_gaps",
+        evidence={
+            "failing_checks": [f.check for f in failures],
+            "snapshot_date": latest.isoformat(),
+            "entity_blocks": len([b for b in blocks if b.schema_type in ENTITY_TYPES]),
+        },
+        steps=[
+            Step(
+                f"Correct the {failure.check.replace('_', ' ')} in the Organization markup",
+                detail=failure.detail
+                + (
+                    "  Pages: " + ", ".join(failure.urls[:5])
+                    if failure.urls
+                    else ""
+                ),
+            )
+            for failure in failures
+        ],
+        expected_impact="How answer engines identify the brand",
+        verify_metric="entity_checks_failing",
+        verify_after_days=28,
+    )
+    coverage.ran("5a", findings=1)
+    # The action's own value is the flat credit it earns in leads a month;
+    # the 0-100 impact is that same number through the shared normaliser,
+    # so 5a sorts against every other rule in one currency rather than its
+    # own. A literal here would be a second scale.
+    credit = float(thresholds.get("flat_credit_5a_entity_fix", 0.0) or 0.0)
+    impact, impact_evidence = normalize_business_impact(
+        site=site,
+        estimated_incremental_leads=credit,
+        data_confidence="medium",
+    )
+    return _make_finding(
+        lever=GrowthAction.TECHNICAL_SEO.value,
+        rule_key=_rule_key("entity_fix", str(client.id)),
+        diagnosis=(
+            f"Structured data misidentifies the brand: {len(failures)} "
+            f"{'check' if len(failures) == 1 else 'checks'} failing"
+        ),
+        evidence_json={
+            "audit_signal": "ai_readiness",
+            "rule_id": "5a",
+            "promotion_class": "actionable",
+            **impact_evidence,
+        },
+        baseline_metrics_json={},
+        impact=impact,
+        prescription=prescription,
+    )
+
+
 def value_actions(
     findings: list[LeverFinding],
     *,
@@ -4913,6 +5018,14 @@ def diagnose(
     # as three problems and is one. The highest-scoring card wins and the
     # rest ride along in its evidence, so nothing is lost.
     findings = _collapse_by_page(findings)
+
+    # ── 5a: who the brand says it is ──
+    entity = _entity_fix_finding(
+        db, client, site=site, coverage=coverage, thresholds=thresholds
+    )
+    if entity is not None:
+        _enrich_finding(entity, classification=None, page_ctx=None)
+        findings.append(entity)
 
     # ── Growth actions ──
     # Valued in expected leads per month, which is the unit the business

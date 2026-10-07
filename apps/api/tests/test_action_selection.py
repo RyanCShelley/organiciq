@@ -88,7 +88,7 @@ def test_a_flat_credit_action_needs_no_estimate():
         window_days=30,
     )
     assert out[0].evidence_json["value_basis"] == "flat_credit"
-    assert out[0].evidence_json["expected_leads_monthly"] == 0.3
+    assert out[0].evidence_json["expected_leads_monthly"] == 0.15
 
 
 def test_a_search_rule_without_a_lead_rate_names_the_missing_input():

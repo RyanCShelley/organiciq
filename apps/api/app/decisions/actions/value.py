@@ -38,8 +38,8 @@ class ActionValue:
     estimated_minutes: int
     evidence_label: str
     #: Separates actions that share a flat credit. Every prompt is worth
-    #: the same 0.3 by definition, so without this the top five of twenty
-    #: is whichever order they came out of the database in.
+    #: the same credit by definition, so without this the top five of
+    #: twenty is whichever order they came out of the database in.
     tiebreak: float = 0.0
 
     @property
