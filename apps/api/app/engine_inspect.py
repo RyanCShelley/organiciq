@@ -129,6 +129,51 @@ def main() -> int:
                         ppses[(len(ppses) * 3) // 4],
                         ppses[-1],
                     )
+                # Landed here and never converted anywhere. Both GA4 pulls
+                # are keyed on landingPage, so this is sessions that began
+                # on the page and produced no conversion in the whole visit
+                # — a stronger statement than "this page has no form".
+                from app.models.config import ConversionDefinition
+                from app.models.ga4 import FactGa4Event
+
+                lead_events = [
+                    row[0]
+                    for row in db.query(ConversionDefinition.event_name)
+                    .filter(
+                        ConversionDefinition.client_id == client.id,
+                        ConversionDefinition.active.is_(True),
+                    )
+                    .all()
+                ]
+                leads_by_url = {}
+                if lead_events:
+                    leads_by_url = {
+                        url: float(total)
+                        for url, total in db.query(
+                            FactGa4Event.normalized_url,
+                            func.sum(FactGa4Event.event_count),
+                        )
+                        .filter(
+                            FactGa4Event.client_id == client.id,
+                            FactGa4Event.date >= start,
+                            FactGa4Event.date <= end,
+                            FactGa4Event.event_name.in_(lead_events),
+                        )
+                        .group_by(FactGa4Event.normalized_url)
+                        .all()
+                    }
+                for floor in (10, 30, 100):
+                    busy = [
+                        (u, float(se))
+                        for u, se, _v, _e in rows
+                        if se and float(se) >= floor
+                    ]
+                    dry = [u for u, _ in busy if leads_by_url.get(u, 0.0) <= 0]
+                    logger.info(
+                        "   pages >=%3d sessions: %3d, of which zero leads: %3d",
+                        floor, len(busy), len(dry),
+                    )
+
                 topics = (
                     db.query(func.count(FactSerKeyword.id))
                     .filter(
