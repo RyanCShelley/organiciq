@@ -57,7 +57,7 @@ export function ActionLedger({
 
         <div
           aria-hidden="true"
-          className="flex gap-4 px-6 pb-2 text-[11px] uppercase tracking-[0.04em] text-[var(--text-tertiary)]"
+          className="hidden gap-4 px-6 pb-2 text-[11px] uppercase tracking-[0.04em] text-[var(--text-tertiary)] sm:flex"
         >
           <span className="w-6 flex-none">#</span>
           <span className="min-w-0 flex-1">What and where</span>

@@ -82,36 +82,41 @@ export function ActionLedgerRow({
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full min-h-[44px] cursor-pointer items-start gap-4 px-6 py-5 text-left hover:bg-[var(--surface-hover)]"
+        className="flex w-full min-h-[44px] cursor-pointer flex-wrap items-start gap-x-4 gap-y-3 px-6 py-5 text-left hover:bg-[var(--surface-hover)]"
       >
         <span className="w-6 flex-none pt-0.5 font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-tertiary)]">
           {rank}
         </span>
 
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0 flex-[999_1_240px]">
           <span className="block text-[14.5px] font-semibold leading-snug text-[var(--text-primary)]">
             {finding.diagnosis}
           </span>
-          <span className="mt-1 block font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+          <span className="mt-1 block break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
             {subject(finding)}
             {tiebreak ? ` · nearest tracked term: ${tiebreak.toLocaleString()} searches / mo` : ""}
           </span>
         </span>
 
-        <span className="w-[104px] flex-none text-right font-[family-name:var(--font-display)] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
-          {leads === null ? "—" : leads.toFixed(2)}
-        </span>
+        {/* The three numbers travel together: below ~640px they wrap under
+            the title as one strip rather than each becoming a column one
+            word wide, which is what five fixed columns did to a phone. */}
+        <span className="ml-10 flex flex-none items-baseline gap-3 sm:ml-0 sm:gap-4">
+          <span className="w-auto text-right font-[family-name:var(--font-display)] sm:w-[104px] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
+            {leads === null ? "—" : leads.toFixed(2)}
+          </span>
 
-        <span className="w-[72px] flex-none text-right text-[13px] text-[var(--text-secondary)]">
-          {minutes === null ? "—" : `${minutes} min`}
-        </span>
+          <span className="w-auto text-right text-[13px] text-[var(--text-secondary)] sm:w-[72px]">
+            {minutes === null ? "—" : `${minutes} min`}
+          </span>
 
-        <span className="w-[112px] flex-none text-right">
-          <span
-            title={chip.title}
-            className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${chip.className}`}
-          >
-            {chip.label}
+          <span className="w-auto text-right sm:w-[112px]">
+            <span
+              title={chip.title}
+              className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${chip.className}`}
+            >
+              {chip.label}
+            </span>
           </span>
         </span>
       </button>
