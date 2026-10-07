@@ -215,3 +215,33 @@ def test_the_offer_falls_back_to_a_pattern_matched_page():
 
     assert _offer_label("https://x.com/get-a-quote") == "Get a quote"
     assert _offer_label("https://x.com/contact") == "Contact"
+
+
+def test_the_card_says_what_the_page_is_worth():
+    """A finding with no expected result cannot be weighed against other
+    work, which is the whole point of a limited budget."""
+    pages = [_page("https://x/a", 600, 180), _page("https://x/b", 400, 320)]
+    prescription, _, _ = classify_page(
+        pages[0],
+        T1Inputs(pages=pages, has_crawl=True),
+        thresholds=LIMITS,
+        expected_leads=3.4,
+    )
+    assert prescription.expected_impact == "about 3.4 leads a period at the site's own rate"
+
+
+def test_each_rule_carries_its_own_evidence_tier():
+    """The sessions are measured; the claim that a rewrite recovers them is
+    not. The discount comes from the engine's tiers, not from a number
+    written into the rule."""
+    from app.decisions.triggers.t1_conversion import RULE_EVIDENCE_TIER
+    from app.services.decision_impact import DATA_CONFIDENCE_MULTIPLIERS
+
+    assert RULE_EVIDENCE_TIER["1a"] == "low"
+    assert RULE_EVIDENCE_TIER["1b"] == "medium"
+    # 1a is the weaker claim of the two, and scores lower for it.
+    assert (
+        DATA_CONFIDENCE_MULTIPLIERS[RULE_EVIDENCE_TIER["1a"]]
+        < DATA_CONFIDENCE_MULTIPLIERS[RULE_EVIDENCE_TIER["1b"]]
+        < DATA_CONFIDENCE_MULTIPLIERS["high"]
+    )

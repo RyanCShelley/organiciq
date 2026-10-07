@@ -110,13 +110,26 @@ def pick_offer(offers: list[Offer], page_stage: str | None) -> Offer | None:
     return offers[0]
 
 
+#: How far each rule's lead estimate is from a measurement. 1a infers that
+#: a rewritten opening recovers visitors who left; 1b that a link someone
+#: has not got would be followed. Neither is measured, and the engine's
+#: existing tiers are how that is said.
+RULE_EVIDENCE_TIER: dict[str, str] = {"1a": "low", "1b": "medium"}
+
+
 def classify_page(
     page: PageSignals,
     inputs: T1Inputs,
     *,
     thresholds: dict,
+    expected_leads: float | None = None,
 ) -> tuple[Prescription | None, SkipReason | None, str | None]:
     """(prescription, skip reason, rule id). Exactly one is not None."""
+    worth = (
+        f"about {expected_leads:.1f} leads a period at the site's own rate"
+        if expected_leads and expected_leads > 0
+        else ""
+    )
     bounce_multiple = float(thresholds.get("t1_bounce_multiple", 1.2))
     baseline_min = float(thresholds.get("t1_baseline_min_sessions", 200))
 
@@ -150,7 +163,7 @@ def classify_page(
                             f"engaging, against {baseline * 100:.0f}% across the site.",
                         )
                     ],
-                    expected_impact="",
+                    expected_impact=worth,
                     verify_metric="page_lead_rate",
                     verify_after_days=28,
                 ),
@@ -185,7 +198,7 @@ def classify_page(
                             human=True,
                         )
                     ],
-                    expected_impact="",
+                    expected_impact=worth,
                     verify_metric="page_lead_rate",
                     verify_after_days=28,
                 ),
@@ -212,7 +225,7 @@ def classify_page(
                         "on every page and say nothing about this one.",
                     )
                 ],
-                expected_impact="",
+                expected_impact=worth,
                 verify_metric="page_lead_rate",
                 verify_after_days=28,
             ),

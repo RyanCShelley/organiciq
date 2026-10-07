@@ -37,6 +37,7 @@ from app.decisions.page_drop_cause import PageDropSignals, classify_page_drop
 from app.decisions.prescription import Prescription, Step
 from app.decisions.triggers.coverage import Coverage, SkipReason
 from app.decisions.triggers.t1_conversion import (
+    RULE_EVIDENCE_TIER,
     Offer,
     PageSignals,
     T1Inputs,
@@ -3179,7 +3180,10 @@ def _conversion_page_findings(
             signals = t1_inputs.by_url.get(page.normalized_url)
             if signals is not None:
                 prescription, skip, rule_id = classify_page(
-                    signals, t1_inputs, thresholds=dict(limits)
+                    signals,
+                    t1_inputs,
+                    thresholds=dict(limits),
+                    expected_leads=shortfall,
                 )
                 if rule_id:
                     matched[rule_id] = matched.get(rule_id, 0) + 1
@@ -3195,13 +3199,19 @@ def _conversion_page_findings(
             "leads per period."
         )
 
-        # The shortfall is already a lead count, which is the engine's unit, so
-        # it goes through the shared normaliser rather than its own arithmetic.
-        # High confidence: these are the page's own measured sessions and leads.
+        # The shortfall is already a lead count, which is the engine's unit,
+        # so it goes through the shared normaliser rather than its own
+        # arithmetic.
+        #
+        # The tier is per rule, not "high". The sessions and leads are
+        # measured, but the claim is that a rewritten opening or an added
+        # link recovers them, and neither of those has been observed. The
+        # existing tiers are how the engine says that, so the discount
+        # comes from them rather than from a number written here.
         impact, impact_evidence = normalize_business_impact(
             site=site,
             estimated_incremental_leads=shortfall,
-            data_confidence="high",
+            data_confidence=RULE_EVIDENCE_TIER.get(rule_id or "", "high"),
         )
 
         findings.append(
