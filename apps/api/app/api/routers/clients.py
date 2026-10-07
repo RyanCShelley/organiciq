@@ -18,7 +18,26 @@ from app.schemas import (
 )
 from app.services import baseline_snapshot, clients as client_service
 
+from app.services.plan_allowances import resolve_plan_allowances
+
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+
+def client_out(client: Client) -> ClientOut:
+    """A client with its plan allowance already worked out.
+
+    The number is a business rule about what the client is buying, so the
+    server answers it. The web used to apply the rule itself, which meant
+    fetching `/admin/tiers` — an endpoint a client-role user is forbidden
+    to call, so the whole Decision Engine page failed for them.
+    """
+    out = ClientOut.model_validate(client)
+    if client.tier is not None:
+        allowances = resolve_plan_allowances(client, client.tier)
+        out.growth_action_allowance = allowances.growth_action_allowance
+        out.plan_label = f"{allowances.tier_name} plan"
+    return out
+
 
 
 @router.get("", response_model=list[ClientOut])
@@ -26,7 +45,7 @@ def list_clients(
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[ClientOut]:
-    return [ClientOut.model_validate(c) for c in client_service.list_clients(db, user)]
+    return [client_out(c) for c in client_service.list_clients(db, user)]
 
 
 @router.post("", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
@@ -36,7 +55,7 @@ def create_client(
     db: Annotated[Session, Depends(get_db)],
 ) -> ClientOut:
     client = client_service.create_client(db, payload)
-    return ClientOut.model_validate(client)
+    return client_out(client)
 
 
 @router.get("/{client_id}", response_model=ClientOut)
@@ -50,7 +69,7 @@ def get_client(
     client = client_service.get_client(db, client_id)
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
-    return ClientOut.model_validate(client)
+    return client_out(client)
 
 
 @router.patch("/{client_id}", response_model=ClientOut)
@@ -66,7 +85,7 @@ def update_client(
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     updated = client_service.update_client(db, client, payload)
-    return ClientOut.model_validate(updated)
+    return client_out(updated)
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -132,4 +151,4 @@ def apply_baseline_from_ga4(
 def current_client_context(
     client: Annotated[Client, Depends(require_client)],
 ) -> ClientOut:
-    return ClientOut.model_validate(client)
+    return client_out(client)

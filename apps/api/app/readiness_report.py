@@ -18,6 +18,7 @@ import logging
 from datetime import date, timedelta
 
 from app.core.db import SessionLocal
+from app.services.plan_allowances import resolve_plan_allowances
 from app.models.client import Client, ClientStatus
 from app.models.job import SyncJob, SyncJobStatus
 from app.schemas import SyncJobCreate
@@ -72,9 +73,9 @@ def main() -> int:
         for client in clients:
             tier = client.tier
             allowance = (
-                client.custom_growth_action_allowance
-                if client.custom_growth_action_allowance is not None
-                else (tier.growth_action_allowance if tier else 0)
+                resolve_plan_allowances(client, tier).growth_action_allowance
+                if tier is not None
+                else 0
             )
             logger.info(
                 "  %-28s %-12s %s",

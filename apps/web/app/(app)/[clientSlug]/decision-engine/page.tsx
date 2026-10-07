@@ -5,7 +5,7 @@ import { EngineStatusBand } from "@/components/DecisionEngine/EngineStatusBand";
 import { FindingsReviewPanel } from "@/components/DecisionEngine/FindingsReviewPanel";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { Alert } from "@/components/ui/Alert";
-import { apiFetch, type Client, type Tier } from "@/lib/api";
+import { apiFetch, type Client } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
@@ -19,7 +19,6 @@ import {
   type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
-import { resolvePlanAllowances } from "@/lib/plan-allowances";
 import { withNavContext } from "@/lib/navigation";
 
 export default async function DecisionEnginePage({
@@ -42,7 +41,7 @@ export default async function DecisionEnginePage({
   let error: string | null = null;
 
   try {
-    const [diagnose, stored, client, tiers] = await Promise.all([
+    const [diagnose, stored, client] = await Promise.all([
       apiFetch<DiagnoseResponse>(
         `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
         { clientId },
@@ -52,13 +51,14 @@ export default async function DecisionEnginePage({
         { clientId },
       ).catch(() => [] as StoredDecision[]),
       apiFetch<Client>(`/clients/${clientId}`, { clientId }),
-      apiFetch<Tier[]>("/admin/tiers"),
     ]);
     data = normalizeDiagnoseResponse(diagnose);
     decisions = stored;
-    const tier = tiers.find((row) => row.id === client.tier_id);
-    growthPlanAllowance = resolvePlanAllowances(client, tier).growthActionAllowance;
-    if (tier?.tier_name) planLabel = `${tier.tier_name} plan`;
+    // The server resolves this. Deriving it here meant fetching
+    // `/admin/tiers`, which a client-role user is forbidden to call — so
+    // the whole page failed for exactly the people it is written for.
+    growthPlanAllowance = client.growth_action_allowance ?? 0;
+    if (client.plan_label) planLabel = client.plan_label;
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load Decision Engine";
   }

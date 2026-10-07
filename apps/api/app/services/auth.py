@@ -33,5 +33,3 @@ def upsert_user(db: Session, payload: AuthUpsertRequest) -> User:
     return user
 
 
-def get_user_by_id(db: Session, user_id: UUID) -> User | None:
-    return db.query(User).filter(User.id == user_id).one_or_none()

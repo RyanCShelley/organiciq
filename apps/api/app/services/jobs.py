@@ -232,7 +232,3 @@ def process_job(db: Session, job: SyncJob) -> SyncJob:
     return handler(db, job)  # type: ignore[operator]
 
 
-def default_14_day_window() -> tuple[date, date]:
-    end = date.today()
-    start = date.fromordinal(end.toordinal() - 13)
-    return start, end

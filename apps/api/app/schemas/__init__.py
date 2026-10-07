@@ -70,6 +70,13 @@ class ClientCreate(BaseModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    #: Resolved server-side from tier + overrides, so a caller never has to
+    #: apply the rule itself — and never has to read the admin tier list to
+    #: do it, which a client-role user is forbidden from fetching at all.
+    growth_action_allowance: int | None = None
+    #: The tier's name, for the same reason: naming the plan on screen is
+    #: not a reason to hand someone the whole tier table.
+    plan_label: str | None = None
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None
@@ -103,6 +110,13 @@ class ClientUpdate(BaseModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    #: Resolved server-side from tier + overrides, so a caller never has to
+    #: apply the rule itself — and never has to read the admin tier list to
+    #: do it, which a client-role user is forbidden from fetching at all.
+    growth_action_allowance: int | None = None
+    #: The tier's name, for the same reason: naming the plan on screen is
+    #: not a reason to hand someone the whole tier table.
+    plan_label: str | None = None
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None
@@ -136,6 +150,13 @@ class ClientOut(ORMModel):
     custom_update_allowance: int | None = None
     custom_growth_action_allowance: int | None = None
     custom_watchlist_cadence: str | None = None
+    #: Resolved server-side from tier + overrides, so a caller never has to
+    #: apply the rule itself — and never has to read the admin tier list to
+    #: do it, which a client-role user is forbidden from fetching at all.
+    growth_action_allowance: int | None = None
+    #: The tier's name, for the same reason: naming the plan on screen is
+    #: not a reason to hand someone the whole tier table.
+    plan_label: str | None = None
     ai_search_prompt_limit: int | None = None
     crawl_page_limit: int | None = None
     sitemap_url: str | None = None

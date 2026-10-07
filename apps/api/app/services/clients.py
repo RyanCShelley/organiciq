@@ -4,7 +4,7 @@ import re
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.client_scope import list_accessible_client_ids
 from app.core.crypto import decrypt_json
@@ -90,7 +90,12 @@ def allocate_client_slug(
 
 
 def list_clients(db: Session, user: AuthUser) -> list[Client]:
-    query = db.query(Client).order_by(Client.client_name.asc())
+    # The tier comes back with the row. Every client is serialised with its
+    # resolved plan allowance, which reads `client.tier`, so lazy-loading it
+    # cost one query per client on a page that lists all of them.
+    query = (
+        db.query(Client).options(joinedload(Client.tier)).order_by(Client.client_name.asc())
+    )
     accessible = list_accessible_client_ids(db, user)
     if accessible is not None:
         query = query.filter(Client.id.in_(accessible))
@@ -98,11 +103,12 @@ def list_clients(db: Session, user: AuthUser) -> list[Client]:
 
 
 def get_client(db: Session, client_id: UUID) -> Client | None:
-    return db.query(Client).filter(Client.id == client_id).one_or_none()
-
-
-def get_client_by_slug(db: Session, slug: str) -> Client | None:
-    return db.query(Client).filter(Client.slug == slug).one_or_none()
+    return (
+        db.query(Client)
+        .options(joinedload(Client.tier))
+        .filter(Client.id == client_id)
+        .one_or_none()
+    )
 
 
 def create_client(db: Session, payload: ClientCreate) -> Client:

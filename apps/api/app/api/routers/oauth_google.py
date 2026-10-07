@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Annotated, Literal
 from urllib.parse import urlencode
@@ -35,7 +36,22 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Short-lived in-memory state for local OAuth (single-process API). Durable store later if needed.
+#: Pending OAuth handshakes, by state token.
+#:
+#: Single-use and random, so it does its CSRF job. What it did not do was
+#: forget: a handshake nobody finished stayed in memory for the life of the
+#: process, and this dict only ever grew. It is also per-process, so a
+#: restart or a second instance loses a flow in progress — which reads to
+#: the operator as "Google connect is flaky" rather than as a restart.
+_OAUTH_STATE_TTL = timedelta(minutes=15)
 _oauth_states: dict[str, dict] = {}
+
+
+def _drop_expired_states(now: datetime) -> None:
+    for token, meta in list(_oauth_states.items()):
+        started = meta.get("started_at")
+        if started is None or now - started > _OAUTH_STATE_TTL:
+            _oauth_states.pop(token, None)
 
 
 class SaveGscPropertyRequest(BaseModel):
@@ -119,7 +135,13 @@ def start_google_data_oauth(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
 
     state = secrets.token_urlsafe(24)
-    _oauth_states[state] = {"client_id": str(client_id), "user_id": str(user.id)}
+    now = datetime.now(timezone.utc)
+    _drop_expired_states(now)
+    _oauth_states[state] = {
+        "client_id": str(client_id),
+        "user_id": str(user.id),
+        "started_at": now,
+    }
 
     params = {
         "client_id": settings.google_data_oauth_client_id,
@@ -145,7 +167,13 @@ def google_data_oauth_callback(
     web = settings.web_app_url.rstrip("/")
 
     if error:
-        return RedirectResponse(f"{web}/clients?oauth=error&message={error}")
+        # Google's own error code, but it arrives on the query string and so
+        # is caller-controlled: encoded, not interpolated, so it cannot add
+        # parameters of its own to the URL we send the browser to.
+        return RedirectResponse(
+            f"{web}/clients?" + urlencode({"oauth": "error", "message": error})
+        )
+    _drop_expired_states(datetime.now(timezone.utc))
     if not code or not state or state not in _oauth_states:
         return RedirectResponse(f"{web}/clients?oauth=error&message=invalid_state")
 

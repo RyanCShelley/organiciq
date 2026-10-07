@@ -274,15 +274,6 @@ def get_audit_status(*, api_key: str, audit_id: int | str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def get_audit_report(*, api_key: str, audit_id: int | str) -> dict[str, Any]:
-    """Section-by-section audit report, including the health score."""
-    data = _request(
-        api_key=api_key,
-        method="GET",
-        path="/project-management/audits/report",
-        params={"audit_id": audit_id},
-    )
-    return data if isinstance(data, dict) else {}
 
 
 def list_audit_pages_paginated(
@@ -453,14 +444,6 @@ def list_airt_prompt_rankings_paginated(
     return rows
 
 
-# --- Domain Analysis (Data API) ---------------------------------------------
-#
-# Same host and Token auth as project-management, but metered in credits rather
-# than rate-limited: /domain/keywords costs 100 credits PER REQUEST, so each
-# extra page is another 100. One page at the maximum limit, ordered by volume,
-# buys the 1000 most valuable keywords for a flat 100 credits — which is why
-# this deliberately does not paginate.
-DOMAIN_KEYWORDS_CREDITS_PER_REQUEST = 100
 DOMAIN_KEYWORDS_MAX_LIMIT = 1000
 
 

@@ -952,10 +952,6 @@ PROMPT_ACTION = (
     "page states who it is about in terms a model can attribute."
 )
 
-TRACKING_ACTION = (
-    "Fire a test conversion and confirm it reaches GA4. Until it does, every "
-    "other number in this report is built on a zero that may not be real."
-)
 
 
 ROBOTS_BLOCKING_CODES = frozenset({"robots_disallow_crawling"})
@@ -1505,8 +1501,6 @@ LINK_GAP_MIN_IMPRESSIONS = 50.0
 #: A source has to be meaningfully stronger than the target, or the link is
 #: being asked for in the wrong direction.
 LINK_GAP_SOURCE_CLICK_RATIO = 2.0
-#: How many shared queries to name. One is the reason; a list is a report.
-LINK_GAP_MAX_QUERIES = 2
 
 
 @dataclass(frozen=True)
@@ -1794,9 +1788,6 @@ def _branded_impression_share(
     }
 
 
-#: The band between where CTR work stops paying and where a page stops
-#: being close enough to push.
-RANK_PUSH_MIN_POSITION = 5.0
 RANK_PUSH_MAX_POSITION = 10.0
 #: Enough demand that three places is worth a month's work.
 RANK_PUSH_MIN_IMPRESSIONS = 200.0
@@ -2836,15 +2827,6 @@ CONVERSION_PAGE_MIN_SHORTFALL = 3.0
 CONVERSION_PAGE_RATE_RATIO = 0.5
 
 
-#: A page needs this many leads in the earlier window to have been
-#: "converting" at all. Below it a fall to zero is one lead not arriving.
-PAGE_DROP_MIN_PRIOR_LEADS = 3.0
-#: And enough traffic for a rate to mean anything. Five leads from twelve
-#: sessions is a 42% conversion rate, which is an attribution artefact
-#: rather than a page worth prescribing against.
-PAGE_DROP_MIN_PRIOR_SESSIONS = 50.0
-#: How many of these to raise. The list is a queue, not an inventory.
-PAGE_DROP_MAX_FINDINGS = 5
 
 
 
@@ -3194,43 +3176,15 @@ def _conversion_page_findings(
     return findings
 
 
-#: Page one. Below this a thin impression count is just the ranking.
-VISIBILITY_MAX_POSITION = 10.0
-#: Terms smaller than this can legitimately draw almost nothing, so silence
-#: tells you nothing about whether the ranking is working.
-VISIBILITY_MIN_VOLUME = 100.0
 #: Above this share of branded impressions a page's CTR says more about the
 #: brand than the listing.
 BRANDED_SHARE_MAX = 0.5
 
 
-#: Kept for the impression check: a ranking that is not even being shown is a
-#: different problem from one being shown and not clicked.
-VISIBILITY_IMPRESSION_RATIO = 0.1
-DAYS_PER_MONTH_VISIBILITY = 365 / 12
 
 
 
 
-#: Words that join queries together without saying what they are about.
-CLUSTER_STOPWORDS: frozenset[str] = frozenset(
-    """a an and are as at be best by can cheap cost do does for from get good how
-    i in is it me my near of on or our price pricing should that the to top
-    vs what when where which who why will with you your""".split()
-)
-#: A token has to recur across this many distinct queries before it describes a
-#: subject rather than a coincidence.
-CLUSTER_MIN_QUERIES = 3
-#: Demand worth writing for.
-CLUSTER_MIN_IMPRESSIONS = 300.0
-#: Page one. Anything better than this and the subject already has an owner.
-CLUSTER_OWNED_POSITION = 10.0
-#: Clusters overlap by construction, so only the strongest few are reported.
-CLUSTER_MAX_FINDINGS = 5
-#: What a new page can realistically reach. Scoring a cluster as if it would
-#: take position one would make every content gap the biggest finding on the
-#: board.
-CLUSTER_TARGET_POSITION = 8.0
 
 
 
@@ -3248,19 +3202,6 @@ def _brand_tokens(client: Client) -> frozenset[str]:
 
 
 
-#: A page has to have been worth something before it can have decayed.
-DECAY_MIN_PRIOR_CLICKS = 20.0
-#: How far clicks must have fallen before it is decay rather than a wobble.
-DECAY_MIN_DROP_PCT = 40.0
-#: And how far it must have fallen *beyond the site*. In a seasonal trough
-#: every page is down; a page is only decaying if it is losing ground its
-#: neighbours are not.
-DECAY_EXCESS_OVER_SITE_PCT = 25.0
-#: A year back reads through seasonality. Anything shorter is compared to the
-#: nearest window that is at least this far from the current one, so a decline
-#: has had room to happen.
-DECAY_MIN_GAP_DAYS = 90
-DECAY_MAX_FINDINGS = 10
 
 
 def _page_totals(
@@ -3285,9 +3226,6 @@ def _page_totals(
     return {url: (float(clicks or 0), float(impressions or 0)) for url, clicks, impressions in rows}
 
 
-#: A page whose average position moved less than this did not lose its
-#: rankings, whatever happened to its impressions.
-RANKING_SLIP_POSITIONS = 3.0
 
 
 
@@ -3758,11 +3696,6 @@ def cap_per_url_impact(findings: list[LeverFinding]) -> None:
             )
 
 
-#: A page that picked up links and did not move is worth looking at; one that
-#: picked up a single link is noise.
-PR_MIN_NEW_REFDOMAINS = 2
-#: How long to give a link to show up in rankings before asking why it has not.
-PR_SETTLING_DAYS = 30
 
 
 
@@ -3999,9 +3932,6 @@ def _tracking_failure_finding(
 
 
 
-#: A 3xx landing here is a redirect to nowhere in particular — the link
-#: equity arrives and the visitor has to start again.
-_GENERIC_REDIRECT_PATHS = frozenset({"", "/", "/home", "/index", "/index.html"})
 
 
 
@@ -4268,21 +4198,6 @@ def _leads_by_page(
     }
 
 
-def _recorded_day_span(db: Session, client_id: UUID, *, before: date) -> int:
-    """Days of history behind the window, so a rate can be a rate.
-
-    Measured from the first recorded day rather than assumed, because a client
-    onboarded three weeks ago has three weeks of history and dividing by a
-    year would make every page look broken.
-    """
-    first = (
-        db.query(func.min(FactGa4Event.date))
-        .filter(FactGa4Event.client_id == client_id, FactGa4Event.date < before)
-        .scalar()
-    )
-    if first is None:
-        return 0
-    return max(0, (before - first).days)
 
 
 #: Behind the plan by less than this is a normal month, not a finding.

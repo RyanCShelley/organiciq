@@ -48,9 +48,6 @@ DATA_CONFIDENCE_MULTIPLIERS: dict[str, float] = {
     "low": 0.55,
 }
 MIN_PAGE_SESSIONS_FOR_PAGE_RATE = 10
-STRATEGIC_SESSIONS_ABSOLUTE = 50.0
-STRATEGIC_CLICKS = 10
-MIN_INDEXATION_DEMAND_IMPRESSIONS = 30
 
 
 @dataclass(frozen=True)
@@ -167,13 +164,6 @@ def normalize_business_impact(
     }
 
 
-def impact_from_lead_opportunity(estimated_leads: float, site: SiteBusinessContext) -> float:
-    impact, _ = normalize_business_impact(
-        site=site,
-        estimated_incremental_leads=estimated_leads,
-        data_confidence="high",
-    )
-    return impact
 
 
 def page_type_rate_support(
@@ -514,18 +504,6 @@ def fallback_visibility_impact(*, clicks: float, average_position: float, impres
     return min(FALLBACK_VISIBILITY_IMPACT_CAP, round(position_score + demand_score + impression_demand, 1))
 
 
-def is_strategic_page(
-    *,
-    clicks: float,
-    page_ctx: PageBusinessContext | None,
-    site: SiteBusinessContext,
-) -> bool:
-    if page_ctx is not None:
-        if page_ctx.ga4_leads > 0:
-            return True
-        if page_ctx.ga4_sessions >= max(STRATEGIC_SESSIONS_ABSOLUTE, site.p90_page_sessions * 0.5):
-            return True
-    return clicks >= STRATEGIC_CLICKS
 
 
 def portfolio_urgency_adjustment(base_urgency: float, site: SiteBusinessContext) -> float:
@@ -1019,41 +997,6 @@ def score_ai_visibility_impact(
     }
 
 
-def score_structured_data_impact(
-    *,
-    search_visibility: float,
-    ai_mention: float,
-    site: SiteBusinessContext,
-) -> tuple[float, dict[str, Any]]:
-    """Deprecated portfolio gap scorer — kept for legacy decisions.engine only."""
-    gap = max(0.0, search_visibility - ai_mention)
-    if site.site_lead_rate_pct is not None and site.period_leads > 0:
-        estimated = site.period_leads * gap * 0.25
-        impact, norm_meta = normalize_business_impact(
-            site=site,
-            estimated_incremental_leads=estimated,
-            data_confidence="medium",
-        )
-        return impact, {
-            "impact_basis": "downstream",
-            "estimated_lead_opportunity": round(estimated, 2),
-            "estimated_incremental_leads": round(estimated, 2),
-            "visibility_gap": round(gap, 3),
-            "site_lead_rate_pct": round(site.site_lead_rate_pct, 2),
-            **norm_meta,
-        }
-
-    impact, norm_meta = normalize_business_impact(
-        site=site,
-        recoverable_clicks=gap * 1000,
-        strategic_priority=3,
-        data_confidence="low",
-    )
-    return impact, {
-        "impact_basis": "fallback",
-        "visibility_gap": round(gap, 3),
-        **norm_meta,
-    }
 
 
 def score_conversion_impact(

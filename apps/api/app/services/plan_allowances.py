@@ -1,4 +1,16 @@
-"""Resolve effective plan allowances from tier + optional client overrides."""
+"""The one place a plan's allowances are worked out.
+
+There were four. This module, which nothing called; the web's own copy in
+`lib/plan-allowances.ts`, which the UI used; and open-coded versions in
+`app.action_plan` and `app.readiness_report`, which honoured a client's
+custom override for every tier rather than only for Enterprise, and had no
+fallback when a tier left `growth_action_allowance` null. So the CLI used
+to verify a client's plan could print a different number from the screen
+the client was shown.
+
+The rule is a business rule about what someone is buying, so it lives with
+the data and is served, not recomputed per caller.
+"""
 
 from __future__ import annotations
 
@@ -54,6 +66,11 @@ def resolve_plan_allowances(client: Client, tier: Tier | None = None) -> PlanAll
         ),
         content_allowance=pick_int(client.custom_content_allowance, active_tier.content_allowance),
         update_allowance=pick_int(client.custom_update_allowance, active_tier.update_allowance),
+        # Straight from the tier. The web carried a `?? update_allowance`
+        # fallback here, but the column is NOT NULL with a default of 0 and
+        # `TierOut` types it as a plain int, so the fallback could never
+        # fire — and porting it would have turned a tier deliberately set to
+        # zero growth actions into one with three.
         growth_action_allowance=pick_int(
             client.custom_growth_action_allowance, active_tier.growth_action_allowance
         ),

@@ -416,9 +416,3 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
     return len(payloads)
 
 
-def count_blank_query_facts(db: Session, client_id: UUID) -> int:
-    return (
-        db.query(FactGscQueryPage)
-        .filter(FactGscQueryPage.client_id == client_id, FactGscQueryPage.query == "")
-        .count()
-    )

@@ -126,6 +126,12 @@ export type Client = {
   custom_update_allowance?: number | null;
   custom_growth_action_allowance?: number | null;
   custom_watchlist_cadence?: string | null;
+  /** Resolved server-side from tier + overrides. Never re-derive it here:
+   *  doing so meant fetching `/admin/tiers`, which a client-role user is
+   *  forbidden to call. */
+  growth_action_allowance?: number | null;
+  /** The tier's name, resolved server-side for the same reason. */
+  plan_label?: string | null;
   /** Max prompts one untracked-prompt lookup may buy. Null = default (5). */
   ai_search_prompt_limit?: number | null;
   /** Max pages one monthly site crawl may fetch. Null = default (500). */
