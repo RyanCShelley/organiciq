@@ -105,3 +105,27 @@ def test_without_a_channel_filter_every_channel_is_counted(db, client_a):
     ctx = _load(db, client_a.id, (end - timedelta(days=29), end), None)[URL]
     assert ctx.ga4_sessions == 482
     assert ctx.ga4_leads == 5
+
+
+# ── The window ──
+
+
+def test_the_headline_and_the_evidence_count_the_same_days(db, client_a):
+    """One card said "54 sessions and no conversions" and, three lines
+    down, "sessions 103". The headline came from the page context, built
+    over the Search Console window, and the evidence from the T1 gate,
+    built over the GA4 window. ACC Tek's Search Console facts stopped on
+    22 Sep, so one was 15 days and the other 30 — and the shortfall that
+    decided the action's value was computed on the short one."""
+    end = date.today()
+    for day_offset in range(30):
+        _seed(db, client_a.id, end - timedelta(days=day_offset))
+
+    full = _load(db, client_a.id, (end - timedelta(days=29), end), MANAGED)[URL]
+    half = _load(db, client_a.id, (end - timedelta(days=14), end), MANAGED)[URL]
+
+    assert full.ga4_sessions == 103 * 30
+    assert half.ga4_sessions == 103 * 15
+    assert full.ga4_sessions != half.ga4_sessions, (
+        "the window has to matter, or this test proves nothing"
+    )

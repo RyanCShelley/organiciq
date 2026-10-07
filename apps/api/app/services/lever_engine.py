@@ -4755,18 +4755,26 @@ def diagnose(
         dashboard=dashboard,
     )
     page_urls = [page.normalized_url for page in pages]
-    # gsc_period can be None now that GSC is no longer a hard prerequisite;
-    # with no GSC there are no page URLs to build contexts for either.
+    # The same window the site rate is measured over, because a page's
+    # sessions are compared against that rate. These are GA4 facts, and
+    # the GSC window is clamped to whatever Search Console has actually
+    # delivered: ACC Tek's facts stop on 22 Sep, so the same card said
+    # "54 sessions and no conversions" in its headline and "sessions 103"
+    # in its evidence — one window 15 days long, the other 30 — and the
+    # shortfall was computed on the short one.
+    #
+    # Which URLs still comes from GSC page demand. That is a different
+    # question from which days.
     page_contexts = (
         load_page_business_contexts(
             db,
             client_id=client.id,
-            period=gsc_period,
+            period=site_period,
             lead_events=lead_events,
             normalized_urls=page_urls,
             channels=MANAGED_CHANNELS,
         )
-        if gsc_period is not None and page_urls
+        if site_period is not None and page_urls
         else {}
     )
     site = with_p90_sessions(site, page_contexts)
