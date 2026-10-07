@@ -37,6 +37,10 @@ class ActionValue:
     value_basis: str
     estimated_minutes: int
     evidence_label: str
+    #: Separates actions that share a flat credit. Every prompt is worth
+    #: the same 0.3 by definition, so without this the top five of twenty
+    #: is whichever order they came out of the database in.
+    tiebreak: float = 0.0
 
     @property
     def above_floor(self) -> bool:
@@ -53,6 +57,7 @@ class ActionValue:
             "value_basis": self.value_basis,
             "estimated_minutes": self.estimated_minutes,
             "evidence_label": self.evidence_label,
+            **({"tiebreak_volume": self.tiebreak} if self.tiebreak else {}),
         }
 
 
@@ -76,6 +81,7 @@ def value_for(
     window_days: int,
     raw_leads_for_window: float | None = None,
     evidence_label: str = "estimated",
+    tiebreak: float = 0.0,
 ) -> ActionValue:
     """The action's monthly lead value, before the floor is applied."""
     if rule_id in FLAT_CREDIT_RULES:
@@ -101,6 +107,7 @@ def value_for(
         value_basis=basis,
         estimated_minutes=minutes,
         evidence_label=evidence_label,
+        tiebreak=tiebreak,
         _floor=float(thresholds.get("min_expected_leads_monthly", 0.1)),
     )
 

@@ -2,6 +2,7 @@ import { DecisionActionBar } from "@/components/DecisionEngine/DecisionActionBar
 import { Badge } from "@/components/ui/Badge";
 import {
   decisionStatusBadgeVariant,
+  expectedLeadsMonthly,
   decisionStatusLabel,
   formatEvidence,
   formatPriorityBand,
@@ -114,12 +115,39 @@ export function RecommendedActionCard({
       </div>
 
       <div className="flex flex-col gap-3 border-[var(--border)] lg:border-l lg:pl-[22px]">
-        <div>
-          <div className="text-[11px] text-[var(--text-tertiary)]">Priority score</div>
-          <div className="font-[family-name:var(--font-display)] text-[28px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
-            {item.priority_score.toFixed(1)}
+        {/* What it is worth and what it costs, in that order. The old
+            0-100 priority score could not be read back as leads by anyone,
+            and a growth action is chosen on exactly these two numbers. */}
+        {expectedLeadsMonthly(item) !== null ? (
+          <div>
+            <div className="text-[11px] text-[var(--text-tertiary)]">
+              Expected leads / month
+            </div>
+            <div className="font-[family-name:var(--font-display)] text-[28px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
+              {expectedLeadsMonthly(item)?.toFixed(2)}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11.5px] text-[var(--text-secondary)]">
+              {typeof item.evidence_json?.estimated_minutes === "number" ? (
+                <span>{String(item.evidence_json.estimated_minutes)} min</span>
+              ) : null}
+              {item.evidence_json?.value_basis === "flat_credit" ? (
+                <span
+                  className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--text-tertiary)] ring-1 ring-[var(--border)]"
+                  title="A placeholder credit: there is no honest clicks-to-leads model for this action yet."
+                >
+                  estimate
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <div className="text-[11px] text-[var(--text-tertiary)]">Priority score</div>
+            <div className="font-[family-name:var(--font-display)] text-[28px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
+              {item.priority_score.toFixed(1)}
+            </div>
+          </div>
+        )}
 
         {scoreFactors(item).map((factor) => (
           <div key={factor.label}>

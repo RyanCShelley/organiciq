@@ -3769,11 +3769,36 @@ def action_rule_id(finding: LeverFinding) -> str | None:
     return ACTION_RULE_IDS.get(str(key or ""))
 
 
+def _prompt_tiebreak_volume(
+    query: str | None, keyword_volumes: dict[str, float]
+) -> float:
+    """Search volume for the keyword a prompt is closest to.
+
+    Every prompt carries the same flat credit by definition, so without a
+    tiebreak the top five of twenty is whichever order the database
+    returned. Prompt volume itself is empty on every prompt for both
+    clients, so the closest tracked keyword stands in — the terms overlap
+    because they are about the same thing.
+    """
+    if not query or not keyword_volumes:
+        return 0.0
+    terms = _match_terms(query)
+    if not terms:
+        return 0.0
+    best = 0.0
+    for keyword, volume in keyword_volumes.items():
+        shared = terms & _match_terms(keyword)
+        if len(shared) >= 2 and volume > best:
+            best = volume
+    return best
+
+
 def value_actions(
     findings: list[LeverFinding],
     *,
     thresholds: dict[str, Any],
     window_days: int,
+    keyword_volumes: dict[str, float] | None = None,
 ) -> list[LeverFinding]:
     """Value every action in expected leads per month, and drop the tiny.
 
@@ -3803,6 +3828,9 @@ def value_actions(
                 window_days=window_days,
                 raw_leads_for_window=float(raw) if raw is not None else None,
                 evidence_label=str(evidence.get("data_confidence") or "estimated"),
+                tiebreak=_prompt_tiebreak_volume(
+                    finding.query, keyword_volumes or {}
+                ),
             )
         except ValueError:
             # A rule tagged as an action with neither an estimate nor a
@@ -3823,6 +3851,7 @@ def value_actions(
     kept.sort(
         key=lambda row: (
             row.evidence_json.get("expected_leads_monthly") or 0.0,
+            row.evidence_json.get("tiebreak_volume") or 0.0,
         ),
         reverse=True,
     )
@@ -5317,7 +5346,23 @@ def diagnose(
     window_days = (
         (gsc_period[1] - gsc_period[0]).days + 1 if gsc_period else 30
     )
-    findings = value_actions(findings, thresholds=thresholds, window_days=window_days)
+    findings = value_actions(
+        findings,
+        thresholds=thresholds,
+        window_days=window_days,
+        keyword_volumes={
+            keyword: float(volume)
+            for keyword, volume in db.query(
+                FactSerKeywordMetric.keyword, FactSerKeywordMetric.volume
+            )
+            .filter(
+                FactSerKeywordMetric.client_id == client.id,
+                FactSerKeywordMetric.volume.isnot(None),
+            )
+            .all()
+            if keyword
+        },
+    )
 
     findings.sort(key=lambda row: row.priority_score, reverse=True)
 

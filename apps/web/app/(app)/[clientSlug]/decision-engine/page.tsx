@@ -16,6 +16,7 @@ import {
   applySuggestedAlternatives,
   countSelectedTowardPlan,
   normalizeDiagnoseResponse,
+  rankActions,
   type DiagnoseResponse,
   type Finding,
   type StoredDecision,
@@ -78,7 +79,10 @@ export default async function DecisionEnginePage({
   const allFindings: Finding[] = data?.findings ?? [];
   const additionalFindings = allFindings.filter((finding) => !finding.is_recommended_action);
   const searchOpportunities = data?.search_opportunities ?? [];
-  const recommendations = data?.recommended_actions ?? [];
+  // Ranked by expected leads a month, and not cut to the allowance: the
+  // allowance says how many are included this month, not how many are
+  // worth seeing. A Launch client with two good actions sees both.
+  const recommendations = rankActions(data?.recommended_actions ?? []);
   const suggestions = applySuggestedAlternatives(
     recommendations,
     additionalFindings,
