@@ -4148,14 +4148,33 @@ def _tracking_anomaly_findings(
 
 
 def _sessions_by_page(
-    db: Session, client_id: UUID, start: date | None, end: date
+    db: Session,
+    client_id: UUID,
+    start: date | None,
+    end: date,
+    *,
+    channels: tuple[OrganicChannel, ...] | None = None,
 ) -> dict[str, float]:
+    """Sessions credited to the landing page.
+
+    `channels` pairs with the same argument on `_leads_by_page`, and the
+    two must agree: a rate built from organic sessions over all-channel
+    leads makes a page another channel converted look like one that
+    converts organically, and so hides it. That mismatch has been written
+    three times in this engine.
+
+    The tracking rules deliberately pass nothing. A form that stopped
+    firing stopped for every visitor, so every visitor is the evidence —
+    and they report, they never spend a growth action.
+    """
     query = db.query(
         FactGa4Traffic.normalized_url,
         func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
     ).filter(FactGa4Traffic.client_id == client_id, FactGa4Traffic.date <= end)
     if start is not None:
         query = query.filter(FactGa4Traffic.date >= start)
+    if channels is not None:
+        query = query.filter(FactGa4Traffic.channel.in_(channels))
     return {
         url: float(total)
         for url, total in query.group_by(FactGa4Traffic.normalized_url).all()
