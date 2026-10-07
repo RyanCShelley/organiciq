@@ -159,7 +159,7 @@ def _schema_types(node: Any) -> list[str]:
     return found
 
 
-def _bare_type(value: str) -> str:
+def bare_type(value: str) -> str:
     """`https://schema.org/LocalBusiness` and `LocalBusiness` are the same type."""
     text = str(value).strip()
     if "/" in text:
@@ -209,7 +209,7 @@ def extract_json_ld(doc: Any) -> list[SchemaBlock]:
             blocks.append(
                 SchemaBlock(
                     syntax="json_ld",
-                    schema_type=_bare_type(schema_type),
+                    schema_type=bare_type(schema_type),
                     raw=payload,
                     raw_text=None,
                     parse_error=None,
@@ -228,7 +228,7 @@ def extract_microdata(doc: Any) -> list[SchemaBlock]:
         blocks.append(
             SchemaBlock(
                 syntax="microdata",
-                schema_type=_bare_type(itemtype.split()[0]),
+                schema_type=bare_type(itemtype.split()[0]),
                 raw={"itemtype": itemtype},
                 raw_text=None,
                 parse_error=None,
@@ -246,7 +246,7 @@ def extract_rdfa(doc: Any) -> list[SchemaBlock]:
         blocks.append(
             SchemaBlock(
                 syntax="rdfa",
-                schema_type=_bare_type(typeof.split()[0]),
+                schema_type=bare_type(typeof.split()[0]),
                 raw={"typeof": typeof},
                 raw_text=None,
                 parse_error=None,
