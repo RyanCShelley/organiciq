@@ -66,7 +66,24 @@ def main() -> int:
             else:
                 blocked.append((client.client_name, missing))
 
-        logger.info("%d clients\n", len(clients))
+        # The allowance the web will apply, read from the same place it
+        # reads: the tier, overridden per client for Enterprise.
+        logger.info("Plan allowances:")
+        for client in clients:
+            tier = client.tier
+            allowance = (
+                client.custom_growth_action_allowance
+                if client.custom_growth_action_allowance is not None
+                else (tier.growth_action_allowance if tier else 0)
+            )
+            logger.info(
+                "  %-28s %-12s %s",
+                client.client_name[:28],
+                tier.tier_name if tier else "—",
+                allowance,
+            )
+
+        logger.info("\n%d clients\n", len(clients))
         logger.info("READY (%d):", len(ready))
         for line in ready:
             logger.info("  %s", line)
