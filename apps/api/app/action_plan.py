@@ -137,6 +137,19 @@ def main() -> int:
                         evidence.get("expected_leads_monthly", 0.0),
                         (row.page_url or row.query or "site-wide")[-44:],
                     )
+                    # A conversion rule valued at zero is either a page
+                    # with nothing to recover or an estimate that lost its
+                    # inputs, and the two read identically without these.
+                    if "sessions" in evidence:
+                        logger.info(
+                            "            %s sessions, %s leads, benchmark %.2f%% (%s)"
+                            " → shortfall %s",
+                            evidence.get("sessions"),
+                            evidence.get("leads"),
+                            evidence.get("benchmark_rate_pct") or 0.0,
+                            evidence.get("benchmark_source", "?"),
+                            evidence.get("shortfall_leads"),
+                        )
             logger.info("")
         return 0
     finally:
