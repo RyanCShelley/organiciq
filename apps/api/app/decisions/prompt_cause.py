@@ -31,6 +31,11 @@ class PromptSignals:
     #: The page on the site that best matches the prompt's wording, by
     #: shared terms with Search Console queries. None when nothing matches.
     best_page: str | None = None
+    #: What that page is for. A commercial page answers the question in an
+    #: FAQ; an article answers it in a section under its own heading. The
+    #: same instruction on both reads as written by someone who had not
+    #: looked at either.
+    best_page_type: str | None = None
     #: Whether the engine stores who *is* cited for this prompt. False until
     #: SE Visible's citation layer is ingested.
     citations_known: bool = False
@@ -87,23 +92,29 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
 
     # 3. A page exists and is not being quoted. The reasons we can test for
     #    are exhausted, so the remaining checks are named rather than implied.
+    # One page, one addition. Three steps on three parts of a page is a
+    # morning's work, and a growth action is an hour.
+    sells = signals.best_page_type in {"commercial", "conversion"}
     steps = [
         Step(
-            "Add a question heading in the prompt's own wording, with a 40 to 60 "
-            "word answer directly under it",
+            (
+                f"Add “{signals.prompt}” as an FAQ on this page, answered in "
+                "the first two sentences"
+            )
+            if sells
+            else (
+                f"Add a section headed “{signals.prompt}”, opening with a "
+                "direct answer"
+            ),
             target=signals.best_page,
-            detail=f"The question is “{signals.prompt}”. Engines quote the "
-            "passage that answers the question as asked, so the heading has to match "
-            "the wording rather than paraphrase it.",
-        ),
-        Step(
-            "Add a comparison table or numbered list if the prompt asks for options",
-            target=signals.best_page,
-        ),
-        Step(
-            "Put a visible author and an updated date on the page, and cite a source "
-            "for every statistic",
-            target=signals.best_page,
+            detail="Engines quote the passage that answers the question as asked, so "
+            "the heading has to match the wording rather than paraphrase it."
+            + (
+                " A buying page answers it briefly and gets back to the offer."
+                if sells
+                else " An article can answer it properly once the first two sentences"
+                " have."
+            ),
         ),
     ]
     if not signals.citations_known:

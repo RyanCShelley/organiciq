@@ -637,3 +637,19 @@ def test_a_tracking_fault_is_never_folded_into_a_page_finding():
         "converting_page_dropped",
         "tracking_partial",
     }
+
+
+def test_a_prompt_is_one_addition_to_one_page():
+    """Three steps on three parts of a page is a morning's work, and a
+    growth action is an hour."""
+    p = _prompt(best_page="https://x/p", best_page_type="informational")
+    assert len([s for s in p.steps if not s.human]) == 1
+
+
+def test_a_buying_page_gets_an_faq_and_an_article_gets_a_section():
+    """The same instruction on both reads as written by someone who had
+    not looked at either."""
+    selling = _prompt(best_page="https://x/p", best_page_type="commercial")
+    reading = _prompt(best_page="https://x/p", best_page_type="informational")
+    assert "as an FAQ" in selling.steps[0].text
+    assert "Add a section headed" in reading.steps[0].text

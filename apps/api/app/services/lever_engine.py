@@ -122,7 +122,12 @@ from app.services.decision_impact import (
     with_p90_sessions,
 )
 from app.services.decision_types import DiagnoseResult, LeverFinding, LeverSummary
-from app.services.page_eligibility import PageClassification, PageType, classify_pages
+from app.services.page_eligibility import (
+    PageClassification,
+    PageType,
+    classify_page_url,
+    classify_pages,
+)
 
 #: The client's scoring weights for the run in progress.
 #:
@@ -2688,7 +2693,10 @@ def _ai_visibility_prompt_findings(
                     prompt=prompt_text,
                     checks=len(rows),
                     blocked_crawlers=blocked_crawlers,
-                    best_page=_best_page_for_prompt(prompt_text, page_titles),
+                    best_page=(best := _best_page_for_prompt(prompt_text, page_titles)),
+                    best_page_type=(
+                        classify_page_url(best).page_type.value if best else None
+                    ),
                     # SE Visible holds who is cited instead; it is not
                     # ingested, so the card asks a person to read it.
                     citations_known=False,
@@ -3244,6 +3252,11 @@ def _conversion_page_findings(
                     "benchmark_source": benchmark_source,
                     "expected_leads": round(expected, 1),
                     "shortfall_leads": round(shortfall, 1),
+                    # The raw estimate, stated rather than inferred from
+                    # what `normalize_business_impact` happened to store:
+                    # it only records the lead number when it is positive,
+                    # so a shortfall of zero left the action unvalued.
+                    "raw_leads_for_window": round(max(shortfall, 0.0), 3),
                     "no_conversions_at_all": none_at_all,
                     "promotion_class": "actionable",
                     **impact_evidence,
@@ -3799,6 +3812,7 @@ def value_actions(
     thresholds: dict[str, Any],
     window_days: int,
     keyword_volumes: dict[str, float] | None = None,
+    site_lead_rate: float | None = None,
 ) -> list[LeverFinding]:
     """Value every action in expected leads per month, and drop the tiny.
 
@@ -3818,7 +3832,9 @@ def value_actions(
             continue
 
         evidence = finding.evidence_json
-        raw = evidence.get("estimated_incremental_leads")
+        raw = evidence.get("raw_leads_for_window")
+        if raw is None:
+            raw = evidence.get("estimated_incremental_leads")
         if raw is None:
             raw = evidence.get("estimated_leads_at_risk")
         try:
@@ -3833,9 +3849,14 @@ def value_actions(
                 ),
             )
         except ValueError:
-            # A rule tagged as an action with neither an estimate nor a
-            # credit is a bug, not a silent zero.
-            evidence["value_error"] = "no_raw_lead_estimate"
+            # Without a site lead rate there is no honest way to turn
+            # clicks into leads, which the brief names as its own skip —
+            # it is a missing input, not a broken rule.
+            evidence["value_error"] = (
+                "no_lead_rate"
+                if not (evidence.get("site_lead_rate_pct") or site_lead_rate)
+                else "no_raw_lead_estimate"
+            )
             finding.is_recommended_action = False
             kept.append(finding)
             continue
@@ -5350,6 +5371,7 @@ def diagnose(
         findings,
         thresholds=thresholds,
         window_days=window_days,
+        site_lead_rate=site.site_lead_rate_pct,
         keyword_volumes={
             keyword: float(volume)
             for keyword, volume in db.query(

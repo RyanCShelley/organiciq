@@ -91,10 +91,36 @@ def test_a_flat_credit_action_needs_no_estimate():
     assert out[0].evidence_json["expected_leads_monthly"] == 0.3
 
 
-def test_an_action_with_no_estimate_and_no_credit_is_flagged_not_zeroed():
-    """Silently valuing it at nothing would bury a bug."""
+def test_a_search_rule_without_a_lead_rate_names_the_missing_input():
+    """There is no honest way to turn clicks into leads without one. That
+    is a missing input, not a broken rule."""
     out = value_actions(
-        [_finding(evidence={"rule_id": "2a"})], thresholds=LIMITS, window_days=30
+        [_finding(evidence={"rule_id": "2a"})],
+        thresholds=LIMITS,
+        window_days=30,
+        site_lead_rate=None,
+    )
+    assert out[0].evidence_json["value_error"] == "no_lead_rate"
+    assert out[0].is_recommended_action is False
+
+
+def test_a_missing_estimate_with_a_lead_rate_present_is_a_bug():
+    """Silently valuing it at nothing would bury it."""
+    out = value_actions(
+        [_finding(evidence={"rule_id": "2a"})],
+        thresholds=LIMITS,
+        window_days=30,
+        site_lead_rate=2.0,
     )
     assert out[0].evidence_json["value_error"] == "no_raw_lead_estimate"
-    assert out[0].is_recommended_action is False
+
+
+def test_the_raw_estimate_is_taken_directly_when_stated():
+    """`normalize_business_impact` only records the lead number when it is
+    positive, so depending on it left a zero-shortfall action unvalued."""
+    out = value_actions(
+        [_finding(evidence={"rule_id": "1b", "raw_leads_for_window": 0.6})],
+        thresholds=LIMITS,
+        window_days=30,
+    )
+    assert out[0].evidence_json["expected_leads_monthly"] == 0.6
