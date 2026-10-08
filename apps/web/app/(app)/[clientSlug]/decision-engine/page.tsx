@@ -69,6 +69,7 @@ export default async function DecisionEnginePage({
   const actions = data?.growth_actions ?? [];
   const belowFloor = data?.below_floor_actions ?? [];
   const unvalued = data?.unvalued_actions ?? [];
+  const blocking = data?.blocking_findings ?? [];
 
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const selectedTowardPlan = countSelectedTowardPlan(decisions);
@@ -129,6 +130,7 @@ export default async function DecisionEnginePage({
             actions={actions}
             belowFloor={belowFloor}
             unvalued={unvalued}
+            blocking={blocking}
             allowance={growthPlanAllowance}
             planLabel={planLabel}
             clientId={clientId}

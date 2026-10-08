@@ -3347,6 +3347,22 @@ def annotate_why_not_an_action(findings: list[LeverFinding]) -> list[LeverFindin
     return findings
 
 
+def blocking_findings(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """The findings that are suppressing other work.
+
+    When a gate fails, every finding under it is excluded from the plan —
+    correctly, because its numbers come from data the gate says is wrong.
+    SMA's conversion tracking went silent after the site rebuild and 26
+    actions disappeared with it, which is right. Showing nothing and not
+    saying why is not: the screen has to name what to fix first, or an
+    empty plan reads as a broken tool.
+    """
+    suppressors = {f.suppressed_by for f in findings if f.suppressed_by}
+    if not suppressors:
+        return []
+    return [f for f in findings if f.rule_key in suppressors]
+
+
 def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
     """The month's growth actions, best first.
 
@@ -5126,6 +5142,7 @@ def diagnose(
         levers=_lever_summaries(all_findings, growth_actions(all_findings)),
         findings=all_findings,
         growth_actions=growth_actions(all_findings),
+        blocking_findings=blocking_findings(all_findings),
         below_floor_actions=below_floor_actions(all_findings),
         unvalued_actions=unvalued_actions(all_findings),
         search_opportunities=search_opportunities,

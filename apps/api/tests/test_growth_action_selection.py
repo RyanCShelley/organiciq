@@ -134,3 +134,32 @@ def test_two_dismissals_is_not_yet_contested():
     finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
     finding.override_count = 2
     assert growth_actions([finding]) == [finding]
+
+
+# ── An empty plan has to say why ──
+
+
+def test_what_is_suppressing_the_plan_is_named():
+    """SMA's conversion tracking went silent after the site rebuild and 26
+    actions correctly vanished with it. Showing nothing and not saying why
+    reads as a broken tool rather than a broken tag."""
+    from app.services.lever_engine import blocking_findings
+
+    gate = _finding(gate="tracking")
+    gate.diagnosis = "No conversions recorded in 14 days while 402 sessions arrived"
+    blocked = _finding(rule_id="6", expected_leads_monthly=0.15)
+    blocked.suppressed_by = gate.rule_key
+
+    assert growth_actions([gate, blocked]) == []
+    assert blocking_findings([gate, blocked]) == [gate]
+
+
+def test_nothing_is_named_when_nothing_is_blocked():
+    action = _finding(rule_id="1b", expected_leads_monthly=1.0)
+    assert blocking_findings_of([action]) == []
+
+
+def blocking_findings_of(findings):
+    from app.services.lever_engine import blocking_findings
+
+    return blocking_findings(findings)

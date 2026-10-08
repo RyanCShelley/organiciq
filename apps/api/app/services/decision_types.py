@@ -72,6 +72,10 @@ class DiagnoseResult:
     findings: list[LeverFinding] = field(default_factory=list)
     #: What can spend the client's monthly allowance, ranked.
     growth_actions: list[LeverFinding] = field(default_factory=list)
+    #: What has to be fixed before the rest can be trusted. A failed gate
+    #: suppresses everything under it, and an empty plan with no reason
+    #: given reads as a broken tool rather than a broken tag.
+    blocking_findings: list[LeverFinding] = field(default_factory=list)
     #: Valued, and under the floor. Shown so the floor can be argued with.
     below_floor_actions: list[LeverFinding] = field(default_factory=list)
     #: Actions the valuer could not price, which is a bug worth seeing.

@@ -22,6 +22,7 @@ export function ActionLedger({
   actions,
   belowFloor,
   unvalued = [],
+  blocking = [],
   allowance,
   planLabel,
   clientId,
@@ -33,6 +34,8 @@ export function ActionLedger({
   belowFloor: Finding[];
   /** Actions the engine could not price. A bug, shown rather than hidden. */
   unvalued?: Finding[];
+  /** What has to be fixed before anything below it can be trusted. */
+  blocking?: Finding[];
   allowance: number;
   planLabel: string;
   clientId?: string;
@@ -46,6 +49,37 @@ export function ActionLedger({
 
   return (
     <section id="growth-actions" className="scroll-mt-24">
+      {/* A plan can be empty because there is nothing to do, or because a
+          gate upstream says the numbers it would be built from are wrong.
+          Those are opposite situations and must not look the same. */}
+      {blocking.length > 0 ? (
+        <div className="mb-4 rounded-[var(--radius-lg,14px)] border border-[var(--danger-border,#e0bcbc)] bg-[var(--danger-soft,#fdf3f3)] px-6 py-5">
+          <p className="font-[family-name:var(--font-display)] text-[16px] font-extrabold text-[var(--text-primary)]">
+            Fix this first
+          </p>
+          <p className="mt-1.5 max-w-[86ch] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+            {actions.length === 0
+              ? "No actions are offered this month. Everything below depends on numbers this says cannot be trusted."
+              : "Some work is held back: it depends on numbers this says cannot be trusted."}
+          </p>
+          <ul className="mt-3 space-y-2">
+            {blocking.map((item) => (
+              <li
+                key={item.rule_key}
+                className="text-[14px] font-semibold leading-snug text-[var(--text-primary)]"
+              >
+                {item.diagnosis}
+                {item.recommended_action ? (
+                  <span className="mt-1 block text-[13px] font-normal text-[var(--text-secondary)]">
+                    {item.recommended_action}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="overflow-hidden rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)]">
         <div className="flex flex-wrap items-baseline justify-between gap-3 px-6 pb-3 pt-5">
           <h2 className="font-[family-name:var(--font-display)] text-[17px] font-extrabold text-[var(--text-primary)]">
@@ -83,7 +117,9 @@ export function ActionLedger({
 
         {actions.length === 0 ? (
           <p className="border-t border-[var(--border)] px-6 py-8 text-[14px] text-[var(--text-secondary)]">
-            Nothing cleared the floor this period.
+            {blocking.length > 0
+              ? "Nothing is offered while the above is unresolved."
+              : "Nothing cleared the floor this period."}
           </p>
         ) : null}
 
@@ -96,11 +132,19 @@ export function ActionLedger({
               {actions.length} of {allowance} slots filled
             </p>
             <p className="mt-1 max-w-[80ch] text-[13px] leading-relaxed text-[var(--text-secondary)]">
-              There is no{" "}
-              {allowance - actions.length === 1 ? "other action" : "further action"} worth an hour
-              this month. The{" "}
-              {allowance - actions.length === 1 ? "slot stays" : "slots stay"} empty rather than
-              being filled with weaker work.
+              {blocking.length > 0 ? (
+                <>
+                  Held back by what is above, not by a shortage of work. Resolve it and re-run.
+                </>
+              ) : (
+                <>
+                  There is no{" "}
+                  {allowance - actions.length === 1 ? "other action" : "further action"} worth an
+                  hour this month. The{" "}
+                  {allowance - actions.length === 1 ? "slot stays" : "slots stay"} empty rather
+                  than being filled with weaker work.
+                </>
+              )}
             </p>
           </div>
         ) : null}

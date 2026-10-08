@@ -69,6 +69,8 @@ export type DiagnoseResponse = {
   findings: Finding[];
   /** The month's growth actions, ranked by the engine. */
   growth_actions?: Finding[];
+  /** Fix these first: they suppress everything below them. */
+  blocking_findings?: Finding[];
   below_floor_actions?: Finding[];
   unvalued_actions?: Finding[];
   search_opportunities?: SearchOpportunity[];

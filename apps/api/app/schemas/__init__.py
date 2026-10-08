@@ -544,6 +544,8 @@ class DiagnoseResponse(BaseModel):
     findings: list[FindingOut] = []
     #: The month's growth actions, ranked.
     growth_actions: list[FindingOut] = []
+    #: Fix these first: they suppress everything below them.
+    blocking_findings: list[FindingOut] = []
     below_floor_actions: list[FindingOut] = []
     unvalued_actions: list[FindingOut] = []
     search_opportunities: list[SearchOpportunityOut] = []
