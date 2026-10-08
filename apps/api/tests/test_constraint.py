@@ -249,3 +249,110 @@ def test_every_assessment_rides_along_whichever_wins():
     assert chosen is not None
     assert len(chosen.assessments) == 3
     assert chosen.of(Layer.TRAFFIC).ratio == pytest.approx(0.7)
+
+
+# ── Through the engine, not just the functions ──
+
+
+def test_diagnose_reads_every_rung_including_the_ai_one(db, client_a):
+    """The AI branch referenced a model the module had not imported, and the
+    whole suite stayed green because nothing drove `diagnose` with tracker
+    stats in the window. Lint caught it; this would have."""
+    from datetime import date as date_cls, timedelta
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from app.models.seranking import FactSerAiTrackerStats, FactSerKeyword
+    from app.services.lever_engine import diagnose
+    from tests.conftest import seed_required_sources
+
+    end = date_cls.today()
+    start = end - timedelta(days=29)
+
+    db.add(
+        FactSerKeyword(
+            id=uuid4(),
+            client_id=client_a.id,
+            site_engine_id="1",
+            keyword_id="k1",
+            keyword="slab leak detection",
+            current_position=42,
+            checked_at=end,
+        )
+    )
+    db.add(
+        FactSerAiTrackerStats(
+            id=uuid4(),
+            client_id=client_a.id,
+            metric_date=end,
+            prompts_count=20,
+            link_presence_pct=Decimal("5"),
+        )
+    )
+    db.commit()
+    seed_required_sources(db, client_a.id, end)
+    # `seed_required_sources` watermarks se_ranking_ai but not
+    # se_ranking_search, and the keyword window is gated on the latter.
+    _watermark_search(db, client_a.id, end)
+
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+
+    assert result.constraint is not None, "a client with tracked terms has a constraint"
+    assert result.constraint.layer is Layer.VISIBILITY
+    # Both readings were taken, not just the one that won.
+    evidence = result.constraint.of(Layer.VISIBILITY).evidence
+    assert evidence["tracked_keywords"] == 1
+    assert evidence["ai_link_presence_pct"] == 5.0
+
+
+def test_the_constraint_reaches_the_response(db, client_a):
+    """`serialize_diagnose` names every field by hand and has silently dropped
+    four before."""
+    from datetime import date as date_cls, timedelta
+    from uuid import uuid4
+
+    from app.models.seranking import FactSerKeyword
+    from app.services.decision_serialization import serialize_diagnose
+    from app.services.lever_engine import diagnose
+    from tests.conftest import seed_required_sources
+
+    end = date_cls.today()
+    db.add(
+        FactSerKeyword(
+            id=uuid4(),
+            client_id=client_a.id,
+            site_engine_id="1",
+            keyword_id="k1",
+            keyword="slab leak detection",
+            current_position=55,
+            checked_at=end,
+        )
+    )
+    db.commit()
+    seed_required_sources(db, client_a.id, end)
+    _watermark_search(db, client_a.id, end)
+
+    served = serialize_diagnose(
+        diagnose(db, client_a, from_date=end - timedelta(days=29), to_date=end)
+    )
+    assert served.constraint is not None
+    assert served.constraint.layer == "visibility"
+    assert len(served.constraint.assessments) == 3
+
+
+def _watermark_search(db, client_id, through) -> None:
+    """The SE Ranking search watermark, which `seed_required_sources` omits."""
+    import uuid as _uuid
+
+    from app.models.job import DataWatermark, ValidationStatus
+
+    db.add(
+        DataWatermark(
+            id=_uuid.uuid4(),
+            client_id=client_id,
+            source="se_ranking_search",
+            fact_through_date=through,
+            validation_status=ValidationStatus.PASSED,
+        )
+    )
+    db.commit()

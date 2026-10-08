@@ -72,6 +72,9 @@ class DiagnoseResult:
     findings: list[LeverFinding] = field(default_factory=list)
     #: What can spend the client's monthly allowance, ranked.
     growth_actions: list[LeverFinding] = field(default_factory=list)
+    #: Which of visibility / traffic / conversion is holding this client
+    #: back this month. None when no rung had the inputs to be read.
+    constraint: Any | None = None
     #: What has to be fixed before the rest can be trusted. A failed gate
     #: suppresses everything under it, and an empty plan with no reason
     #: given reads as a broken tool rather than a broken tag.

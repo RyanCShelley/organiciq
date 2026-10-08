@@ -527,6 +527,27 @@ class RecommendationOut(FindingOut):
     pass
 
 
+class LayerAssessmentOut(BaseModel):
+    layer: str
+    measurable: bool
+    ratio: float | None = None
+    floor: float
+    reason: str
+    evidence: dict = {}
+
+
+class ConstraintOut(BaseModel):
+    """Which of visibility / traffic / conversion is holding the client back."""
+
+    layer: str
+    reason: str
+    #: True when nothing was below its bar and the softest spot won instead.
+    #: "This is broken" and "nothing is broken, this is weakest" are different
+    #: sentences and the screen has to be able to tell them apart.
+    by_comparison: bool = False
+    assessments: list[LayerAssessmentOut] = []
+
+
 class DiagnoseResponse(BaseModel):
     ready: bool
     message: str | None = None
@@ -544,6 +565,8 @@ class DiagnoseResponse(BaseModel):
     findings: list[FindingOut] = []
     #: The month's growth actions, ranked.
     growth_actions: list[FindingOut] = []
+    #: The month's constraint. Null when no rung had the inputs to be read.
+    constraint: ConstraintOut | None = None
     #: Fix these first: they suppress everything below them.
     blocking_findings: list[FindingOut] = []
     below_floor_actions: list[FindingOut] = []

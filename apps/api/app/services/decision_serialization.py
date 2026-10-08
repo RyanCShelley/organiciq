@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from app.schemas import DiagnoseResponse, FindingOut, LeverSummaryOut, SearchOpportunityOut
+from app.schemas import (
+    ConstraintOut,
+    DiagnoseResponse,
+    FindingOut,
+    LayerAssessmentOut,
+    LeverSummaryOut,
+    SearchOpportunityOut,
+)
 from app.services.lever_engine import LEVER_LABELS, SEARCH_OPPORTUNITY_LABEL
 
 
@@ -66,9 +73,32 @@ def _serialize_search_opportunity(row) -> SearchOpportunityOut:
     )
 
 
+
+def _serialize_constraint(constraint) -> ConstraintOut | None:
+    if constraint is None:
+        return None
+    return ConstraintOut(
+        layer=constraint.layer.value,
+        reason=constraint.reason,
+        by_comparison=constraint.by_comparison,
+        assessments=[
+            LayerAssessmentOut(
+                layer=a.layer.value,
+                measurable=a.measurable,
+                ratio=round(a.ratio, 3) if a.ratio is not None else None,
+                floor=a.floor,
+                reason=a.reason,
+                evidence=a.evidence,
+            )
+            for a in constraint.assessments
+        ],
+    )
+
+
 def serialize_diagnose(result) -> DiagnoseResponse:
     findings = [_serialize_finding(row) for row in result.findings]
     growth_actions = [_serialize_finding(row) for row in result.growth_actions]
+    constraint = _serialize_constraint(result.constraint)
     blocking_findings = [_serialize_finding(row) for row in result.blocking_findings]
     below_floor_actions = [_serialize_finding(row) for row in result.below_floor_actions]
     unvalued_actions = [_serialize_finding(row) for row in result.unvalued_actions]
@@ -100,6 +130,7 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         ],
         findings=findings,
         growth_actions=growth_actions,
+        constraint=constraint,
         blocking_findings=blocking_findings,
         below_floor_actions=below_floor_actions,
         unvalued_actions=unvalued_actions,

@@ -17,6 +17,16 @@ from sqlalchemy.orm import Session
 
 from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
 from app.decisions.actions.value import FLAT_CREDIT_RULES, value_for
+from app.decisions.constraint import (
+    Constraint,
+    ConversionSignals,
+    TrafficSignals,
+    VisibilitySignals,
+    assess_conversion,
+    assess_traffic,
+    assess_visibility,
+    select_constraint,
+)
 from app.decisions.answer_cause import (
     prescribe_answer_first,
     prescribe_faq_expansion,
@@ -92,6 +102,7 @@ from app.models.job import DataWatermark, ValidationStatus
 from app.core.settings import get_settings
 from app.core.urls import normalize_url
 from app.models.seranking import (
+    FactSerAiTrackerStats,
     FactSerAiCheck,
     FactSerDomainKeyword,
     FactSerKeywordMetric,
@@ -3675,6 +3686,156 @@ def _faq_expansion_finding(
     )
 
 
+def _constraint_for(
+    db: Session,
+    client: Client,
+    *,
+    gsc_period: tuple[date, date] | None,
+    ser_period: tuple[date, date] | None,
+    ai_period: tuple[date, date] | None,
+    ga4_period: tuple[date, date] | None,
+    lead_events: list[str],
+    period_goal: float | None,
+    ctr_curve: dict[int, float] | None,
+    thresholds: dict[str, Any],
+) -> Constraint | None:
+    """Read the three rungs from the facts, and pick the month's constraint.
+
+    Deliberately not from `build_dashboard`: that payload applies no channel
+    filter anywhere, so its sessions and leads include paid and direct. A rung
+    about whether the organic path is working cannot be read from a number
+    that has paid traffic in it.
+    """
+    # ── Visibility: tracked positions, and whether engines cite the brand ──
+    distribution: dict[str, int] | None = None
+    if ser_period is not None:
+        start, end = ser_period
+        buckets = {"top_3": 0, "top_10": 0, "top_20": 0, "beyond_20": 0, "not_ranking": 0}
+        rows = (
+            db.query(FactSerKeyword.current_position)
+            .filter(
+                FactSerKeyword.client_id == client.id,
+                FactSerKeyword.checked_at.isnot(None),
+                FactSerKeyword.checked_at >= start,
+                FactSerKeyword.checked_at <= end,
+            )
+            .all()
+        )
+        for (position,) in rows:
+            if position is None or position <= 0:
+                buckets["not_ranking"] += 1
+            elif position <= 3:
+                buckets["top_3"] += 1
+            elif position <= 10:
+                buckets["top_10"] += 1
+            elif position <= 20:
+                buckets["top_20"] += 1
+            else:
+                buckets["beyond_20"] += 1
+        if rows:
+            distribution = buckets
+
+    # The AI reading has its own window, which falls back to the search one.
+    ai_pct: float | None = None
+    tracked_prompts = 0
+    if ai_period is not None:
+        start, end = ai_period
+        latest = (
+            db.query(FactSerAiTrackerStats)
+            .filter(
+                FactSerAiTrackerStats.client_id == client.id,
+                FactSerAiTrackerStats.metric_date >= start,
+                FactSerAiTrackerStats.metric_date <= end,
+            )
+            .order_by(FactSerAiTrackerStats.metric_date.desc())
+            .first()
+        )
+        if latest is not None:
+            if latest.link_presence_pct is not None:
+                ai_pct = float(latest.link_presence_pct)
+            tracked_prompts = int(latest.prompts_count or 0)
+
+    visibility = assess_visibility(
+        VisibilitySignals(
+            keyword_distribution=distribution,
+            ai_link_presence_pct=ai_pct,
+            tracked_prompts=tracked_prompts,
+        ),
+        top10_floor=float(thresholds.get("constraint_visibility_floor_top10_share", 0.30)),
+        ai_citation_floor_pct=float(
+            thresholds.get("constraint_visibility_floor_ai_citation_pct", 25.0)
+        ),
+    )
+
+    # ── Traffic: clicks earned against what these rankings should earn ──
+    clicks = expected_clicks = impressions = None
+    if gsc_period is not None:
+        start, end = gsc_period
+        rows = (
+            db.query(
+                FactGscPage.normalized_url,
+                func.sum(FactGscPage.clicks),
+                func.sum(FactGscPage.impressions),
+                func.avg(FactGscPage.average_position),
+            )
+            .filter(
+                FactGscPage.client_id == client.id,
+                FactGscPage.date >= start,
+                FactGscPage.date <= end,
+            )
+            .group_by(FactGscPage.normalized_url)
+            .all()
+        )
+        if rows:
+            clicks = sum(float(c or 0) for _u, c, _i, _p in rows)
+            impressions = sum(float(i or 0) for _u, _c, i, _p in rows)
+            expected_clicks = sum(
+                float(i or 0)
+                * _expected_ctr(float(p or 0), ctr_curve)
+                / 100.0
+                for _u, _c, i, p in rows
+                if p
+            )
+
+    traffic = assess_traffic(
+        TrafficSignals(
+            clicks=clicks, expected_clicks=expected_clicks, impressions=impressions or 0.0
+        ),
+        min_impressions=float(thresholds.get("constraint_traffic_min_impressions", 500)),
+        floor=float(thresholds.get("constraint_traffic_floor_ratio", 0.60)),
+    )
+
+    # ── Conversion: managed-channel leads against the period goal ──
+    leads = None
+    if ga4_period is not None and lead_events:
+        leads = sum(
+            _leads_by_page(
+                db, client.id, lead_events, ga4_period[0], ga4_period[1],
+                channels=MANAGED_CHANNELS,
+            ).values()
+        )
+
+    conversion = assess_conversion(
+        ConversionSignals(
+            leads=leads,
+            period_goal=period_goal,
+            lead_events_configured=bool(lead_events),
+        ),
+        floor=float(thresholds.get("constraint_conversion_floor_ratio", 0.80)),
+    )
+
+    return select_constraint([visibility, traffic, conversion])
+
+
+def _expected_ctr(position: float, curve: dict[int, float] | None) -> float:
+    """The client's own curve where it has one, the benchmark otherwise."""
+    if curve:
+        rounded = max(1, min(20, int(round(position))))
+        if rounded in curve:
+            return float(curve[rounded])
+    return expected_ctr_percent(position)
+
+
 #: Which growth action a finding is, by the gate or signal it carries.
 #: Only these can spend a client's monthly allowance; everything else the
 #: engine reports is recurring work already covered by the plan.
@@ -5175,6 +5336,9 @@ def diagnose(
         ),
         "ai_visibility": _last_fact(FactSerAiCheck),
     }
+    # Built once: the per-page cascade and the month's constraint both
+    # read it, and it is a query per call.
+    client_curve = build_client_ctr_curve(db, client.id, gsc_period)[0]
     # Which rules ran, and why the others did not. Built before the
     # readiness check, because a source that never reported is the first
     # thing this has to be able to record.
@@ -5602,6 +5766,20 @@ def diagnose(
         formula=SCORE_FORMULA,
         levers=_lever_summaries(all_findings, growth_actions(all_findings)),
         findings=all_findings,
+        constraint=_constraint_for(
+            db,
+            client,
+            gsc_period=gsc_period,
+            ser_period=ser_period,
+            ai_period=ai_period,
+            ga4_period=ga4_period,
+            lead_events=lead_events,
+            period_goal=(
+                float(site.period_lead_goal) if site.period_lead_goal else None
+            ),
+            ctr_curve=client_curve,
+            thresholds=thresholds,
+        ),
         growth_actions=growth_actions(all_findings),
         blocking_findings=blocking_findings(all_findings),
         below_floor_actions=below_floor_actions(all_findings),
