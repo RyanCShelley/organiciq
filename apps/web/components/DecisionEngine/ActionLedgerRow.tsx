@@ -12,6 +12,7 @@ import {
   growthActionLabel,
   isPrecondition,
   numberField,
+  stringField,
   valueDerivation,
   type Finding,
   type StoredDecision,
@@ -74,6 +75,10 @@ export function ActionLedgerRow({
   const panelId = useId();
   const demand = demandOf(finding);
   const unsized = demandIsUnsized(finding);
+  // What the number is of. "74,000 searches" under a prompt reads as the
+  // number of people asking that prompt; it is the volume of a related
+  // tracked term, and the card has to say which one.
+  const basis = stringField(finding.evidence_json ?? {}, "demand_basis");
   const minutes = numberField(finding.evidence_json ?? {}, "estimated_minutes");
   const chip = preconditionChip(finding);
   const steps = findingActions(finding.evidence_json ?? {});
@@ -104,6 +109,12 @@ export function ActionLedgerRow({
           <span className="mt-1 block break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
             {subject(finding)}
           </span>
+          {basis ? (
+            <span className="mt-1 block text-[11.5px] leading-snug text-[var(--text-tertiary)]">
+              {formatDemand(demand)}
+              {demand ? ` ${demand.unit}` : ""} — {basis}
+            </span>
+          ) : null}
         </span>
 
         {/* The three numbers travel together: below ~640px they wrap under
@@ -215,11 +226,15 @@ export function ActionLedgerRow({
             <p className="mt-1 font-[family-name:var(--font-display)] text-[44px] font-black leading-none tracking-[-0.035em] text-[var(--text-primary)]">
               {isPrecondition(finding) ? "All" : formatDemand(demand)}
             </p>
+            {basis ? (
+              <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-tertiary)]">
+                {basis.charAt(0).toUpperCase() + basis.slice(1)}.
+              </p>
+            ) : null}
             {unsized ? (
               <p className="mt-3 text-[12.5px] leading-relaxed text-[var(--text-tertiary)]">
-                No volume comes back on this prompt and no tracked term is close
-                enough to stand in, so the engine cannot say how many people ask
-                it. The prompt is tracked and nothing cites it either way.
+                The prompt is tracked and nothing cites it either way — it is the
+                size that is missing, not the gap.
               </p>
             ) : null}
 

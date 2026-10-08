@@ -2796,7 +2796,13 @@ def _ai_visibility_prompt_findings(
                 "demand_basis": (
                     f"volume of the nearest tracked term, “{stood_in_for}”"
                     if stood_in_for
-                    else "searches for this prompt"
+                    else (
+                        "searches for this prompt"
+                        if volume > 0
+                        # Saying "searches for this prompt" here would name a
+                        # source for a number that does not exist.
+                        else "no volume on this prompt and no tracked term close enough to stand in"
+                    )
                 ),
                 "demand_term": stood_in_for,
                 **without_predicted_leads(impact_evidence),
