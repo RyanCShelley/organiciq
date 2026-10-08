@@ -3330,6 +3330,16 @@ def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
         if action_rule_id(finding) is not None
         and not finding.evidence_json.get("below_floor")
         and not finding.evidence_json.get("value_error")
+        # A gate failing means this finding's inputs cannot be trusted, so
+        # it is not an hour anyone should spend.
+        and not finding.suppressed_by
+        # Dismissed across three different pages and the rule is what is
+        # wrong. Offering it again spends an action on an argument this
+        # team has already had three times.
+        and finding.override_count < 3
+        # In the plan every month already. Promoting it bills the client
+        # for work they are paying for twice.
+        and not finding.core_work
     ]
     return sorted(
         actions,

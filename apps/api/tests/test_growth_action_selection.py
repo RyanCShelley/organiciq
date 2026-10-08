@@ -100,3 +100,37 @@ def test_every_offered_action_carries_what_the_screen_prints():
 def test_the_catalogue_of_action_rules_is_not_empty():
     """If this ever empties, every client's plan silently goes to zero."""
     assert ACTION_RULE_IDS, "no signal maps to a growth action"
+
+
+# ── Policy the old promotion carried, which the new selection must too ──
+
+
+def test_a_suppressed_finding_is_not_an_action():
+    """A gate failing means this finding's inputs cannot be trusted. The
+    old promotion refused it; the new selection has to as well, or a
+    failure upstream becomes an hour of someone's work."""
+    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding.suppressed_by = "tracking_silent"
+    assert growth_actions([finding]) == []
+
+
+def test_a_rule_this_team_has_dismissed_three_times_does_not_return():
+    """Dismissed across three different pages and the rule is contested.
+    Offering it again spends an action on an argument already had."""
+    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding.override_count = 3
+    assert growth_actions([finding]) == []
+
+
+def test_core_work_never_spends_an_action():
+    """It is in the plan every month. Promoting it bills a client for work
+    they already pay for."""
+    finding = _finding(rule_id="2a", expected_leads_monthly=2.0)
+    finding.core_work = True
+    assert growth_actions([finding]) == []
+
+
+def test_two_dismissals_is_not_yet_contested():
+    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding.override_count = 2
+    assert growth_actions([finding]) == [finding]
