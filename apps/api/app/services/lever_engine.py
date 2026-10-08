@@ -3500,6 +3500,8 @@ def _answer_first_finding(
     eligible = [
         row for row in questions if 4.0 <= row[3] <= 15.0
     ][:max_queries]
+    if coverage is not None:
+        coverage.ran("3a")
     if not eligible:
         return None
     if sum(row[1] for row in eligible) < lo:
@@ -3543,6 +3545,8 @@ def _answer_first_finding(
     )
 
     query, impressions, position, result = failures[0]
+    if coverage is not None:
+        coverage.ran("3a", findings=1)
     return _make_finding(
         lever=GrowthAction.SERP_CTR.value,
         rule_key=_rule_key("answer_first", page.normalized_url),
@@ -3601,6 +3605,8 @@ def _faq_expansion_finding(
     coverage_overlap = float(thresholds.get("faq_coverage_overlap", 0.7))
     target = float(thresholds.get("keyword_target_position", 3))
 
+    if coverage is not None:
+        coverage.ran("3b")
     candidates = [
         row for row in questions if row[3] <= 15.0 and row[1] >= 20.0
     ]
@@ -3640,6 +3646,8 @@ def _faq_expansion_finding(
         for row in chosen
     )
 
+    if coverage is not None:
+        coverage.ran("3b", findings=1)
     return _make_finding(
         lever=GrowthAction.SERP_CTR.value,
         rule_key=_rule_key("faq_expansion", page.normalized_url),

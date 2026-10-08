@@ -41,12 +41,17 @@ class RuleCoverage:
     #: Anything worth knowing that is not a finding: how many pages entered
     #: a gate, which pairs were found and not emitted, and so on.
     notes: dict[str, object] = field(default_factory=dict)
+    #: Why the rule could not run, and on how many pages. A per-page rule
+    #: can run on most of a site and skip the rest; one verdict for the
+    #: whole rule loses that.
+    skips: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
             "rule_id": self.rule_id,
             "status": "ran" if self.ran else f"skipped:{self.skipped.value if self.skipped else '?'}",
             "findings": self.findings,
+            **({"skipped_on": self.skips} if self.skips else {}),
             **({"notes": self.notes} if self.notes else {}),
         }
 
@@ -58,14 +63,40 @@ class Coverage:
     rules: dict[str, RuleCoverage] = field(default_factory=dict)
 
     def ran(self, rule_id: str, findings: int = 0, **notes: object) -> None:
-        self.rules[rule_id] = RuleCoverage(
-            rule_id=rule_id, ran=True, findings=findings, notes=dict(notes)
-        )
+        """Record that the rule ran, adding to anything already recorded.
+
+        Per-page rules call this once per page, so findings accumulate.
+        A rule called once with a total is unaffected.
+        """
+        existing = self.rules.get(rule_id)
+        if existing is None:
+            self.rules[rule_id] = RuleCoverage(
+                rule_id=rule_id, ran=True, findings=findings, notes=dict(notes)
+            )
+            return
+        existing.ran = True
+        existing.findings += findings
+        if notes:
+            existing.notes.update(notes)
 
     def skipped(self, rule_id: str, reason: SkipReason, **notes: object) -> None:
-        self.rules[rule_id] = RuleCoverage(
-            rule_id=rule_id, ran=False, skipped=reason, notes=dict(notes)
-        )
+        """Record a skip, keeping any earlier verdict for the same rule.
+
+        A rule that runs per page used to overwrite itself: 3a evaluated 78
+        of SMA's 80 pages and reported `page_not_crawled`, because the last
+        two pages it looked at had no crawl row. "A rule that cannot run
+        must never look like a rule that found nothing" cuts both ways, and
+        this was the other way round.
+        """
+        existing = self.rules.get(rule_id)
+        if existing is None:
+            existing = RuleCoverage(rule_id=rule_id, ran=False, skipped=reason)
+            self.rules[rule_id] = existing
+        existing.skips[reason.value] = existing.skips.get(reason.value, 0) + 1
+        if existing.skipped is None:
+            existing.skipped = reason
+        if notes:
+            existing.notes.update(notes)
 
     def as_list(self) -> list[dict[str, object]]:
         return [self.rules[key].as_dict() for key in sorted(self.rules)]
