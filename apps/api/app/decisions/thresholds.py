@@ -54,6 +54,21 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     # Nothing is dropped for being small. Going from 36 leads to 37 is
     # worth doing; only work worth less than a tenth of a lead a month
     # falls away.
+    # ── The month's constraint ──
+    # Which rung of visibility -> traffic -> leads is holding the client back.
+    # Each is a bar in its own units; the selector compares ratio over floor so
+    # the three are asked the same question. Proposed, not measured.
+    #: A third of tracked terms on page one is a working site.
+    "constraint_visibility_floor_top10_share": 0.30,
+    #: Cited on a quarter of tracked prompts.
+    "constraint_visibility_floor_ai_citation_pct": 25.0,
+    #: Earning 60% of the clicks the rankings should is the bar; below that the
+    #: listing, not the ranking, is the problem.
+    "constraint_traffic_floor_ratio": 0.60,
+    #: Within 20% of the lead goal for the period.
+    "constraint_conversion_floor_ratio": 0.80,
+    #: Below this the Search Console sample is too thin to judge traffic on.
+    "constraint_traffic_min_impressions": 500.0,
     "min_expected_leads_monthly": 0.1,
     #: Per-rule discount, for when measured outcomes exist. Until then
     #: every rule is trusted at face value and the learning loop is not
