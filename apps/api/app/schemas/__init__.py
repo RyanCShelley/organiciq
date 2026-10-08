@@ -542,9 +542,7 @@ class DiagnoseResponse(BaseModel):
     recommended_actions_count: int = 0
     levers: list[LeverSummaryOut]
     findings: list[FindingOut] = []
-    recommended_actions: list[FindingOut] = []
-    #: The month's growth actions, ranked. Prefer these over
-    #: `recommended_actions`, which is the older promotion.
+    #: The month's growth actions, ranked.
     growth_actions: list[FindingOut] = []
     below_floor_actions: list[FindingOut] = []
     unvalued_actions: list[FindingOut] = []

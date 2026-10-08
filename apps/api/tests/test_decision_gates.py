@@ -231,12 +231,15 @@ def test_a_silent_tag_suppresses_every_other_finding(db, client_a):
     assert all(not row.is_recommended_action for row in others)
     # What a Launch client with one action a month should see: exactly one
     # thing to do, and it is the thing that makes everything else legible.
-    assert [row.evidence_json.get("gate") for row in result.recommendations] == ["tracking"]
+    # The tracking gate is a finding, not one of the seven rules that can
+    # spend an action — silence is something to fix, not an hour of work.
+    assert "tracking" in {row.evidence_json.get("gate") for row in result.findings}
+    assert result.growth_actions == []
 
 
 def test_core_work_never_becomes_a_recommended_action(db, client_a):
     """A Launch client buys one action a month; upkeep must not spend it."""
-    from app.services.action_promotion import promote_findings
+    from app.services.lever_engine import annotate_why_not_an_action, growth_actions
     from app.services.decision_types import LeverFinding
     from app.models.decision import DiagnosticLayer
 
@@ -247,7 +250,7 @@ def test_core_work_never_becomes_a_recommended_action(db, client_a):
         diagnosis="Missing core meta",
         recommended_action="",
         success_metric="",
-        evidence_json={"promotion_class": "actionable"},
+        evidence_json={"promotion_class": "actionable", "rule_id": "2a"},
         baseline_metrics_json={},
         impact=99.0,
         confidence=90.0,
@@ -257,11 +260,9 @@ def test_core_work_never_becomes_a_recommended_action(db, client_a):
         core_work=True,
     )
 
-    all_findings, recommended = promote_findings(
-        [finding], classifications={}, page_contexts={}, thresholds={}
-    )
+    all_findings = annotate_why_not_an_action([finding])
 
-    assert recommended == []
+    assert growth_actions(all_findings) == []
     assert all_findings[0].promotion_blocked_reason == "core work: included in the monthly plan"
 
 

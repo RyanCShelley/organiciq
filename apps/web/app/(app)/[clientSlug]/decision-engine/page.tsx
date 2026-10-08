@@ -62,9 +62,7 @@ export default async function DecisionEnginePage({
   const searchOpportunities = data?.search_opportunities ?? [];
 
   // The engine decides what a growth action is and what order they come
-  // in; this reads its answer. Reading `recommended_actions` instead —
-  // the older impact promotion — put eight keyword findings on screen with
-  // no lead estimate and no time, while the CLI printed three real ones.
+  // in; this reads its answer.
   //
   // Never truncated to the allowance: the plan says how many are included
   // this month, not how many are worth seeing. The ledger draws the line.

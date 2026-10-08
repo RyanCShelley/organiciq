@@ -34,21 +34,37 @@ def test_nothing_is_described_that_the_engine_no_longer_emits():
 
 def test_every_check_says_what_it_spends():
     for signal in CHECKS:
-        assert _row(signal)["spends"] in {"core work", "growth action"}
+        assert _row(signal)["spends"] in {"core work", "growth action", "reported"}
+
+
+def test_only_a_rule_with_an_id_spends_an_action():
+    """The column used to be derived from `core_work` alone, so it said
+    "growth action" against `tracking` and `site_conversion` — neither of
+    which has a rule id and so neither of which can ever be one."""
+    for signal in CHECKS:
+        row = _row(signal)
+        if row["spends"] == "growth action":
+            assert row["rule"], f"{signal} spends an action with no rule id"
+        else:
+            assert not row["rule"], f"{signal} has rule {row['rule']} but cannot spend"
 
 
 def test_conversion_checks_are_not_core_work():
     """They were all marked as upkeep, because the technical predicate was
-    asked about gates it knows nothing about."""
+    asked about gates it knows nothing about. They are not actions either:
+    a broken tag is something to fix, not an hour of someone's month."""
     for signal in ("tracking", "site_conversion", "converting_page_dropped"):
-        assert _row(signal)["spends"] == "growth action"
+        assert _row(signal)["spends"] == "reported"
 
 
-def test_meta_descriptions_are_core_work_and_titles_are_not():
-    """A title earns the click, so it competes for an action. A
-    description is upkeep Google rewrites at will."""
+def test_a_description_is_upkeep_and_a_title_is_not():
+    """A description is upkeep Google rewrites at will. A title earns the
+    click, so it is not upkeep — but it is not an action either, because
+    no rule id maps to it. Rewriting a title is a twenty-minute job that
+    the engine cannot currently offer, which is a gap in `ACTION_RULE_IDS`
+    rather than a decision anyone made."""
     assert _row("description_missing")["spends"] == "core work"
-    assert _row("title_missing")["spends"] == "growth action"
+    assert _row("title_missing")["spends"] == "reported"
 
 
 def test_blocking_checks_are_marked_as_preempting():

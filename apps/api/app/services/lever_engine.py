@@ -46,7 +46,6 @@ from app.decisions.triggers.t1_conversion import (
     leaking_pages,
 )
 from app.decisions.tracking_cause import TrackingSignals, classify_tracking_break
-from app.decisions.effort import effort_class, ranking_score
 from app.decisions.ctr_curve import has_ai_overview
 from app.decisions.client_ctr_curve import build_client_ctr_curve, ctr_at
 from app.decisions.ctr_curve import (
@@ -89,7 +88,6 @@ from app.models.seranking import (
     FactSerBacklinkPage,
     FactSerKeyword,
 )
-from app.services.action_promotion import promote_findings
 from app.services.dashboard import (
     _effective_range,
     _lead_event_names,
@@ -3311,6 +3309,44 @@ ACTION_RULE_IDS: dict[str, str] = {
 }
 
 
+#: Why a finding that could otherwise be an action is not one. Set on the
+#: finding so the answer survives onto the screen, rather than being a
+#: silent absence from the list.
+NOT_AN_ACTION_REASONS = {
+    "suppressed": "suppressed: fix the blocking issue first",
+    "contested": "dismissed three times: rewrite or retire this rule",
+    "core_work": "core work: included in the monthly plan",
+}
+
+
+def _not_an_action_reason(finding: LeverFinding) -> str | None:
+    if finding.suppressed_by:
+        return NOT_AN_ACTION_REASONS["suppressed"]
+    if finding.override_count >= 3:
+        return NOT_AN_ACTION_REASONS["contested"]
+    if finding.core_work:
+        return NOT_AN_ACTION_REASONS["core_work"]
+    return None
+
+
+def annotate_why_not_an_action(findings: list[LeverFinding]) -> list[LeverFinding]:
+    """Record, on each finding, why it cannot spend an action.
+
+    `growth_actions` filters; this explains. Keeping them apart means the
+    selector stays a pure function that several callers can use, while the
+    reason is written once per run where the findings are assembled.
+    """
+    for finding in findings:
+        # Every finding, not only the ones that could have been actions:
+        # "core work, already in the plan" is the answer to "why is this
+        # here and not on my list" whatever rule produced it.
+        reason = _not_an_action_reason(finding)
+        if reason is not None:
+            finding.is_recommended_action = False
+            finding.promotion_blocked_reason = reason
+    return findings
+
+
 def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
     """The month's growth actions, best first.
 
@@ -5048,26 +5084,11 @@ def diagnose(
         },
     )
 
-    findings.sort(key=lambda row: row.priority_score, reverse=True)
-
-    # ── S1 ──
-    # Size every finding and re-order the top of the queue by what it costs.
-    # Only the order moves: promotion still turns on impact and confidence, so
-    # nothing is promoted or blocked for being cheap or expensive. Confined to
-    # the top N because the tail is not work anyone is choosing between.
-    top_n = int(thresholds.get("effort_reorder_top_n", 25))
-    for finding in findings:
-        size = effort_class(finding.lever, finding.evidence_json)
-        finding.evidence_json["effort_class"] = size
-        finding.evidence_json["ranking_score"] = ranking_score(
-            impact=finding.impact,
-            confidence=finding.confidence,
-            effort=size,
-            thresholds=thresholds,
-        )
-    head = findings[:top_n]
-    head.sort(key=lambda row: row.evidence_json["ranking_score"], reverse=True)
-    findings[:top_n] = head
+    # Nothing is ordered here. The month's actions are ranked by expected
+    # leads in `growth_actions`, and everything else is reported rather
+    # than queued, so a second ordering — the old priority score, then a
+    # re-shuffle of the top 25 by impact x confidence / effort weight —
+    # was two answers to a question only one list still asks.
 
     # What the finding is worth, and how long it takes. Leads alone cannot
     # be weighed by someone deciding where an hour goes: 0.4 leads is
@@ -5087,12 +5108,7 @@ def diagnose(
             )
             finding.evidence_json["lead_value"] = site.lead_value
 
-    all_findings, recommended_actions = promote_findings(
-        findings,
-        classifications=classifications,
-        page_contexts=page_contexts,
-        thresholds=thresholds,
-    )
+    all_findings = annotate_why_not_an_action(findings)
     actioned_urls = {finding.page_url for finding in all_findings if finding.page_url}
     search_opportunities = _search_opportunities(
         pages,
@@ -5107,9 +5123,8 @@ def diagnose(
         message=None,
         readiness=readiness,
         formula=SCORE_FORMULA,
-        levers=_lever_summaries(all_findings, recommended_actions),
+        levers=_lever_summaries(all_findings, growth_actions(all_findings)),
         findings=all_findings,
-        recommended_actions=recommended_actions,
         growth_actions=growth_actions(all_findings),
         below_floor_actions=below_floor_actions(all_findings),
         unvalued_actions=unvalued_actions(all_findings),

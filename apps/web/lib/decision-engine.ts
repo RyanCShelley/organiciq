@@ -67,10 +67,7 @@ export type DiagnoseResponse = {
   recommended_actions_count: number;
   levers: LeverSummary[];
   findings: Finding[];
-  recommended_actions: Finding[];
-  /** The month's growth actions, ranked by the engine. Prefer these over
-   *  `recommended_actions`, which is the older impact promotion and carries
-   *  report-only work that was never valued in leads. */
+  /** The month's growth actions, ranked by the engine. */
   growth_actions?: Finding[];
   below_floor_actions?: Finding[];
   unvalued_actions?: Finding[];

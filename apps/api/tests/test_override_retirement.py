@@ -18,7 +18,7 @@ from app.models.decision import (
     DiagnosticLayer,
     GrowthAction,
 )
-from app.services.action_promotion import promote_findings
+from app.services.lever_engine import annotate_why_not_an_action, growth_actions
 from app.services.decision_types import LeverFinding
 from app.services.lever_engine import (
     OVERRIDE_RETIREMENT_COUNT,
@@ -154,39 +154,32 @@ def _finding(**over):
 
 
 def test_a_retired_rule_stops_spending_actions():
-    finding = _finding(override_count=3)
+    finding = _finding(override_count=3, evidence_json={"rule_id": "1b"})
 
-    all_findings, recommended = promote_findings(
-        [finding], classifications={}, page_contexts={}, thresholds={}
-    )
+    annotate_why_not_an_action([finding])
 
-    assert recommended == []
-    assert "rewrite or retire this rule" in all_findings[0].promotion_blocked_reason
+    assert growth_actions([finding]) == []
+    assert "retire this rule" in finding.promotion_blocked_reason
 
 
 def test_a_retired_rule_still_appears():
-    """A rule that vanishes silently can never be rewritten or deliberately removed."""
-    finding = _finding(override_count=4)
+    """A rule that vanishes silently can never be rewritten or deliberately
+    removed. It stops spending actions; it does not stop being reported."""
+    finding = _finding(override_count=4, evidence_json={"rule_id": "1b"})
 
-    all_findings, _ = promote_findings(
-        [finding], classifications={}, page_contexts={}, thresholds={}
-    )
+    all_findings = annotate_why_not_an_action([finding])
 
     assert len(all_findings) == 1
     assert all_findings[0].override_count == 4
 
 
 def test_two_dismissals_are_not_yet_a_verdict():
-    """Asserted on the reason, not on promotion: other gates block this
-    synthetic finding for reasons of their own, and the question here is only
-    whether the override rule has fired."""
-    finding = _finding(override_count=2)
+    finding = _finding(override_count=2, evidence_json={"rule_id": "1b"})
 
-    all_findings, _ = promote_findings(
-        [finding], classifications={}, page_contexts={}, thresholds={}
-    )
+    annotate_why_not_an_action([finding])
 
-    assert "retire this rule" not in (all_findings[0].promotion_blocked_reason or "")
+    assert "retire this rule" not in (finding.promotion_blocked_reason or "")
+    assert growth_actions([finding]) == [finding]
 
 
 # --- T8: reasons, and a rule getting another chance -------------------------

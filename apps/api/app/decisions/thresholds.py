@@ -117,13 +117,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "lead_spike_multiple": 3.0,
     # 3x of two leads is six, which is a good week, not a spike.
     "lead_spike_min_leads": 10,
-    # --- Phase 5: effort ---
-    # Between two findings worth the same, the cheaper one should come first.
-    # These re-order the queue; they never promote or block anything.
-    "effort_weight_small": 1.0,
-    "effort_weight_medium": 1.5,
-    "effort_weight_large": 2.5,
-    "effort_reorder_top_n": 25,
     # C1: confidence read from the evidence rather than from the lever.
     # Applying it is off until the distribution across real clients has been
     # looked at — see app/decisions/confidence.py.
@@ -137,23 +130,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "confidence_stale_after_days": 14,
     "confidence_stale_factor": 0.85,
     "minimum_actionable_impact": 25,
-    # A growth action is a small task that moves the account forward. One
-    # worth this much, and doable inside an hour, is worth doing whatever
-    # share of the monthly goal it represents. Needs the client's
-    # `lead_value` to be set; without it the engine falls back to counting
-    # leads and this route never opens.
-    "growth_action_min_value": 250,
-    # A critical technical fault clears a lower bar than ordinary work, but
-    # not a bar of zero: a broken page with no demand behind it is still a
-    # page with no demand behind it.
-    "critical_override_min_impact": 5,
-    # Lowered from 60 once C1 made confidence a measured number rather than a
-    # per-lever constant. Against constants that started at 70 the old gate had
-    # never rejected anything; against the measured score the distribution runs
-    # 45-76 with a median of 54, so 60 would have rejected 83% of findings. At
-    # 50 the gate keeps today's recommendations and rejects the band that rests
-    # on both a weak source and thin evidence.
-    "minimum_recommendation_confidence": 50,
     # The priority formula itself, so the ranking can be argued with rather
     # than only read. Impact leads; the rest are scaled by how real the
     # impact is, so a tidy and urgent finding worth nothing cannot climb on
@@ -167,8 +143,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "score_impact_relevance_scale": 20,
     "high_priority_threshold": 70,
     "medium_priority_threshold": 50,
-    "meaningful_gsc_impressions": 100,
-    "meaningful_ga4_sessions": 10,
     "content_planning_min_impressions": 200,
     "content_planning_top_n": 50,
 }

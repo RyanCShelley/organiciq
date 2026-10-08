@@ -81,7 +81,7 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
     case "decision-engine":
       return {
         title: "Decision Engine",
-        description: "Hard recommendations, suggestions, and findings for review.",
+        description: "What to do this month, ranked by expected leads.",
       };
     case "annotations":
       return {

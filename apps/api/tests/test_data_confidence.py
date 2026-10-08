@@ -148,7 +148,7 @@ def test_score_is_recorded_without_changing_recommendations(db, client_a):
     result = diagnose(db, client_a, from_date=date(2026, 8, 2), to_date=end)
     conversion = [
         row
-        for row in result.recommendations
+        for row in result.findings
         if row.evidence_json.get("gate") == "site_conversion"
     ]
     assert len(conversion) == 1

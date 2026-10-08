@@ -187,10 +187,13 @@ def evaluate_and_store(
             Decision.client_id == client.id,
             Decision.date_range_start == from_date,
             Decision.date_range_end == to_date,
-            Decision.rule_key.in_([f.rule_key for f in result.recommended_actions]),
+            Decision.rule_key.in_([f.rule_key for f in result.growth_actions]),
         )
     }
-    for finding in result.recommended_actions:
+    # The month's growth actions, which is what a decision records. It
+    # used to be the legacy impact promotion, so the decisions table was
+    # filling with report-only findings nobody was asked to do.
+    for finding in result.growth_actions:
         if finding.rule_key in already:
             skipped += 1
             continue
@@ -231,11 +234,6 @@ def ensure_decision_for_rule(
         return None
 
     finding = next((row for row in result.findings if row.rule_key == rule_key), None)
-    if finding is None:
-        finding = next(
-            (row for row in result.recommended_actions if row.rule_key == rule_key),
-            None,
-        )
     if finding is None:
         return None
 

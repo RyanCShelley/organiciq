@@ -2,8 +2,6 @@ from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
-from app.models.crawl import FactCrawlPageSnapshot
-from app.services.lever_engine import active_crawl_source
 from app.models.gsc import FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.decisions import evaluate_and_store
@@ -52,13 +50,21 @@ def test_diagnose_api(db, client, client_a, admin_user):
     assert body["ready"] is True
     assert len(body["levers"]) == 5
     assert "findings_count" in body
-    assert "recommended_actions" in body
+    assert "growth_actions" in body
     assert "formula" in body
 
 
 def test_evaluate_persists_scored_decisions(db, client_a):
+    """A decision is stored per growth action, once.
+
+    This used to seed a noindexed page with no inbound links, which makes
+    technical findings and no action at all — the CTR finding on a
+    noindexed page is suppressed, correctly. It stored rows anyway, because
+    it was storing the legacy impact promotion, which included report-only
+    work nobody had been asked to do.
+    """
     start, end = date_window(14)
-    page = "https://example.com/services/sem"
+    page = "https://example.com/services"
     _watermark(db, client_a.id, "gsc_pages", end)
     db.add(
         FactGscPage(
@@ -70,23 +76,55 @@ def test_evaluate_persists_scored_decisions(db, client_a):
             country="usa",
             device="DESKTOP",
             impressions=Decimal("1500"),
-            clicks=Decimal("2"),
-            ctr=Decimal("0.0013"),
-            average_position=Decimal("5"),
+            clicks=Decimal("3"),
+            ctr=Decimal("0.002"),
+            average_position=Decimal("5.0"),
+        )
+    )
+    # A site lead rate, or the valuer has no honest way to turn recoverable
+    # clicks into leads and records `no_lead_rate` instead of a value.
+    from app.models.config import ConversionDefinition, OrganicChannel
+    from app.models.ga4 import FactGa4Event, FactGa4Traffic
+
+    db.add(
+        ConversionDefinition(
+            id=uuid4(),
+            client_id=client_a.id,
+            event_name="generate_lead",
+            conversion_name="Lead",
+            conversion_type="lead",
+            is_primary=True,
+            active=True,
         )
     )
     db.add(
-        FactCrawlPageSnapshot(
+        FactGa4Traffic(
             id=uuid4(),
             client_id=client_a.id,
-            source=active_crawl_source(),
-            snapshot_date=end,
+            date=end,
             raw_url=page,
             normalized_url=page,
-            indexable=False,
-            status_code=200,
-            inbound_internal_links=0,
-            word_count=1200,
+            session_source="google",
+            session_medium="organic",
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            sessions=Decimal("500"),
+            active_users=Decimal("500"),
+            views=Decimal("500"),
+            engaged_sessions=Decimal("400"),
+        )
+    )
+    db.add(
+        FactGa4Event(
+            id=uuid4(),
+            client_id=client_a.id,
+            date=end,
+            raw_url=page,
+            normalized_url=page,
+            session_source="google",
+            session_medium="organic",
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            event_name="generate_lead",
+            event_count=10,
         )
     )
     db.commit()
@@ -94,9 +132,9 @@ def test_evaluate_persists_scored_decisions(db, client_a):
     seed_required_sources(db, client_a.id, end)
     created, skipped, result = evaluate_and_store(db, client_a, from_date=start, to_date=end)
     assert result.ready is True
-    assert len(created) >= 1
-    assert created[0].priority_score is not None
-    assert created[0].impact is not None
+    assert len(result.growth_actions) >= 1, "the fixture has to produce an action"
+    assert len(created) == len(result.growth_actions)
+    assert all(row.evidence_json.get("expected_leads_monthly") is not None for row in result.growth_actions)
 
     created_again, skipped_again, _ = evaluate_and_store(db, client_a, from_date=start, to_date=end)
     assert len(created_again) == 0

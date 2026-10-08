@@ -70,10 +70,7 @@ class DiagnoseResult:
     source_freshness: dict[str, str | None] = field(default_factory=dict)
     levers: list[LeverSummary] = field(default_factory=list)
     findings: list[LeverFinding] = field(default_factory=list)
-    recommended_actions: list[LeverFinding] = field(default_factory=list)
-    #: What can spend the client's monthly allowance, ranked. Distinct from
-    #: `recommended_actions`, which is the older impact-and-confidence
-    #: promotion and includes report-only work that carries no lead value.
+    #: What can spend the client's monthly allowance, ranked.
     growth_actions: list[LeverFinding] = field(default_factory=list)
     #: Valued, and under the floor. Shown so the floor can be argued with.
     below_floor_actions: list[LeverFinding] = field(default_factory=list)
@@ -90,9 +87,9 @@ class DiagnoseResult:
 
     @property
     def recommended_actions_count(self) -> int:
-        return len(self.recommended_actions)
+        return len(self.growth_actions)
 
     @property
     def recommendations(self) -> list[LeverFinding]:
         """Backward-compatible alias."""
-        return self.recommended_actions
+        return self.growth_actions

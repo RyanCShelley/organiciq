@@ -306,7 +306,7 @@ def test_conversion_portfolio_rule(db, client_a):
     result = diagnose(db, client_a, from_date=start, to_date=end)
     conversion = [
         row
-        for row in result.recommendations
+        for row in result.findings
         if row.evidence_json.get("gate") == "site_conversion"
     ]
     assert len(conversion) == 1
