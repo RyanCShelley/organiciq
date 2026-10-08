@@ -4188,11 +4188,19 @@ def _entity_fix_finding(
     )
 
 
+def _window_days(period: tuple[date, date] | None) -> int:
+    """How many days a source actually covered. Thirty when it said nothing."""
+    if period is None:
+        return 30
+    return (period[1] - period[0]).days + 1
+
+
 def measure_demand(
     findings: list[LeverFinding],
     *,
     thresholds: dict[str, Any],
     window_days: int,
+    session_window_days: int | None = None,
     settling: set[str] | None = None,
     refreshing: set[str] | None = None,
 ) -> list[LeverFinding]:
@@ -4214,12 +4222,20 @@ def measure_demand(
             continue
 
         evidence = finding.evidence_json
+        layer = layer_of(finding)
+        # Sessions come from GA4 and everything else from Search Console,
+        # and the two rarely cover the same days.
+        days = (
+            (session_window_days if session_window_days is not None else window_days)
+            if layer is Layer.CONVERSION
+            else window_days
+        )
         try:
             demand = demand_for(
                 rule_id,
-                layer=layer_of(finding).value,
+                layer=layer.value,
                 thresholds=thresholds,
-                window_days=window_days,
+                window_days=days,
                 counted_in_window=_as_float(evidence.get("demand_raw")),
                 counted_monthly=_as_float(evidence.get("demand_monthly")),
                 known=not evidence.get("demand_unknown"),
@@ -5749,13 +5765,16 @@ def diagnose(
     # or sessions — and ranked by that count within its layer, so the web
     # can take the top N for the client's plan. Everything else stays
     # report-only.
-    window_days = (
-        (gsc_period[1] - gsc_period[0]).days + 1 if gsc_period else 30
-    )
+    # One window per source, because the sources do not agree on one.
+    # SMA's Search Console had sixteen days in this period and GA4 had
+    # thirty; restating a GA4 session count as if it covered sixteen days
+    # turned 100 sessions into 187.5 a month on the same card that said
+    # "100 sessions and no conversions".
     findings = measure_demand(
         findings,
         thresholds=thresholds,
-        window_days=window_days,
+        window_days=_window_days(gsc_period),
+        session_window_days=_window_days(ga4_period),
         settling=_settling_urls(
             db, client.id, days=int(thresholds.get("rank_settle_days", 60))
         ),

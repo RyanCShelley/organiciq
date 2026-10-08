@@ -13,10 +13,15 @@ LIMITS = merge_thresholds(None)
 def _finding(**kwargs) -> LeverFinding:
     evidence = {"promotion_class": "actionable"}
     evidence.update(kwargs.pop("evidence", {}))
+    lever = kwargs.pop("lever", GrowthAction.CONVERSION_PATH.value)
     return LeverFinding(
         rule_key=kwargs.pop("key", "k"),
-        lever=kwargs.pop("lever", GrowthAction.CONVERSION_PATH.value),
-        stage=DiagnosticLayer.CONVERSION,
+        lever=lever,
+        stage=(
+            DiagnosticLayer.CONVERSION
+            if lever == GrowthAction.CONVERSION_PATH.value
+            else DiagnosticLayer.TRAFFIC
+        ),
         diagnosis="d",
         recommended_action="a",
         success_metric="m",
@@ -174,3 +179,38 @@ def test_an_untouched_page_is_unaffected():
     )
     assert "settling" not in out[0].evidence_json
     assert "folded_into_refresh" not in out[0].evidence_json
+
+
+def test_sessions_are_restated_on_ga4s_window_not_search_consoles():
+    """The two sources rarely cover the same days.
+
+    SMA's Search Console had sixteen days in the period and GA4 had thirty.
+    Restating a GA4 session count on the Search Console window turned 100
+    sessions into 187.5 a month, on the same card whose diagnosis read
+    "100 sessions and no conversions".
+    """
+    out = measure_demand(
+        [
+            _finding(evidence={"rule_id": "1a", "demand_raw": 100}),
+            _finding(
+                key="search",
+                lever=GrowthAction.SERP_CTR.value,
+                evidence={"rule_id": "2a", "demand_raw": 160},
+            ),
+        ],
+        thresholds=LIMITS,
+        window_days=16,
+        session_window_days=30,
+    )
+    by_rule = {f.evidence_json["rule_id"]: f.evidence_json["demand"] for f in out}
+    assert by_rule["1a"] == 100.0, "sessions covered thirty days already"
+    assert by_rule["2a"] == 300.0, "clicks covered sixteen and are restated"
+
+
+def test_one_window_still_works_when_only_one_is_known():
+    out = measure_demand(
+        [_finding(evidence={"rule_id": "1a", "demand_raw": 100})],
+        thresholds=LIMITS,
+        window_days=30,
+    )
+    assert out[0].evidence_json["demand"] == 100.0
