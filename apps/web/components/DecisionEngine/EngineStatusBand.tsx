@@ -1,3 +1,4 @@
+import { ReportedFindings } from "@/components/DecisionEngine/ReportedFindings";
 import { SOURCE_LABELS, type DiagnoseResponse } from "@/lib/decision-engine";
 
 function formatDay(iso: string | null | undefined): string {
@@ -44,10 +45,13 @@ export function EngineStatusBand({
   // other than the total printed beside them.
   const findings = data.findings ?? [];
   const coreWorkCount = findings.filter((row) => row.core_work).length;
-  const reportedCount = Math.max(
-    0,
-    findingsCount - actionCount - coreWorkCount,
+  // The findings themselves, so the count and the list cannot disagree:
+  // everything that is neither offered nor already in the plan.
+  const offered = new Set((data.growth_actions ?? []).map((row) => row.rule_key));
+  const reported = findings.filter(
+    (row) => !row.core_work && !offered.has(row.rule_key),
   );
+  const reportedCount = reported.length;
   const analysedTo = data.analysis_to ?? to;
   const analysedFrom = data.analysis_from ?? from;
   // The engine stops where the data stops. When that is short of the date
@@ -96,8 +100,8 @@ export function EngineStatusBand({
               <>
                 {" "}
                 The remaining {reportedCount.toLocaleString()}{" "}
-                {reportedCount === 1 ? "is" : "are"} reported rather than offered:
-                nothing there is a separate hour of work.
+                {reportedCount === 1 ? "is" : "are"} reported rather than
+                offered.
               </>
             ) : null}
           </p>
@@ -113,6 +117,8 @@ export function EngineStatusBand({
           ) : null}
         </div>
       </div>
+
+      <ReportedFindings findings={reported} />
 
       <dl className="mt-4 grid gap-x-8 gap-y-2 border-t border-[var(--border)] pt-4 sm:grid-cols-2">
         {Object.keys(data.readiness ?? {}).map((key) => {
