@@ -297,6 +297,56 @@ CHECKS: dict[str, dict[str, str]] = {
         "impact": "Reported through the prompt rule rather than scored on its own.",
         "notes": "Usually a plugin's default rule rather than a decision anyone made.",
     },
+    "answer_first": {
+        "question": "Which rule key does `answer_not_first` file under?",
+        "fires": "See `answer_not_first`.",
+        "impact": "See `answer_not_first`.",
+        "notes": "Same check, named twice: the signal the UI shows and the key it is stored under.",
+    },
+    "faq_expansion": {
+        "question": "Which rule key does `faq_gap` file under?",
+        "fires": "See `faq_gap`.",
+        "impact": "See `faq_gap`.",
+        "notes": "Same check, named twice: the signal the UI shows and the key it is stored under.",
+    },
+    "answer_not_first": {
+        "question": "Does the page lead with the answer to the question it ranks for?",
+        "fires": (
+            f"Up to {_t('answer_first_max_queries')} question queries at position 4–15, "
+            f"drawing {_t('answer_first_min_impressions')} impressions between them, where the "
+            "paragraph under the matching heading opens with filler, is outside "
+            f"{_t('answer_first_words')} words, or shares less than "
+            f"{_t('answer_first_token_overlap')} of the query's meaningful words."
+        ),
+        "impact": (
+            "The clicks the ranking already earns and loses: impressions × the gap "
+            "between the CTR curve at the target position and at the current one, "
+            "converted at the page-type lead rate."
+        ),
+        "notes": (
+            "A page can rank for a question, hold the answer three paragraphs down, "
+            "and lose the click to a result that leads with it. Needs the crawl's "
+            "captured headings; skips as `page_not_crawled` without them, and as "
+            "`no_query_page_data` for the twenty clients with no query-page rows. "
+            "Growth action 3a."
+        ),
+    },
+    "faq_gap": {
+        "question": "Which questions does the page draw and not answer?",
+        "fires": (
+            f"A commercial page with at least {_t('faq_min_questions')} question queries at "
+            "position 15 or better and 20+ impressions each, of which at least "
+            f"{_t('faq_min_uncovered')} are not covered by an existing FAQ entry "
+            f"(token overlap below {_t('faq_coverage_overlap')})."
+        ),
+        "impact": "As 3a, over the questions offered.",
+        "notes": (
+            f"At most {_t('faq_max_added')} questions per action. Buying queries are excluded: "
+            "an FAQ entry for “plumber near me” is a landing page in the wrong "
+            "place, not an answer. Reads FAQPage schema and question-shaped "
+            "headings, because either alone misses real FAQs. Growth action 3b."
+        ),
+    },
     "ai_readiness": {
         "question": "Does the structured data say who the brand is, consistently?",
         "fires": (

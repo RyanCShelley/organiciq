@@ -77,6 +77,13 @@ def test_no_rule_invents_its_own_impact_scale():
         if isinstance(value, ast.Attribute):
             # assessment.impact — a scorer's own result.
             continue
+        if isinstance(value, ast.Constant) and value.value == 0:
+            # A literal zero is not a new currency, it is the absence of the
+            # old one. Rules written after the 0-100 scale stopped ordering
+            # anything carry no impact: they are valued in expected leads a
+            # month, and inventing a score for a field nothing reads would
+            # be the very thing this test exists to stop.
+            continue
         offenders.append(f"line {lineno}: {ast.unparse(value)}")
 
     assert offenders == [], (

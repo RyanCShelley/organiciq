@@ -64,9 +64,28 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "reliability_1b": 1.0,
     "reliability_2a": 1.0,
     "reliability_2c": 1.0,
+    "reliability_3a": 1.0,
+    "reliability_3b": 1.0,
     "reliability_6": 1.0,
     "reliability_5a": 1.0,
     "reliability_ai_crawlers_unblock": 1.0,
+    # 3a — the page ranks for a question and buries the answer.
+    #: Below this the ranking is too thin for a rewrite to be worth an hour.
+    "answer_first_min_impressions": 200,
+    #: How many of the page's question queries to judge. Beyond a handful
+    #: it stops being one edit.
+    "answer_first_max_queries": 5,
+    #: What an opening answer looks like: long enough to be an answer,
+    #: short enough to be read before the reader leaves.
+    "answer_first_words": [15, 70],
+    #: Share of the query's meaningful words the paragraph has to use.
+    "answer_first_token_overlap": 0.5,
+    # 3b — questions the page draws and does not answer.
+    "faq_min_questions": 3,
+    "faq_min_uncovered": 2,
+    "faq_max_added": 3,
+    #: Above this overlap the FAQ already says it, in other words.
+    "faq_coverage_overlap": 0.7,
     #: How long each action takes. Estimates, not measurements. The cap
     #: that makes an action an action is sixty minutes, enforced by a test.
     "estimated_minutes": {

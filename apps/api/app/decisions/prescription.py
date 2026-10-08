@@ -54,6 +54,9 @@ CAUSES: dict[str, str] = {
     "ai_crawlers_blocked": "Answer engines are not allowed to fetch the site",
     "no_page_answers_prompt": "No page answers the question",
     "page_not_quotable": "A page answers it in a form an engine cannot quote",
+    # 3a / 3b — the page ranks for a question and does not lead with the answer
+    "answer_buried": "The page ranks for a question and does not answer it first",
+    "questions_not_covered": "The page draws questions its FAQ does not answer",
     # Rank push: the band CTR work cannot reach
     "rank_push": "It has the demand and sits below where clicks happen",
     # T1 — the page takes traffic and does not convert it

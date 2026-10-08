@@ -126,6 +126,8 @@ DEFAULT_MINUTES: dict[str, int] = {
     "1b": 15,
     "2a": 30,
     "2c": 45,
+    "3a": 45,
+    "3b": 60,
     "6": 45,
     "5a": 45,
     "ai_crawlers_unblock": 15,

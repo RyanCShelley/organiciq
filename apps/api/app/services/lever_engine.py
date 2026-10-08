@@ -17,6 +17,17 @@ from sqlalchemy.orm import Session
 
 from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
 from app.decisions.actions.value import FLAT_CREDIT_RULES, value_for
+from app.decisions.answer_cause import (
+    prescribe_answer_first,
+    prescribe_faq_expansion,
+)
+from app.decisions.questions import (
+    Section,
+    answers_first,
+    best_section_for,
+    is_question,
+    uncovered_questions,
+)
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
 from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
@@ -100,6 +111,7 @@ from app.services.decision_impact import (
     LeadRateContext,
     PageBusinessContext,
     SiteBusinessContext,
+    effective_lead_rate_pct,
     build_impact_explanation,
     compute_page_type_lead_rates,
     page_type_rate_support,
@@ -2028,6 +2040,11 @@ def _per_page_cascade(
     top_queries: dict[str, str] | None = None,
     ai_overview_queries: frozenset[str] = frozenset(),
     client_brand: str | None = None,
+    #: Question queries per page: (query, impressions, clicks, position).
+    #: Empty for the twenty clients with no query-page rows, which is why
+    #: 3a and 3b record a skip rather than quietly finding nothing.
+    question_queries: dict[str, list[tuple[str, float, float, float]]] | None = None,
+    coverage: Coverage | None = None,
 ) -> list[LeverFinding]:
     findings: list[LeverFinding] = []
     issue_map = issues_by_url or {}
@@ -2035,6 +2052,10 @@ def _per_page_cascade(
     ctr_curve = page_ctr_curve or {}
     branded = branded_shares or {}
     top_queries = top_queries or {}
+    question_queries = question_queries or {}
+    if not question_queries and coverage is not None:
+        coverage.skipped("3a", SkipReason.NO_QUERY_PAGE_DATA)
+        coverage.skipped("3b", SkipReason.NO_QUERY_PAGE_DATA)
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -2104,6 +2125,33 @@ def _per_page_cascade(
                 donors=(link_gaps or {}).get(page.normalized_url, []),
                 ctr_curve=ctr_curve,
                 thresholds=thresholds or {},
+            )
+        if finding is None:
+            # The listing is fine and the ranking is fine, so the remaining
+            # question is what the page says. 3a before 3b: rewriting an
+            # opening that exists is a smaller job than adding questions,
+            # and a page that fails both should be fixed in that order.
+            finding = _answer_first_finding(
+                page,
+                questions=question_queries.get(page.normalized_url, []),
+                crawl=crawl,
+                site=site,
+                lead_rate_ctx=lead_rate_ctx,
+                thresholds=thresholds or {},
+                ctr_curve=ctr_curve,
+                coverage=coverage,
+            )
+        if finding is None:
+            finding = _faq_expansion_finding(
+                page,
+                questions=question_queries.get(page.normalized_url, []),
+                crawl=crawl,
+                classification=classification,
+                site=site,
+                lead_rate_ctx=lead_rate_ctx,
+                thresholds=thresholds or {},
+                ctr_curve=ctr_curve,
+                coverage=coverage,
             )
         if finding is None and crawl_ready and crawl is not None:
             # Last resort: nothing else to say about this page, so report the
@@ -3347,12 +3395,274 @@ def _blocking_only_findings(
     return findings
 
 
+def _question_queries_by_page(
+    db: Session, client_id: UUID, *, period: tuple[date, date] | None
+) -> dict[str, list[tuple[str, float, float, float]]]:
+    """Question queries each page draws: (query, impressions, clicks, position).
+
+    Only four of twenty-four clients have query-page rows, so both rules
+    that read this skip with `no_query_page_data` rather than looking like
+    rules that found nothing.
+    """
+    if period is None:
+        return {}
+    start, end = period
+    rows = (
+        db.query(
+            FactGscQueryPage.normalized_url,
+            FactGscQueryPage.query,
+            func.sum(FactGscQueryPage.impressions).label("impressions"),
+            func.sum(FactGscQueryPage.clicks).label("clicks"),
+            func.avg(FactGscQueryPage.average_position).label("position"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.normalized_url, FactGscQueryPage.query)
+        .all()
+    )
+    out: dict[str, list[tuple[str, float, float, float]]] = {}
+    for url, query, impressions, clicks, position in rows:
+        if not url or not query or not is_question(query):
+            continue
+        out.setdefault(url, []).append(
+            (str(query), float(impressions or 0), float(clicks or 0), float(position or 0))
+        )
+    for url in out:
+        out[url].sort(key=lambda row: -row[1])
+    return out
+
+
+def _sections_for(crawl: FactCrawlPageSnapshot | None) -> list[Section] | None:
+    """The page's headings, or None when the crawl never read the page.
+
+    None and [] are different answers. A page we could not fetch has no
+    sections; a page with no headings has none either, and only the second
+    is a finding.
+    """
+    if crawl is None or crawl.sections is None:
+        return None
+    return [
+        Section(
+            heading=str(row.get("heading") or ""),
+            first_paragraph=str(row.get("first_paragraph") or ""),
+        )
+        for row in crawl.sections
+        if isinstance(row, dict)
+    ]
+
+
+def _recoverable_clicks_at_target(
+    impressions: float, position: float, *, target: float, curve: dict[int, float] | None
+) -> float:
+    """Clicks the ranking would earn at the target position but does not now."""
+    now = expected_ctr_percent(position, curve=curve) if curve else expected_ctr_percent(position)
+    then = expected_ctr_percent(target, curve=curve) if curve else expected_ctr_percent(target)
+    return max(0.0, impressions * (then - now) / 100.0)
+
+
+def _answer_first_finding(
+    page: PageDemand,
+    *,
+    questions: list[tuple[str, float, float, float]],
+    crawl: FactCrawlPageSnapshot | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None,
+    thresholds: dict[str, Any],
+    ctr_curve: dict[int, float] | None,
+    coverage: Coverage | None = None,
+) -> LeverFinding | None:
+    """3a — the page ranks for a question and does not lead with the answer."""
+    sections = _sections_for(crawl)
+    if sections is None:
+        if coverage is not None:
+            coverage.skipped("3a", SkipReason.PAGE_NOT_CRAWLED)
+        return None
+
+    lo = int(thresholds.get("answer_first_min_impressions", 200))
+    max_queries = int(thresholds.get("answer_first_max_queries", 5))
+    words = thresholds.get("answer_first_words", [15, 70])
+    min_words, max_words = int(words[0]), int(words[1])
+    overlap = float(thresholds.get("answer_first_token_overlap", 0.5))
+    target = float(thresholds.get("keyword_target_position", 3))
+
+    # Positions 4 to 15: above that the ranking, not the listing, is the
+    # problem, and inside the top three there is little left to win.
+    eligible = [
+        row for row in questions if 4.0 <= row[3] <= 15.0
+    ][:max_queries]
+    if not eligible:
+        return None
+    if sum(row[1] for row in eligible) < lo:
+        return None
+
+    failures = []
+    for query, impressions, _clicks, position in eligible:
+        result = answers_first(
+            query,
+            best_section_for(query, sections),
+            min_words=min_words,
+            max_words=max_words,
+            min_overlap=overlap,
+        )
+        if not result.passes:
+            failures.append((query, impressions, position, result))
+    if not failures:
+        return None
+
+    rate = effective_lead_rate_pct(
+        None,
+        site,
+        page_type=lead_rate_ctx.page_type if lead_rate_ctx else None,
+        page_type_rates=lead_rate_ctx.page_type_rates if lead_rate_ctx else None,
+        topic=lead_rate_ctx.topic if lead_rate_ctx else None,
+        topic_rates=lead_rate_ctx.topic_rates if lead_rate_ctx else None,
+    )
+    if rate is None or rate <= 0:
+        # No honest way to turn recoverable clicks into leads. The brief
+        # names this as its own skip rather than a silent zero.
+        return None
+    raw_leads = sum(
+        _recoverable_clicks_at_target(
+            impressions, position, target=target, curve=ctr_curve
+        )
+        * rate
+        / 100.0
+        for _q, impressions, position, _r in failures
+    )
+
+    query, impressions, position, result = failures[0]
+    return _make_finding(
+        lever=GrowthAction.SERP_CTR.value,
+        rule_key=_rule_key("answer_first", page.normalized_url),
+        diagnosis=(
+            f"Ranks for “{query}” at position {position:.1f} and does not answer it "
+            f"in the opening: {page.normalized_url}"
+        ),
+        prescription=prescribe_answer_first(
+            page_url=page.normalized_url,
+            query=query,
+            result=result,
+            impressions=impressions,
+            position=position,
+            min_words=min_words,
+            max_words=max_words,
+        ),
+        evidence_json={
+            "audit_signal": "answer_not_first",
+            "rule_id": "3a",
+            "raw_leads_for_window": round(raw_leads, 3),
+            "questions_failing": len(failures),
+            "question_impressions": round(sum(f[1] for f in failures), 1),
+            "promotion_class": "actionable",
+        },
+        baseline_metrics_json={"impressions": page.impressions},
+        impact=0.0,
+        page_url=page.normalized_url,
+        query=query,
+    )
+
+
+def _faq_expansion_finding(
+    page: PageDemand,
+    *,
+    questions: list[tuple[str, float, float, float]],
+    crawl: FactCrawlPageSnapshot | None,
+    classification: PageClassification | None,
+    site: SiteBusinessContext,
+    lead_rate_ctx: LeadRateContext | None,
+    thresholds: dict[str, Any],
+    ctr_curve: dict[int, float] | None,
+    coverage: Coverage | None = None,
+) -> LeverFinding | None:
+    """3b — the page draws questions its FAQ does not answer."""
+    if classification is None or classification.page_type != PageType.COMMERCIAL:
+        return None
+    if crawl is None or crawl.faq_questions is None:
+        if coverage is not None:
+            coverage.skipped("3b", SkipReason.PAGE_NOT_CRAWLED)
+        return None
+
+    min_questions = int(thresholds.get("faq_min_questions", 3))
+    min_uncovered = int(thresholds.get("faq_min_uncovered", 2))
+    max_added = int(thresholds.get("faq_max_added", 3))
+    coverage_overlap = float(thresholds.get("faq_coverage_overlap", 0.7))
+    target = float(thresholds.get("keyword_target_position", 3))
+
+    candidates = [
+        row for row in questions if row[3] <= 15.0 and row[1] >= 20.0
+    ]
+    if len(candidates) < min_questions:
+        return None
+
+    existing = [str(q) for q in crawl.faq_questions]
+    uncovered = uncovered_questions(
+        [row[0] for row in candidates], existing, coverage_overlap=coverage_overlap
+    )
+    if len(uncovered) < min_uncovered:
+        return None
+
+    by_query = {row[0]: row for row in candidates}
+    chosen = [by_query[q] for q in uncovered[:max_added] if q in by_query]
+    if not chosen:
+        return None
+
+    rate = effective_lead_rate_pct(
+        None,
+        site,
+        page_type=lead_rate_ctx.page_type if lead_rate_ctx else None,
+        page_type_rates=lead_rate_ctx.page_type_rates if lead_rate_ctx else None,
+        topic=lead_rate_ctx.topic if lead_rate_ctx else None,
+        topic_rates=lead_rate_ctx.topic_rates if lead_rate_ctx else None,
+    )
+    if rate is None or rate <= 0:
+        # No honest way to turn recoverable clicks into leads. The brief
+        # names this as its own skip rather than a silent zero.
+        return None
+    raw_leads = sum(
+        _recoverable_clicks_at_target(row[1], row[3], target=target, curve=ctr_curve)
+        * rate
+        / 100.0
+        for row in chosen
+    )
+
+    return _make_finding(
+        lever=GrowthAction.SERP_CTR.value,
+        rule_key=_rule_key("faq_expansion", page.normalized_url),
+        diagnosis=(
+            f"Draws {len(uncovered)} questions its FAQ does not answer: "
+            f"{page.normalized_url}"
+        ),
+        prescription=prescribe_faq_expansion(
+            page_url=page.normalized_url,
+            questions=[(row[0], row[1], row[3]) for row in chosen],
+        ),
+        evidence_json={
+            "audit_signal": "faq_gap",
+            "rule_id": "3b",
+            "raw_leads_for_window": round(raw_leads, 3),
+            "questions_uncovered": len(uncovered),
+            "questions_offered": [row[0] for row in chosen],
+            "faq_questions_present": len(existing),
+            "promotion_class": "actionable",
+        },
+        baseline_metrics_json={"impressions": page.impressions},
+        impact=0.0,
+        page_url=page.normalized_url,
+        query=chosen[0][0],
+    )
+
+
 #: Which growth action a finding is, by the gate or signal it carries.
 #: Only these can spend a client's monthly allowance; everything else the
 #: engine reports is recurring work already covered by the plan.
 ACTION_RULE_IDS: dict[str, str] = {
     "serp_ctr": "2a",
     "rank_push": "2c",
+    "answer_not_first": "3a",
+    "faq_gap": "3b",
     "prompt_not_cited": "6",
     "ai_crawlers_blocked": "ai_crawlers_unblock",
     "ai_readiness": "5a",
@@ -3734,6 +4044,37 @@ def value_actions(
     return kept
 
 
+#: When two findings on one page are worth the same, this decides. Earlier
+#: is better: a conversion fix outranks a listing fix outranks a content
+#: rewrite, which is the order someone would do them in anyway.
+ACTION_PRECEDENCE = ("1a", "1b", "1c", "2a", "2c", "3a", "3b", "6")
+
+
+def _page_rank_key(finding: LeverFinding) -> tuple[float, int]:
+    """What a finding is worth on its page, and where it sits in the order.
+
+    Value first, because that is the one currency. The tie-break is the
+    precedence list rather than whatever order the rules happened to run
+    in, which is what decided it before.
+    """
+    value = float(finding.evidence_json.get("expected_leads_monthly") or 0.0)
+    rule_id = action_rule_id(finding) or ""
+    position = (
+        ACTION_PRECEDENCE.index(rule_id)
+        if rule_id in ACTION_PRECEDENCE
+        else len(ACTION_PRECEDENCE)
+    )
+    return value, position
+
+
+def _beats(candidate: LeverFinding, current: LeverFinding) -> bool:
+    cand_value, cand_pos = _page_rank_key(candidate)
+    cur_value, cur_pos = _page_rank_key(current)
+    if cand_value != cur_value:
+        return cand_value > cur_value
+    return cand_pos < cur_pos
+
+
 def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
     """One card per URL, keeping the highest-scoring and noting the rest.
 
@@ -3763,7 +4104,7 @@ def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
         current = best.get(url)
         if current is None:
             best[url] = finding
-        elif finding.priority_score > current.priority_score:
+        elif _beats(finding, current):
             best[url] = finding
             others.setdefault(url, []).append(current)
         else:
@@ -3776,9 +4117,11 @@ def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
                 {
                     "diagnosis": row.diagnosis,
                     "cause": row.evidence_json.get("cause"),
-                    "score": row.priority_score,
+                    "expected_leads_monthly": row.evidence_json.get(
+                        "expected_leads_monthly"
+                    ),
                 }
-                for row in sorted(hidden, key=lambda r: -r.priority_score)
+                for row in sorted(hidden, key=lambda r: -_page_rank_key(r)[0])
             ]
         out.append(finding)
     return out
@@ -4958,6 +5301,10 @@ def diagnose(
             top_queries=_top_query_per_page(db, client.id, period=gsc_period),
             ai_overview_queries=_ai_overview_queries(db, client.id),
             client_brand=client.client_name,
+            question_queries=_question_queries_by_page(
+                db, client.id, period=gsc_period
+            ),
+            coverage=coverage,
         )
     )
     for site_finding in _site_technical_findings(
@@ -5148,7 +5495,7 @@ def diagnose(
     # drop was concentrated on, and again below the threshold — which reads
     # as three problems and is one. The highest-scoring card wins and the
     # rest ride along in its evidence, so nothing is lost.
-    findings = _collapse_by_page(findings)
+
 
     # ── 5a: who the brand says it is ──
     entity = _entity_fix_finding(
@@ -5188,11 +5535,17 @@ def diagnose(
         },
     )
 
-    # Nothing is ordered here. The month's actions are ranked by expected
-    # leads in `growth_actions`, and everything else is reported rather
-    # than queued, so a second ordering — the old priority score, then a
-    # re-shuffle of the top 25 by impact x confidence / effort weight —
-    # was two answers to a question only one list still asks.
+    # One action per page, after valuation rather than before it. This used
+    # to run on `priority_score`, so the page's winner was decided by the
+    # old 0-100 scale while the plan was ranked in leads — two currencies
+    # picking different findings on the same URL.
+    findings = _collapse_by_page(findings)
+
+    # Nothing else is ordered here. The month's actions are ranked by
+    # expected leads in `growth_actions`, and everything else is reported
+    # rather than queued, so a second ordering — the old priority score,
+    # then a re-shuffle of the top 25 by impact x confidence / effort
+    # weight — was two answers to a question only one list still asks.
 
     # What the finding is worth, and how long it takes. Leads alone cannot
     # be weighed by someone deciding where an hour goes: 0.4 leads is

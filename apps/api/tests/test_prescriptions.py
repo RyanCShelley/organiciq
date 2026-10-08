@@ -580,29 +580,66 @@ def test_one_card_per_page():
     from app.services.decision_types import LeverFinding
     from app.services.lever_engine import _collapse_by_page
 
-    def _finding(score: float, gate: str) -> LeverFinding:
+    def _finding(leads: float, rule_id: str) -> LeverFinding:
         return LeverFinding(
-            rule_key=f"k{score}",
+            rule_key=f"k{leads}",
             lever="conversion_path",
             stage=DiagnosticLayer.CONVERSION,
-            diagnosis=f"something at {score}",
+            diagnosis=f"something worth {leads}",
             recommended_action="do it",
             success_metric="m",
-            evidence_json={"gate": gate},
+            evidence_json={"rule_id": rule_id, "expected_leads_monthly": leads},
             baseline_metrics_json={},
-            impact=score,
-            confidence=70,
-            urgency=65,
-            effort=40,
-            priority_score=score,
+            impact=0.0,
+            confidence=0.0,
+            urgency=0.0,
+            effort=0.0,
+            priority_score=0.0,
             page_url="https://x/pool-leak-emergency",
         )
 
-    kept = _collapse_by_page([_finding(48.5, "a"), _finding(36.3, "b")])
+    # Ranked on what they are worth. This used to pick by `priority_score`,
+    # so the page's winner was chosen on the old 0-100 scale while the plan
+    # was ranked in leads — two currencies disagreeing about one URL.
+    kept = _collapse_by_page([_finding(0.36, "2a"), _finding(1.07, "1b")])
     assert len(kept) == 1
-    assert kept[0].priority_score == 48.5
+    assert kept[0].evidence_json["expected_leads_monthly"] == 1.07
     # Nothing is lost: the quieter one rides along.
-    assert kept[0].evidence_json["also_found_on_this_page"][0]["score"] == 36.3
+    assert (
+        kept[0].evidence_json["also_found_on_this_page"][0]["expected_leads_monthly"]
+        == 0.36
+    )
+
+
+def test_an_equal_tie_on_one_page_follows_the_precedence_list():
+    """Same value, so the order they happened to run in used to decide.
+    A conversion fix outranks a listing fix outranks a content rewrite,
+    which is the order someone would do them in anyway."""
+    from app.models.decision import DiagnosticLayer
+    from app.services.decision_types import LeverFinding
+    from app.services.lever_engine import _collapse_by_page
+
+    def _tied(rule_id: str) -> LeverFinding:
+        return LeverFinding(
+            rule_key=f"k{rule_id}",
+            lever="conversion_path",
+            stage=DiagnosticLayer.CONVERSION,
+            diagnosis=rule_id,
+            recommended_action="do it",
+            success_metric="m",
+            evidence_json={"rule_id": rule_id, "expected_leads_monthly": 0.5},
+            baseline_metrics_json={},
+            impact=0.0,
+            confidence=0.0,
+            urgency=0.0,
+            effort=0.0,
+            priority_score=0.0,
+            page_url="https://x/one-page",
+        )
+
+    kept = _collapse_by_page([_tied("3b"), _tied("2a"), _tied("1b")])
+    assert len(kept) == 1
+    assert kept[0].evidence_json["rule_id"] == "1b"
 
 
 def test_a_tracking_fault_is_never_folded_into_a_page_finding():
