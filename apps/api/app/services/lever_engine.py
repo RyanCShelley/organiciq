@@ -1906,6 +1906,7 @@ def _rank_push_finding(
             # Searches where the page already appears. It is seen and not
             # reachable, which is what moving the ranking addresses.
             "demand_raw": round(float(page.impressions), 1),
+            "demand_basis": "searches this page already appears for",
             **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={
@@ -2010,6 +2011,7 @@ def _serp_ctr_finding(
             "ctr_benchmark_source": benchmark_source_label(),
             "recoverable_clicks": recoverable_int,
             "demand_raw": round(float(recoverable), 1),
+            "demand_basis": "clicks the measured CTR curve says this ranking is not earning",
             "average_position": round(page.average_position, 1),
             **without_predicted_leads(impact_evidence),
         },
@@ -2737,8 +2739,11 @@ def _ai_visibility_prompt_findings(
             volume = float(meta.search_volume or 0) if meta else 0.0
         except (TypeError, ValueError):
             volume = 0.0
+        stood_in_for: str | None = None
         if volume <= 0:
-            volume = _nearest_tracked_volume(prompt_text, keyword_volumes)
+            volume, stood_in_for = _nearest_tracked_volume(
+                prompt_text, keyword_volumes
+            )
         impact, impact_evidence = score_ai_visibility_impact(
             signal="prompt_not_cited",
             volume=max(volume, 50.0),
@@ -2785,6 +2790,15 @@ def _ai_visibility_prompt_findings(
                 # stand in. The gap is real and cannot be sized; printing a
                 # zero would read as "nobody is asking this".
                 "demand_unknown": volume <= 0,
+                # Whose volume this is. Without it the card reads as the
+                # number of people asking the prompt, which is not a figure
+                # SE Ranking gives for any prompt on any client.
+                "demand_basis": (
+                    f"volume of the nearest tracked term, “{stood_in_for}”"
+                    if stood_in_for
+                    else "searches for this prompt"
+                ),
+                "demand_term": stood_in_for,
                 **without_predicted_leads(impact_evidence),
             },
             baseline_metrics_json={
@@ -3296,6 +3310,7 @@ def _conversion_page_findings(
                     # stays as evidence — it does not rank the action,
                     # because it is modelled and the sessions are counted.
                     "demand_raw": round(float(ctx.ga4_sessions), 1),
+                    "demand_basis": "organic sessions landing on this page",
                     "no_conversions_at_all": none_at_all,
                     "promotion_class": "actionable",
                     **without_predicted_leads(impact_evidence),
@@ -3618,6 +3633,7 @@ def _answer_first_finding(
             "audit_signal": "answer_not_first",
             "rule_id": "3a",
             "demand_raw": round(recoverable, 1),
+            "demand_basis": "clicks these questions rank for and do not earn",
             "questions_failing": len(failures),
             "question_impressions": round(sum(f[1] for f in failures), 1),
             "promotion_class": "actionable",
@@ -3695,6 +3711,7 @@ def _faq_expansion_finding(
             "audit_signal": "faq_gap",
             "rule_id": "3b",
             "demand_raw": round(recoverable, 1),
+            "demand_basis": "clicks the unanswered questions rank for and do not earn",
             "questions_uncovered": len(uncovered),
             "questions_offered": [row[0] for row in chosen],
             "faq_questions_present": len(existing),
@@ -4003,28 +4020,34 @@ def action_rule_id(finding: LeverFinding) -> str | None:
 
 def _nearest_tracked_volume(
     query: str | None, keyword_volumes: dict[str, float]
-) -> float:
+) -> tuple[float, str | None]:
     """Monthly searches for the tracked keyword a prompt is closest to.
 
     SE Ranking returns no volume on any prompt for any client, so the prompt
     itself cannot say how many people are asking. The closest tracked keyword
     stands in — the terms overlap because they are about the same thing.
 
-    This used to be a tie-break under a flat credit, which meant it was
-    already deciding the order while a made-up lead figure took the credit
-    for it. It is the count now, and the card says so.
+    The keyword comes back with the number, because they are not the same
+    claim. "74,000 searches" under a prompt reads as the prompt's own
+    demand; it is the volume of a different, related phrase, and a card that
+    does not name that phrase overstates what the engine knows.
+
+    This used to be a tie-break under a flat credit, so it was already
+    deciding the order while a made-up lead figure took the credit for it.
     """
     if not query or not keyword_volumes:
-        return 0.0
+        return 0.0, None
     terms = _match_terms(query)
     if not terms:
-        return 0.0
+        return 0.0, None
     best = 0.0
+    best_keyword: str | None = None
     for keyword, volume in keyword_volumes.items():
         shared = terms & _match_terms(keyword)
         if len(shared) >= 2 and volume > best:
             best = volume
-    return best
+            best_keyword = keyword
+    return best, best_keyword
 
 
 def _tracked_keyword_volumes(db: Session, client_id: UUID) -> dict[str, float]:

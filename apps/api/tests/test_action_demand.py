@@ -163,9 +163,14 @@ def test_every_action_rule_counts_demand():
     with nothing to rank it by sorts last and disappears off the bottom of
     the ledger, which is the quietest possible failure.
 
+    It also has to say what it counted. "74,000 searches" under a prompt
+    reads as the number of people asking that prompt; it is the volume of a
+    related tracked term, and a card that does not name the term overstates
+    what the engine knows.
+
     The engine's evidence dicts are literals, so the key that names the
-    rule and the key that counts it sit in the same dict and can be read
-    together.
+    rule, the key that counts it and the key that labels the count sit in
+    the same dict and can be read together.
     """
     import ast
     from pathlib import Path
@@ -177,6 +182,7 @@ def test_every_action_rule_counts_demand():
     ).read_text(encoding="utf-8")
 
     missing: list[str] = []
+    unlabelled: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Dict):
             continue
@@ -199,10 +205,16 @@ def test_every_action_rule_counts_demand():
             continue
         if "demand_raw" not in literals and "demand_monthly" not in literals:
             missing.append(rule)
+        elif "demand_basis" not in literals:
+            unlabelled.append(rule)
 
     assert sorted(set(missing)) == [], (
         "these action rules build evidence with no count, so the ledger has "
         "nothing to rank them by: " + ", ".join(sorted(set(missing)))
+    )
+    assert sorted(set(unlabelled)) == [], (
+        "these action rules count something without saying what, so the "
+        "number on the card cannot be read: " + ", ".join(sorted(set(unlabelled)))
     )
 
 
