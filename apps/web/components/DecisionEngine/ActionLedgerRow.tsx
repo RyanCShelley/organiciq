@@ -111,8 +111,7 @@ export function ActionLedgerRow({
           </span>
           {basis ? (
             <span className="mt-1 block text-[11.5px] leading-snug text-[var(--text-tertiary)]">
-              {formatDemand(demand)}
-              {demand ? ` ${demand.unit}` : ""} — {basis}
+              {basis}
             </span>
           ) : null}
         </span>
@@ -135,9 +134,12 @@ export function ActionLedgerRow({
             {demand ? (
               // The unit sits on the row, not in the heading: 74,000
               // searches and 312 clicks are both in this list and they are
-              // not the same thing.
+              // not the same thing. "/ mo" stays on it, because the
+              // diagnosis beside it quotes the window — "100 sessions and no
+              // conversions" next to a bare "103" reads as a contradiction
+              // rather than as a rate.
               <span className="ml-1 text-[11px] text-[var(--text-tertiary)]">
-                {demand.unit.replace(" / mo", "")}
+                {demand.unit}
               </span>
             ) : null}
           </span>
