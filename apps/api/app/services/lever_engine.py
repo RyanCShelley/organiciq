@@ -1472,6 +1472,7 @@ def _make_finding(
     severity: float | None = None,
     action_override: str | None = None,
     prescription: Prescription | None = None,
+    stage_override: DiagnosticLayer | None = None,
 ) -> LeverFinding:
     inputs = LEVER_INPUTS[lever]
     # Recorded rather than derived later: the finding knows its own kind, and
@@ -1495,7 +1496,7 @@ def _make_finding(
     return LeverFinding(
         rule_key=rule_key,
         lever=lever,
-        stage=inputs.stage,
+        stage=stage_override or inputs.stage,
         diagnosis=diagnosis,
         recommended_action=action_override or inputs.recommended_action,
         success_metric=inputs.success_metric,
@@ -1856,6 +1857,12 @@ def _rank_push_finding(
     )
     return _make_finding(
         lever=GrowthAction.SERP_CTR.value,
+        # Filed under SERP & CTR because that is the lever it shares, but the
+        # outcome is visibility: 2a rewrites a listing to earn more of the
+        # clicks a ranking already has, 2c moves the ranking itself. Grouping
+        # it with the listing work put "push this page up" in the traffic
+        # bucket, which is not what it does.
+        stage_override=DiagnosticLayer.VISIBILITY,
         rule_key=_rule_key("rank_push", page.normalized_url),
         diagnosis=(
             f"Position {page.average_position:.0f} on {int(page.impressions):,} "

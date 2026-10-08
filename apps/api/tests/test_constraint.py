@@ -406,3 +406,33 @@ def test_without_a_constraint_the_order_is_left_alone():
     from app.services.lever_engine import order_by_constraint
 
     assert order_by_constraint([], None) == []
+
+
+def test_rank_push_is_visibility_not_traffic():
+    """2a and 2c share the SERP & CTR lever and do different jobs: 2a rewrites
+    a listing to earn more of the clicks a ranking already has, 2c moves the
+    ranking itself. Grouped by lever, "push this page up" landed in the
+    traffic bucket."""
+    from app.models.decision import DiagnosticLayer
+    from app.services.lever_engine import _make_finding, layer_of
+    from app.models.decision import GrowthAction
+
+    pushed = _make_finding(
+        lever=GrowthAction.SERP_CTR.value,
+        stage_override=DiagnosticLayer.VISIBILITY,
+        rule_key="k",
+        diagnosis="d",
+        evidence_json={"audit_signal": "rank_push"},
+        baseline_metrics_json={},
+        impact=0.0,
+    )
+    listing = _make_finding(
+        lever=GrowthAction.SERP_CTR.value,
+        rule_key="k2",
+        diagnosis="d",
+        evidence_json={"audit_signal": "serp_ctr"},
+        baseline_metrics_json={},
+        impact=0.0,
+    )
+    assert layer_of(pushed) is Layer.VISIBILITY
+    assert layer_of(listing) is Layer.TRAFFIC, "the listing rewrite stays traffic"
