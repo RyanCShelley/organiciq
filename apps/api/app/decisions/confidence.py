@@ -60,16 +60,22 @@ def data_confidence(
 def _thin_evidence(evidence: Mapping[str, Any], thresholds: Mapping[str, Any]) -> bool:
     """Whether the finding rests on too little to be more than a guess.
 
-    Leads first, because a rule that counts leads has already done the harder
-    inference; impressions only stand in when no lead estimate was made. A
-    finding carrying neither is not thin, it is simply not of this shape, and
-    penalising it for that would hit every technical check.
+    This used to read the finding's estimated lead count and call anything
+    under three leads thin. Nothing estimates leads any more, and leaving
+    that branch in place would have made it dead code that silently stopped
+    penalising anything — the fall-through to impressions would have quietly
+    become the only rule.
+
+    Sessions first, because a conversion finding's sample is the people who
+    arrived; impressions stand in for the search side. A finding carrying
+    neither is not thin, it is simply not of this shape, and penalising it
+    for that would hit every technical check.
     """
-    leads = evidence.get("estimated_incremental_leads")
-    if leads is None:
-        leads = evidence.get("estimated_leads_at_risk")
-    if leads is not None:
-        return float(leads) < float(thresholds.get("confidence_min_sample_leads", 0))
+    sessions = evidence.get("sessions")
+    if sessions is not None:
+        return float(sessions) < float(
+            thresholds.get("confidence_min_sample_sessions", 0)
+        )
 
     impressions = evidence.get("impressions")
     if impressions is None:

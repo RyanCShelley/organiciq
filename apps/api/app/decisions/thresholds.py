@@ -141,7 +141,10 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "confidence_tier_medium": 0.9,
     "confidence_tier_low": 0.75,
     "confidence_small_sample_factor": 0.8,
-    "confidence_min_sample_leads": 3,
+    #: A conversion finding's sample is the people who arrived. This stood
+    #: at three estimated leads until the lead estimates went; the sessions
+    #: bar is proposed, not measured.
+    "confidence_min_sample_sessions": 100,
     "confidence_min_sample_impressions": 100,
     "confidence_stale_after_days": 14,
     "confidence_stale_factor": 0.85,

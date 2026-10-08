@@ -33,18 +33,20 @@ def test_lever_constant_is_the_ceiling():
     assert data_confidence(70, {"data_confidence": "high"}, generous) == 70
 
 
-def test_thin_lead_estimate_is_discounted():
-    thin = data_confidence(80, {"estimated_incremental_leads": 1.2}, LIMITS)
-    solid = data_confidence(80, {"estimated_incremental_leads": 40.0}, LIMITS)
+def test_a_thin_sample_of_sessions_is_discounted():
+    """This asked the same question of an estimated lead count until the
+    lead estimates went. A conversion finding's sample is the people who
+    arrived, and that is counted rather than inferred."""
+    thin = data_confidence(80, {"sessions": 12}, LIMITS)
+    solid = data_confidence(80, {"sessions": 4000}, LIMITS)
     assert thin == 64
     assert solid == 80
 
 
-def test_impressions_only_stand_in_when_no_lead_estimate_was_made():
-    """A lead estimate is the harder inference, so it wins when both exist."""
-    both = data_confidence(
-        80, {"estimated_incremental_leads": 40.0, "impressions": 5}, LIMITS
-    )
+def test_impressions_only_stand_in_when_no_sessions_were_counted():
+    """Sessions are the conversion side's own sample, so they win when
+    both are present."""
+    both = data_confidence(80, {"sessions": 4000, "impressions": 5}, LIMITS)
     assert both == 80
     assert data_confidence(80, {"impressions": 5}, LIMITS) == 64
 

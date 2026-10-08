@@ -1457,6 +1457,38 @@ def _enrich_finding(
         finding.finding_group_key = finding.rule_key
 
 
+#: Keys the legacy 0-100 impact scorer writes into evidence that are
+#: predictions of leads, or clicks derived from a flat share of search
+#: volume. Both were invented: the lead figure applies a site-wide rate to
+#: one page, and the click figure is a fixed percentage of volume that
+#: nobody measured. The score itself still runs — it orders the CLI reports
+#: and the stored decisions — but its workings do not reach the payload,
+#: because a card showing "17 leads a month" from one uncited prompt is the
+#: number this rebuild exists to stop printing.
+_PREDICTED_LEAD_KEYS = frozenset(
+    {
+        "estimated_incremental_leads",
+        "estimated_leads_at_risk",
+        "impact_reference_leads",
+        "impact_normalization_basis",
+        "estimate_capped_at_goal_share",
+        "capture_basis",
+        "upstream_fallback_score",
+    }
+)
+
+
+def without_predicted_leads(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Evidence with the legacy scorer's lead arithmetic taken out.
+
+    Applied where the finding is built rather than where it is serialised,
+    so nothing downstream can read a number the engine does not stand
+    behind. `recoverable_clicks` survives: on 2a it is the measured CTR
+    curve and is the count the action ranks on.
+    """
+    return {k: v for k, v in evidence.items() if k not in _PREDICTED_LEAD_KEYS}
+
+
 def _make_finding(
     *,
     lever: str,
@@ -1732,7 +1764,7 @@ def _internal_linking_finding(
             "link_floor": floor,
             "word_count": crawl.word_count,
             "impressions": int(page.impressions),
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={
             "impressions": page.impressions,
@@ -1874,7 +1906,7 @@ def _rank_push_finding(
             # Searches where the page already appears. It is seen and not
             # reachable, which is what moving the ranking addresses.
             "demand_raw": round(float(page.impressions), 1),
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={
             "impressions": page.impressions,
@@ -1979,7 +2011,7 @@ def _serp_ctr_finding(
             "recoverable_clicks": recoverable_int,
             "demand_raw": round(float(recoverable), 1),
             "average_position": round(page.average_position, 1),
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={
             "impressions": page.impressions,
@@ -2538,7 +2570,7 @@ def _ai_visibility_keyword_findings(
                 "previous_position": prev,
                 "ranking_url": row.ranking_url,
                 "volume": volume,
-                **impact_evidence,
+                **without_predicted_leads(impact_evidence),
             },
             baseline_metrics_json={
                 "current_position": curr,
@@ -2712,6 +2744,11 @@ def _ai_visibility_prompt_findings(
             volume=max(volume, 50.0),
             site=site,
         )
+        # A flat share of search volume called "recoverable clicks". On 2a
+        # that key is the measured curve; here it is a guess wearing the
+        # same name, and it reached the card as "8,880 clicks the curve says
+        # are left" beside a count in searches.
+        impact_evidence.pop("recoverable_clicks", None)
         engine = meta.engine if meta else None
         diagnosis = (
             f"Tracked prompt is not earning AI citations across {len(rows)} checks: "
@@ -2748,7 +2785,7 @@ def _ai_visibility_prompt_findings(
                 # stand in. The gap is real and cannot be sized; printing a
                 # zero would read as "nobody is asking this".
                 "demand_unknown": volume <= 0,
-                **impact_evidence,
+                **without_predicted_leads(impact_evidence),
             },
             baseline_metrics_json={
                 "checks_in_period": len(rows),
@@ -3261,7 +3298,7 @@ def _conversion_page_findings(
                     "demand_raw": round(float(ctx.ga4_sessions), 1),
                     "no_conversions_at_all": none_at_all,
                     "promotion_class": "actionable",
-                    **impact_evidence,
+                    **without_predicted_leads(impact_evidence),
                 },
                 baseline_metrics_json={
                     "impressions": page.impressions,
@@ -3424,7 +3461,7 @@ def _blocking_only_findings(
                     "status_code": crawl.status_code,
                     "indexable": crawl.indexable,
                     "promotion_class": "actionable",
-                    **impact_evidence,
+                    **without_predicted_leads(impact_evidence),
                 },
                 baseline_metrics_json={"prior_impressions": prior_impressions},
                 impact=impact,
@@ -4143,7 +4180,7 @@ def _entity_fix_finding(
             "audit_signal": "ai_readiness",
             "rule_id": "5a",
             "promotion_class": "actionable",
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={},
         impact=impact,
@@ -4627,7 +4664,7 @@ def _tracking_failure_finding(
             # rest rather than matching on diagnosis text.
             "gate": "tracking",
             "promotion_class": "actionable",
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={},
         # Before suppression existed this was pinned at 100 to force it to the
@@ -4787,7 +4824,7 @@ def _tracking_anomaly_findings(
                         "expected_leads": round(expected, 1),
                         "site_leads_in_window": round(site_leads_now, 1),
                         "lead_events": lead_events,
-                        **impact_evidence,
+                        **without_predicted_leads(impact_evidence),
                     },
                     baseline_metrics_json={"prior_leads": round(prior_leads, 1)},
                     impact=impact,
@@ -4841,7 +4878,7 @@ def _tracking_anomaly_findings(
                         "multiple": round(site_leads_now / expected_site, 1),
                         "suspect_leads": round(suspect, 1),
                         "lead_events": lead_events,
-                        **impact_evidence,
+                        **without_predicted_leads(impact_evidence),
                     },
                     baseline_metrics_json={"expected_leads": round(expected_site, 1)},
                     impact=impact,
@@ -5206,7 +5243,7 @@ def _conversion_portfolio(
             "baseline_lead_rate_pct": round(baseline_rate, 2) if baseline_rate else None,
             "period_lead_goal": float(period_goal) if period_goal else None,
             "period_leads": float(period_leads) if period_leads is not None else None,
-            **impact_evidence,
+            **without_predicted_leads(impact_evidence),
         },
         baseline_metrics_json={
             "lead_rate_current": round(current_rate, 2),
