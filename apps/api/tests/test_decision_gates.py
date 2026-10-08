@@ -335,3 +335,47 @@ def test_the_response_says_how_far_each_source_runs(db, client_a):
     assert set(result.source_freshness) == set(result.readiness), (
         "freshness and readiness must describe the same four sources"
     )
+
+
+def test_a_silent_lead_feed_does_not_silence_flat_credit_work(db, client_a):
+    """The gate exists because a silent lead feed makes every lead estimate
+    a fiction. That is an argument about estimates, not about every rule.
+
+    SMA relaunched on 7 September 2026 and its custom GA4 events did not
+    come with it. The gate fired and took 26 prompt actions down with it —
+    work whose value is a flat credit and never read the missing number.
+    """
+    from app.services.decision_types import LeverFinding
+    from app.models.decision import DiagnosticLayer, GrowthAction
+    from app.services.lever_engine import survives_tracking_gate
+
+    def _finding(**evidence) -> LeverFinding:
+        return LeverFinding(
+            rule_key="k" + str(sorted(evidence.items())),
+            lever=GrowthAction.AI_VISIBILITY.value,
+            stage=DiagnosticLayer.VISIBILITY,
+            diagnosis="d",
+            recommended_action="a",
+            success_metric="m",
+            evidence_json=dict(evidence),
+            baseline_metrics_json={},
+            impact=0.0,
+            confidence=0.0,
+            urgency=0.0,
+            effort=0.0,
+            priority_score=0.0,
+        )
+
+    prompt = _finding(rule_id="6")
+    entity = _finding(rule_id="5a")
+    crawlers = _finding(rule_id="ai_crawlers_unblock")
+    conversion = _finding(rule_id="1b")
+    ctr = _finding(rule_id="2a")
+
+    assert survives_tracking_gate(prompt, set())
+    assert survives_tracking_gate(entity, set())
+    assert survives_tracking_gate(crawlers, set())
+    # These two are a lead estimate, so a silent lead feed does make them
+    # fiction and they stay suppressed.
+    assert not survives_tracking_gate(conversion, set())
+    assert not survives_tracking_gate(ctr, set())

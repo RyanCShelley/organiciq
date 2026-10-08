@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
-from app.decisions.actions.value import value_for
+from app.decisions.actions.value import FLAT_CREDIT_RULES, value_for
 from app.decisions.confidence import data_confidence
 from app.decisions.prompt_cause import PromptSignals, classify_prompt_gap
 from app.decisions.ctr_cause import CtrSignals, classify_ctr_gap
@@ -2932,6 +2932,56 @@ def _t1_inputs(
     return T1Inputs(pages=signals, offers=offers, has_crawl=has_crawl)
 
 
+def _lead_events_last_seen(
+    db: Session, client_id: UUID, lead_events: list[str]
+) -> date | None:
+    """The last day any configured lead event fired.
+
+    A rebuild that drops its custom events leaves a clean edge: SMA's
+    `pdf_download` and `report_unlock` both stop on 8 September, the day
+    after the new site went live. Naming the date turns "no conversions"
+    into something someone can act on.
+    """
+    if not lead_events:
+        return None
+    return (
+        db.query(func.max(FactGa4Event.date))
+        .filter(
+            FactGa4Event.client_id == client_id,
+            FactGa4Event.event_name.in_(lead_events),
+        )
+        .scalar()
+    )
+
+
+def _events_recorded(
+    db: Session, client_id: UUID, start: date, end: date, limit: int = 6
+) -> list[str]:
+    """The event names GA4 is actually sending, busiest first.
+
+    A client whose lead events stopped appearing has two very different
+    problems. Either nothing is firing, or the names were renamed out from
+    under the configuration — SMA's rebuild left `Form Submit - Thank You`
+    and `grade_submit` configured while GA4 went on recording 722
+    page_views and 15 clicks under other names. The first is a broken tag;
+    the second is a stale setting, and calling it a broken tag sends
+    somebody to debug a page that is fine.
+    """
+    rows = (
+        db.query(FactGa4Event.event_name, func.sum(FactGa4Event.event_count))
+        .filter(
+            FactGa4Event.client_id == client_id,
+            FactGa4Event.date >= start,
+            FactGa4Event.date <= end,
+        )
+        .group_by(FactGa4Event.event_name)
+        .order_by(func.sum(FactGa4Event.event_count).desc())
+        .limit(limit)
+        .all()
+    )
+    return [str(name) for name, _total in rows if name]
+
+
 def _conversion_page_findings(
     pages: list[PageDemand],
     *,
@@ -3817,8 +3867,25 @@ def _pages_active_before(
     return active
 
 
+#: Rules whose value is a flat credit rather than a lead estimate. They do
+#: not read the lead rate, so a silent lead feed says nothing about them.
+LEAD_INDEPENDENT_RULES = frozenset(FLAT_CREDIT_RULES)
+
+
 def survives_tracking_gate(finding: LeverFinding, active_before: set[str]) -> bool:
-    """Whether a finding stays promotable while Gate 0 is failing. B1."""
+    """Whether a finding stays promotable while Gate 0 is failing. B1.
+
+    The gate exists because a silent lead feed makes every lead estimate a
+    fiction. That is an argument about estimates, not about every rule:
+    a prompt gap and an entity fix carry a flat credit and never read the
+    lead rate at all.
+
+    SMA relaunched on 7 September and its custom events did not come with
+    it, so the gate fired and took 26 prompt actions down with it — work
+    whose value never depended on the number that went missing.
+    """
+    if action_rule_id(finding) in LEAD_INDEPENDENT_RULES:
+        return True
     if finding.lever != GrowthAction.TECHNICAL_SEO.value:
         return False
     if finding.core_work:
@@ -3971,10 +4038,24 @@ def _tracking_failure_finding(
             crm_leads_now=None,
         )
     )
-    return _make_finding(
-        lever=GrowthAction.CONVERSION_PATH.value,
-        rule_key=_rule_key("tracking_silent", str(client.id)),
-        diagnosis=(
+    # Is anything reaching GA4 at all? If other events are flowing and only
+    # the configured ones are absent, the names are stale, not the tag.
+    other_events = [
+        name
+        for name in _events_recorded(db, client.id, window_start, end)
+        if name not in set(lead_events)
+    ]
+    stale_names = bool(other_events)
+    if stale_names:
+        last_seen = _lead_events_last_seen(db, client.id, lead_events)
+        when = f", last seen {last_seen.isoformat()}" if last_seen else ""
+        diagnosis = (
+            "GA4 is recording events, but none of them are the lead events "
+            f"configured here ({', '.join(lead_events)}{when}). The lead "
+            "definitions look stale rather than the tag broken"
+        )
+    else:
+        diagnosis = (
             f"No conversions recorded in {TRACKING_SILENCE_DAYS} days while "
             f"{int(sessions):,} sessions arrived"
             + (
@@ -3982,8 +4063,15 @@ def _tracking_failure_finding(
                 if ever_recorded
                 else " — tracking may never have fired"
             )
-        ),
+        )
+
+    return _make_finding(
+        lever=GrowthAction.CONVERSION_PATH.value,
+        rule_key=_rule_key("tracking_silent", str(client.id)),
+        diagnosis=diagnosis,
         evidence_json={
+            "events_ga4_is_sending": other_events,
+            "lead_definitions_look_stale": stale_names,
             "sessions": int(sessions),
             "leads": 0,
             "window_days": TRACKING_SILENCE_DAYS,
