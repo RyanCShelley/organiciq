@@ -1,3 +1,5 @@
+"use client";
+
 import type { Constraint } from "@/lib/decision-engine";
 
 const LAYER_LABEL: Record<string, string> = {
@@ -25,7 +27,16 @@ function pct(ratio: number | null | undefined): string {
  * is not twenty-five options — it is which of the three outcomes is actually
  * holding the client back, with enough of the other two to argue about it.
  */
-export function ConstraintBand({ constraint }: { constraint: Constraint }) {
+export function ConstraintBand({
+  constraint,
+  selected,
+  onSelect,
+}: {
+  constraint: Constraint;
+  /** The layer whose actions are lit up below, if any. */
+  selected?: string | null;
+  onSelect?: (layer: string) => void;
+}) {
   const label = LAYER_LABEL[constraint.layer] ?? constraint.layer;
   const counts = constraint.action_counts ?? {};
 
@@ -57,22 +68,23 @@ export function ConstraintBand({ constraint }: { constraint: Constraint }) {
         {constraint.assessments.map((a) => {
           const isChosen = a.layer === constraint.layer;
           const short = a.measurable && a.ratio !== null && a.ratio < a.floor;
-          return (
-            <div
-              key={a.layer}
-              className={`rounded-[10px] px-4 py-3 ${
-                isChosen ? "bg-[var(--surface-muted)]" : ""
-              }`}
-            >
+          const count = counts[a.layer] ?? 0;
+          const isSelected = selected === a.layer;
+          // A reading with no actions behind it has nothing to light up,
+          // so it stays a tile rather than pretending to be a control.
+          const selectable = onSelect !== undefined && count > 0;
+
+          const body = (
+            <>
               <dt className="flex items-baseline justify-between gap-2">
                 <span className="text-[13px] font-semibold text-[var(--text-primary)]">
                   {LAYER_LABEL[a.layer] ?? a.layer}
                 </span>
                 <span className="text-[11.5px] text-[var(--text-tertiary)]">
-                  {counts[a.layer] ?? 0} {counts[a.layer] === 1 ? "action" : "actions"}
+                  {count} {count === 1 ? "action" : "actions"}
                 </span>
               </dt>
-              <dd className="mt-1">
+              <dd className="mt-1 text-left">
                 {a.measurable ? (
                   <>
                     <span
@@ -88,13 +100,42 @@ export function ConstraintBand({ constraint }: { constraint: Constraint }) {
                   </>
                 ) : (
                   // Not measurable is not zero. Eighteen clients have no
-                  // Search Console; a rung with no inputs must not read as a
-                  // catastrophe.
-                  <span className="text-[12.5px] leading-snug text-[var(--text-tertiary)]">
+                  // Search Console; a rung with no inputs must not read as
+                  // a catastrophe.
+                  <span className="block text-[12.5px] leading-snug text-[var(--text-tertiary)]">
                     {a.reason}
                   </span>
                 )}
+                {selectable ? (
+                  <span className="mt-1.5 block text-[11px] font-semibold text-[var(--brand-teal-deep)]">
+                    {isSelected ? "Showing these — click to clear" : "Show these actions"}
+                  </span>
+                ) : null}
               </dd>
+            </>
+          );
+
+          const shared = `block w-full rounded-[10px] px-4 py-3 ${
+            isSelected
+              ? "bg-[var(--surface-muted)] ring-2 ring-[var(--brand-teal-deep)]"
+              : isChosen
+                ? "bg-[var(--surface-muted)]"
+                : ""
+          }`;
+
+          return selectable ? (
+            <button
+              key={a.layer}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onSelect?.(a.layer)}
+              className={`${shared} min-h-[44px] cursor-pointer text-left hover:bg-[var(--surface-hover)]`}
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={a.layer} className={shared}>
+              {body}
             </div>
           );
         })}

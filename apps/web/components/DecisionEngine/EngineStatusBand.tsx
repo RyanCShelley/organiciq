@@ -38,6 +38,16 @@ export function EngineStatusBand({
   from: string;
   to: string;
 }) {
+  const actionCount = (data.growth_actions ?? []).length;
+  // Counted off the findings the response already carries rather than
+  // asked for separately, so these three can never add up to something
+  // other than the total printed beside them.
+  const findings = data.findings ?? [];
+  const coreWorkCount = findings.filter((row) => row.core_work).length;
+  const reportedCount = Math.max(
+    0,
+    findingsCount - actionCount - coreWorkCount,
+  );
   const analysedTo = data.analysis_to ?? to;
   const analysedFrom = data.analysis_from ?? from;
   // The engine stops where the data stops. When that is short of the date
@@ -60,20 +70,47 @@ export function EngineStatusBand({
         />
         <div className="min-w-0">
           <p className="font-[family-name:var(--font-display)] text-[16px] font-extrabold leading-snug text-[var(--text-primary)]">
-            Ranked {findingsCount.toLocaleString()} findings from {formatDay(analysedFrom)} to{" "}
-            {formatDay(analysedTo)}.
+            Checked {findingsCount.toLocaleString()}{" "}
+            {findingsCount === 1 ? "thing" : "things"} on the site, {formatDay(analysedFrom)}{" "}
+            to {formatDay(analysedTo)}.
           </p>
+
+          {/* "Ranked 120 findings" was the whole sentence, and it accounted
+              for two of them. The other 118 are not missing and they are not
+              ranked — most are reported, some are already in the plan — and
+              a reader who cannot see where they went reasonably assumes the
+              engine lost them. */}
+          <p className="mt-1.5 max-w-[86ch] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+            {actionCount.toLocaleString()}{" "}
+            {actionCount === 1 ? "is a growth action" : "are growth actions"} and
+            {actionCount === 1 ? " is" : " are"} ranked above.
+            {coreWorkCount > 0 ? (
+              <>
+                {" "}
+                {coreWorkCount.toLocaleString()}{" "}
+                {coreWorkCount === 1 ? "is" : "are"} core work your plan already
+                covers.
+              </>
+            ) : null}
+            {reportedCount > 0 ? (
+              <>
+                {" "}
+                The remaining {reportedCount.toLocaleString()}{" "}
+                {reportedCount === 1 ? "is" : "are"} reported rather than offered:
+                nothing there is a separate hour of work.
+              </>
+            ) : null}
+          </p>
+
           {narrowed ? (
-            <p className="mt-1.5 max-w-[86ch] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
-              You asked for data through {formatDay(to)}. The newest Search Console day on
-              record is {formatDay(analysedTo)}, so the run stops {shortBy}{" "}
-              {shortBy === 1 ? "day" : "days"} short. Re-sync Search Console to widen it.
+            <p className="mt-2 max-w-[86ch] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+              Those dates are Search Console&rsquo;s. You asked through{" "}
+              {formatDay(to)}; its newest day on record is {formatDay(analysedTo)},
+              so the run stops {shortBy} {shortBy === 1 ? "day" : "days"} short.
+              Each source&rsquo;s own last day is below. Re-sync Search Console to
+              widen it.
             </p>
-          ) : (
-            <p className="mt-1.5 text-[13.5px] text-[var(--text-secondary)]">
-              The full range you asked for.
-            </p>
-          )}
+          ) : null}
         </div>
       </div>
 

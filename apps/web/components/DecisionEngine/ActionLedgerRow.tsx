@@ -54,6 +54,7 @@ export function ActionLedgerRow({
   finding,
   rank,
   beyondPlan,
+  dimmed = false,
   clientId,
   from,
   to,
@@ -62,6 +63,8 @@ export function ActionLedgerRow({
   finding: Finding;
   rank: number;
   beyondPlan: boolean;
+  /** Another layer is picked out. Still readable, just not the subject. */
+  dimmed?: boolean;
   clientId?: string;
   from?: string;
   to?: string;
@@ -79,7 +82,9 @@ export function ActionLedgerRow({
 
   return (
     <div
-      className={`border-t border-[var(--border)] ${beyondPlan ? "bg-[var(--surface-muted)]" : ""}`}
+      className={`border-t border-[var(--border)] transition-opacity ${
+        beyondPlan ? "bg-[var(--surface-muted)]" : ""
+      } ${dimmed && !open ? "opacity-40" : ""}`}
     >
       <button
         type="button"

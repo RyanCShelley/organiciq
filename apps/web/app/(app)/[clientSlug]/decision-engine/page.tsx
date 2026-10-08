@@ -1,7 +1,6 @@
 import Link from "next/link";
 
-import { ActionLedger } from "@/components/DecisionEngine/ActionLedger";
-import { ConstraintBand } from "@/components/DecisionEngine/ConstraintBand";
+import { DecisionBoard } from "@/components/DecisionEngine/DecisionBoard";
 import { EngineStatusBand } from "@/components/DecisionEngine/EngineStatusBand";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { Alert } from "@/components/ui/Alert";
@@ -118,19 +117,8 @@ export default async function DecisionEnginePage({
 
       {data?.ready && clientId ? (
         <div className="space-y-[var(--section-gap)]">
-          {constraint ? <ConstraintBand constraint={constraint} /> : null}
-
-          <p className="max-w-[76ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
-            {constraint
-              ? "The constraint's work comes first. Everything else is still here, ranked by how many people it is about."
-              : "Everything the engine found that could be done in an hour, ranked by how many people it is about."}{" "}
-            The line falls where the plan does — the ranking is advice, not a rule.
-            {selectedTowardPlan > 0
-              ? ` ${selectedTowardPlan} accepted so far this period.`
-              : ""}
-          </p>
-
-          <ActionLedger
+          <DecisionBoard
+            constraint={constraint}
             actions={actions}
             blocking={blocking}
             allowance={growthPlanAllowance}
@@ -139,6 +127,7 @@ export default async function DecisionEnginePage({
             from={from}
             to={to}
             decisionsByRule={decisionByRule}
+            selectedTowardPlan={selectedTowardPlan}
           />
 
           {/* One way out of this page, to the list that is not actions.

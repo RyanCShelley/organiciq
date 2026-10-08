@@ -1,5 +1,13 @@
+"use client";
+
 import { ActionLedgerRow } from "@/components/DecisionEngine/ActionLedgerRow";
 import { type Finding, type StoredDecision } from "@/lib/decision-engine";
+
+const LAYER_LABEL: Record<string, string> = {
+  visibility: "Visibility",
+  traffic: "Traffic",
+  conversion: "Leads",
+};
 
 function planWord(count: number): string {
   return count === 1 ? "1 action" : `${count} actions`;
@@ -32,6 +40,8 @@ export function ActionLedger({
   from,
   to,
   decisionsByRule,
+  highlight = null,
+  onClearHighlight,
 }: {
   actions: Finding[];
   /** What has to be fixed before anything below it can be trusted. */
@@ -42,9 +52,14 @@ export function ActionLedger({
   from?: string;
   to?: string;
   decisionsByRule: Map<string, StoredDecision>;
+  /** Lit up by the constraint band: the layer whose work to pick out. */
+  highlight?: string | null;
+  onClearHighlight?: () => void;
 }) {
   const included = allowance > 0 ? actions.slice(0, allowance) : actions;
   const beyond = allowance > 0 ? actions.slice(allowance) : [];
+  const litBelowTheLine = beyond.filter((item) => item.stage === highlight).length;
+  const litTotal = actions.filter((item) => item.stage === highlight).length;
   const short = allowance > 0 && actions.length < allowance;
   // What is down there, by outcome, so the closed summary still says
   // something: "18 visibility, 3 leads" is a reason to open it or not.
@@ -103,6 +118,31 @@ export function ActionLedger({
           </p>
         </div>
 
+        {/* Nothing is removed from the list when a layer is picked out: the
+            order is the engine's argument, and hiding two thirds of it to
+            answer "which of these are about leads" would throw the argument
+            away to answer the question. */}
+        {highlight ? (
+          <div className="flex flex-wrap items-baseline justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface-muted)] px-6 py-2.5">
+            <p className="text-[12.5px] text-[var(--text-secondary)]">
+              {litTotal} {litTotal === 1 ? "action" : "actions"} for{" "}
+              <span className="font-semibold text-[var(--text-primary)]">
+                {LAYER_LABEL[highlight] ?? highlight}
+              </span>
+              , in place. The rest are dimmed, not hidden.
+            </p>
+            {onClearHighlight ? (
+              <button
+                type="button"
+                onClick={onClearHighlight}
+                className="min-h-[32px] cursor-pointer text-[12.5px] font-semibold text-[var(--brand-teal-deep)] underline-offset-2 hover:underline"
+              >
+                Show all
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div
           aria-hidden="true"
           className="hidden gap-4 px-6 pb-2 text-[11px] uppercase tracking-[0.04em] text-[var(--text-tertiary)] sm:flex"
@@ -120,6 +160,7 @@ export function ActionLedger({
             finding={item}
             rank={index + 1}
             beyondPlan={false}
+            dimmed={highlight !== null && item.stage !== highlight}
             clientId={clientId}
             from={from}
             to={to}
@@ -165,7 +206,7 @@ export function ActionLedger({
             the menu this screen is trying to stop being; the work is still
             here, and still in order, behind one click. */}
         {beyond.length > 0 ? (
-          <details className="group">
+          <details className="group" open={litBelowTheLine > 0}>
             <summary className="flex min-h-[44px] cursor-pointer flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-t-2 border-b-[var(--border)] border-t-[var(--text-primary)] bg-[var(--surface-muted)] px-6 py-3.5">
               <span className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)]">
                 {planLabel} ends here · {planWord(allowance)}
@@ -181,6 +222,7 @@ export function ActionLedger({
                 finding={item}
                 rank={allowance + index + 1}
                 beyondPlan
+                dimmed={highlight !== null && item.stage !== highlight}
                 clientId={clientId}
                 from={from}
                 to={to}
