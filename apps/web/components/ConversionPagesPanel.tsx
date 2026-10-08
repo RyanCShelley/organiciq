@@ -104,7 +104,7 @@ export function ConversionPagesPanel({
         {rows.map((row, index) => (
           <div
             key={index}
-            className="grid gap-3 rounded-lg border border-[var(--border)] p-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+            className="grid gap-3 rounded-lg border border-[var(--border)] p-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(160px,auto)]"
           >
             <label className="block">
               <span className="mb-1 block text-xs text-[var(--text-tertiary)]">Page URL</span>
@@ -139,8 +139,8 @@ export function ConversionPagesPanel({
                 ))}
               </Select>
             </label>
-            <div className="flex items-end gap-3 pb-1">
-              <label className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
+            <div className="flex items-end gap-4 whitespace-nowrap pb-1 sm:col-span-3 lg:col-span-1">
+              <label className="flex min-h-[44px] items-center gap-2 text-[13px] text-[var(--text-secondary)]">
                 <input
                   type="checkbox"
                   checked={row.is_primary}
