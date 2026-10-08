@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.lever_engine import action_counts_by_layer
 from app.schemas import (
     ConstraintOut,
     DiagnoseResponse,
@@ -74,10 +75,11 @@ def _serialize_search_opportunity(row) -> SearchOpportunityOut:
 
 
 
-def _serialize_constraint(constraint) -> ConstraintOut | None:
+def _serialize_constraint(constraint, action_counts: dict[str, int]) -> ConstraintOut | None:
     if constraint is None:
         return None
     return ConstraintOut(
+        action_counts=action_counts,
         layer=constraint.layer.value,
         reason=constraint.reason,
         by_comparison=constraint.by_comparison,
@@ -98,7 +100,9 @@ def _serialize_constraint(constraint) -> ConstraintOut | None:
 def serialize_diagnose(result) -> DiagnoseResponse:
     findings = [_serialize_finding(row) for row in result.findings]
     growth_actions = [_serialize_finding(row) for row in result.growth_actions]
-    constraint = _serialize_constraint(result.constraint)
+    constraint = _serialize_constraint(
+        result.constraint, action_counts_by_layer(result.growth_actions)
+    )
     blocking_findings = [_serialize_finding(row) for row in result.blocking_findings]
     below_floor_actions = [_serialize_finding(row) for row in result.below_floor_actions]
     unvalued_actions = [_serialize_finding(row) for row in result.unvalued_actions]

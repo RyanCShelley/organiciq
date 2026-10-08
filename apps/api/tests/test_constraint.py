@@ -356,3 +356,53 @@ def _watermark_search(db, client_id, through) -> None:
         )
     )
     db.commit()
+
+
+# ── Ordering and counts ──
+
+
+def test_the_constraints_actions_come_first_without_dropping_the_rest():
+    """The constraint ranks; it does not exclude. A conversion fix worth two
+    leads stays on the page when visibility wins the month — it is simply not
+    the first thing offered."""
+    from app.models.decision import DiagnosticLayer, GrowthAction
+    from app.services.decision_types import LeverFinding
+    from app.services.lever_engine import (
+        action_counts_by_layer,
+        order_by_constraint,
+    )
+    from app.decisions.constraint import Constraint
+
+    def _finding(layer: DiagnosticLayer, lever: str, name: str) -> LeverFinding:
+        return LeverFinding(
+            rule_key=name,
+            lever=lever,
+            stage=layer,
+            diagnosis=name,
+            recommended_action="a",
+            success_metric="m",
+            evidence_json={},
+            baseline_metrics_json={},
+            impact=0.0, confidence=0.0, urgency=0.0, effort=0.0, priority_score=0.0,
+        )
+
+    conversion = _finding(DiagnosticLayer.CONVERSION, GrowthAction.CONVERSION_PATH.value, "cta")
+    traffic = _finding(DiagnosticLayer.TRAFFIC, GrowthAction.SERP_CTR.value, "title")
+    visibility = _finding(DiagnosticLayer.VISIBILITY, GrowthAction.AI_VISIBILITY.value, "prompt")
+
+    chosen = Constraint(layer=Layer.VISIBILITY, reason="r", assessments=())
+    ordered = order_by_constraint([conversion, traffic, visibility], chosen)
+
+    # Constraint first, then the remaining rungs in ladder order — traffic
+    # before conversion, because that is the order they depend on each other.
+    assert [f.rule_key for f in ordered] == ["prompt", "title", "cta"]
+    assert len(ordered) == 3, "nothing is dropped"
+    assert action_counts_by_layer(ordered) == {
+        "visibility": 1, "traffic": 1, "conversion": 1
+    }
+
+
+def test_without_a_constraint_the_order_is_left_alone():
+    from app.services.lever_engine import order_by_constraint
+
+    assert order_by_constraint([], None) == []

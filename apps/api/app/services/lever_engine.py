@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
 from app.decisions.actions.value import FLAT_CREDIT_RULES, value_for
 from app.decisions.constraint import (
+    LADDER,
     Constraint,
+    Layer,
     ConversionSignals,
     TrafficSignals,
     VisibilitySignals,
@@ -3836,6 +3838,41 @@ def _expected_ctr(position: float, curve: dict[int, float] | None) -> float:
     return expected_ctr_percent(position)
 
 
+def layer_of(finding: LeverFinding) -> Layer:
+    """Which outcome a finding moves. Read off the lever it files under."""
+    return Layer(finding.stage.value)
+
+
+def action_counts_by_layer(actions: list[LeverFinding]) -> dict[str, int]:
+    """How many of the month's actions move each outcome.
+
+    The question "how many are about leads, how many about visibility, how
+    many about traffic" is the one a strategist asks before deciding where the
+    month goes, and it was not answerable from the screen.
+    """
+    counts = {layer.value: 0 for layer in LADDER}
+    for action in actions:
+        counts[layer_of(action).value] = counts.get(layer_of(action).value, 0) + 1
+    return counts
+
+
+def order_by_constraint(
+    actions: list[LeverFinding], constraint: Constraint | None
+) -> list[LeverFinding]:
+    """The constraint's actions first, then the rest down the ladder.
+
+    The constraint ranks; it does not exclude. A conversion fix worth two
+    leads stays on the page when visibility wins the month — it is simply not
+    the first thing offered. Within each layer the existing order by expected
+    leads is untouched.
+    """
+    if constraint is None:
+        return actions
+    order = [constraint.layer] + [rung for rung in LADDER if rung is not constraint.layer]
+    position = {layer: i for i, layer in enumerate(order)}
+    return sorted(actions, key=lambda f: position.get(layer_of(f), len(order)))
+
+
 #: Which growth action a finding is, by the gate or signal it carries.
 #: Only these can spend a client's monthly allowance; everything else the
 #: engine reports is recurring work already covered by the plan.
@@ -5759,28 +5796,31 @@ def diagnose(
         tracked_by_url=_tracked_keywords_by_url(db, client.id),
     )
 
+    constraint = _constraint_for(
+        db,
+        client,
+        gsc_period=gsc_period,
+        ser_period=ser_period,
+        ai_period=ai_period,
+        ga4_period=ga4_period,
+        lead_events=lead_events,
+        period_goal=(
+            float(site.period_lead_goal) if site.period_lead_goal else None
+        ),
+        ctr_curve=client_curve,
+        thresholds=thresholds,
+    )
+    month_actions = order_by_constraint(growth_actions(all_findings), constraint)
+
     return DiagnoseResult(
         ready=True,
         message=None,
         readiness=readiness,
         formula=SCORE_FORMULA,
-        levers=_lever_summaries(all_findings, growth_actions(all_findings)),
+        levers=_lever_summaries(all_findings, month_actions),
         findings=all_findings,
-        constraint=_constraint_for(
-            db,
-            client,
-            gsc_period=gsc_period,
-            ser_period=ser_period,
-            ai_period=ai_period,
-            ga4_period=ga4_period,
-            lead_events=lead_events,
-            period_goal=(
-                float(site.period_lead_goal) if site.period_lead_goal else None
-            ),
-            ctr_curve=client_curve,
-            thresholds=thresholds,
-        ),
-        growth_actions=growth_actions(all_findings),
+        constraint=constraint,
+        growth_actions=month_actions,
         blocking_findings=blocking_findings(all_findings),
         below_floor_actions=below_floor_actions(all_findings),
         unvalued_actions=unvalued_actions(all_findings),

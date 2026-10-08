@@ -546,6 +546,9 @@ class ConstraintOut(BaseModel):
     #: sentences and the screen has to be able to tell them apart.
     by_comparison: bool = False
     assessments: list[LayerAssessmentOut] = []
+    #: How many of the month's actions move each outcome, keyed by layer.
+    #: The question a strategist asks before deciding where the month goes.
+    action_counts: dict[str, int] = {}
 
 
 class DiagnoseResponse(BaseModel):
