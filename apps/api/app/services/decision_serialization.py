@@ -104,8 +104,6 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         result.constraint, action_counts_by_layer(result.growth_actions)
     )
     blocking_findings = [_serialize_finding(row) for row in result.blocking_findings]
-    below_floor_actions = [_serialize_finding(row) for row in result.below_floor_actions]
-    unvalued_actions = [_serialize_finding(row) for row in result.unvalued_actions]
     search_opportunities = [
         _serialize_search_opportunity(row) for row in result.search_opportunities
     ]
@@ -136,8 +134,6 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         growth_actions=growth_actions,
         constraint=constraint,
         blocking_findings=blocking_findings,
-        below_floor_actions=below_floor_actions,
-        unvalued_actions=unvalued_actions,
         search_opportunities=search_opportunities,
         recommendations=growth_actions,
     )

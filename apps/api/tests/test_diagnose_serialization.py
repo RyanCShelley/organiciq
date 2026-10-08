@@ -5,8 +5,8 @@ a field could be added to `DiagnoseResult`, used by a CLI that reads the
 dataclass directly, and never serialised — leaving the screen with nothing
 while every test passed and the command-line check looked right.
 
-That is exactly what happened. `growth_actions`, `below_floor_actions`,
-`unvalued_actions` and `source_freshness` were all computed and all
+That is exactly what happened. `growth_actions`, `constraint`,
+`blocking_findings` and `source_freshness` were all computed and all
 dropped by `serialize_diagnose`, which names its fields one by one.
 """
 
@@ -70,13 +70,16 @@ def test_the_serialiser_actually_populates_them():
         readiness={"search_console": True},
         formula="",
         source_freshness={"search_console": "2026-09-22"},
-        growth_actions=[_finding("1b", expected_leads_monthly=2.04, estimated_minutes=15)],
-        below_floor_actions=[_finding("1b", expected_leads_monthly=0.01, below_floor=True)],
-        unvalued_actions=[_finding("1b", value_error="no raw lead estimate")],
+        growth_actions=[
+            _finding(
+                "1b", demand=402.0, demand_unit="sessions / mo", estimated_minutes=15,
+            )
+        ],
+        blocking_findings=[_finding("1b", gate="tracking")],
     )
     response = serialize_diagnose(result)
 
-    for name in ("growth_actions", "below_floor_actions", "unvalued_actions"):
+    for name in ("growth_actions", "blocking_findings"):
         served = getattr(response, name)
         assert len(served) == 1, f"{name} was computed but did not reach the response"
         assert served[0].evidence_json["rule_id"] == "1b"
@@ -85,18 +88,22 @@ def test_the_serialiser_actually_populates_them():
 
 
 def test_a_growth_action_arrives_with_what_the_screen_prints(db, client_a):
-    """Every row shows leads a month and minutes. A row carrying neither
-    renders as two em dashes, which is how this was spotted."""
+    """Every row shows a count, its unit and the minutes. A row carrying
+    none of them renders as em dashes, which is how this was spotted."""
     end = date.today()
     result = diagnose(db, client_a, from_date=end - timedelta(days=29), to_date=end)
     for action in serialize_diagnose(result).growth_actions:
-        assert action.evidence_json.get("expected_leads_monthly") is not None
-        assert action.evidence_json.get("estimated_minutes") is not None
+        evidence = action.evidence_json
+        assert evidence.get("estimated_minutes") is not None
+        if evidence.get("precondition"):
+            continue
+        assert evidence.get("demand") is not None
+        assert evidence.get("demand_unit")
 
 
 def test_only_valued_work_reaches_the_growth_actions(db, client_a):
     """The legacy `recommended_actions` list is gone. What it used to carry
-    — report-only findings with no lead estimate — must not reappear here."""
+    — report-only findings with nothing counted — must not reappear here."""
     end = date.today()
     response = serialize_diagnose(
         diagnose(db, client_a, from_date=end - timedelta(days=29), to_date=end)

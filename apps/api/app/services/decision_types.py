@@ -79,10 +79,6 @@ class DiagnoseResult:
     #: suppresses everything under it, and an empty plan with no reason
     #: given reads as a broken tool rather than a broken tag.
     blocking_findings: list[LeverFinding] = field(default_factory=list)
-    #: Valued, and under the floor. Shown so the floor can be argued with.
-    below_floor_actions: list[LeverFinding] = field(default_factory=list)
-    #: Actions the valuer could not price, which is a bug worth seeing.
-    unvalued_actions: list[LeverFinding] = field(default_factory=list)
     search_opportunities: list[LeverFinding] = field(default_factory=list)
     #: Which rules ran this period and why the rest did not. "No findings"
     #: and "never looked" are different answers and must not share a row.

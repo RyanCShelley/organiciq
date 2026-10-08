@@ -23,7 +23,7 @@ from pathlib import Path
 
 from app.decisions.prescription import CAUSES
 from app.decisions.thresholds import DEFAULT_DECISION_THRESHOLDS as LIMITS
-from app.decisions.actions.value import DEFAULT_MINUTES
+from app.decisions.actions.demand import DEFAULT_MINUTES
 from app.services.lever_engine import (
     ACTION_RULE_IDS,
     INDEXATION_BLOCKING_SIGNALS,
@@ -58,7 +58,7 @@ CHECKS: dict[str, dict[str, str]] = {
             "fortnight should have produced at least 3 leads (or, with no history, "
             "500 sessions arrived)."
         ),
-        "impact": "Leads the fortnight should have produced, as leads at risk.",
+        "impact": "Sessions on the page. The lead shortfall against the benchmark rides along as evidence.",
         "notes": "The only check that suppresses others: every score below it is computed from a lead count it says is wrong.",
     },
     "tracking_partial": {
@@ -68,7 +68,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"still converts, and its own prior rate applied to the traffic it still "
             f"gets expects at least {_t('partial_break_min_expected_leads')} leads."
         ),
-        "impact": "Expected leads from that page, as leads at risk.",
+        "impact": "Sessions on the page.",
         "notes": "Suppresses nothing. A page with no visitors is skipped: no leads is arithmetic, not a fault.",
     },
     "tracking_spike": {
@@ -77,7 +77,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"Leads past {_t('lead_spike_multiple')}x the rate the same traffic used to "
             f"produce, with at least {_t('lead_spike_min_leads')} recorded."
         ),
-        "impact": "The excess over the expected rate — the recorded leads that may not exist.",
+        "impact": "Sessions on the page. The excess over the expected rate rides along as evidence.",
         "notes": "What double firing and form spam look like.",
     },
     "site_conversion": {
@@ -88,7 +88,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"the rate sits below the client's own starting baseline. Each trigger needs "
             f"{_t('gate1_min_expected_leads')} expected leads behind it."
         ),
-        "impact": "Leads lost against the previous period, or the gap to plan.",
+        "impact": "Sessions in the period.",
         "notes": "Routes to one page when 60% of the loss sits there; says 'hold the plan' when last year fell the same way.",
     },
     "conversion_page": {
@@ -97,7 +97,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"The page type has at least {_t('gate3_page_type_min_pages')} pages and "
             f"{_t('gate3_page_type_min_leads')} leads behind it to compare against."
         ),
-        "impact": "Leads the page would produce at its page type's rate.",
+        "impact": "Sessions on the page.",
         "notes": "",
     },
     "no_conversion_element": {
@@ -117,7 +117,7 @@ CHECKS: dict[str, dict[str, str]] = {
             "under half the measured curve, and at least 5 clicks recoverable. Pages where "
             "brand is over half the impressions are skipped."
         ),
-        "impact": "Recoverable clicks converted at the site's lead rate.",
+        "impact": "Recoverable clicks, from the measured CTR curve.",
         "notes": "Stops at five on purpose: the curve pays 0.73% at six, so there is no click to win back by rewriting a listing.",
     },
     "rank_push": {
@@ -128,7 +128,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"{_t('rank_push_min_impressions')} impressions and 5 clicks to gain at "
             "position five."
         ),
-        "impact": "Clicks gained reaching position five, converted at the site's lead rate.",
+        "impact": "Clicks gained reaching position five, from the measured CTR curve.",
         "notes": "The band CTR work cannot reach. The instruction is rank, not the listing.",
     },
     # ── Visibility ──
@@ -139,7 +139,7 @@ CHECKS: dict[str, dict[str, str]] = {
             f"{_t('link_floor_money')} for money pages, {_t('link_floor_industry')} for "
             f"industry pages, {_t('link_floor_blog')} for posts — at position 4 to 20."
         ),
-        "impact": "Clicks a better position would earn, converted at the site's lead rate.",
+        "impact": "Impressions the page already draws from a position too low to be clicked.",
         "notes": f"The homepage is never reported. Donors capped at {_t('link_max_donors')}.",
     },
     "keyword_not_ranking": {
@@ -158,13 +158,13 @@ CHECKS: dict[str, dict[str, str]] = {
     "keyword_fell_top5": {
         "question": "Did a term fall out of the top five?",
         "fires": "Previous position 5 or better, now worse than 5.",
-        "impact": "18% of volume as recoverable clicks, converted at the site's lead rate.",
+        "impact": "Monthly search volume for the term.",
         "notes": "A term that was ranking has shown it can rank, so the share is a property of the fall rather than the curve.",
     },
     "keyword_fell_top10": {
         "question": "Did a term fall out of the top ten?",
         "fires": "Previous position 10 or better, now worse than 10.",
-        "impact": "10% of volume as recoverable clicks, converted at the site's lead rate.",
+        "impact": "Monthly search volume for the term.",
         "notes": "",
     },
     "prompt_not_cited": {
@@ -173,14 +173,14 @@ CHECKS: dict[str, dict[str, str]] = {
             f"At least {_t('ai_visibility_prompt_min_checks')} checks in the period with no "
             f"citation; the top {_t('ai_visibility_prompt_top_n')} are reported."
         ),
-        "impact": "12% of prompt volume as recoverable clicks, converted at the site's lead rate.",
+        "impact": "Monthly searches for the nearest tracked term. SE Ranking returns no volume on prompts themselves.",
         "notes": "A blocked AI crawler preempts everything else: an engine that cannot fetch the page will never cite it.",
     },
     # ── Technical ──
     "status_error": {
         "question": "Does the page return 4xx or 5xx?",
         "fires": "On a page with demand, or in the sitemap, or commercial/conversion.",
-        "impact": "Addressable clicks behind the error, converted at the site's lead rate.",
+        "impact": "Addressable clicks behind the error.",
         "notes": "",
     },
     "soft_404": {
@@ -356,9 +356,9 @@ CHECKS: dict[str, dict[str, str]] = {
             "client's; or the homepage block is missing a required property."
         ),
         "impact": (
-            f"A flat credit of {_t('flat_credit_5a_entity_fix')} leads a month, "
-            "normalised against the client's own reference like every other rule. "
-            "Nothing here is measurable per-page, so a measured estimate would be invented."
+            "A precondition: structured data that misnames the brand is wrong on "
+            "every page at once, so it carries no per-page count and sorts first "
+            "in its layer."
         ),
         "notes": (
             "One finding per run carrying every failing check, because they are one "
@@ -509,22 +509,33 @@ def main() -> int:
         "",
         "## What a growth action is",
         "",
-        "A specific task of an hour or less, valued in **expected leads a month**,",
-        "ranked by that number, and limited by the client's plan. Only the rules",
-        "with an id below can be one. Everything else is reported: core work the",
-        "plan already covers, or an opportunity that needs a decision first.",
+        "A specific task of an hour or less, counted in the unit of the outcome",
+        "it moves, ranked by that count inside its layer, and limited by the",
+        "client's plan. Only the rules with an id below can be one. Everything",
+        "else is reported: core work the plan already covers, or an opportunity",
+        "that needs a decision first.",
         "",
         "```",
-        "expected leads a month = raw lead estimate x 30 / window days",
-        "                         x the rule's reliability prior",
+        "visibility  searches / mo   prompt volume, or the impressions a page",
+        "                            already draws from a position too low to",
+        "                            be clicked",
+        "traffic     clicks / mo     what the measured CTR curve says the",
+        "                            ranking would earn at its target and does",
+        "                            not earn now",
+        "conversion  sessions / mo   the people who arrive on the page",
         "```",
         "",
-        "A rule with no honest clicks-to-leads model carries a flat credit",
-        "instead, and says so on screen. Prompt gaps all carry the same credit",
-        "by definition, so search volume breaks the tie.",
+        "Counts over the analysis window are restated per month, so a 28-day",
+        "window does not rank below a 30-day one. Nothing is converted between",
+        "the three units. Actions were priced in expected leads a month until",
+        "October 2026, which required a site-wide lead rate to be applied to one",
+        "page's clicks, and gave the three rules with no clicks-to-leads model a",
+        "flat credit instead — so twenty-five tracked prompts arrived identically",
+        "priced and the ranking was really the tie-break underneath.",
         "",
-        f"Below {LIMITS['min_expected_leads_monthly']} leads a month an action is not offered. The floor is shown",
-        "rather than applied silently, so it can be argued with.",
+        "Site-wide preconditions — blocked AI crawlers, structured data that",
+        "misnames the brand — have no count of their own and sort first in their",
+        "layer, because they hold back every page beneath them.",
         "",
         "Three things stop a rule that could otherwise be an action: a gate",
         "upstream failed and its inputs cannot be trusted; the team has dismissed",

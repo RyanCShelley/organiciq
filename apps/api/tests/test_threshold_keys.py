@@ -18,12 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 THRESHOLDS = ROOT / "app" / "decisions" / "thresholds.py"
 WEB = ROOT.parent / "web"
 
-#: Keys built at runtime from a rule id, so the literal never appears.
-#: `value.py` reads `f"reliability_{rule_id}"` and
-#: `f"flat_credit_{_credit_key(rule_id)}"`.
-DYNAMIC_PREFIXES = ("reliability_", "flat_credit_")
-
-
 def _default_keys() -> set[str]:
     keys: set[str] = set()
     for node in ast.walk(ast.parse(THRESHOLDS.read_text(encoding="utf-8"))):
@@ -55,39 +49,30 @@ def _corpus() -> str:
 
 def test_every_default_threshold_is_read_by_something():
     corpus = _corpus()
-    orphans = sorted(
-        key
-        for key in _default_keys()
-        if not key.startswith(DYNAMIC_PREFIXES) and key not in corpus
-    )
+    orphans = sorted(key for key in _default_keys() if key not in corpus)
     assert orphans == [], (
         "these thresholds are offered as tuning knobs and turn nothing: "
         + ", ".join(orphans)
     )
 
 
-def test_the_dynamic_families_are_still_built_the_way_this_test_assumes():
-    """The exemption above is only safe while the code really does compose
-    these names. If that changes, the exemption hides real orphans."""
-    value = (ROOT / "app" / "decisions" / "actions" / "value.py").read_text(encoding="utf-8")
-    assert 'f"reliability_{rule_id}"' in value
-    assert 'f"flat_credit_{_credit_key(rule_id)}"' in value
+def test_no_threshold_is_composed_at_runtime():
+    """Every key is a literal, so the scan above sees all of them.
 
-
-def test_every_dynamic_key_belongs_to_a_rule_the_engine_still_has():
-    """A `reliability_7` left behind by a deleted rule is as dead as any
-    other orphan; it is just spelled in a way the scan cannot see."""
-    from app.decisions.actions.value import DEFAULT_MINUTES, _CREDIT_KEYS
-    from app.services.lever_engine import ACTION_RULE_IDS
-
-    live = set(ACTION_RULE_IDS.values()) | set(DEFAULT_MINUTES)
-    suffixes = {f"reliability_{rule}" for rule in live}
-    suffixes |= {f"flat_credit_{_CREDIT_KEYS.get(rule, rule)}" for rule in live}
-    suffixes.add("reliability_default")
-
-    orphans = sorted(
-        key
-        for key in _default_keys()
-        if key.startswith(DYNAMIC_PREFIXES) and key not in suffixes
-    )
-    assert orphans == [], "tuned for rules the engine no longer has: " + ", ".join(orphans)
+    There used to be two families built from a rule id — `reliability_{rule}`
+    and `flat_credit_{_credit_key(rule)}` — which the scan had to be told to
+    skip, and an exemption that wide hides real orphans behind it. Both
+    families went with the lead valuation: the reliability priors were all
+    1.0, a multiplier that did nothing, and the flat credits were the made-up
+    numbers that put twenty-five identically priced prompts on the screen.
+    """
+    # Built rather than written, because this file is in the corpus and a
+    # literal needle here would match itself.
+    needles = ['f"' + stem for stem in ("reliability_", "flat_credit_")]
+    corpus = _corpus()
+    for needle in needles:
+        assert needle not in corpus, (
+            f"{needle} composes a threshold key at runtime, so the orphan "
+            "scan cannot see it. Spell the key out, or re-introduce an "
+            "exemption here deliberately."
+        )

@@ -134,7 +134,11 @@ def test_evaluate_persists_scored_decisions(db, client_a):
     assert result.ready is True
     assert len(result.growth_actions) >= 1, "the fixture has to produce an action"
     assert len(created) == len(result.growth_actions)
-    assert all(row.evidence_json.get("expected_leads_monthly") is not None for row in result.growth_actions)
+    assert all(
+        row.evidence_json.get("demand") is not None
+        or row.evidence_json.get("precondition")
+        for row in result.growth_actions
+    )
 
     created_again, skipped_again, _ = evaluate_and_store(db, client_a, from_date=start, to_date=end)
     assert len(created_again) == 0

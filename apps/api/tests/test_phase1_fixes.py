@@ -45,34 +45,38 @@ def _finding(**over):
 # --- B1 ---------------------------------------------------------------------
 
 
-def test_a_blocking_technical_finding_survives_gate_zero():
-    """A 5xx on a page with demand is true whatever the conversion tag does."""
+def _conversion(**over):
+    """The only layer the gate still holds back."""
+    over.setdefault("stage", DiagnosticLayer.CONVERSION)
+    over.setdefault("lever", GrowthAction.CONVERSION_PATH.value)
+    return _finding(**over)
+
+
+def test_work_that_never_reads_the_lead_feed_survives_gate_zero():
+    """A 5xx on a page is true whatever the conversion tag is doing, and so
+    is a prompt nothing cites. Neither count comes from the client's tag."""
     assert survives_tracking_gate(_finding(), {PAGE}) is True
+    assert survives_tracking_gate(_finding(), set()) is True
+    assert survives_tracking_gate(
+        _finding(stage=DiagnosticLayer.TRAFFIC, lever=GrowthAction.SERP_CTR.value),
+        set(),
+    ) is True
 
 
-def test_a_blocking_finding_on_a_dead_page_does_not_survive():
-    """No traffic last period either, so nothing is being lost right now."""
-    assert survives_tracking_gate(_finding(), set()) is False
+def test_a_conversion_finding_on_a_dead_page_does_not_survive():
+    """No traffic last period either, so nothing is being lost right now —
+    and the feed that would say otherwise is the one that went silent."""
+    assert survives_tracking_gate(_conversion(), {PAGE}) is True
+    assert survives_tracking_gate(_conversion(), set()) is False
 
 
 def test_core_work_does_not_ride_the_exception():
     """It is never promoted anyway; letting it through widens the exception."""
-    assert survives_tracking_gate(_finding(core_work=True), {PAGE}) is False
+    assert survives_tracking_gate(_conversion(core_work=True), {PAGE}) is False
 
 
-def test_other_levers_stay_suppressed():
-    """Their scores are computed from the lead count the gate distrusts."""
-    for lever in (
-        GrowthAction.INTERNAL_LINKING.value,
-        GrowthAction.SERP_CTR.value,
-        GrowthAction.CONVERSION_PATH.value,
-        GrowthAction.AI_VISIBILITY.value,
-    ):
-        assert survives_tracking_gate(_finding(lever=lever), {PAGE}) is False
-
-
-def test_a_finding_with_no_page_cannot_survive():
-    assert survives_tracking_gate(_finding(page_url=None), {PAGE}) is False
+def test_a_conversion_finding_with_no_page_cannot_survive():
+    assert survives_tracking_gate(_conversion(page_url=None), {PAGE}) is False
 
 
 # --- B4 ---------------------------------------------------------------------

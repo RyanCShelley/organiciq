@@ -337,23 +337,27 @@ def test_the_response_says_how_far_each_source_runs(db, client_a):
     )
 
 
-def test_a_silent_lead_feed_does_not_silence_flat_credit_work(db, client_a):
-    """The gate exists because a silent lead feed makes every lead estimate
-    a fiction. That is an argument about estimates, not about every rule.
+def test_a_silent_lead_feed_only_silences_the_lead_layer(db, client_a):
+    """The gate exists because a silent lead feed makes a lead number a
+    fiction. That is an argument about the conversion layer, not every rule.
 
-    SMA relaunched on 7 September 2026 and its custom GA4 events did not
-    come with it. The gate fired and took 26 prompt actions down with it —
-    work whose value is a flat credit and never read the missing number.
+    SMA relaunched on 7 September 2026 and its custom GA4 events did not come
+    with it. The gate fired and took 26 prompt actions with it — work counted
+    in searches, which no tag of ours reports.
+
+    The exemption used to be a list of the three rules carrying a flat credit,
+    which happened to be the three that read no lead rate. Now that nothing is
+    priced in leads, the layer says it directly.
     """
     from app.services.decision_types import LeverFinding
     from app.models.decision import DiagnosticLayer, GrowthAction
     from app.services.lever_engine import survives_tracking_gate
 
-    def _finding(**evidence) -> LeverFinding:
+    def _finding(layer: DiagnosticLayer, **evidence) -> LeverFinding:
         return LeverFinding(
-            rule_key="k" + str(sorted(evidence.items())),
+            rule_key="k" + str(sorted(evidence.items())) + layer.value,
             lever=GrowthAction.AI_VISIBILITY.value,
-            stage=DiagnosticLayer.VISIBILITY,
+            stage=layer,
             diagnosis="d",
             recommended_action="a",
             success_metric="m",
@@ -366,16 +370,15 @@ def test_a_silent_lead_feed_does_not_silence_flat_credit_work(db, client_a):
             priority_score=0.0,
         )
 
-    prompt = _finding(rule_id="6")
-    entity = _finding(rule_id="5a")
-    crawlers = _finding(rule_id="ai_crawlers_unblock")
-    conversion = _finding(rule_id="1b")
-    ctr = _finding(rule_id="2a")
+    # Counted in searches and clicks, from Search Console and SE Ranking.
+    assert survives_tracking_gate(_finding(DiagnosticLayer.VISIBILITY, rule_id="6"), set())
+    assert survives_tracking_gate(_finding(DiagnosticLayer.VISIBILITY, rule_id="5a"), set())
+    assert survives_tracking_gate(
+        _finding(DiagnosticLayer.VISIBILITY, rule_id="ai_crawlers_unblock"), set()
+    )
+    assert survives_tracking_gate(_finding(DiagnosticLayer.TRAFFIC, rule_id="2a"), set())
 
-    assert survives_tracking_gate(prompt, set())
-    assert survives_tracking_gate(entity, set())
-    assert survives_tracking_gate(crawlers, set())
-    # These two are a lead estimate, so a silent lead feed does make them
-    # fiction and they stay suppressed.
-    assert not survives_tracking_gate(conversion, set())
-    assert not survives_tracking_gate(ctr, set())
+    # The conversion layer reads the feed that went silent, so it waits.
+    assert not survives_tracking_gate(
+        _finding(DiagnosticLayer.CONVERSION, rule_id="1b"), set()
+    )

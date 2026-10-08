@@ -69,21 +69,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "constraint_conversion_floor_ratio": 0.80,
     #: Below this the Search Console sample is too thin to judge traffic on.
     "constraint_traffic_min_impressions": 500.0,
-    "min_expected_leads_monthly": 0.1,
-    #: Per-rule discount, for when measured outcomes exist. Until then
-    #: every rule is trusted at face value and the learning loop is not
-    #: built.
-    "reliability_default": 1.0,
-    #: Per rule, so one can be discounted without touching the rest.
-    "reliability_1a": 1.0,
-    "reliability_1b": 1.0,
-    "reliability_2a": 1.0,
-    "reliability_2c": 1.0,
-    "reliability_3a": 1.0,
-    "reliability_3b": 1.0,
-    "reliability_6": 1.0,
-    "reliability_5a": 1.0,
-    "reliability_ai_crawlers_unblock": 1.0,
     # 3a — the page ranks for a question and buries the answer.
     #: Below this the ranking is too thin for a rewrite to be worth an hour.
     "answer_first_min_impressions": 200,
@@ -119,9 +104,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     # outranked every measured estimate SMA had, and twenty-five prompt
     # actions decided the whole month. A guess should sit below a
     # measurement, not above it.
-    "flat_credit_6_prompt_gap": 0.15,
-    "flat_credit_5a_entity_fix": 0.2,
-    "flat_credit_ai_crawlers_unblock": 1.0,
     #: How many donor links one rank-push action may ask for. The cap is
     #: what keeps it inside an hour.
     "donor_link_cap": 5,

@@ -4,49 +4,35 @@ import { useId, useState } from "react";
 
 import { DecisionActionBar } from "@/components/DecisionEngine/DecisionActionBar";
 import {
-  expectedLeadsMonthly,
+  demandOf,
   findingActions,
+  formatDemand,
   formatEvidence,
   growthActionLabel,
+  isPrecondition,
   numberField,
-  stringField,
   valueDerivation,
   type Finding,
   type StoredDecision,
 } from "@/lib/decision-engine";
 
 /**
- * What kind of number this is — or that there isn't one.
+ * Whether a row is a site-wide precondition, and why it leads its layer.
  *
- * The third branch is the one that matters: this defaulted to "Measured"
- * for anything that was not a flat credit, including rows that carried no
- * valuation at all. Eight of those reached the screen, each showing an em
- * dash for leads and for time under a green badge claiming it was
- * measured. An unvalued row is a bug, and it has to look like one.
+ * This used to say what kind of lead figure the row carried — "Flat
+ * credit" for the three rules with no clicks-to-leads model, "Measured"
+ * for the rest, and "Not valued" for the eight that reached the screen
+ * with no figure at all under a green badge claiming they were measured.
+ * Nothing carries a lead figure now, so the only distinction left is a
+ * real one: a count for one page, or a fix that holds back all of them.
  */
-function basisChip(finding: Finding) {
-  const basis = stringField(finding.evidence_json ?? {}, "value_basis");
-  if (basis === "flat_credit") {
-    return {
-      label: "Flat credit",
-      className: "bg-[#f6ead0] text-[#614a16]",
-      title:
-        "A placeholder credit. There is no honest clicks-to-leads model for this action yet, so every one of its kind carries the same value and the search volume breaks the tie.",
-    };
-  }
-  if (basis === null || expectedLeadsMonthly(finding) === null) {
-    return {
-      label: "Not valued",
-      className: "bg-[#f3e2e2] text-[#6b2b2b]",
-      title:
-        "The engine could not put a lead estimate on this. It should not be competing for an action; please report it.",
-    };
-  }
+function preconditionChip(finding: Finding) {
+  if (!isPrecondition(finding)) return null;
   return {
-    label: "Measured",
-    className: "bg-[#d9f3e4] text-[#2c4a3e]",
+    label: "Unblocks the rest",
+    className: "bg-[#f6ead0] text-[#614a16]",
     title:
-      "The sessions and the leads were counted. What is estimated is that the fix recovers them.",
+      "Site-wide, so it has no count of its own. An engine that cannot fetch the site will not cite any page on it, which is why this comes first.",
   };
 }
 
@@ -82,12 +68,11 @@ export function ActionLedgerRow({
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const leads = expectedLeadsMonthly(finding);
+  const demand = demandOf(finding);
   const minutes = numberField(finding.evidence_json ?? {}, "estimated_minutes");
-  const chip = basisChip(finding);
+  const chip = preconditionChip(finding);
   const steps = findingActions(finding.evidence_json ?? {});
   const derivation = valueDerivation(finding);
-  const tiebreak = numberField(finding.evidence_json ?? {}, "tiebreak_volume");
   const evidence = formatEvidence(finding.evidence_json ?? {});
 
   return (
@@ -111,7 +96,6 @@ export function ActionLedgerRow({
           </span>
           <span className="mt-1 block break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
             {subject(finding)}
-            {tiebreak ? ` · nearest tracked term: ${tiebreak.toLocaleString()} searches / mo` : ""}
           </span>
         </span>
 
@@ -119,21 +103,33 @@ export function ActionLedgerRow({
             the title as one strip rather than each becoming a column one
             word wide, which is what five fixed columns did to a phone. */}
         <span className="ml-10 flex flex-none items-baseline gap-3 sm:ml-0 sm:gap-4">
-          <span className="w-auto text-right font-[family-name:var(--font-display)] sm:w-[104px] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
-            {leads === null ? "—" : leads.toFixed(2)}
+          <span className="w-auto text-right sm:w-[132px]">
+            <span className="font-[family-name:var(--font-display)] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
+              {formatDemand(demand)}
+            </span>
+            {demand ? (
+              // The unit sits on the row, not in the heading: 74,000
+              // searches and 312 clicks are both in this list and they are
+              // not the same thing.
+              <span className="ml-1 text-[11px] text-[var(--text-tertiary)]">
+                {demand.unit.replace(" / mo", "")}
+              </span>
+            ) : null}
           </span>
 
           <span className="w-auto text-right text-[13px] text-[var(--text-secondary)] sm:w-[72px]">
             {minutes === null ? "—" : `${minutes} min`}
           </span>
 
-          <span className="w-auto text-right sm:w-[112px]">
-            <span
-              title={chip.title}
-              className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${chip.className}`}
-            >
-              {chip.label}
-            </span>
+          <span className="w-auto text-right sm:w-[132px]">
+            {chip ? (
+              <span
+                title={chip.title}
+                className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${chip.className}`}
+              >
+                {chip.label}
+              </span>
+            ) : null}
           </span>
         </span>
       </button>
@@ -191,13 +187,15 @@ export function ActionLedgerRow({
             ) : null}
           </div>
 
-          {/* One number and the arithmetic behind it, in place of five
-              0-100 bars in a currency nobody could read back as leads or
-              as minutes — which were the only two questions being asked. */}
+          {/* One number and where it came from, in place of five 0-100
+              bars in a currency nobody could read back as people or as
+              minutes — which were the only two questions being asked. */}
           <aside className="border-[var(--border)] lg:border-l lg:pl-7">
-            <p className="text-[11.5px] text-[var(--text-tertiary)]">Expected leads / month</p>
+            <p className="text-[11.5px] text-[var(--text-tertiary)]">
+              {demand ? demand.unit.replace(" / mo", " a month") : "Site-wide"}
+            </p>
             <p className="mt-1 font-[family-name:var(--font-display)] text-[44px] font-black leading-none tracking-[-0.035em] text-[var(--text-primary)]">
-              {leads === null ? "—" : leads.toFixed(2)}
+              {isPrecondition(finding) ? "All" : formatDemand(demand)}
             </p>
 
             {derivation.length > 0 ? (
@@ -216,11 +214,11 @@ export function ActionLedgerRow({
                   ))}
                 </div>
               </dl>
-            ) : (
+            ) : chip ? (
               <p className="mt-5 text-[12.5px] leading-relaxed text-[var(--text-tertiary)]">
                 {chip.title}
               </p>
-            )}
+            ) : null}
           </aside>
         </div>
       ) : null}

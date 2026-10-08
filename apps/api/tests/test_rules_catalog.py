@@ -7,7 +7,7 @@ code is worse than none, because it is believed.
 
 from __future__ import annotations
 
-from app.decisions.actions.value import (
+from app.decisions.actions.demand import (
     DEFAULT_MINUTES,
     GROWTH_ACTION_MAX_MINUTES,
     _minutes,

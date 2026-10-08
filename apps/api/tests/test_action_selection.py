@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.decisions.thresholds import merge_thresholds
 from app.models.decision import DiagnosticLayer, GrowthAction
 from app.services.decision_types import LeverFinding
-from app.services.lever_engine import action_rule_id, value_actions
+from app.services.lever_engine import action_rule_id, measure_demand
 
 LIMITS = merge_thresholds(None)
 
@@ -41,98 +41,92 @@ def test_only_the_named_actions_can_spend_one():
 
 
 def test_report_only_findings_never_become_actions():
-    out = value_actions(
+    out = measure_demand(
         [_finding(evidence={"audit_signal": "description_missing"})],
         thresholds=LIMITS,
         window_days=30,
     )
     assert out[0].is_recommended_action is False
-    assert "expected_leads_monthly" not in out[0].evidence_json
+    assert "demand" not in out[0].evidence_json
 
 
-def test_an_action_is_valued_in_leads_per_month():
-    out = value_actions(
-        [_finding(evidence={"rule_id": "1a", "estimated_incremental_leads": 0.56})],
+def test_an_action_is_counted_in_its_layers_unit():
+    """A conversion action is about the people who arrive on the page."""
+    out = measure_demand(
+        [_finding(evidence={"rule_id": "1a", "demand_raw": 280})],
         thresholds=LIMITS,
         window_days=28,
     )
-    assert out[0].evidence_json["expected_leads_monthly"] == 0.6
-    assert out[0].evidence_json["value_basis"] == "estimated_incremental_leads"
+    assert out[0].evidence_json["demand"] == 300.0
+    assert out[0].evidence_json["demand_unit"] == "sessions / mo"
     assert out[0].evidence_json["estimated_minutes"] == 45
 
 
-def test_a_tiny_action_is_recorded_rather_than_hidden():
-    out = value_actions(
-        [_finding(evidence={"rule_id": "1a", "estimated_incremental_leads": 0.02})],
+def test_nothing_is_dropped_for_being_small():
+    """There is no floor. A rule gates itself on its own inputs, and a
+    second global floor in a unit the rule does not use is how an action
+    with real demand got dropped for failing a lead conversion."""
+    out = measure_demand(
+        [_finding(evidence={"rule_id": "1a", "demand_raw": 2})],
         thresholds=LIMITS,
         window_days=30,
     )
-    assert out[0].evidence_json["below_floor"] is True
-    assert out[0].is_recommended_action is False
-    assert out[0].promotion_blocked_reason == "below_floor"
+    assert out[0].evidence_json["demand"] == 2.0
+    assert "below_floor" not in out[0].evidence_json
+    assert out[0].promotion_blocked_reason is None
 
 
-def test_actions_are_ranked_by_what_they_are_worth():
+def test_actions_are_ranked_by_how_many_people_they_are_about():
     findings = [
-        _finding(key="small", evidence={"rule_id": "1b", "estimated_incremental_leads": 0.3}),
-        _finding(key="big", evidence={"rule_id": "1a", "estimated_incremental_leads": 0.9}),
+        _finding(key="small", evidence={"rule_id": "1b", "demand_raw": 30}),
+        _finding(key="big", evidence={"rule_id": "1a", "demand_raw": 900}),
     ]
-    out = value_actions(findings, thresholds=LIMITS, window_days=30)
+    out = measure_demand(findings, thresholds=LIMITS, window_days=30)
     assert [f.rule_key for f in out] == ["big", "small"]
 
 
-def test_a_flat_credit_action_needs_no_estimate():
-    out = value_actions(
-        [_finding(evidence={"audit_signal": "prompt_not_cited"})],
+def test_a_precondition_outranks_every_count():
+    """A blocked crawler holds back every page under it, so it is not
+    ranked against one page's demand."""
+    findings = [
+        _finding(key="big", evidence={"rule_id": "1a", "demand_raw": 9000}),
+        _finding(key="blocked", evidence={"audit_signal": "ai_crawlers_blocked"}),
+    ]
+    out = measure_demand(findings, thresholds=LIMITS, window_days=30)
+    assert [f.rule_key for f in out] == ["blocked", "big"]
+    assert out[0].evidence_json["precondition"] is True
+
+
+def test_a_monthly_count_is_not_restated():
+    """Search volume is already per month. Restating it would deflate it
+    by the ratio of the window to thirty days."""
+    out = measure_demand(
+        [_finding(evidence={"audit_signal": "prompt_not_cited", "demand_monthly": 74000})],
         thresholds=LIMITS,
-        window_days=30,
+        window_days=28,
     )
-    assert out[0].evidence_json["value_basis"] == "flat_credit"
-    assert out[0].evidence_json["expected_leads_monthly"] == 0.15
+    assert out[0].evidence_json["demand"] == 74000.0
 
 
-def test_a_search_rule_without_a_lead_rate_names_the_missing_input():
-    """There is no honest way to turn clicks into leads without one. That
-    is a missing input, not a broken rule."""
-    out = value_actions(
+def test_an_action_rule_with_no_count_is_reported_as_a_bug():
+    """Silently ranking it last would bury it. No client input can cause
+    this — a rule that forgets to say what it is about causes it."""
+    out = measure_demand(
         [_finding(evidence={"rule_id": "2a"})],
         thresholds=LIMITS,
         window_days=30,
-        site_lead_rate=None,
     )
-    assert out[0].evidence_json["value_error"] == "no_lead_rate"
+    assert out[0].evidence_json["demand_error"] == "no_count"
     assert out[0].is_recommended_action is False
-
-
-def test_a_missing_estimate_with_a_lead_rate_present_is_a_bug():
-    """Silently valuing it at nothing would bury it."""
-    out = value_actions(
-        [_finding(evidence={"rule_id": "2a"})],
-        thresholds=LIMITS,
-        window_days=30,
-        site_lead_rate=2.0,
-    )
-    assert out[0].evidence_json["value_error"] == "no_raw_lead_estimate"
-
-
-def test_the_raw_estimate_is_taken_directly_when_stated():
-    """`normalize_business_impact` only records the lead number when it is
-    positive, so depending on it left a zero-shortfall action unvalued."""
-    out = value_actions(
-        [_finding(evidence={"rule_id": "1b", "raw_leads_for_window": 0.6})],
-        thresholds=LIMITS,
-        window_days=30,
-    )
-    assert out[0].evidence_json["expected_leads_monthly"] == 0.6
 
 
 def test_a_page_with_work_settling_is_not_recommended_again():
     """Recommending the same page a fortnight after someone rewrote it
     asks them to do it twice."""
-    out = value_actions(
+    out = measure_demand(
         [
             _finding(
-                evidence={"rule_id": "1a", "raw_leads_for_window": 0.9},
+                evidence={"rule_id": "1a", "demand_raw": 402},
                 page_url="https://x/done",
             )
         ],
@@ -148,10 +142,10 @@ def test_a_page_with_work_settling_is_not_recommended_again():
 def test_a_page_booked_for_refresh_keeps_its_steps_and_stops_counting():
     """The work is paid for out of the content allowance. Spending a growth
     action on it would charge the client twice for one job."""
-    out = value_actions(
+    out = measure_demand(
         [
             _finding(
-                evidence={"rule_id": "1b", "raw_leads_for_window": 0.9},
+                evidence={"rule_id": "1b", "demand_raw": 402},
                 page_url="https://x/booked",
             )
         ],
@@ -166,10 +160,10 @@ def test_a_page_booked_for_refresh_keeps_its_steps_and_stops_counting():
 
 
 def test_an_untouched_page_is_unaffected():
-    out = value_actions(
+    out = measure_demand(
         [
             _finding(
-                evidence={"rule_id": "1a", "raw_leads_for_window": 0.9},
+                evidence={"rule_id": "1a", "demand_raw": 402},
                 page_url="https://x/fresh",
             )
         ],

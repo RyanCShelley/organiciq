@@ -572,8 +572,6 @@ class DiagnoseResponse(BaseModel):
     constraint: ConstraintOut | None = None
     #: Fix these first: they suppress everything below them.
     blocking_findings: list[FindingOut] = []
-    below_floor_actions: list[FindingOut] = []
-    unvalued_actions: list[FindingOut] = []
     search_opportunities: list[SearchOpportunityOut] = []
     recommendations: list[FindingOut] = []
 

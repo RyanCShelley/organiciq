@@ -93,8 +93,6 @@ export type DiagnoseResponse = {
   constraint?: Constraint | null;
   /** Fix these first: they suppress everything below them. */
   blocking_findings?: Finding[];
-  below_floor_actions?: Finding[];
-  unvalued_actions?: Finding[];
   search_opportunities?: SearchOpportunity[];
   content_planning_signals?: SearchOpportunity[];
   recommendations: Finding[];
@@ -225,10 +223,37 @@ export type StoredDecision = {
   dismissal_reason?: string | null;
 };
 
-/** Expected leads a month, for actions valued in that unit. */
-export function expectedLeadsMonthly(finding: Finding): number | null {
-  const value = finding.evidence_json?.expected_leads_monthly;
-  return typeof value === "number" ? value : null;
+/**
+ * How many people the action is about, and what they are.
+ *
+ * Every action was priced in expected leads a month until October 2026,
+ * which meant a site-wide lead rate applied to one page's clicks, and a
+ * flat credit for the three rules that had no clicks-to-leads model at
+ * all — so twenty-five tracked prompts all read 0.15 and the ranking was
+ * the hidden tie-break underneath.
+ *
+ * The three outcomes are counted in three units and nothing converts
+ * between them, so the unit travels with the number.
+ */
+export type Demand = { count: number; unit: string } | null;
+
+export function demandOf(finding: Finding): Demand {
+  const evidence = finding.evidence_json ?? {};
+  const count = evidence.demand;
+  const unit = evidence.demand_unit;
+  if (typeof count !== "number" || typeof unit !== "string") return null;
+  return { count, unit };
+}
+
+/** A site-wide fix that holds back every page under it, so it has no count. */
+export function isPrecondition(finding: Finding): boolean {
+  return finding.evidence_json?.precondition === true;
+}
+
+/** Counts get thousands separators; nothing here is ever a decimal. */
+export function formatDemand(demand: Demand): string {
+  if (demand === null) return "—";
+  return Math.round(demand.count).toLocaleString();
 }
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -238,7 +263,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   ai_visibility: "AI visibility",
 };
 
-/** Everything the card needs to show how a measured estimate was built. */
+/** Everything the card needs to show where the count came from. */
 export type ValueDerivation = { label: string; value: string }[];
 
 export function valueDerivation(finding: Finding): ValueDerivation {
@@ -248,7 +273,9 @@ export function valueDerivation(finding: Finding): ValueDerivation {
   const leads = numberField(evidence, "leads");
   const benchmark = numberField(evidence, "benchmark_rate_pct");
   const shortfall = numberField(evidence, "shortfall_leads");
-  const reliability = numberField(evidence, "reliability_prior");
+  const recoverable = numberField(evidence, "recoverable_clicks");
+  const impressions = numberField(evidence, "impressions");
+  const searchVolume = numberField(evidence, "search_volume");
 
   if (sessions !== null) rows.push({ label: "Organic sessions", value: formatNum(sessions, 0) });
   if (leads !== null) rows.push({ label: "Leads from them", value: formatNum(leads, 0) });
@@ -259,9 +286,19 @@ export function valueDerivation(finding: Finding): ValueDerivation {
       value: `${benchmark.toFixed(2)}%`,
     });
   }
-  if (shortfall !== null) rows.push({ label: "Shortfall", value: formatNum(shortfall, 2) });
-  if (reliability !== null && reliability !== 1) {
-    rows.push({ label: "Discounted for a claim not yet observed", value: `×${reliability}` });
+  if (shortfall !== null) {
+    // Modelled, not counted — it is why the action exists and it is not
+    // what ranks it.
+    rows.push({ label: "Shortfall against that", value: formatNum(shortfall, 2) });
+  }
+  if (impressions !== null) {
+    rows.push({ label: "Impressions", value: formatNum(impressions, 0) });
+  }
+  if (recoverable !== null) {
+    rows.push({ label: "Clicks the curve says are left", value: formatNum(recoverable, 0) });
+  }
+  if (searchVolume !== null && searchVolume > 0) {
+    rows.push({ label: "Searches a month", value: formatNum(searchVolume, 0) });
   }
   return rows;
 }

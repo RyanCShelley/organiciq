@@ -65,34 +65,33 @@ def main() -> int:
                 logger.info("  engine blocked: %s\n", (result.message or "")[:120])
                 continue
 
-            # The same three lists the API serves and the screen reads.
-            # These were open-coded here while the web read a different
-            # field entirely, so this command and that page disagreed about
-            # what the client's actions even were.
+            # The same list the API serves and the screen reads. This was
+            # open-coded here while the web read a different field entirely,
+            # so this command and that page disagreed about what the
+            # client's actions even were.
             actions = result.growth_actions
-            below = result.below_floor_actions
-            broken = result.unvalued_actions
+            constraint = result.constraint
 
             logger.info(
-                "  %d actions above the floor, %d below, %d unvalued\n",
-                len(actions), len(below), len(broken),
+                "  constraint: %s · %d actions\n",
+                constraint.layer.value if constraint else "none measurable",
+                len(actions),
             )
             for index, row in enumerate(actions, start=1):
                 evidence = row.evidence_json
                 taken = "  ← taken" if index <= (allowance or 0) else ""
                 logger.info(
-                    "  %2d. %-4s %5.2f leads/mo  %3s min  %-12s %s%s",
+                    "  %2d. %-4s %-11s %9s %-14s %3s min  %s%s",
                     index,
                     evidence.get("rule_id", "?"),
-                    evidence.get("expected_leads_monthly", 0.0),
+                    row.stage.value,
+                    ("precondition" if evidence.get("precondition")
+                     else f"{evidence.get('demand', 0.0):,.0f}"),
+                    evidence.get("demand_unit", ""),
                     evidence.get("estimated_minutes", "?"),
-                    evidence.get("value_basis", "?"),
-                    (row.page_url or row.query or "site-wide")[-44:],
+                    (row.page_url or row.query or "site-wide")[-40:],
                     taken,
                 )
-                tie = evidence.get("tiebreak_volume")
-                if tie:
-                    logger.info("        (tiebreak: %s searches/mo)", int(tie))
                 logger.info(
                     "%s",
                     textwrap.fill(
@@ -102,44 +101,13 @@ def main() -> int:
                         subsequent_indent="        ",
                     )[:400],
                 )
-            for row in broken:
-                logger.info(
-                    "  UNVALUED  %-6s %s",
-                    row.evidence_json.get("rule_id")
-                    or row.evidence_json.get("gate")
-                    or row.evidence_json.get("audit_signal"),
-                    (row.page_url or row.query or "site-wide")[-50:],
-                )
             if allowance and len(actions) < allowance:
+                # Nothing is padded, and the shortfall is stated rather than
+                # filled with weaker work.
                 logger.info(
                     "\n  SHORT: %d of %d. Nothing is padded — weaker work is not an action.",
                     len(actions), allowance,
                 )
-                # What a short plan nearly offered. Without this the floor is
-                # an assertion: the reader is told there was nothing better
-                # without being shown what came closest, which is the one
-                # thing that says whether the floor is set right.
-                for row in below[:5]:
-                    evidence = row.evidence_json
-                    logger.info(
-                        "        below the floor: %-4s %5.3f leads/mo  %s",
-                        evidence.get("rule_id", "?"),
-                        evidence.get("expected_leads_monthly", 0.0),
-                        (row.page_url or row.query or "site-wide")[-44:],
-                    )
-                    # A conversion rule valued at zero is either a page
-                    # with nothing to recover or an estimate that lost its
-                    # inputs, and the two read identically without these.
-                    if "sessions" in evidence:
-                        logger.info(
-                            "            %s sessions, %s leads, benchmark %.2f%% (%s)"
-                            " → shortfall %s",
-                            evidence.get("sessions"),
-                            evidence.get("leads"),
-                            evidence.get("benchmark_rate_pct") or 0.0,
-                            evidence.get("benchmark_source", "?"),
-                            evidence.get("shortfall_leads"),
-                        )
             logger.info("")
         return 0
     finally:

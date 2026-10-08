@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.actions.entity import ENTITY_TYPES, EntityBlock, check_entity
-from app.decisions.actions.value import FLAT_CREDIT_RULES, value_for
+from app.decisions.actions.demand import demand_for
 from app.decisions.constraint import (
     LADDER,
     Constraint,
@@ -124,7 +124,6 @@ from app.services.decision_impact import (
     LeadRateContext,
     PageBusinessContext,
     SiteBusinessContext,
-    effective_lead_rate_pct,
     build_impact_explanation,
     compute_page_type_lead_rates,
     page_type_rate_support,
@@ -1872,6 +1871,9 @@ def _rank_push_finding(
             "gate": "rank_push",
             "rule_id": "2c",
             "promotion_class": "actionable",
+            # Searches where the page already appears. It is seen and not
+            # reachable, which is what moving the ranking addresses.
+            "demand_raw": round(float(page.impressions), 1),
             **impact_evidence,
         },
         baseline_metrics_json={
@@ -1975,6 +1977,7 @@ def _serp_ctr_finding(
             "expected_ctr_percent": round(expected, 2),
             "ctr_benchmark_source": benchmark_source_label(),
             "recoverable_clicks": recoverable_int,
+            "demand_raw": round(float(recoverable), 1),
             "average_position": round(page.average_position, 1),
             **impact_evidence,
         },
@@ -2161,8 +2164,6 @@ def _per_page_cascade(
                 page,
                 questions=question_queries.get(page.normalized_url, []),
                 crawl=crawl,
-                site=site,
-                lead_rate_ctx=lead_rate_ctx,
                 thresholds=thresholds or {},
                 ctr_curve=ctr_curve,
                 coverage=coverage,
@@ -2173,8 +2174,6 @@ def _per_page_cascade(
                 questions=question_queries.get(page.normalized_url, []),
                 crawl=crawl,
                 classification=classification,
-                site=site,
-                lead_rate_ctx=lead_rate_ctx,
                 thresholds=thresholds or {},
                 ctr_curve=ctr_curve,
                 coverage=coverage,
@@ -2674,6 +2673,10 @@ def _ai_visibility_prompt_findings(
     if not checks:
         return []
 
+    # The prompt's own volume is empty on every client, so the nearest
+    # tracked term carries the count. See `_nearest_tracked_volume`.
+    keyword_volumes = _tracked_keyword_volumes(db, client_id)
+
     by_prompt: dict[tuple[str, str], list[FactSerAiCheck]] = {}
     for check in checks:
         by_prompt.setdefault((check.llm_id, check.prompt_id), []).append(check)
@@ -2702,6 +2705,8 @@ def _ai_visibility_prompt_findings(
             volume = float(meta.search_volume or 0) if meta else 0.0
         except (TypeError, ValueError):
             volume = 0.0
+        if volume <= 0:
+            volume = _nearest_tracked_volume(prompt_text, keyword_volumes)
         impact, impact_evidence = score_ai_visibility_impact(
             signal="prompt_not_cited",
             volume=max(volume, 50.0),
@@ -2711,6 +2716,18 @@ def _ai_visibility_prompt_findings(
         diagnosis = (
             f"Tracked prompt is not earning AI citations across {len(rows)} checks: "
             f"“{prompt_text[:120]}”"
+        )
+        best = _best_page_for_prompt(prompt_text, page_titles)
+        prescription = classify_prompt_gap(
+            PromptSignals(
+                prompt=prompt_text,
+                checks=len(rows),
+                blocked_crawlers=blocked_crawlers,
+                best_page=best,
+                best_page_type=(
+                    classify_page_url(best).page_type.value if best else None
+                ),
+            )
         )
         finding = _make_finding(
             lever=GrowthAction.AI_VISIBILITY.value,
@@ -2726,6 +2743,7 @@ def _ai_visibility_prompt_findings(
                 "min_checks_required": min_checks,
                 "brand_cited": False,
                 "search_volume": volume,
+                "demand_monthly": volume,
                 **impact_evidence,
             },
             baseline_metrics_json={
@@ -2734,22 +2752,13 @@ def _ai_visibility_prompt_findings(
             },
             impact=impact,
             query=prompt_text[:200],
-            prescription=classify_prompt_gap(
-                PromptSignals(
-                    prompt=prompt_text,
-                    checks=len(rows),
-                    blocked_crawlers=blocked_crawlers,
-                    best_page=(best := _best_page_for_prompt(prompt_text, page_titles)),
-                    best_page_type=(
-                        classify_page_url(best).page_type.value if best else None
-                    ),
-                    # SE Visible holds who is cited instead; it is not
-                    # ingested, so the card asks a person to read it.
-                    citations_known=False,
-                )
-            ),
+            prescription=prescription,
         )
-        candidates.append((volume + len(rows), finding))
+        # Branch 2 prescribes writing the page, which is content creation and
+        # therefore inside the monthly plan already. It stays on the screen as
+        # a finding and cannot spend one of the client's growth actions.
+        finding.core_work = prescription.cause == "no_page_answers_prompt"
+        candidates.append((volume, finding))
 
     candidates.sort(key=lambda row: row[0], reverse=True)
     return [finding for _, finding in candidates[:top_n]]
@@ -3241,11 +3250,11 @@ def _conversion_page_findings(
                     "benchmark_source": benchmark_source,
                     "expected_leads": round(expected, 1),
                     "shortfall_leads": round(shortfall, 1),
-                    # The raw estimate, stated rather than inferred from
-                    # what `normalize_business_impact` happened to store:
-                    # it only records the lead number when it is positive,
-                    # so a shortfall of zero left the action unvalued.
-                    "raw_leads_for_window": round(max(shortfall, 0.0), 3),
+                    # The people who arrive. The shortfall above is what the
+                    # page's rate implies they should have produced, and it
+                    # stays as evidence — it does not rank the action,
+                    # because it is modelled and the sessions are counted.
+                    "demand_raw": round(float(ctx.ga4_sessions), 1),
                     "no_conversions_at_all": none_at_all,
                     "promotion_class": "actionable",
                     **impact_evidence,
@@ -3494,14 +3503,11 @@ def _answer_first_finding(
     *,
     questions: list[tuple[str, float, float, float]],
     crawl: FactCrawlPageSnapshot | None,
-    site: SiteBusinessContext,
-    lead_rate_ctx: LeadRateContext | None,
     thresholds: dict[str, Any],
     ctr_curve: dict[int, float] | None,
     coverage: Coverage | None = None,
 ) -> LeverFinding | None:
     """3a — the page ranks for a question and does not lead with the answer."""
-    rule_id = "3a"
     sections = _sections_for(crawl)
     if sections is None:
         if coverage is not None:
@@ -3541,26 +3547,10 @@ def _answer_first_finding(
     if not failures:
         return None
 
-    rate = effective_lead_rate_pct(
-        None,
-        site,
-        page_type=lead_rate_ctx.page_type if lead_rate_ctx else None,
-        page_type_rates=lead_rate_ctx.page_type_rates if lead_rate_ctx else None,
-        topic=lead_rate_ctx.topic if lead_rate_ctx else None,
-        topic_rates=lead_rate_ctx.topic_rates if lead_rate_ctx else None,
-    )
-    if rate is None or rate <= 0:
-        # No honest way to turn recoverable clicks into leads. The brief
-        # names this as its own skip rather than a silent zero.
-        if coverage is not None:
-            coverage.skipped(rule_id, SkipReason.NO_LEAD_RATE)
-        return None
-    raw_leads = sum(
+    recoverable = sum(
         _recoverable_clicks_at_target(
             impressions, position, target=target, curve=ctr_curve
         )
-        * rate
-        / 100.0
         for _q, impressions, position, _r in failures
     )
 
@@ -3586,7 +3576,7 @@ def _answer_first_finding(
         evidence_json={
             "audit_signal": "answer_not_first",
             "rule_id": "3a",
-            "raw_leads_for_window": round(raw_leads, 3),
+            "demand_raw": round(recoverable, 1),
             "questions_failing": len(failures),
             "question_impressions": round(sum(f[1] for f in failures), 1),
             "promotion_class": "actionable",
@@ -3604,14 +3594,11 @@ def _faq_expansion_finding(
     questions: list[tuple[str, float, float, float]],
     crawl: FactCrawlPageSnapshot | None,
     classification: PageClassification | None,
-    site: SiteBusinessContext,
-    lead_rate_ctx: LeadRateContext | None,
     thresholds: dict[str, Any],
     ctr_curve: dict[int, float] | None,
     coverage: Coverage | None = None,
 ) -> LeverFinding | None:
     """3b — the page draws questions its FAQ does not answer."""
-    rule_id = "3b"
     if classification is None or classification.page_type != PageType.COMMERCIAL:
         return None
     if crawl is None or crawl.faq_questions is None:
@@ -3645,24 +3632,8 @@ def _faq_expansion_finding(
     if not chosen:
         return None
 
-    rate = effective_lead_rate_pct(
-        None,
-        site,
-        page_type=lead_rate_ctx.page_type if lead_rate_ctx else None,
-        page_type_rates=lead_rate_ctx.page_type_rates if lead_rate_ctx else None,
-        topic=lead_rate_ctx.topic if lead_rate_ctx else None,
-        topic_rates=lead_rate_ctx.topic_rates if lead_rate_ctx else None,
-    )
-    if rate is None or rate <= 0:
-        # No honest way to turn recoverable clicks into leads. The brief
-        # names this as its own skip rather than a silent zero.
-        if coverage is not None:
-            coverage.skipped(rule_id, SkipReason.NO_LEAD_RATE)
-        return None
-    raw_leads = sum(
+    recoverable = sum(
         _recoverable_clicks_at_target(row[1], row[3], target=target, curve=ctr_curve)
-        * rate
-        / 100.0
         for row in chosen
     )
 
@@ -3682,7 +3653,7 @@ def _faq_expansion_finding(
         evidence_json={
             "audit_signal": "faq_gap",
             "rule_id": "3b",
-            "raw_leads_for_window": round(raw_leads, 3),
+            "demand_raw": round(recoverable, 1),
             "questions_uncovered": len(uncovered),
             "questions_offered": [row[0] for row in chosen],
             "faq_questions_present": len(existing),
@@ -3965,8 +3936,7 @@ def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
         finding
         for finding in findings
         if action_rule_id(finding) is not None
-        and not finding.evidence_json.get("below_floor")
-        and not finding.evidence_json.get("value_error")
+        and not finding.evidence_json.get("demand_error")
         # A gate failing means this finding's inputs cannot be trusted, so
         # it is not an hour anyone should spend.
         and not finding.suppressed_by
@@ -3978,26 +3948,7 @@ def growth_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
         # for work they are paying for twice.
         and not finding.core_work
     ]
-    return sorted(
-        actions,
-        key=lambda row: (
-            -float(row.evidence_json.get("expected_leads_monthly") or 0.0),
-            -float(row.evidence_json.get("tiebreak_volume") or 0.0),
-        ),
-    )
-
-
-def below_floor_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
-    """Valued, and not worth an hour. Shown so the floor can be argued with."""
-    return sorted(
-        (f for f in findings if f.evidence_json.get("below_floor")),
-        key=lambda row: -float(row.evidence_json.get("expected_leads_monthly") or 0.0),
-    )
-
-
-def unvalued_actions(findings: list[LeverFinding]) -> list[LeverFinding]:
-    """Actions the valuer could not price. A bug, surfaced rather than hidden."""
-    return [f for f in findings if f.evidence_json.get("value_error")]
+    return sorted(actions, key=_demand_rank_key, reverse=True)
 
 
 def action_rule_id(finding: LeverFinding) -> str | None:
@@ -4009,16 +3960,18 @@ def action_rule_id(finding: LeverFinding) -> str | None:
     return ACTION_RULE_IDS.get(str(key or ""))
 
 
-def _prompt_tiebreak_volume(
+def _nearest_tracked_volume(
     query: str | None, keyword_volumes: dict[str, float]
 ) -> float:
-    """Search volume for the keyword a prompt is closest to.
+    """Monthly searches for the tracked keyword a prompt is closest to.
 
-    Every prompt carries the same flat credit by definition, so without a
-    tiebreak the top five of twenty is whichever order the database
-    returned. Prompt volume itself is empty on every prompt for both
-    clients, so the closest tracked keyword stands in — the terms overlap
-    because they are about the same thing.
+    SE Ranking returns no volume on any prompt for any client, so the prompt
+    itself cannot say how many people are asking. The closest tracked keyword
+    stands in — the terms overlap because they are about the same thing.
+
+    This used to be a tie-break under a flat credit, which meant it was
+    already deciding the order while a made-up lead figure took the credit
+    for it. It is the count now, and the card says so.
     """
     if not query or not keyword_volumes:
         return 0.0
@@ -4031,6 +3984,22 @@ def _prompt_tiebreak_volume(
         if len(shared) >= 2 and volume > best:
             best = volume
     return best
+
+
+def _tracked_keyword_volumes(db: Session, client_id: UUID) -> dict[str, float]:
+    """Monthly search volume per tracked keyword, for the terms we follow."""
+    return {
+        keyword: float(volume)
+        for keyword, volume in db.query(
+            FactSerKeywordMetric.keyword, FactSerKeywordMetric.volume
+        )
+        .filter(
+            FactSerKeywordMetric.client_id == client_id,
+            FactSerKeywordMetric.volume.isnot(None),
+        )
+        .all()
+        if keyword
+    }
 
 
 def _settling_urls(db: Session, client_id: UUID, *, days: int) -> set[str]:
@@ -4151,14 +4120,12 @@ def _entity_fix_finding(
         verify_after_days=28,
     )
     coverage.ran("5a", findings=1)
-    # The action's own value is the flat credit it earns in leads a month;
-    # the 0-100 impact is that same number through the shared normaliser,
-    # so 5a sorts against every other rule in one currency rather than its
-    # own. A literal here would be a second scale.
-    credit = float(thresholds.get("flat_credit_5a_entity_fix", 0.0) or 0.0)
+    # Structured data that misnames the brand is wrong on every page at
+    # once, so it carries no count of its own: it is a precondition and
+    # sorts first in its layer. See `PRECONDITION_RULES`.
     impact, impact_evidence = normalize_business_impact(
         site=site,
-        estimated_incremental_leads=credit,
+        estimated_incremental_leads=0.0,
         data_confidence="medium",
     )
     return _make_finding(
@@ -4180,64 +4147,52 @@ def _entity_fix_finding(
     )
 
 
-def value_actions(
+def measure_demand(
     findings: list[LeverFinding],
     *,
     thresholds: dict[str, Any],
     window_days: int,
-    keyword_volumes: dict[str, float] | None = None,
-    site_lead_rate: float | None = None,
     settling: set[str] | None = None,
     refreshing: set[str] | None = None,
 ) -> list[LeverFinding]:
-    """Value every action in expected leads per month, and drop the tiny.
+    """Count how many people each action is about, in its outcome's unit.
 
-    The raw estimate is the one the rule already computed — stored in
-    evidence before `normalize_business_impact` applied the goal-relative
-    scale and the evidence haircut — restated per month. Nothing is
-    discounted twice.
+    The count is the one the rule already measured — impressions, recoverable
+    clicks, sessions — restated per month. Nothing is converted into leads on
+    the way, so no action is dropped for failing a conversion the engine had
+    no business performing, and no action carries a flat credit standing in
+    for a model that was never built.
     """
     kept: list[LeverFinding] = []
     for finding in findings:
         rule_id = action_rule_id(finding)
         if rule_id is None:
-            # Report-only work. It keeps the old scoring and never spends
-            # an action.
+            # Report-only work. It never spends an action.
             finding.is_recommended_action = False
             kept.append(finding)
             continue
 
         evidence = finding.evidence_json
-        raw = evidence.get("raw_leads_for_window")
-        if raw is None:
-            raw = evidence.get("estimated_incremental_leads")
-        if raw is None:
-            raw = evidence.get("estimated_leads_at_risk")
         try:
-            value = value_for(
+            demand = demand_for(
                 rule_id,
+                layer=layer_of(finding).value,
                 thresholds=thresholds,
                 window_days=window_days,
-                raw_leads_for_window=float(raw) if raw is not None else None,
+                counted_in_window=_as_float(evidence.get("demand_raw")),
+                counted_monthly=_as_float(evidence.get("demand_monthly")),
                 evidence_label=str(evidence.get("data_confidence") or "estimated"),
-                tiebreak=_prompt_tiebreak_volume(
-                    finding.query, keyword_volumes or {}
-                ),
             )
         except ValueError:
-            # Without a site lead rate there is no honest way to turn
-            # clicks into leads, which the brief names as its own skip —
-            # it is a missing input, not a broken rule.
-            evidence["value_error"] = (
-                "no_lead_rate"
-                if not (evidence.get("site_lead_rate_pct") or site_lead_rate)
-                else "no_raw_lead_estimate"
-            )
+            # An action with nothing to rank it by is a rule that forgot to
+            # say what it is about — a bug here, not a missing input from a
+            # client. `test_every_action_rule_counts_demand` fails on it.
+            evidence["demand_error"] = "no_count"
             finding.is_recommended_action = False
             kept.append(finding)
             continue
 
-        evidence.update(value.as_dict())
+        evidence.update(demand.as_dict())
 
         url = finding.page_url or ""
         if settling and url in settling:
@@ -4252,37 +4207,48 @@ def value_actions(
             kept.append(finding)
             continue
 
-        if not value.above_floor:
-            evidence["below_floor"] = True
-            finding.is_recommended_action = False
-            finding.promotion_blocked_reason = "below_floor"
         kept.append(finding)
 
-    # Ranked by what they are worth, so the web can take the top N.
-    kept.sort(
-        key=lambda row: (
-            row.evidence_json.get("expected_leads_monthly") or 0.0,
-            row.evidence_json.get("tiebreak_volume") or 0.0,
-        ),
-        reverse=True,
-    )
+    kept.sort(key=_demand_rank_key, reverse=True)
     return kept
 
 
-#: When two findings on one page are worth the same, this decides. Earlier
-#: is better: a conversion fix outranks a listing fix outranks a content
-#: rewrite, which is the order someone would do them in anyway.
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _demand_rank_key(finding: LeverFinding) -> tuple[int, float]:
+    """Preconditions first, then by how many people the action is about.
+
+    A blocked crawler or a brand the structured data misnames holds back
+    every page under it, so it is not ranked against one page's demand — it
+    goes first in its layer or it makes the rest of the layer pointless.
+    """
+    evidence = finding.evidence_json
+    return (
+        1 if evidence.get("precondition") else 0,
+        float(evidence.get("demand") or 0.0),
+    )
+
+
+#: When two findings on one page are about the same number of people, this
+#: decides. Earlier is better: a conversion fix outranks a listing fix
+#: outranks a content rewrite, which is the order someone would do them in.
 ACTION_PRECEDENCE = ("1a", "1b", "1c", "2a", "2c", "3a", "3b", "6")
 
 
 def _page_rank_key(finding: LeverFinding) -> tuple[float, int]:
-    """What a finding is worth on its page, and where it sits in the order.
+    """How many people a finding is about on its page, and its precedence.
 
-    Value first, because that is the one currency. The tie-break is the
-    precedence list rather than whatever order the rules happened to run
-    in, which is what decided it before.
+    Demand first. The tie-break is the precedence list rather than whatever
+    order the rules happened to run in, which is what decided it before.
     """
-    value = float(finding.evidence_json.get("expected_leads_monthly") or 0.0)
+    value = float(finding.evidence_json.get("demand") or 0.0)
     rule_id = action_rule_id(finding) or ""
     position = (
         ACTION_PRECEDENCE.index(rule_id)
@@ -4342,9 +4308,8 @@ def _collapse_by_page(findings: list[LeverFinding]) -> list[LeverFinding]:
                 {
                     "diagnosis": row.diagnosis,
                     "cause": row.evidence_json.get("cause"),
-                    "expected_leads_monthly": row.evidence_json.get(
-                        "expected_leads_monthly"
-                    ),
+                    "demand": row.evidence_json.get("demand"),
+                    "demand_unit": row.evidence_json.get("demand_unit"),
                 }
                 for row in sorted(hidden, key=lambda r: -_page_rank_key(r)[0])
             ]
@@ -4435,27 +4400,24 @@ def _pages_active_before(
     return active
 
 
-#: Rules whose value is a flat credit rather than a lead estimate. They do
-#: not read the lead rate, so a silent lead feed says nothing about them.
-LEAD_INDEPENDENT_RULES = frozenset(FLAT_CREDIT_RULES)
-
-
 def survives_tracking_gate(finding: LeverFinding, active_before: set[str]) -> bool:
     """Whether a finding stays promotable while Gate 0 is failing. B1.
 
-    The gate exists because a silent lead feed makes every lead estimate a
-    fiction. That is an argument about estimates, not about every rule:
-    a prompt gap and an entity fix carry a flat credit and never read the
-    lead rate at all.
+    The gate fires when a client's lead events go silent, and it used to take
+    everything down with it. That was right while every action was priced in
+    leads: an estimate built on a feed that is not reporting is fiction.
 
-    SMA relaunched on 7 September and its custom events did not come with
-    it, so the gate fired and took 26 prompt actions down with it — work
-    whose value never depended on the number that went missing.
+    Nothing is priced in leads now. Visibility counts searches and traffic
+    counts clicks, from Search Console and SE Ranking, neither of which knows
+    or cares whether the client's tag is firing. Only the conversion layer
+    reads the feed, so only the conversion layer waits for it.
+
+    SMA relaunched on 7 September and its custom events did not come with it.
+    The gate fired and took 26 prompt actions with it — work that never
+    touched the number that went missing.
     """
-    if action_rule_id(finding) in LEAD_INDEPENDENT_RULES:
+    if layer_of(finding) is not Layer.CONVERSION:
         return True
-    if finding.lever != GrowthAction.TECHNICAL_SEO.value:
-        return False
     if finding.core_work:
         # Upkeep is never promoted anyway; letting it through here would only
         # make the exception look broader than it is.
@@ -5734,33 +5696,21 @@ def diagnose(
         findings.append(entity)
 
     # ── Growth actions ──
-    # Valued in expected leads per month, which is the unit the business
-    # uses, and ranked by it so the web can take the top N for the
-    # client's plan. Everything else stays report-only.
+    # Counted in the unit of the outcome each one moves — searches, clicks
+    # or sessions — and ranked by that count within its layer, so the web
+    # can take the top N for the client's plan. Everything else stays
+    # report-only.
     window_days = (
         (gsc_period[1] - gsc_period[0]).days + 1 if gsc_period else 30
     )
-    findings = value_actions(
+    findings = measure_demand(
         findings,
         thresholds=thresholds,
         window_days=window_days,
-        site_lead_rate=site.site_lead_rate_pct,
         settling=_settling_urls(
             db, client.id, days=int(thresholds.get("rank_settle_days", 60))
         ),
         refreshing=_refresh_queue_urls(db, client.id),
-        keyword_volumes={
-            keyword: float(volume)
-            for keyword, volume in db.query(
-                FactSerKeywordMetric.keyword, FactSerKeywordMetric.volume
-            )
-            .filter(
-                FactSerKeywordMetric.client_id == client.id,
-                FactSerKeywordMetric.volume.isnot(None),
-            )
-            .all()
-            if keyword
-        },
     )
 
     # One action per page, after valuation rather than before it. This used
@@ -5829,8 +5779,6 @@ def diagnose(
         constraint=constraint,
         growth_actions=month_actions,
         blocking_findings=blocking_findings(all_findings),
-        below_floor_actions=below_floor_actions(all_findings),
-        unvalued_actions=unvalued_actions(all_findings),
         search_opportunities=search_opportunities,
         coverage=coverage.as_list(),
         **base_result,

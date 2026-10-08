@@ -19,9 +19,7 @@ from app.services.decision_types import LeverFinding
 from app.services.lever_engine import (
     ACTION_RULE_IDS,
     action_rule_id,
-    below_floor_actions,
     growth_actions,
-    unvalued_actions,
 )
 
 
@@ -51,49 +49,65 @@ def test_only_a_rule_that_can_spend_an_action_is_one():
     assert growth_actions([keyword]) == []
 
 
-def test_a_valued_action_is_offered():
-    action = _finding(rule_id="1b", expected_leads_monthly=1.07)
+def test_a_counted_action_is_offered():
+    action = _finding(rule_id="1b", demand=402.0)
     assert growth_actions([action]) == [action]
 
 
-def test_below_the_floor_is_not_offered_but_is_kept():
-    weak = _finding(rule_id="1b", expected_leads_monthly=0.01, below_floor=True)
-    assert growth_actions([weak]) == []
-    assert below_floor_actions([weak]) == [weak]
+def test_nothing_is_dropped_for_being_small():
+    """There is no floor any more. Actions were priced in expected leads a
+    month and anything under a tenth of a lead fell away — a floor in a unit
+    most of the rules could not honestly produce."""
+    tiny = _finding(rule_id="1b", demand=2.0)
+    assert growth_actions([tiny]) == [tiny]
 
 
-def test_an_action_the_valuer_could_not_price_is_surfaced_not_offered():
-    broken = _finding(rule_id="1b", value_error="no raw lead estimate")
+def test_an_action_with_no_count_is_held_back():
+    """A rule that reaches here having forgotten to say what it is about is
+    a bug in that rule. Offering it would rank it last and hide it."""
+    broken = _finding(rule_id="1b", demand_error="no_count")
     assert growth_actions([broken]) == []
-    assert unvalued_actions([broken]) == [broken]
 
 
-def test_the_order_is_by_expected_leads():
-    small = _finding(rule_id="6", expected_leads_monthly=0.15)
-    big = _finding(rule_id="1b", expected_leads_monthly=2.04)
+def test_the_order_is_by_how_many_people_the_action_is_about():
+    small = _finding(rule_id="6", demand=50.0)
+    big = _finding(rule_id="1b", demand=2040.0)
     assert growth_actions([small, big]) == [big, small]
 
 
-def test_a_flat_credit_tie_is_broken_by_volume():
-    """Every prompt carries the same credit by definition, so without this
-    the top five of twenty is whichever order the database returned."""
-    quiet = _finding(rule_id="6", expected_leads_monthly=0.15, tiebreak_volume=50)
-    loud = _finding(rule_id="6", expected_leads_monthly=0.15, tiebreak_volume=74000)
+def test_prompts_order_by_their_search_volume():
+    """They used to carry an identical flat credit of 0.15 leads a month and
+    sort on a hidden tie-break, so the screen showed twenty-five rows with
+    the same number and called it a ranking. The volume is the count now."""
+    quiet = _finding(rule_id="6", demand=50.0)
+    loud = _finding(rule_id="6", demand=74000.0)
     assert growth_actions([quiet, loud]) == [loud, quiet]
 
 
+def test_a_precondition_leads_its_layer():
+    """A blocked crawler holds back every page beneath it, so it is not
+    ranked against any one page's demand."""
+    page = _finding(rule_id="1b", demand=9000.0)
+    blocking = _finding(rule_id="ai_crawlers_unblock", precondition=True, demand=0.0)
+    assert growth_actions([page, blocking]) == [blocking, page]
+
+
 def test_every_offered_action_carries_what_the_screen_prints():
-    """The row shows leads a month and minutes. A row that has neither is
-    the bug this file exists for, and it renders as two em dashes."""
+    """The row shows a count, its unit and the minutes. A row missing any of
+    them is the bug this file exists for, and it renders as em dashes."""
     offered = growth_actions(
         [
-            _finding(rule_id="1b", expected_leads_monthly=1.07, estimated_minutes=15),
+            _finding(
+                rule_id="1b", demand=402.0, demand_unit="sessions / mo",
+                estimated_minutes=15,
+            ),
             _finding(audit_signal="keyword_not_ranking"),
         ]
     )
     assert len(offered) == 1
     for action in offered:
-        assert action.evidence_json.get("expected_leads_monthly") is not None
+        assert action.evidence_json.get("demand") is not None
+        assert action.evidence_json.get("demand_unit")
         assert action.evidence_json.get("estimated_minutes") is not None
 
 
@@ -109,7 +123,7 @@ def test_a_suppressed_finding_is_not_an_action():
     """A gate failing means this finding's inputs cannot be trusted. The
     old promotion refused it; the new selection has to as well, or a
     failure upstream becomes an hour of someone's work."""
-    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding = _finding(rule_id="1b", demand=402.0)
     finding.suppressed_by = "tracking_silent"
     assert growth_actions([finding]) == []
 
@@ -117,7 +131,7 @@ def test_a_suppressed_finding_is_not_an_action():
 def test_a_rule_this_team_has_dismissed_three_times_does_not_return():
     """Dismissed across three different pages and the rule is contested.
     Offering it again spends an action on an argument already had."""
-    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding = _finding(rule_id="1b", demand=402.0)
     finding.override_count = 3
     assert growth_actions([finding]) == []
 
@@ -125,13 +139,13 @@ def test_a_rule_this_team_has_dismissed_three_times_does_not_return():
 def test_core_work_never_spends_an_action():
     """It is in the plan every month. Promoting it bills a client for work
     they already pay for."""
-    finding = _finding(rule_id="2a", expected_leads_monthly=2.0)
+    finding = _finding(rule_id="2a", demand=402.0)
     finding.core_work = True
     assert growth_actions([finding]) == []
 
 
 def test_two_dismissals_is_not_yet_contested():
-    finding = _finding(rule_id="1b", expected_leads_monthly=2.0)
+    finding = _finding(rule_id="1b", demand=402.0)
     finding.override_count = 2
     assert growth_actions([finding]) == [finding]
 
@@ -147,7 +161,7 @@ def test_what_is_suppressing_the_plan_is_named():
 
     gate = _finding(gate="tracking")
     gate.diagnosis = "No conversions recorded in 14 days while 402 sessions arrived"
-    blocked = _finding(rule_id="6", expected_leads_monthly=0.15)
+    blocked = _finding(rule_id="6", demand=402.0)
     blocked.suppressed_by = gate.rule_key
 
     assert growth_actions([gate, blocked]) == []
@@ -155,7 +169,7 @@ def test_what_is_suppressing_the_plan_is_named():
 
 
 def test_nothing_is_named_when_nothing_is_blocked():
-    action = _finding(rule_id="1b", expected_leads_monthly=1.0)
+    action = _finding(rule_id="1b", demand=402.0)
     assert blocking_findings_of([action]) == []
 
 

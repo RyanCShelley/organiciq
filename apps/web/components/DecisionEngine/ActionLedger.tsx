@@ -1,10 +1,5 @@
 import { ActionLedgerRow } from "@/components/DecisionEngine/ActionLedgerRow";
-import {
-  expectedLeadsMonthly,
-  numberField,
-  type Finding,
-  type StoredDecision,
-} from "@/lib/decision-engine";
+import { type Finding, type StoredDecision } from "@/lib/decision-engine";
 
 function planWord(count: number): string {
   return count === 1 ? "1 action" : `${count} actions`;
@@ -30,8 +25,6 @@ function layerWord(layer: string, count: number): string {
  */
 export function ActionLedger({
   actions,
-  belowFloor,
-  unvalued = [],
   blocking = [],
   allowance,
   planLabel,
@@ -41,9 +34,6 @@ export function ActionLedger({
   decisionsByRule,
 }: {
   actions: Finding[];
-  belowFloor: Finding[];
-  /** Actions the engine could not price. A bug, shown rather than hidden. */
-  unvalued?: Finding[];
   /** What has to be fixed before anything below it can be trusted. */
   blocking?: Finding[];
   allowance: number;
@@ -105,7 +95,7 @@ export function ActionLedger({
       <div className="overflow-hidden rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)]">
         <div className="flex flex-wrap items-baseline justify-between gap-3 px-6 pb-3 pt-5">
           <h2 className="font-[family-name:var(--font-display)] text-[17px] font-extrabold text-[var(--text-primary)]">
-            Ranked by expected leads a month
+            The constraint first, then by how many people
           </h2>
           <p className="text-xs text-[var(--text-tertiary)]">
             {actions.length.toLocaleString()} {actions.length === 1 ? "action" : "actions"} worth an
@@ -119,9 +109,9 @@ export function ActionLedger({
         >
           <span className="w-6 flex-none">#</span>
           <span className="min-w-0 flex-1">What and where</span>
-          <span className="w-[104px] flex-none text-right">Leads / mo</span>
+          <span className="w-[132px] flex-none text-right">People / mo</span>
           <span className="w-[72px] flex-none text-right">Time</span>
-          <span className="w-[112px] flex-none text-right">Basis</span>
+          <span className="w-[132px] flex-none text-right" />
         </div>
 
         {included.map((item, index) => (
@@ -201,77 +191,6 @@ export function ActionLedger({
         ) : null}
       </div>
 
-      {unvalued.length > 0 ? (
-        <div className="mt-4 rounded-[var(--radius-lg,14px)] border border-[var(--danger-border,#e0bcbc)] bg-[var(--danger-soft,#fdf3f3)] px-6 py-4">
-          <p className="text-[14px] font-semibold text-[var(--text-primary)]">
-            {unvalued.length} {unvalued.length === 1 ? "action" : "actions"} could not be valued
-          </p>
-          <p className="mt-1.5 max-w-[80ch] text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            They are held back rather than ranked against work that has a number. This is a bug in
-            the engine, not a judgement about the work.
-          </p>
-          <ul className="mt-3 space-y-1.5">
-            {unvalued.map((item) => (
-              <li key={item.rule_key} className="text-[13px] text-[var(--text-secondary)]">
-                {item.diagnosis}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {belowFloor.length > 0 ? (
-        <details className="mt-4 rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] px-6 py-4">
-          <summary className="flex min-h-[44px] cursor-pointer items-center text-[13.5px] font-semibold text-[var(--brand-teal-deep)]">
-            Considered and not offered ({belowFloor.length})
-          </summary>
-          <p className="mt-2 max-w-[80ch] text-[13px] leading-relaxed text-[var(--text-tertiary)]">
-            Below a tenth of a lead a month. Shown so the floor can be argued with rather than taken
-            on trust — if these look worth an hour to you, the floor is wrong, not the work.
-          </p>
-          <ul className="mt-4 space-y-3">
-            {belowFloor.map((item) => (
-              <li
-                key={item.rule_key}
-                className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-[var(--border)] pt-3 text-[13.5px]"
-              >
-                <span className="min-w-[54px] font-[family-name:var(--font-display)] font-extrabold tabular-nums text-[var(--text-tertiary)]">
-                  {(expectedLeadsMonthly(item) ?? 0).toFixed(3)}
-                </span>
-                <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
-                  {item.diagnosis}
-                </span>
-                <span className="text-xs text-[var(--text-tertiary)]">
-                  {describeShortfall(item)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
     </section>
   );
-}
-
-/**
- * The inputs behind a number that came out too small.
- *
- * A page with nothing left to recover and an estimate that lost its
- * inputs both print 0.000; only these say which it is.
- */
-function describeShortfall(item: Finding): string {
-  const evidence = item.evidence_json ?? {};
-  const sessions = numberField(evidence, "sessions");
-  const leads = numberField(evidence, "leads");
-  const benchmark = numberField(evidence, "benchmark_rate_pct");
-  const shortfall = numberField(evidence, "shortfall_leads");
-  if (sessions === null) return "";
-  return [
-    `${sessions.toLocaleString()} sessions`,
-    `${leads ?? 0} leads`,
-    benchmark === null ? null : `benchmark ${benchmark.toFixed(2)}%`,
-    shortfall === null ? null : `shortfall ${shortfall}`,
-  ]
-    .filter(Boolean)
-    .join(", ");
 }

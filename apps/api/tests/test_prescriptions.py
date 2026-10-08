@@ -245,13 +245,18 @@ def test_a_page_that_exists_is_made_quotable_rather_than_replaced():
     )
 
 
-def test_the_missing_citation_layer_becomes_a_named_human_check():
-    """Who is cited instead lives in SE Visible and is not ingested. The
-    spec says name the check rather than go quiet."""
-    p = _prompt(best_page="https://x/agencies", citations_known=False)
-    human = [step for step in p.steps if step.human]
-    assert len(human) == 1
-    assert "not ingested" in human[0].detail
+def test_a_quotable_page_is_one_edit_and_no_homework():
+    """It used to append "read the engine's own output and note which
+    sources it cites" to every one of these, because SE Visible's citation
+    layer is not ingested. That is a research task wearing an action's
+    clothes, and it arrived on all twenty-five of SMA's prompt cards.
+
+    A page that draws the question and is not quoted needs work on that
+    page, and the work is the same edit whoever is cited instead.
+    """
+    p = _prompt(best_page="https://x/agencies")
+    assert [step for step in p.steps if step.human] == []
+    assert len(p.steps) == 1
 
 
 def test_a_handful_of_impressions_does_not_make_it_the_page_for_the_term():
@@ -580,15 +585,15 @@ def test_one_card_per_page():
     from app.services.decision_types import LeverFinding
     from app.services.lever_engine import _collapse_by_page
 
-    def _finding(leads: float, rule_id: str) -> LeverFinding:
+    def _finding(sessions: float, rule_id: str) -> LeverFinding:
         return LeverFinding(
-            rule_key=f"k{leads}",
+            rule_key=f"k{sessions}",
             lever="conversion_path",
             stage=DiagnosticLayer.CONVERSION,
-            diagnosis=f"something worth {leads}",
+            diagnosis=f"something about {sessions} people",
             recommended_action="do it",
             success_metric="m",
-            evidence_json={"rule_id": rule_id, "expected_leads_monthly": leads},
+            evidence_json={"rule_id": rule_id, "demand": sessions},
             baseline_metrics_json={},
             impact=0.0,
             confidence=0.0,
@@ -598,17 +603,15 @@ def test_one_card_per_page():
             page_url="https://x/pool-leak-emergency",
         )
 
-    # Ranked on what they are worth. This used to pick by `priority_score`,
-    # so the page's winner was chosen on the old 0-100 scale while the plan
-    # was ranked in leads — two currencies disagreeing about one URL.
-    kept = _collapse_by_page([_finding(0.36, "2a"), _finding(1.07, "1b")])
+    # Ranked on how many people each is about. This used to pick by
+    # `priority_score`, so the page's winner was chosen on the old 0-100
+    # scale while the plan was ranked in leads — two currencies disagreeing
+    # about one URL.
+    kept = _collapse_by_page([_finding(36.0, "2a"), _finding(107.0, "1b")])
     assert len(kept) == 1
-    assert kept[0].evidence_json["expected_leads_monthly"] == 1.07
+    assert kept[0].evidence_json["demand"] == 107.0
     # Nothing is lost: the quieter one rides along.
-    assert (
-        kept[0].evidence_json["also_found_on_this_page"][0]["expected_leads_monthly"]
-        == 0.36
-    )
+    assert kept[0].evidence_json["also_found_on_this_page"][0]["demand"] == 36.0
 
 
 def test_an_equal_tie_on_one_page_follows_the_precedence_list():

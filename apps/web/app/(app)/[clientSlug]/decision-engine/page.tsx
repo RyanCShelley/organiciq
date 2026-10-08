@@ -68,8 +68,6 @@ export default async function DecisionEnginePage({
   // Never truncated to the allowance: the plan says how many are included
   // this month, not how many are worth seeing. The ledger draws the line.
   const actions = data?.growth_actions ?? [];
-  const belowFloor = data?.below_floor_actions ?? [];
-  const unvalued = data?.unvalued_actions ?? [];
   const blocking = data?.blocking_findings ?? [];
   const constraint = data?.constraint ?? null;
 
@@ -124,8 +122,8 @@ export default async function DecisionEnginePage({
 
           <p className="max-w-[76ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
             {constraint
-              ? "The constraint's work comes first. Everything else is still here, ranked by what it is worth."
-              : "Everything the engine found that could be done in an hour, ranked by what it is worth."}{" "}
+              ? "The constraint's work comes first. Everything else is still here, ranked by how many people it is about."
+              : "Everything the engine found that could be done in an hour, ranked by how many people it is about."}{" "}
             The line falls where the plan does — the ranking is advice, not a rule.
             {selectedTowardPlan > 0
               ? ` ${selectedTowardPlan} accepted so far this period.`
@@ -134,8 +132,6 @@ export default async function DecisionEnginePage({
 
           <ActionLedger
             actions={actions}
-            belowFloor={belowFloor}
-            unvalued={unvalued}
             blocking={blocking}
             allowance={growthPlanAllowance}
             planLabel={planLabel}
