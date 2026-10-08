@@ -23,6 +23,13 @@ class SkipReason(str, Enum):
     #: The source itself never reported, so every rule reading it is
     #: quiet. Distinct from a rule that ran and found nothing.
     SOURCE_MISSING = "source_missing"
+    #: No site lead rate, so there is no honest way to turn recoverable
+    #: clicks into leads. A missing input, not a rule that found nothing.
+    NO_LEAD_RATE = "no_lead_rate"
+    #: 1c needs how far down the page people get. Nothing measures it yet,
+    #: so the rule is paused rather than guessed at from views/sessions,
+    #: which is zero on a quarter of SMA's rows.
+    NO_DEPTH_DATA = "no_depth_data"
 
 
 @dataclass

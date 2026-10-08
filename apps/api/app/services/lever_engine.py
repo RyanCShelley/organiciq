@@ -2056,6 +2056,12 @@ def _per_page_cascade(
     if not question_queries and coverage is not None:
         coverage.skipped("3a", SkipReason.NO_QUERY_PAGE_DATA)
         coverage.skipped("3b", SkipReason.NO_QUERY_PAGE_DATA)
+    if coverage is not None:
+        # 1c is one of the ten and cannot run: it compares how far down a
+        # page people get against the rest of the site, and nothing
+        # measures that yet. Recorded every run so it reads as paused
+        # rather than as a rule that never finds anything.
+        coverage.skipped("1c", SkipReason.NO_DEPTH_DATA)
     for page in pages:
         page_ctx = page_contexts.get(page.normalized_url)
         classification = classifications.get(page.normalized_url)
@@ -3475,6 +3481,7 @@ def _answer_first_finding(
     coverage: Coverage | None = None,
 ) -> LeverFinding | None:
     """3a — the page ranks for a question and does not lead with the answer."""
+    rule_id = "3a"
     sections = _sections_for(crawl)
     if sections is None:
         if coverage is not None:
@@ -3523,6 +3530,8 @@ def _answer_first_finding(
     if rate is None or rate <= 0:
         # No honest way to turn recoverable clicks into leads. The brief
         # names this as its own skip rather than a silent zero.
+        if coverage is not None:
+            coverage.skipped(rule_id, SkipReason.NO_LEAD_RATE)
         return None
     raw_leads = sum(
         _recoverable_clicks_at_target(
@@ -3578,6 +3587,7 @@ def _faq_expansion_finding(
     coverage: Coverage | None = None,
 ) -> LeverFinding | None:
     """3b — the page draws questions its FAQ does not answer."""
+    rule_id = "3b"
     if classification is None or classification.page_type != PageType.COMMERCIAL:
         return None
     if crawl is None or crawl.faq_questions is None:
@@ -3620,6 +3630,8 @@ def _faq_expansion_finding(
     if rate is None or rate <= 0:
         # No honest way to turn recoverable clicks into leads. The brief
         # names this as its own skip rather than a silent zero.
+        if coverage is not None:
+            coverage.skipped(rule_id, SkipReason.NO_LEAD_RATE)
         return None
     raw_leads = sum(
         _recoverable_clicks_at_target(row[1], row[3], target=target, curve=ctr_curve)
