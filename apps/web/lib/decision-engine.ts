@@ -51,6 +51,26 @@ export type SearchOpportunity = {
   diagnosis: string;
 };
 
+export type LayerAssessment = {
+  layer: string;
+  measurable: boolean;
+  ratio: number | null;
+  floor: number;
+  reason: string;
+  evidence?: Record<string, unknown>;
+};
+
+/** Which of visibility / traffic / leads is holding this client back. */
+export type Constraint = {
+  layer: string;
+  reason: string;
+  /** True when nothing was below its bar and the softest spot won instead. */
+  by_comparison: boolean;
+  assessments: LayerAssessment[];
+  /** How many of the month's actions move each outcome, keyed by layer. */
+  action_counts?: Record<string, number>;
+};
+
 export type DiagnoseResponse = {
   ready: boolean;
   message: string | null;
@@ -69,6 +89,8 @@ export type DiagnoseResponse = {
   findings: Finding[];
   /** The month's growth actions, ranked by the engine. */
   growth_actions?: Finding[];
+  /** The month's constraint. Null when no rung had the inputs to be read. */
+  constraint?: Constraint | null;
   /** Fix these first: they suppress everything below them. */
   blocking_findings?: Finding[];
   below_floor_actions?: Finding[];

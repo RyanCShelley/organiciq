@@ -11,6 +11,16 @@ function planWord(count: number): string {
 }
 
 /**
+ * Visibility and traffic are mass nouns and read the same at any count.
+ * "Leads" does not — "1 leads" is the kind of seam that makes a number
+ * look generated rather than counted.
+ */
+function layerWord(layer: string, count: number): string {
+  if (layer === "conversion") return count === 1 ? "lead" : "leads";
+  return layer;
+}
+
+/**
  * Every action the engine found, ranked, with the plan's line drawn across it.
  *
  * The line is stated rather than implied by truncating the list. The
@@ -46,6 +56,18 @@ export function ActionLedger({
   const included = allowance > 0 ? actions.slice(0, allowance) : actions;
   const beyond = allowance > 0 ? actions.slice(allowance) : [];
   const short = allowance > 0 && actions.length < allowance;
+  // What is down there, by outcome, so the closed summary still says
+  // something: "18 visibility, 3 leads" is a reason to open it or not.
+  const beyondSummary = Object.entries(
+    beyond.reduce<Record<string, number>>((acc, item) => {
+      const layer = item.stage ?? "other";
+      acc[layer] = (acc[layer] ?? 0) + 1;
+      return acc;
+    }, {}),
+  )
+    .sort((a, b) => b[1] - a[1])
+    .map(([layer, n]) => `${n} ${layerWord(layer, n)}`)
+    .join(", ");
 
   return (
     <section id="growth-actions" className="scroll-mt-24">
@@ -149,16 +171,20 @@ export function ActionLedger({
           </div>
         ) : null}
 
+        {/* Everything past the plan line, collapsed. Twenty-six open rows is
+            the menu this screen is trying to stop being; the work is still
+            here, and still in order, behind one click. */}
         {beyond.length > 0 ? (
-          <>
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-t-2 border-b-[var(--border)] border-t-[var(--text-primary)] bg-[var(--surface-muted)] px-6 py-3.5">
+          <details className="group">
+            <summary className="flex min-h-[44px] cursor-pointer flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-t-2 border-b-[var(--border)] border-t-[var(--text-primary)] bg-[var(--surface-muted)] px-6 py-3.5">
               <span className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)]">
                 {planLabel} ends here · {planWord(allowance)}
               </span>
               <span className="text-[13px] text-[var(--text-secondary)]">
-                Below is real work that did not fit this month.
+                {beyond.length} more {beyond.length === 1 ? "action" : "actions"} did not fit
+                this month{beyondSummary ? ` — ${beyondSummary}` : ""}
               </span>
-            </div>
+            </summary>
             {beyond.map((item, index) => (
               <ActionLedgerRow
                 key={item.rule_key}
@@ -171,7 +197,7 @@ export function ActionLedger({
                 decision={decisionsByRule.get(item.rule_key) ?? null}
               />
             ))}
-          </>
+          </details>
         ) : null}
       </div>
 

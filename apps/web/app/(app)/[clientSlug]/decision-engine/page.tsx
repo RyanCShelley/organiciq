@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ActionLedger } from "@/components/DecisionEngine/ActionLedger";
+import { ConstraintBand } from "@/components/DecisionEngine/ConstraintBand";
 import { EngineStatusBand } from "@/components/DecisionEngine/EngineStatusBand";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { Alert } from "@/components/ui/Alert";
@@ -70,6 +71,7 @@ export default async function DecisionEnginePage({
   const belowFloor = data?.below_floor_actions ?? [];
   const unvalued = data?.unvalued_actions ?? [];
   const blocking = data?.blocking_findings ?? [];
+  const constraint = data?.constraint ?? null;
 
   const decisionByRule = new Map(decisions.map((row) => [row.rule_key, row]));
   const selectedTowardPlan = countSelectedTowardPlan(decisions);
@@ -118,8 +120,12 @@ export default async function DecisionEnginePage({
 
       {data?.ready && clientId ? (
         <div className="space-y-[var(--section-gap)]">
+          {constraint ? <ConstraintBand constraint={constraint} /> : null}
+
           <p className="max-w-[76ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
-            Everything the engine found that could be done in an hour, ranked by what it is worth.
+            {constraint
+              ? "The constraint's work comes first. Everything else is still here, ranked by what it is worth."
+              : "Everything the engine found that could be done in an hour, ranked by what it is worth."}{" "}
             The line falls where the plan does — the ranking is advice, not a rule.
             {selectedTowardPlan > 0
               ? ` ${selectedTowardPlan} accepted so far this period.`
