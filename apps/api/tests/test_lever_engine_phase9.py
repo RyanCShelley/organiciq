@@ -51,13 +51,17 @@ def test_expected_ctr_curve():
     assert expected_ctr_percent(10) == 0.58
 
 
-def test_diagnose_not_ready_without_gsc(db, client_a):
+def test_without_gsc_the_run_continues_on_what_is_left(db, client_a):
+    """GA4 still has sessions and leads, so the conversion rules still have
+    something to say. Search Console's absence makes them quiet, not wrong."""
     start, end = date_window(7)
     seed_required_sources(db, client_a.id, end, skip=("search_console",))
     result = diagnose(db, client_a, from_date=start, to_date=end)
-    assert result.ready is False
+    assert result.ready is True
     assert result.readiness["search_console"] is False
-    assert "Search Console" in (result.message or "")
+    assert any(
+        row.get("rule_id") == "Search Console" for row in result.coverage
+    ), "the missing source must be named in coverage"
 
 
 def test_internal_linking_cascade(db, client_a):
@@ -338,15 +342,17 @@ def test_serp_ctr_page_rule(db, client_a):
     assert len(serp) == 1
 
 
-def test_diagnose_is_blocked_when_only_ga4_has_data(db, client_a):
-    """
-    A partial source set stops the run.
+def test_a_partial_source_set_still_runs(db, client_a):
+    """All four used to be required, and the reason was the old cross-lever
+    score: a 0-100 impact from three sources was not comparable to one from
+    four, so the ranking between levers came out wrong while looking
+    authoritative.
 
-    This used to be the opposite: GA4-only clients got a run so Conversion Path
-    could report something. But a score built from one source is not comparable
-    to one built from four, so the ranking between levers came out wrong while
-    looking authoritative. Naming what is missing is more useful than a plan
-    derived from a quarter of the inputs.
+    That ranking is gone. A growth action is valued in expected leads a
+    month from its own evidence, so a missing source means fewer rules can
+    fire, not that the surviving estimates are wrong. Refusing to run for
+    nineteen of twenty-four clients was the expensive way to say that some
+    rules are quiet.
     """
     start = date(2026, 8, 2)
     end = date(2026, 8, 31)
@@ -356,33 +362,38 @@ def test_diagnose_is_blocked_when_only_ga4_has_data(db, client_a):
 
     result = diagnose(db, client_a, from_date=start, to_date=end)
 
-    assert result.ready is False
+    assert result.ready is True
     assert result.readiness["analytics"] is True
     assert result.readiness["search_console"] is False
-    assert result.readiness["crawl_audit"] is False
-    assert result.readiness["ai_visibility"] is False
-    message = result.message or ""
-    assert "Search Console" in message
-    assert "site crawl" in message
-    assert "AI visibility" in message
 
 
-def test_diagnose_is_blocked_when_any_single_source_is_missing(db, client_a):
-    """Each source is individually required — not merely one of the four."""
+def test_a_missing_source_is_recorded_as_a_skip_not_a_silence(db, client_a):
+    """"No findings" and "never looked" are different statements, and the
+    second one has to survive onto the screen."""
+    start = date(2026, 8, 2)
+    end = date(2026, 8, 31)
+    seed_required_sources(db, client_a.id, end, skip=("crawl_audit",))
+
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+    skipped = [
+        row
+        for row in result.coverage
+        if str(row.get("status", "")).startswith("skipped:source_missing")
+    ]
+    assert skipped, "a source that never reported must be recorded"
+
+
+def test_no_search_and_no_analytics_is_still_nothing_to_reason_about(db, client_a):
+    """With neither there is no page, no session and no lead."""
     start, end = date_window(7)
+    for model in (DataWatermark, FactGscPage, FactGa4Traffic, FactCrawlPageSnapshot):
+        for row in db.query(model).filter(model.client_id == client_a.id):
+            db.delete(row)
+    db.commit()
 
-    for missing in ("search_console", "analytics", "crawl_audit", "ai_visibility"):
-        # Readiness reads facts as well as watermarks, so clear both between cases.
-        for model in (DataWatermark, FactGscPage, FactGa4Traffic, FactCrawlPageSnapshot):
-            for row in db.query(model).filter(model.client_id == client_a.id):
-                db.delete(row)
-        db.commit()
-        seed_required_sources(db, client_a.id, end, skip=(missing,))
-
-        result = diagnose(db, client_a, from_date=start, to_date=end)
-
-        assert result.ready is False, f"{missing} missing should block the run"
-        assert result.readiness[missing] is False
+    result = diagnose(db, client_a, from_date=start, to_date=end)
+    assert result.ready is False
+    assert "nothing to reason about" in (result.message or "")
 
 
 

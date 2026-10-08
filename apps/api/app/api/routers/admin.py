@@ -9,7 +9,12 @@ from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client, Tier
-from app.models.config import ChannelRule, ConversionDefinition, Topic
+from app.models.config import (
+    ChannelRule,
+    ClientConversionPage,
+    ConversionDefinition,
+    Topic,
+)
 from app.models.ga4 import FactGa4Event
 from app.models.integration import Integration
 from app.models.job import SyncJob
@@ -24,6 +29,8 @@ from app.schemas import (
     ChannelRuleOut,
     ConversionDefinitionCreate,
     ConversionDefinitionOut,
+    ConversionPageIn,
+    ConversionPageOut,
     TierCreate,
     TierOut,
     TopicCreate,
@@ -98,6 +105,70 @@ def create_conversion_definition(
     db.commit()
     db.refresh(row)
     return ConversionDefinitionOut.model_validate(row)
+
+
+@router.get("/conversion-pages", response_model=list[ConversionPageOut])
+def list_conversion_pages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[ConversionPageOut]:
+    rows = (
+        db.query(ClientConversionPage)
+        .filter(ClientConversionPage.client_id == client.id)
+        .order_by(ClientConversionPage.is_primary.desc(), ClientConversionPage.label.asc())
+        .all()
+    )
+    return [ConversionPageOut.model_validate(r) for r in rows]
+
+
+@router.put("/conversion-pages", response_model=list[ConversionPageOut])
+def replace_conversion_pages(
+    payload: list[ConversionPageIn],
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[ConversionPageOut]:
+    """Replace the whole list, because that is how the screen edits it.
+
+    One primary at most: the engine falls back to the primary offer when a
+    page's stage matches nothing, so two of them is a silent coin toss.
+    """
+    seen: set[str] = set()
+    cleaned: list[ConversionPageIn] = []
+    for entry in payload:
+        url = entry.normalized_url.strip()
+        if not url:
+            continue
+        if url in seen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{url} is listed twice",
+            )
+        seen.add(url)
+        cleaned.append(entry)
+
+    if sum(1 for e in cleaned if e.is_primary) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only one page can be the primary offer",
+        )
+
+    db.query(ClientConversionPage).filter(
+        ClientConversionPage.client_id == client.id
+    ).delete(synchronize_session=False)
+    for entry in cleaned:
+        db.add(
+            ClientConversionPage(
+                client_id=client.id,
+                normalized_url=entry.normalized_url.strip(),
+                label=entry.label.strip(),
+                stage=(entry.stage or None),
+                is_primary=entry.is_primary,
+            )
+        )
+    db.commit()
+    return list_conversion_pages(client=client, _=_, db=db)
 
 
 @router.delete(

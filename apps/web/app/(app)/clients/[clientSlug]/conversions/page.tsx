@@ -1,5 +1,9 @@
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
+import {
+  ConversionPagesPanel,
+  type ConversionPage,
+} from "@/components/ConversionPagesPanel";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type ConversionDefinition } from "@/lib/api";
@@ -16,12 +20,14 @@ export default async function ClientConversionsPage({
   const clientId = client.id;
 
   let conversions: ConversionDefinition[] = [];
+  let conversionPages: ConversionPage[] = [];
   let error: string | null = null;
 
   try {
-    conversions = await apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", {
-      clientId,
-    });
+    [conversions, conversionPages] = await Promise.all([
+      apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", { clientId }),
+      apiFetch<ConversionPage[]>("/admin/conversion-pages", { clientId }),
+    ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load conversions";
   }
@@ -43,6 +49,16 @@ export default async function ClientConversionsPage({
         />
         <div className="workspace-panel">
           <ConversionDefinitionsPanel clientId={clientId} conversions={conversions} />
+        </div>
+      </section>
+
+      <section className="workspace-section">
+        <SectionHeader
+          title="Conversion pages"
+          description="Where a visitor is meant to end up. Without these the engine guesses from the URL — /contact, /demo, /quote — which sent one client's team to a page that does not exist."
+        />
+        <div className="workspace-panel">
+          <ConversionPagesPanel clientId={clientId} initial={conversionPages} />
         </div>
       </section>
     </section>

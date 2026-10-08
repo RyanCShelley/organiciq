@@ -4662,6 +4662,10 @@ def diagnose(
         ),
         "ai_visibility": _last_fact(FactSerAiCheck),
     }
+    # Which rules ran, and why the others did not. Built before the
+    # readiness check, because a source that never reported is the first
+    # thing this has to be able to record.
+    coverage = Coverage()
     base_result = {
         "requested_from": from_date,
         "requested_to": to_date,
@@ -4670,29 +4674,37 @@ def diagnose(
         "partial_message": partial_message,
         "source_freshness": source_freshness,
     }
-    # All four sources are required, and a missing one stops the run.
+    # Run on what is here, and say what could not run.
     #
-    # An earlier version ran on whatever happened to be present, so a client
-    # with no site crawl still got a scored, confident-looking plan built from
-    # three sources — the Technical SEO lever silently contributed nothing and
-    # nothing on screen said so. Scores computed from a partial source set are
-    # not comparable to scores computed from a full one, which makes the
-    # ranking between levers wrong rather than merely incomplete. Refusing to
-    # run, and naming exactly what is missing, is the honest failure.
+    # All four sources used to be required, and the reason was the old
+    # cross-lever score: a 0-100 impact computed from three sources was not
+    # comparable to one computed from four, so the ranking between levers
+    # was wrong rather than merely incomplete.
+    #
+    # That ranking is gone. A growth action is valued in expected leads a
+    # month, from its own evidence, and a missing source does not make the
+    # remaining actions' estimates wrong — it means fewer rules can fire.
+    # Refusing to run for nineteen of twenty-four clients, and showing them
+    # nothing, was the expensive way to say "some rules are quiet".
+    #
+    # Nothing at all is still nothing: with neither search nor analytics
+    # there is no page, no session and no lead to reason about.
     missing = [name for name, ok in readiness.items() if not ok]
-    if missing:
-        missing_labels = ", ".join(REQUIRED_SOURCE_LABELS[name] for name in missing)
+    for name in missing:
+        coverage.skipped(
+            REQUIRED_SOURCE_LABELS.get(name, name), SkipReason.SOURCE_MISSING
+        )
+    if gsc_period is None and ga4_period is None:
         logger.warning(
-            "Decision Engine blocked for client %s (%s): missing %s",
+            "Decision Engine has no search or analytics data for client %s (%s)",
             client.id,
             client.domain,
-            ", ".join(missing),
         )
         return DiagnoseResult(
             ready=False,
             message=(
-                f"Decision Engine needs all four data sources. Missing: {missing_labels}. "
-                "Fix the sync for those sources, then re-run."
+                "No Search Console or GA4 data for this period, so there is nothing "
+                "to reason about. Fix one of those syncs and re-run."
                 + (f" {block_message}" if block_message else "")
             ),
             readiness=readiness,
@@ -4745,9 +4757,6 @@ def diagnose(
     # Set for the whole run so every finding is scored on this client's
     # weights, including the ones built deep inside the per-page cascade.
     _SCORE_WEIGHTS.set(thresholds)
-    # Which rules ran, and why the others did not. Carried through the run
-    # so "no findings" can be told apart from "never looked".
-    coverage = Coverage()
     declared_pages = (
         db.query(ClientConversionPage)
         .filter(ClientConversionPage.client_id == client.id)

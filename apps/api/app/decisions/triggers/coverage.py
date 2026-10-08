@@ -20,6 +20,9 @@ class SkipReason(str, Enum):
     NO_CONVERSION_DATA = "no_conversion_data"
     NO_PAGES_IN_GATE = "no_pages_in_gate"
     NO_RULE_MATCHED = "no_rule_matched"
+    #: The source itself never reported, so every rule reading it is
+    #: quiet. Distinct from a rule that ran and found nothing.
+    SOURCE_MISSING = "source_missing"
 
 
 @dataclass

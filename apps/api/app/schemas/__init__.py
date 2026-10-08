@@ -587,6 +587,33 @@ class DecisionThresholdsUpdate(BaseModel):
     thresholds: dict[str, float | int]
 
 
+class ConversionPageIn(BaseModel):
+    """A page this client counts as an offer.
+
+    Declared pages win over the URL guesses. `classify_page_url` reads
+    fragments — /contact, /demo, /quote — which is right often enough to
+    have hidden how often it is wrong: ACCTek's offer is /contact-us, and
+    the engine spent months telling people to link to /contact, which 404s.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    normalized_url: str = Field(min_length=1, max_length=2048)
+    label: str = Field(min_length=1, max_length=255)
+    #: tofu / mofu / bofu, so a page is sent to the offer that matches where
+    #: its reader is rather than to whichever one is primary.
+    stage: str | None = Field(default=None, max_length=8)
+    is_primary: bool = False
+
+
+class ConversionPageOut(ORMModel):
+    id: UUID
+    normalized_url: str
+    label: str
+    stage: str | None = None
+    is_primary: bool = False
+
+
 class KeywordPageMapEntry(BaseModel):
     keyword: str = Field(min_length=1, max_length=512)
     #: Null records "no page owns this yet" — a decision, not an omission.
