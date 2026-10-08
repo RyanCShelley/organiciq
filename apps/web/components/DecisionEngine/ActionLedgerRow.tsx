@@ -41,6 +41,10 @@ function preconditionChip(finding: Finding) {
   };
 }
 
+function targetPath(url: string): string {
+  return url.replace(/^https?:\/\/[^/]+/, "") || "/";
+}
+
 function subject(finding: Finding): string {
   if (finding.page_url) return finding.page_url.replace(/^https?:\/\/[^/]+/, "") || "/";
   return finding.query ?? "site-wide";
@@ -180,9 +184,13 @@ export function ActionLedgerRow({
                   {steps.map((step) => (
                     <li key={step.text} className="text-[14.5px] leading-relaxed">
                       {step.text}
-                      {step.target ? (
+                      {/* Where the work goes. Shown only when the sentence
+                          does not already say — 1b's step names the page
+                          being edited and targets the conversion page it
+                          should link to, which are two different places. */}
+                      {step.target && !step.text.includes(targetPath(step.target)) ? (
                         <span className="mt-1 block break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-                          {step.target.replace(/^https?:\/\/[^/]+/, "") || "/"}
+                          {targetPath(step.target)}
                         </span>
                       ) : null}
                       {step.detail ? (
