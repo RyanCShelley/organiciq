@@ -21,6 +21,9 @@ import {
 /**
  * Whether a row is a site-wide precondition, and why it leads its layer.
  *
+ * The chip read "Unblocks the rest", which names a consequence rather than
+ * a thing to do and left a reader working out what was blocked.
+ *
  * This used to say what kind of lead figure the row carried — "Flat
  * credit" for the three rules with no clicks-to-leads model, "Measured"
  * for the rest, and "Not valued" for the eight that reached the screen
@@ -31,7 +34,7 @@ import {
 function preconditionChip(finding: Finding) {
   if (!isPrecondition(finding)) return null;
   return {
-    label: "Unblocks the rest",
+    label: "Do this first",
     className: "bg-[#f6ead0] text-[#614a16]",
     title:
       "Site-wide, so it has no count of its own. An engine that cannot fetch the site will not cite any page on it, which is why this comes first.",
@@ -177,6 +180,11 @@ export function ActionLedgerRow({
                   {steps.map((step) => (
                     <li key={step.text} className="text-[14.5px] leading-relaxed">
                       {step.text}
+                      {step.target ? (
+                        <span className="mt-1 block break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+                          {step.target.replace(/^https?:\/\/[^/]+/, "") || "/"}
+                        </span>
+                      ) : null}
                       {step.detail ? (
                         <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--text-tertiary)]">
                           {step.detail}
@@ -218,16 +226,29 @@ export function ActionLedgerRow({
               bars in a currency nobody could read back as people or as
               minutes — which were the only two questions being asked. */}
           <aside className="border-[var(--border)] lg:border-l lg:pl-7">
-            <p className="text-[11.5px] text-[var(--text-tertiary)]">
-              {unsized
-                ? "Not sized"
-                : demand
-                  ? demand.unit.replace(" / mo", " a month")
-                  : "Site-wide"}
-            </p>
-            <p className="mt-1 font-[family-name:var(--font-display)] text-[44px] font-black leading-none tracking-[-0.035em] text-[var(--text-primary)]">
-              {isPrecondition(finding) ? "All" : formatDemand(demand)}
-            </p>
+            {/* Four cases, and only the first has a number worth printing
+                in a column headed "people". A precondition has no count of
+                its own, a prompt's is a related keyword's borrowed to sort
+                by, and an unsized one has none at all. */}
+            {demand ? (
+              <>
+                <p className="text-[11.5px] text-[var(--text-tertiary)]">
+                  {demand.unit.replace(" / mo", " a month")}
+                </p>
+                <p className="mt-1 font-[family-name:var(--font-display)] text-[44px] font-black leading-none tracking-[-0.035em] text-[var(--text-primary)]">
+                  {formatDemand(demand)}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                {isPrecondition(finding)
+                  ? "Site-wide"
+                  : unsized
+                    ? "Not sized"
+                    : "Not counted here"}
+              </p>
+            )}
+
             {basis ? (
               <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-tertiary)]">
                 {basis.charAt(0).toUpperCase() + basis.slice(1)}.

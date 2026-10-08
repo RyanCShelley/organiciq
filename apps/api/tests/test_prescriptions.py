@@ -245,6 +245,41 @@ def test_a_page_that_exists_is_made_quotable_rather_than_replaced():
     )
 
 
+def test_the_step_says_which_page_to_put_it_on():
+    """The page was chosen and kept quiet. It reached `Step.target`, which
+    the screen never printed, so the instruction read "add a section" with
+    no destination — leaving a reader to guess at the one thing the engine
+    had already decided."""
+    p = _prompt(
+        best_page="https://x/carbon-fiber-prototyping-services",
+        matched_on=("carbon", "fiber", "prototyping"),
+    )
+    assert "/carbon-fiber-prototyping-services" in p.steps[0].text
+    assert p.steps[0].target == "https://x/carbon-fiber-prototyping-services"
+
+
+def test_the_step_says_why_that_page():
+    """Naming a page is a claim someone will act on. The words it was
+    matched on are the case for it, and a weak case should be visible
+    rather than hidden behind a confident sentence."""
+    p = _prompt(best_page="https://x/drone-parts", matched_on=("carbon", "drone"))
+    assert "“carbon”, “drone”" in p.steps[0].detail
+
+
+def test_a_homepage_target_reads_as_the_homepage():
+    """"Add a section to /" is not a sentence."""
+    p = _prompt(best_page="https://x/", matched_on=("carbon", "fiber"))
+    assert "the homepage" in p.steps[0].text
+
+
+def test_a_close_call_is_declared():
+    p = _prompt(
+        best_page="https://x/a", matched_on=("carbon", "fiber"),
+        decided_by_headings=True,
+    )
+    assert "worth a look before you write" in p.steps[0].detail
+
+
 def test_a_quotable_page_is_one_edit_and_no_homework():
     """It used to append "read the engine's own output and note which
     sources it cites" to every one of these, because SE Visible's citation

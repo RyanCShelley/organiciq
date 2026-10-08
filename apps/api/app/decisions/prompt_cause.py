@@ -41,6 +41,12 @@ class PromptSignals:
     #: same instruction on both reads as written by someone who had not
     #: looked at either.
     best_page_type: str | None = None
+    #: The prompt's own words that page already uses. The reason it was
+    #: chosen, so a bad choice can be seen rather than taken on trust.
+    matched_on: tuple[str, ...] = ()
+    #: Two pages matched equally on title and URL, and this one's own
+    #: headings decided it. Worth saying: the choice was close.
+    decided_by_headings: bool = False
 
 
 def classify_prompt_gap(signals: PromptSignals) -> Prescription:
@@ -99,16 +105,37 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
     # One page, one addition. Three steps on three parts of a page is a
     # morning's work, and a growth action is an hour.
     sells = signals.best_page_type in {"commercial", "conversion"}
+    page = signals.best_page or ""
+    where = page.split("//", 1)[-1].split("/", 1)
+    path = "/" + where[1] if len(where) > 1 and where[1] else "the homepage"
+
+    # Why this page and not another. The step used to name the page only in
+    # a field the screen never printed, so the instruction read "add a
+    # section" with no destination — a page was chosen and kept quiet.
+    if signals.matched_on:
+        words = ", ".join(f"“{word}”" for word in signals.matched_on)
+        why = (
+            f" {path} is the closest page on the site: it already uses "
+            f"{words} from the question."
+        )
+        if signals.decided_by_headings:
+            why += (
+                " Another page matched its title and URL just as well, and this "
+                "one's own headings decided it — worth a look before you write."
+            )
+    else:
+        why = f" {path} is the closest page on the site."
+
     steps = [
         Step(
             (
-                f"Add “{signals.prompt}” as an FAQ on this page, answered in "
+                f"Add “{signals.prompt}” as an FAQ on {path}, answered in "
                 "the first two sentences"
             )
             if sells
             else (
-                f"Add a section headed “{signals.prompt}”, opening with a "
-                "direct answer"
+                f"Add a section headed “{signals.prompt}” to {path}, opening "
+                "with a direct answer"
             ),
             target=signals.best_page,
             detail="Engines quote the passage that answers the question as asked, so "
@@ -118,7 +145,8 @@ def classify_prompt_gap(signals: PromptSignals) -> Prescription:
                 if sells
                 else " An article can answer it properly once the first two sentences"
                 " have."
-            ),
+            )
+            + why,
         ),
     ]
     return Prescription(

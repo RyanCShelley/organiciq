@@ -83,6 +83,12 @@ class ActionDemand:
     #: from and never alters it — an engine that discounts an estimate in
     #: the number *and* labels it an estimate has discounted it twice.
     evidence_label: str
+    #: Whether this count was taken from the thing the action is about.
+    #: Sessions and clicks are. A prompt's is not: SE Ranking returns no
+    #: volume on prompts, so the figure is a related keyword's, borrowed to
+    #: put the prompts in an order. A borrowed number still sorts, and it
+    #: does not go on the screen as though it were measured.
+    measured: bool = True
     precondition: bool = False
 
     @property
@@ -94,6 +100,7 @@ class ActionDemand:
             "rule_id": self.rule_id,
             "demand": None if self.demand is None else round(self.demand, 1),
             "demand_unit": self.unit,
+            "demand_measured": self.measured,
             "estimated_minutes": self.estimated_minutes,
             "evidence_label": self.evidence_label,
             **({"precondition": True} if self.precondition else {}),
@@ -122,6 +129,7 @@ def demand_for(
     counted_in_window: float | None = None,
     counted_monthly: float | None = None,
     known: bool = True,
+    measured: bool = True,
     evidence_label: str = "estimated",
 ) -> ActionDemand:
     """How many people this action is about, per month.
@@ -156,6 +164,9 @@ def demand_for(
         unit=DEMAND_UNIT.get(layer, "people / mo"),
         estimated_minutes=_minutes(rule_id, thresholds),
         evidence_label=evidence_label,
+        # A precondition has nothing of its own to count, so there is no
+        # measurement to claim.
+        measured=measured and not precondition,
         precondition=precondition,
     )
 

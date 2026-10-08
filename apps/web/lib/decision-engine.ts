@@ -239,6 +239,11 @@ export type Demand = { count: number; unit: string } | null;
 
 export function demandOf(finding: Finding): Demand {
   const evidence = finding.evidence_json ?? {};
+  // A count that was not taken from the thing the action is about does not
+  // go on the screen. A prompt's figure is a related keyword's volume,
+  // borrowed to put the prompts in an order; it sorts, and showing it in a
+  // column headed "people / mo" would claim it as the prompt's own demand.
+  if (evidence.demand_measured === false) return null;
   const count = evidence.demand;
   const unit = evidence.demand_unit;
   if (typeof count !== "number" || typeof unit !== "string") return null;

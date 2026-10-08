@@ -2619,10 +2619,26 @@ _PROMPT_STOPWORDS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class PromptPageMatch:
+    """The page a prompt should go on, and the case for it."""
+
+    url: str
+    #: The prompt's own words the page already uses.
+    shared: tuple[str, ...]
+    #: True when a second page scored the same on title and URL and the
+    #: page's own headings decided it. Worth saying: the choice was close.
+    decided_by_headings: bool = False
+
+
 def _best_page_for_prompt(
-    prompt: str, page_titles: dict[str, str], *, require_clear_winner: bool = False
-) -> str | None:
-    """The page whose title and URL best match a phrase.
+    prompt: str,
+    page_titles: dict[str, str],
+    *,
+    require_clear_winner: bool = False,
+    page_headings: dict[str, tuple[str, ...]] | None = None,
+) -> PromptPageMatch | None:
+    """The page whose title, URL and headings best match a phrase.
 
     Vector similarity is what the playbook asks for and there are no
     embeddings yet, so this is shared terms over the title and the URL
@@ -2632,15 +2648,21 @@ def _best_page_for_prompt(
     "seo services", `/capabilities/local-seo` shares both words and is
     still the wrong page, because "local" narrows it to a different term.
 
-    `require_clear_winner` refuses to answer on a tie. Naming a page is a
-    claim that someone will act on, and two pages scoring the same means we
-    do not know which.
+    Headings break ties and nothing else. They are the page's own content
+    and the right thing to read, but a long page has many of them, so
+    scoring on them directly would hand every prompt to whichever page says
+    the most. A tie used to be settled by sorting the URL alphabetically,
+    which is not a reason.
+
+    `require_clear_winner` refuses to answer when the tie survives even
+    that. Naming a page is a claim someone will act on, and two pages
+    scoring the same means we do not know which.
     """
     terms = _match_terms(prompt)
     if not terms:
         return None
 
-    scored: list[tuple[float, str]] = []
+    scored: list[tuple[float, int, str, frozenset[str]]] = []
     for url, title in page_titles.items():
         candidate = _match_terms(title) | _match_terms(
             urlsplit(url).path.replace("-", " ").replace("/", " ")
@@ -2652,14 +2674,29 @@ def _best_page_for_prompt(
         # on a page matched to "seo services" is not a near miss, it is a
         # different service.
         extra = len(candidate - terms - _MATCH_GENERIC)
-        scored.append((len(shared) - 0.5 * extra, url))
+        in_headings = len(
+            terms
+            & {
+                word
+                for heading in (page_headings or {}).get(url, ())
+                for word in _match_terms(heading)
+            }
+        )
+        scored.append((len(shared) - 0.5 * extra, in_headings, url, frozenset(shared)))
 
     if not scored:
         return None
-    scored.sort(key=lambda row: (-row[0], row[1]))
-    if require_clear_winner and len(scored) > 1 and scored[0][0] == scored[1][0]:
+    scored.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    best = scored[0]
+    runner_up = scored[1] if len(scored) > 1 else None
+    tied_on_text = runner_up is not None and runner_up[0] == best[0]
+    if require_clear_winner and tied_on_text and runner_up[1] == best[1]:
         return None
-    return scored[0][1]
+    return PromptPageMatch(
+        url=best[2],
+        shared=tuple(sorted(best[3])),
+        decided_by_headings=bool(tied_on_text and best[1] > (runner_up[1] if runner_up else 0)),
+    )
 
 
 #: Words that appear on every page of a site and say nothing about which.
@@ -2690,6 +2727,20 @@ def _ai_visibility_prompt_findings(
         return []
     page_titles = {
         url: crawl.title or "" for url, crawl in (crawl_by_url or {}).items()
+    }
+    # The page's own headings, which is what "look at the content on the
+    # site" means with what the crawl stores. They break ties and nothing
+    # more — see `_best_page_for_prompt`.
+    page_headings = {
+        url: tuple(
+            str(section.get("heading") or "")
+            for section in (crawl.sections or [])
+            if isinstance(section, dict)
+        )
+        # The questions the page already poses are headings too, and the
+        # closest thing on the page to the shape of a prompt.
+        + tuple(str(question) for question in (crawl.faq_questions or []))
+        for url, crawl in (crawl_by_url or {}).items()
     }
     start, end = period
     min_checks = int(thresholds.get("ai_visibility_prompt_min_checks", 2))
@@ -2759,16 +2810,20 @@ def _ai_visibility_prompt_findings(
             f"Tracked prompt is not earning AI citations across {len(rows)} checks: "
             f"“{prompt_text[:120]}”"
         )
-        best = _best_page_for_prompt(prompt_text, page_titles)
+        match = _best_page_for_prompt(
+            prompt_text, page_titles, page_headings=page_headings
+        )
         prescription = classify_prompt_gap(
             PromptSignals(
                 prompt=prompt_text,
                 checks=len(rows),
                 blocked_crawlers=blocked_crawlers,
-                best_page=best,
+                best_page=match.url if match else None,
                 best_page_type=(
-                    classify_page_url(best).page_type.value if best else None
+                    classify_page_url(match.url).page_type.value if match else None
                 ),
+                matched_on=match.shared if match else (),
+                decided_by_headings=bool(match and match.decided_by_headings),
             )
         )
         finding = _make_finding(
@@ -2790,11 +2845,17 @@ def _ai_visibility_prompt_findings(
                 # stand in. The gap is real and cannot be sized; printing a
                 # zero would read as "nobody is asking this".
                 "demand_unknown": volume <= 0,
+                # The prompt's own volume, or a related keyword's standing
+                # in for it. Only the first is this prompt's demand.
+                "demand_measured": volume > 0 and stood_in_for is None,
                 # Whose volume this is. Without it the card reads as the
                 # number of people asking the prompt, which is not a figure
                 # SE Ranking gives for any prompt on any client.
                 "demand_basis": (
-                    f"volume of the nearest tracked term, “{stood_in_for}”"
+                    # The figure is not printed, so this has to carry both
+                    # what it is and why these are in this order.
+                    f"ordered by the volume of the nearest tracked term, "
+                    f"“{stood_in_for}” — SE Ranking gives no volume for prompts"
                     if stood_in_for
                     else (
                         "searches for this prompt"
@@ -4268,6 +4329,7 @@ def measure_demand(
                 counted_in_window=_as_float(evidence.get("demand_raw")),
                 counted_monthly=_as_float(evidence.get("demand_monthly")),
                 known=not evidence.get("demand_unknown"),
+                measured=evidence.get("demand_measured", True),
                 evidence_label=str(evidence.get("data_confidence") or "estimated"),
             )
         except ValueError:
