@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 
 import { DecisionActionBar } from "@/components/DecisionEngine/DecisionActionBar";
 import {
+  demandIsUnsized,
   demandOf,
   findingActions,
   formatDemand,
@@ -69,6 +70,7 @@ export function ActionLedgerRow({
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const demand = demandOf(finding);
+  const unsized = demandIsUnsized(finding);
   const minutes = numberField(finding.evidence_json ?? {}, "estimated_minutes");
   const chip = preconditionChip(finding);
   const steps = findingActions(finding.evidence_json ?? {});
@@ -104,7 +106,14 @@ export function ActionLedgerRow({
             word wide, which is what five fixed columns did to a phone. */}
         <span className="ml-10 flex flex-none items-baseline gap-3 sm:ml-0 sm:gap-4">
           <span className="w-auto text-right sm:w-[132px]">
-            <span className="font-[family-name:var(--font-display)] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]">
+            <span
+              title={
+                unsized
+                  ? "No volume on this prompt and no tracked term close enough to stand in, so the size is missing — not the gap."
+                  : undefined
+              }
+              className="font-[family-name:var(--font-display)] text-[21px] font-black leading-none tracking-[-0.02em] text-[var(--text-primary)]"
+            >
               {formatDemand(demand)}
             </span>
             {demand ? (
@@ -192,11 +201,22 @@ export function ActionLedgerRow({
               minutes — which were the only two questions being asked. */}
           <aside className="border-[var(--border)] lg:border-l lg:pl-7">
             <p className="text-[11.5px] text-[var(--text-tertiary)]">
-              {demand ? demand.unit.replace(" / mo", " a month") : "Site-wide"}
+              {unsized
+                ? "Not sized"
+                : demand
+                  ? demand.unit.replace(" / mo", " a month")
+                  : "Site-wide"}
             </p>
             <p className="mt-1 font-[family-name:var(--font-display)] text-[44px] font-black leading-none tracking-[-0.035em] text-[var(--text-primary)]">
               {isPrecondition(finding) ? "All" : formatDemand(demand)}
             </p>
+            {unsized ? (
+              <p className="mt-3 text-[12.5px] leading-relaxed text-[var(--text-tertiary)]">
+                No volume comes back on this prompt and no tracked term is close
+                enough to stand in, so the engine cannot say how many people ask
+                it. The prompt is tracked and nothing cites it either way.
+              </p>
+            ) : null}
 
             {derivation.length > 0 ? (
               <dl className="mt-5 rounded-[10px] bg-[var(--surface-muted)] p-4">

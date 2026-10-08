@@ -71,9 +71,12 @@ class ActionDemand:
 
     rule_id: str
     layer: str
-    #: In `unit`, per month. Zero for a precondition, which does not rank
-    #: on size.
-    demand: float
+    #: In `unit`, per month. None when the source has no number for this
+    #: one, which is not the same as nobody wanting it: SE Ranking returns
+    #: no volume on prompts, and where no tracked term is close enough to
+    #: stand in, the honest answer is that we cannot size it. Zero for a
+    #: precondition, which does not rank on size.
+    demand: float | None
     unit: str
     estimated_minutes: int
     #: measured | inferred | estimated. Describes where the count came
@@ -82,10 +85,14 @@ class ActionDemand:
     evidence_label: str
     precondition: bool = False
 
+    @property
+    def known(self) -> bool:
+        return self.demand is not None
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "rule_id": self.rule_id,
-            "demand": round(self.demand, 1),
+            "demand": None if self.demand is None else round(self.demand, 1),
             "demand_unit": self.unit,
             "estimated_minutes": self.estimated_minutes,
             "evidence_label": self.evidence_label,
@@ -114,6 +121,7 @@ def demand_for(
     window_days: int,
     counted_in_window: float | None = None,
     counted_monthly: float | None = None,
+    known: bool = True,
     evidence_label: str = "estimated",
 ) -> ActionDemand:
     """How many people this action is about, per month.
@@ -122,10 +130,18 @@ def demand_for(
     recoverable clicks, sessions — and is restated per month.
     `counted_monthly` is already a monthly figure, which search volume is,
     and passes through untouched.
+
+    `known=False` says the rule looked and the source had no number. The
+    action is real and cannot be sized, so it ranks last in its layer and
+    the card says so rather than printing a zero that would read as "nobody
+    is asking this".
     """
     precondition = rule_id in PRECONDITION_RULES
+    monthly: float | None
     if precondition:
         monthly = 0.0
+    elif not known:
+        monthly = None
     elif counted_monthly is not None:
         monthly = float(counted_monthly)
     elif counted_in_window is not None:

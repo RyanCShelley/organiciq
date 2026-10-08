@@ -2744,6 +2744,10 @@ def _ai_visibility_prompt_findings(
                 "brand_cited": False,
                 "search_volume": volume,
                 "demand_monthly": volume,
+                # No volume on the prompt and no tracked term close enough to
+                # stand in. The gap is real and cannot be sized; printing a
+                # zero would read as "nobody is asking this".
+                "demand_unknown": volume <= 0,
                 **impact_evidence,
             },
             baseline_metrics_json={
@@ -4181,6 +4185,7 @@ def measure_demand(
                 window_days=window_days,
                 counted_in_window=_as_float(evidence.get("demand_raw")),
                 counted_monthly=_as_float(evidence.get("demand_monthly")),
+                known=not evidence.get("demand_unknown"),
                 evidence_label=str(evidence.get("data_confidence") or "estimated"),
             )
         except ValueError:
@@ -4222,17 +4227,24 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
-def _demand_rank_key(finding: LeverFinding) -> tuple[int, float]:
-    """Preconditions first, then by how many people the action is about.
+def _demand_rank_key(finding: LeverFinding) -> tuple[int, int, float]:
+    """Preconditions, then sized work by size, then what cannot be sized.
 
     A blocked crawler or a brand the structured data misnames holds back
     every page under it, so it is not ranked against one page's demand — it
     goes first in its layer or it makes the rest of the layer pointless.
+
+    Work we cannot size goes last rather than nowhere. A tracked prompt with
+    no volume behind it is still a prompt nothing cites; it is only the
+    number that is missing, and sorting it as a zero would put it below
+    nothing and above nothing in particular.
     """
     evidence = finding.evidence_json
+    demand = evidence.get("demand")
     return (
         1 if evidence.get("precondition") else 0,
-        float(evidence.get("demand") or 0.0),
+        0 if demand is None else 1,
+        float(demand or 0.0),
     )
 
 

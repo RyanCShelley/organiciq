@@ -245,6 +245,18 @@ export function demandOf(finding: Finding): Demand {
   return { count, unit };
 }
 
+/**
+ * The engine looked and the source had no number.
+ *
+ * Not the same as nobody wanting it. SE Ranking returns no volume on
+ * prompts, so where no tracked term is close enough to stand in, the size
+ * is missing and the gap is not.
+ */
+export function demandIsUnsized(finding: Finding): boolean {
+  const evidence = finding.evidence_json ?? {};
+  return evidence.demand === null && evidence.demand_unit !== undefined;
+}
+
 /** A site-wide fix that holds back every page under it, so it has no count. */
 export function isPrecondition(finding: Finding): boolean {
   return finding.evidence_json?.precondition === true;

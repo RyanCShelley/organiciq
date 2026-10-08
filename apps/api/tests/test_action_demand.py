@@ -204,3 +204,23 @@ def test_every_action_rule_counts_demand():
         "these action rules build evidence with no count, so the ledger has "
         "nothing to rank them by: " + ", ".join(sorted(set(missing)))
     )
+
+
+def test_work_that_cannot_be_sized_says_so_rather_than_reporting_zero():
+    """SE Ranking returns no volume on prompts, and where no tracked term is
+    close enough to stand in there is no number to give.
+
+    A zero would read as "nobody is asking this" and sort the prompt below
+    work that genuinely has no audience. The prompt is still tracked and
+    still uncited; it is only the size that is missing.
+    """
+    unknown = demand_for(
+        "6", layer="visibility", thresholds=LIMITS, window_days=30,
+        counted_monthly=0.0, known=False,
+    )
+    assert unknown.demand is None
+    assert unknown.known is False
+    assert unknown.as_dict()["demand"] is None
+    # And it is not confused with a precondition, which has a reason to
+    # carry no number.
+    assert unknown.precondition is False
