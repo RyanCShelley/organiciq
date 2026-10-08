@@ -111,6 +111,20 @@ class SchemaBlock:
 
 
 @dataclass
+class PageSection:
+    """A heading and the first paragraph beneath it.
+
+    The pair is the unit, not the heading: the answer-first test is about
+    what comes immediately after a heading, and a heading on its own says
+    nothing about whether the page answers the question it poses.
+    """
+
+    level: int
+    heading: str
+    first_paragraph: str
+
+
+@dataclass
 class ParsedPage:
     title: str
     description: str
@@ -133,6 +147,108 @@ class ParsedPage:
     conversion_elements: int = 0
     #: The page says it is a 404 while returning 200.
     says_not_found: bool = False
+    #: Every heading with the first paragraph under it, in document order.
+    #: 3a asks whether the passage that answers a query answers it first,
+    #: which cannot be judged from a title and a word count.
+    sections: list["PageSection"] = field(default_factory=list)
+    #: Questions a visitor can see as questions: FAQPage schema entries and
+    #: headings that read as questions. 3b asks what is not covered.
+    faq_questions: list[str] = field(default_factory=list)
+
+
+#: A heading that reads as a question. Matches the engine's `is_question`
+#: so a visible FAQ heading and a Search Console query are judged the same
+#: way; defined here because the crawler has no access to that module.
+_QUESTION_OPENERS = frozenset(
+    "what how why when where which who can does do is are should".split()
+)
+
+
+def _looks_like_a_question(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped.endswith("?"):
+        return True
+    first = re.split(r"[^a-z']+", stripped.lower(), maxsplit=1)[0]
+    return first in _QUESTION_OPENERS
+
+
+def extract_sections(doc: Any) -> list[PageSection]:
+    """Every heading with the first paragraph under it, in document order.
+
+    Walks the document rather than querying each heading, because "the
+    paragraph under this heading" is a statement about order, not about
+    nesting: on most pages the `<p>` is a sibling of the `<h2>`, not a
+    child of anything that contains both.
+    """
+    sections: list[PageSection] = []
+    pending: PageSection | None = None
+    for node in doc.iter():
+        tag = str(getattr(node, "tag", "") or "").lower()
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            if pending is not None:
+                sections.append(pending)
+            heading = " ".join((node.text_content() or "").split())
+            pending = PageSection(level=int(tag[1]), heading=heading, first_paragraph="")
+        elif tag == "p" and pending is not None and not pending.first_paragraph:
+            text = " ".join((node.text_content() or "").split())
+            if text:
+                pending = PageSection(
+                    level=pending.level, heading=pending.heading, first_paragraph=text
+                )
+    if pending is not None:
+        sections.append(pending)
+    return [s for s in sections if s.heading]
+
+
+def extract_faq_questions(doc: Any, schema_blocks: list[SchemaBlock]) -> list[str]:
+    """Questions the page already answers, as a visitor would see them.
+
+    Two sources, because either alone is wrong. FAQPage schema is what
+    engines read and is often absent on pages that plainly have an FAQ;
+    a question-shaped heading is what a visitor reads and is often present
+    without any markup at all.
+    """
+    found: list[str] = []
+
+    for block in schema_blocks:
+        raw = block.raw
+        if not isinstance(raw, (dict, list)):
+            continue
+
+        def walk(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+                return
+            if not isinstance(node, dict):
+                return
+            declared = node.get("@type")
+            types = declared if isinstance(declared, list) else [declared]
+            if any(isinstance(t, str) and t.endswith("Question") for t in types):
+                name = node.get("name") or node.get("headline")
+                if isinstance(name, str) and name.strip():
+                    found.append(" ".join(name.split()))
+            for key in ("@graph", "mainEntity", "itemListElement", "acceptedAnswer"):
+                if key in node:
+                    walk(node[key])
+
+        walk(raw)
+
+    for node in doc.xpath("//h2|//h3|//h4|//summary|//dt"):
+        text = " ".join((node.text_content() or "").split())
+        if text and _looks_like_a_question(text):
+            found.append(text)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for question in found:
+        key = question.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(question)
+    return unique
 
 
 def _same_site(host: str, other: str) -> bool:
@@ -275,6 +391,11 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
     # strip below removes from the tree.
     schema_blocks = extract_json_ld(doc) + extract_microdata(doc) + extract_rdfa(doc)
 
+    # Headings and their opening paragraphs, read before the strip below
+    # removes script and style text from the tree.
+    sections = extract_sections(doc)
+    faq_questions = extract_faq_questions(doc, schema_blocks)
+
     canonical_raw = None
     for node in doc.xpath('//link[translate(@rel,"CANONICAL","canonical")="canonical"]'):
         href = (node.get("href") or "").strip()
@@ -373,6 +494,8 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         meta_nofollow=bool(robots and _NOFOLLOW.search(robots)),
         internal_links=list(internal.values()),
         schema_blocks=schema_blocks,
+        sections=sections,
+        faq_questions=faq_questions,
         resource_urls=sorted(set(resources)),
         conversion_elements=conversion_elements,
         says_not_found=bool(_NOT_FOUND.search(title) or _NOT_FOUND.search(h1)),

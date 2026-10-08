@@ -93,6 +93,14 @@ class FactCrawlPageSnapshot(Base):
     #: Forms, phone and email links, and buttons asking for the next step.
     #: Null where the crawl predates the check — distinct from a counted zero.
     conversion_elements: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: `[{level, heading, first_paragraph}, ...]` in document order. 3a asks
+    #: whether the passage answering a query answers it first, which cannot
+    #: be judged from a title and a word count. Null where the crawl
+    #: predates the capture — distinct from a page with no headings.
+    sections: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    #: Questions the page already answers, from FAQPage schema and from
+    #: headings that read as questions. Null as above.
+    faq_questions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

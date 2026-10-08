@@ -140,6 +140,31 @@ def _snapshot_rows(
                     and 200 <= page.status_code < 300
                     else None
                 ),
+                # Same rule as conversion elements: only from a page we
+                # actually read. A challenge page has no headings either,
+                # and recording an empty list would tell 3a that a page
+                # answers nothing when we never saw it.
+                "sections": (
+                    [
+                        {
+                            "level": section.level,
+                            "heading": section.heading,
+                            "first_paragraph": section.first_paragraph,
+                        }
+                        for section in parsed.sections
+                    ]
+                    if parsed is not None
+                    and page.status_code is not None
+                    and 200 <= page.status_code < 300
+                    else None
+                ),
+                "faq_questions": (
+                    list(parsed.faq_questions)
+                    if parsed is not None
+                    and page.status_code is not None
+                    and 200 <= page.status_code < 300
+                    else None
+                ),
             }
         )
     return rows
