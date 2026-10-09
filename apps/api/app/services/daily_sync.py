@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import date, datetime, timedelta, timezone
+from importlib import import_module
+
+from sqlalchemy import func
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -42,6 +45,76 @@ _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
 }
 
 
+#: How many days behind "today" a source's data actually is.
+#:
+#: Search Console finalises a day two to three days late. The daily sync asked
+#: every source for the last three days ending today, so every Search Console
+#: window sat entirely inside that lag and came back empty — for every client,
+#: every day. The job then recorded success and advanced the watermark to
+#: today, so the next run asked for the same empty window, and the one after
+#: that. SMA's facts stopped on 24 September and nothing noticed for fifteen
+#: days.
+SOURCE_LAG_DAYS: dict[str, int] = {
+    "gsc_pages": 3,
+    "gsc_queries": 3,
+    # GA4 keeps revising the current day; yesterday is the first stable one.
+    "ga4": 1,
+}
+
+#: The newest fact each source writes. Read instead of the watermark on
+#: purpose: a watermark is a claim about what was fetched, and the bug above
+#: is exactly a watermark that advanced past data that was never there.
+_FACT_FOR_SOURCE: dict[str, tuple[str, str, str]] = {
+    "gsc_pages": ("app.models.gsc", "FactGscPage", "date"),
+    "gsc_queries": ("app.models.gsc", "FactGscQueryPage", "date"),
+    "ga4": ("app.models.ga4", "FactGa4Traffic", "date"),
+    "se_ranking_search": ("app.models.seranking", "FactSerKeyword", "checked_at"),
+}
+
+#: A client that has fallen a long way behind still does not get asked for its
+#: whole history in one job. It catches up over a few runs instead.
+MAX_CATCHUP_DAYS = 60
+
+#: Days of already-fetched data to re-request. Search Console restates recent
+#: days, so the newest ones are refetched rather than trusted.
+RESTATEMENT_OVERLAP_DAYS = 3
+
+
+def _last_fact_date(db: Session, client_id, source: str) -> date | None:
+    spec = _FACT_FOR_SOURCE.get(source)
+    if spec is None:
+        return None
+    module_name, class_name, column = spec
+    model = getattr(import_module(module_name), class_name)
+    return (
+        db.query(func.max(getattr(model, column)))
+        .filter(model.client_id == client_id)
+        .scalar()
+    )
+
+
+def _window_for_source(
+    db: Session, client_id, source: str, lookback_days: int
+) -> tuple[date, date]:
+    """The window to ask this source for.
+
+    Ends where the source's data can actually exist, and starts wherever this
+    client's facts stop — so a client that has fallen behind catches up rather
+    than asking for the same recent days forever.
+    """
+    end = date.today() - timedelta(days=SOURCE_LAG_DAYS.get(source, 0))
+    default_start = end - timedelta(days=max(lookback_days, 1) - 1)
+
+    last = _last_fact_date(db, client_id, source)
+    if last is not None:
+        catch_up = last - timedelta(days=RESTATEMENT_OVERLAP_DAYS)
+        start = min(default_start, catch_up)
+    else:
+        start = default_start
+    start = max(start, end - timedelta(days=MAX_CATCHUP_DAYS))
+    return min(start, end), end
+
+
 def _lookback_window(lookback_days: int) -> tuple[date, date]:
     end = date.today()
     start = end - timedelta(days=max(lookback_days, 1) - 1)
@@ -67,7 +140,6 @@ def _mapped_sources_by_client(db: Session) -> dict:
 def enqueue_daily_syncs(db: Session) -> dict[str, int]:
     """Enqueue overlapping lookback syncs for every client with mapped properties."""
     settings = get_settings()
-    start, end = _lookback_window(settings.daily_sync_lookback_days)
     mapped = _mapped_sources_by_client(db)
 
     enqueued = 0
@@ -77,6 +149,9 @@ def enqueue_daily_syncs(db: Session) -> dict[str, int]:
     for client_id, sources in mapped.items():
         for source in sorted(sources):
             try:
+                start, end = _window_for_source(
+                    db, client_id, source, settings.daily_sync_lookback_days
+                )
                 enqueue_sync_job(
                     db,
                     client_id,

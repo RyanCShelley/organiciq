@@ -120,20 +120,25 @@ def run_gsc_pages_job(db: Session, job: SyncJob) -> SyncJob:
         max_date = validate_gsc_pages(db, job, fetched_pages, written_pages)
 
         if max_date is None and fetched_pages == 0 and fetched_daily == 0:
-            # Empty window can be valid (new property); watermark to end_date only if API succeeded.
+            # An empty window can be legitimate — a new property, or a site
+            # with no impressions — but it is not evidence that we have data
+            # through `end_date`, and recording it as such is what hid this
+            # for fifteen days. The window asked for the last three days
+            # ending today, which sits entirely inside Search Console's two-
+            # to three-day lag, so every client came back empty every day,
+            # was marked successful, and had its watermark pushed to today.
+            #
+            # The watermark stays where the facts actually stop. A run that
+            # fetched nothing reports PARTIAL and says so.
             job.validation_status = ValidationStatus.PASSED
-            job.fact_watermark = job.end_date
-            job.status = SyncJobStatus.SUCCESSFUL
+            job.status = SyncJobStatus.PARTIAL
+            job.error_message = (
+                f"Search Console returned no rows for {job.start_date}..{job.end_date}. "
+                "The watermark is unchanged; nothing was fetched to move it."
+            )
             job.completed_at = datetime.now(timezone.utc)
             db.commit()
-            _upsert_watermark(
-                db,
-                client_id=job.client_id,
-                source="gsc_pages",
-                fact_through=job.end_date,
-                validation_status=ValidationStatus.PASSED,
-            )
-            _touch_integration(db, job.client_id, success=True, fact_date=job.end_date, error=None)
+            _touch_integration(db, job.client_id, success=True, fact_date=None, error=None)
             purge_staging_for_job(db, job_id=job.id, source=job.source)
             return job
 
@@ -199,19 +204,17 @@ def run_gsc_queries_job(db: Session, job: SyncJob) -> SyncJob:
         max_date = validate_gsc_queries(db, job, fetched, written)
 
         if max_date is None and fetched == 0:
+            # Same rule as the pages job: nothing fetched is not evidence of
+            # data through `end_date`, so the watermark stays put.
             job.validation_status = ValidationStatus.PASSED
-            job.fact_watermark = job.end_date
-            job.status = SyncJobStatus.SUCCESSFUL
+            job.status = SyncJobStatus.PARTIAL
+            job.error_message = (
+                f"Search Console returned no query rows for "
+                f"{job.start_date}..{job.end_date}. The watermark is unchanged."
+            )
             job.completed_at = datetime.now(timezone.utc)
             db.commit()
-            _upsert_watermark(
-                db,
-                client_id=job.client_id,
-                source="gsc_queries",
-                fact_through=job.end_date,
-                validation_status=ValidationStatus.PASSED,
-            )
-            _touch_integration(db, job.client_id, success=True, fact_date=job.end_date, error=None)
+            _touch_integration(db, job.client_id, success=True, fact_date=None, error=None)
             purge_staging_for_job(db, job_id=job.id, source=job.source)
             return job
 
