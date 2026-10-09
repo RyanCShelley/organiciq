@@ -9,13 +9,13 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 
 export type KeywordMapRow = {
   keyword: string;
-  page_url: string | null;
+  target_url: string | null;
   note: string | null;
   mapped: boolean;
   volume: number | null;
   difficulty: number | null;
   current_position: number | null;
-  suggested_page_url: string | null;
+  suggested_target_url: string | null;
   suggested_impressions: number | null;
   suggested_instead_of: string | null;
 };
@@ -43,19 +43,19 @@ function Row({
   clientSlug: string;
   pages: string[];
 }) {
-  const [pageUrl, setPageUrl] = useState(row.page_url ?? "");
+  const [pageUrl, setPageUrl] = useState(row.target_url ?? "");
   const [saved, setSaved] = useState<"idle" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const dirty = (row.page_url ?? "") !== pageUrl;
+  const dirty = (row.target_url ?? "") !== pageUrl;
 
   function save(nextUrl: string) {
     const data = new FormData();
     data.set("clientId", clientId);
     data.set("clientSlug", clientSlug);
     data.set("keyword", row.keyword);
-    data.set("page_url", nextUrl);
+    data.set("target_url", nextUrl);
     startTransition(async () => {
       const result = await saveKeywordPageMapAction(data);
       setSaved(result.ok ? "ok" : "error");
@@ -103,12 +103,12 @@ function Row({
         </div>
         {/* What the engine would otherwise guess, so the decision is a
             confirmation rather than research. */}
-        {!row.mapped && row.suggested_page_url ? (
+        {!row.mapped && row.suggested_target_url ? (
           <button
             type="button"
             className="mt-1 text-left text-xs text-[var(--brand-teal-hover)] hover:underline"
             onClick={() => {
-              setPageUrl(row.suggested_page_url ?? "");
+              setPageUrl(row.suggested_target_url ?? "");
               setSaved("idle");
             }}
           >
@@ -116,11 +116,11 @@ function Row({
               <>
                 Search Console shows {row.suggested_instead_of} (
                 {formatNum(row.suggested_impressions)} impressions), which
-                canonicalises to {row.suggested_page_url} — use the canonical
+                canonicalises to {row.suggested_target_url} — use the canonical
               </>
             ) : (
               <>
-                Search Console shows {row.suggested_page_url} (
+                Search Console shows {row.suggested_target_url} (
                 {formatNum(row.suggested_impressions)} impressions) — use this
               </>
             )}
@@ -135,8 +135,8 @@ function Row({
       </td>
       <td className="whitespace-nowrap">
         {row.mapped ? (
-          <Badge variant={row.page_url ? "success" : "neutral"}>
-            {row.page_url ? "Mapped" : "No page, recorded"}
+          <Badge variant={row.target_url ? "success" : "neutral"}>
+            {row.target_url ? "Mapped" : "No page, recorded"}
           </Badge>
         ) : (
           <Badge variant="warning">Unmapped</Badge>
@@ -167,7 +167,7 @@ export function KeywordPageMapTable({
       if (!needle) return true;
       return (
         row.keyword.toLowerCase().includes(needle) ||
-        (row.page_url ?? "").toLowerCase().includes(needle)
+        (row.target_url ?? "").toLowerCase().includes(needle)
       );
     });
   }, [rows, query, onlyUnmapped]);

@@ -13,8 +13,8 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.decision import DecisionStatus
 from app.schemas import (
-    KeywordPageMapOut,
-    KeywordPageMapUpdate,
+    KeywordTargetOut,
+    KeywordTargetUpdate,
     DecisionEnsureRequest,
     DecisionEvaluateRequest,
     DecisionEvaluateResponse,
@@ -186,17 +186,17 @@ def get_keyword_page_map(
     return decision_service.keyword_page_map_view(db, client.id)
 
 
-@router.put("/keyword-page-map", response_model=list[KeywordPageMapOut])
+@router.put("/keyword-page-map", response_model=list[KeywordTargetOut])
 def put_keyword_page_map(
-    payload: KeywordPageMapUpdate,
+    payload: KeywordTargetUpdate,
     client: Annotated[Client, Depends(require_client)],
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
-) -> list[KeywordPageMapOut]:
+) -> list[KeywordTargetOut]:
     """Record which page owns a term.
 
     A row with no page_url means "no page owns this yet", which is an
     answer and stops the engine asking again.
     """
     rows = upsert_keyword_page_map(db, client.id, payload.entries)
-    return [KeywordPageMapOut.model_validate(row) for row in rows]
+    return [KeywordTargetOut.model_validate(row) for row in rows]

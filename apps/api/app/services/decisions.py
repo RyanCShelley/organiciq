@@ -291,16 +291,16 @@ def upsert_keyword_page_map(db, client_id, entries):
     query differ in case far more often than in substance, and the engine
     looks the mapping up by the lowercased term.
     """
-    from app.models.decision import KeywordPageMap
+    from app.models.decision import KeywordTarget
 
     wanted = [k for k in ((e.keyword or "").strip().lower() for e in entries) if k]
     # Every row this save might touch, in one query rather than one per
     # entry — a bulk save of a hundred keywords was a hundred round trips.
     existing = {
         row.keyword: row
-        for row in db.query(KeywordPageMap).filter(
-            KeywordPageMap.client_id == client_id,
-            KeywordPageMap.keyword.in_(wanted),
+        for row in db.query(KeywordTarget).filter(
+            KeywordTarget.client_id == client_id,
+            KeywordTarget.keyword.in_(wanted),
         )
     }
     for entry in entries:
@@ -309,19 +309,25 @@ def upsert_keyword_page_map(db, client_id, entries):
             continue
         row = existing.get(keyword)
         if row is None:
-            row = KeywordPageMap(client_id=client_id, keyword=keyword)
+            row = KeywordTarget(client_id=client_id, keyword=keyword)
             db.add(row)
             # The batched lookup only saw what was in the table when it ran,
             # so a keyword repeated inside one payload has to be matched
             # against what this call has already added.
             existing[keyword] = row
-        row.page_url = (entry.page_url or "").strip() or None
+        row.target_url = (entry.target_url or "").strip() or None
+        row.term_role = entry.term_role
+        row.group_name = (entry.group_name or "").strip() or None
+        row.priority = bool(entry.priority)
+        # Anything written through this path is somebody's decision. A
+        # suggestion only becomes confirmed by passing through here.
+        row.source = "confirmed"
         row.note = (entry.note or "").strip() or None
     db.commit()
     return (
-        db.query(KeywordPageMap)
-        .filter(KeywordPageMap.client_id == client_id)
-        .order_by(KeywordPageMap.keyword)
+        db.query(KeywordTarget)
+        .filter(KeywordTarget.client_id == client_id)
+        .order_by(KeywordTarget.keyword)
         .all()
     )
 
@@ -337,7 +343,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
     from datetime import date, timedelta
 
     from app.models.crawl import FactCrawlPageSnapshot
-    from app.models.decision import KeywordPageMap
+    from app.models.decision import KeywordTarget
     from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
     from app.services.lever_engine import (
         _pages_for_queries,
@@ -351,8 +357,8 @@ def keyword_page_map_view(db, client_id, *, period=None):
 
     mapped = {
         (row.keyword or "").strip().lower(): row
-        for row in db.query(KeywordPageMap)
-        .filter(KeywordPageMap.client_id == client_id)
+        for row in db.query(KeywordTarget)
+        .filter(KeywordTarget.client_id == client_id)
         .all()
     }
     metrics = {
@@ -403,15 +409,23 @@ def keyword_page_map_view(db, client_id, *, period=None):
         rows.append(
             {
                 "keyword": keyword,
-                "page_url": row.page_url if row else None,
+                "target_url": row.target_url if row else None,
                 "note": row.note if row else None,
                 "mapped": row is not None,
+                #: primary | secondary | None. Null is its own answer.
+                "term_role": row.term_role if row else None,
+                #: SE Ranking's own grouping, so the only new judgement is
+                #: which groups are the priority ones.
+                "group_name": (row.group_name if row else None) or tracked.group_name,
+                "priority": bool(row.priority) if row else False,
+                #: confirmed | suggested. The engine reads confirmed only.
+                "source": row.source if row else None,
                 "volume": float(metric.volume) if metric and metric.volume else None,
                 "difficulty": (
                     float(metric.difficulty) if metric and metric.difficulty else None
                 ),
                 "current_position": _rank_position(tracked.current_position),
-                "suggested_page_url": suggested_url,
+                "suggested_target_url": suggested_url,
                 "suggested_impressions": (
                     round(suggested.impressions) if suggested else None
                 ),

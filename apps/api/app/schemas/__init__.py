@@ -1,3 +1,4 @@
+from typing import Literal
 from datetime import date as Date, datetime as DateTime
 from uuid import UUID
 
@@ -638,18 +639,28 @@ class ConversionPageOut(ORMModel):
     is_primary: bool = False
 
 
-class KeywordPageMapEntry(BaseModel):
+class KeywordTargetEntry(BaseModel):
     keyword: str = Field(min_length=1, max_length=512)
     #: Null records "no page owns this yet" — a decision, not an omission.
-    page_url: str | None = None
+    target_url: str | None = None
+    #: primary | secondary | None. Null means nobody has said, which the
+    #: rules that care must treat as its own answer.
+    term_role: Literal["primary", "secondary"] | None = None
+    group_name: str | None = None
+    priority: bool = False
     note: str | None = None
 
 
-class KeywordPageMapUpdate(BaseModel):
-    entries: list[KeywordPageMapEntry]
+class KeywordTargetUpdate(BaseModel):
+    entries: list[KeywordTargetEntry]
 
 
-class KeywordPageMapOut(ORMModel):
+class KeywordTargetOut(ORMModel):
     keyword: str
-    page_url: str | None
+    target_url: str | None
+    term_role: str | None
+    group_name: str | None
+    priority: bool
+    source: str
+    confidence: float | None
     note: str | None

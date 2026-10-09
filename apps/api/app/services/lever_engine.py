@@ -90,7 +90,7 @@ from app.models.crawl import (
     FactCrawlPageSnapshot,
 )
 from app.models.decision import (
-    KeywordPageMap,
+    KeywordTarget,
     Decision,
     DecisionStatus,
     DecisionThreshold,
@@ -2482,8 +2482,8 @@ def _keyword_page_map(db: Session, client_id: UUID) -> dict[str, tuple[str | Non
     engine forgetting what it was told.
     """
     rows = (
-        db.query(KeywordPageMap.keyword, KeywordPageMap.page_url)
-        .filter(KeywordPageMap.client_id == client_id)
+        db.query(KeywordTarget.keyword, KeywordTarget.target_url)
+        .filter(KeywordTarget.client_id == client_id)
         .all()
     )
     return {

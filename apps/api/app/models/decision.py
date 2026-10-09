@@ -3,7 +3,20 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -131,7 +144,7 @@ class Decision(Base):
     effort: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
 
-class KeywordPageMap(Base):
+class KeywordTarget(Base):
     """Which page is meant to own a term.
 
     The playbook's first source for "which page should rank for this", and
@@ -144,10 +157,19 @@ class KeywordPageMap(Base):
     guessing.
     """
 
-    __tablename__ = "keyword_page_map"
+    __tablename__ = "keyword_targets"
     __table_args__ = (
-        UniqueConstraint("client_id", "keyword", name="uq_keyword_page_map_grain"),
-        Index("ix_keyword_page_map_client", "client_id"),
+        UniqueConstraint("client_id", "keyword", name="uq_keyword_targets_grain"),
+        Index("ix_keyword_targets_client", "client_id"),
+        Index("ix_keyword_targets_priority", "client_id", "priority"),
+        CheckConstraint(
+            "term_role IS NULL OR term_role IN ('primary', 'secondary')",
+            name="ck_keyword_targets_term_role",
+        ),
+        CheckConstraint(
+            "source IN ('confirmed', 'suggested')",
+            name="ck_keyword_targets_source",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -159,7 +181,25 @@ class KeywordPageMap(Base):
     keyword: Mapped[str] = mapped_column(String(512), nullable=False)
     #: Null means "deliberately no page yet" — a decision, and different
     #: from never having been asked.
-    page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: primary | secondary | None. A primary term earns a title rewrite; a
+    #: secondary one earns a section. Null means nobody has said, which is
+    #: not the same as secondary, so the rules that care must check.
+    term_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: The SE Ranking group this term belongs to, copied at confirmation
+    #: time. The fact table has it too, but a term can be mapped before it
+    #: is tracked, and a group can be renamed under us.
+    group_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: Whether this is one of the terms the client is actually judged on.
+    #: V1 reads "priority-group keywords" and nothing marked a group before.
+    priority: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: confirmed | suggested. The engine reads confirmed rows only — a
+    #: proposal from the embedding matcher is a proposal until somebody
+    #: agrees with it.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
+    #: How sure the suggester was, for ordering a review queue. Never read
+    #: by a rule.
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

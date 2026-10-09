@@ -4,9 +4,13 @@ import { revalidatePath } from "next/cache";
 
 import { apiFetch } from "@/lib/api";
 
-export type KeywordMapEntry = {
+export type KeywordTargetEntry = {
   keyword: string;
-  page_url: string | null;
+  target_url: string | null;
+  /** primary | secondary | null. Null means nobody has said yet. */
+  term_role: "primary" | "secondary" | null;
+  group_name: string | null;
+  priority: boolean;
   note: string | null;
 };
 
@@ -29,9 +33,13 @@ export async function saveKeywordPageMapAction(formData: FormData) {
   // An empty page URL is a decision — "no page owns this yet" — and the
   // engine treats it as an answer rather than a gap. That is only true if
   // the row is written, so this does not bail out on a blank.
-  const entry: KeywordMapEntry = {
+  const role = String(formData.get("term_role") || "").trim();
+  const entry: KeywordTargetEntry = {
     keyword,
-    page_url: String(formData.get("page_url") || "").trim() || null,
+    target_url: String(formData.get("target_url") || "").trim() || null,
+    term_role: role === "primary" || role === "secondary" ? role : null,
+    group_name: String(formData.get("group_name") || "").trim() || null,
+    priority: String(formData.get("priority") || "") === "true",
     note: String(formData.get("note") || "").trim() || null,
   };
 
