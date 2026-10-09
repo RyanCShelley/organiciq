@@ -363,13 +363,30 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
             or 0
         )
         collapsed = indexable_now == 0 and indexable_before > 0
-        if not fetched or collapsed:
+        # Being turned away is knowably incomplete. The guards above catch a
+        # crawl that came back with nothing; this catches the one that came
+        # back with less, which is how nine clients ended up with a single
+        # page in their latest crawl while the one before had five hundred.
+        #
+        # No ratio to tune: if the server refused us pages *and* we finished
+        # with fewer indexable pages than we already had, this crawl is worse
+        # than the one it would replace. Throttled but still ahead is an
+        # improvement, and is kept.
+        throttled_short = result.rate_limited_pages > 0 and indexable_now < indexable_before
+        if not fetched or collapsed or throttled_short:
             blocked = sum(1 for page in result.pages if page.blocked_by_robots)
             reason = (
                 "robots.txt disallows crawling"
                 if blocked
                 else f"nothing indexable came back, where the last crawl had {indexable_before}"
                 if collapsed
+                else (
+                    f"{client.domain} rate limited the crawl: "
+                    f"{result.rate_limited_pages} pages turned away and only "
+                    f"{indexable_now} indexable came back, where the last crawl "
+                    f"had {indexable_before}"
+                )
+                if throttled_short
                 else "no page could be fetched"
             )
             db.query(FactCrawlPageIssue).filter(

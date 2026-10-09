@@ -758,3 +758,157 @@ def test_search_console_hosts_find_a_subdomain_nothing_links_to(db, client_a):
     # The subdomain, and only that: www is the apex and the other domain is
     # not ours.
     assert hosts == ("offer.aquamanleakdetection.com",)
+
+
+def test_a_throttled_crawl_that_came_back_smaller_keeps_the_previous_pages(
+    db, client_a, monkeypatch
+):
+    """One page through and the rest refused must not replace a whole site.
+
+    This is how nine clients ended up with a single page in their latest
+    crawl. The page that got through is indexable, so neither of the guards
+    above fires: something was fetched, and something is indexable. The
+    result replaced five hundred rows with one.
+
+    The condition is knowable without a ratio to tune — the server told us it
+    was refusing pages, and we finished with fewer indexable than we had.
+    """
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.job import SyncJob, SyncJobStatus
+
+    db.add(_snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, PAGE))
+    db.add(_snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, "https://example.com/two"))
+    db.commit()
+
+    got_through = CrawledPage(
+        raw_url="https://example.com/one",
+        normalized_url="https://example.com/one",
+        status_code=200,
+        redirect_url=None,
+        redirect_count=0,
+        blocked_by_robots=False,
+        fetch_error=None,
+        parsed=None,
+    )
+    refused = [
+        CrawledPage(
+            raw_url=f"https://example.com/p{i}",
+            normalized_url=f"https://example.com/p{i}",
+            status_code=None,
+            redirect_url=None,
+            redirect_count=0,
+            blocked_by_robots=False,
+            fetch_error="rate limited (HTTP 429)",
+            parsed=None,
+            rate_limited=True,
+        )
+        for i in range(60)
+    ]
+    throttled = CrawlResult(
+        pages=[got_through, *refused],
+        robots_txt_found=True,
+        rate_limited_pages=len(refused),
+        throttled=True,
+    )
+    monkeypatch.setattr(
+        pipeline.asyncio, "run", lambda coro: (coro.close(), throttled)[1]
+    )
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+
+    assert job.status == SyncJobStatus.PARTIAL
+    assert "rate limited the crawl" in (job.error_message or "")
+    assert "60 pages turned away" in (job.error_message or "")
+
+    survivors = sorted(
+        row.normalized_url
+        for row in db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client_a.id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+        )
+        .all()
+    )
+    assert survivors == sorted([PAGE, "https://example.com/two"])
+
+
+def test_a_throttled_crawl_that_still_grew_is_published(db, client_a, monkeypatch):
+    """Throttled but ahead is an improvement. Refusing it would leave a
+    client stuck on an old crawl forever because one page got a 429."""
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.job import SyncJob, SyncJobStatus
+
+    db.add(_snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, PAGE))
+    db.commit()
+
+    pages = [
+        CrawledPage(
+            raw_url=f"https://example.com/n{i}",
+            normalized_url=f"https://example.com/n{i}",
+            status_code=200,
+            redirect_url=None,
+            redirect_count=0,
+            blocked_by_robots=False,
+            fetch_error=None,
+            parsed=None,
+        )
+        for i in range(5)
+    ]
+    pages.append(
+        CrawledPage(
+            raw_url="https://example.com/refused",
+            normalized_url="https://example.com/refused",
+            status_code=None,
+            redirect_url=None,
+            redirect_count=0,
+            blocked_by_robots=False,
+            fetch_error="rate limited (HTTP 429)",
+            parsed=None,
+            rate_limited=True,
+        )
+    )
+    grew = CrawlResult(
+        pages=pages, robots_txt_found=True, rate_limited_pages=1, throttled=True
+    )
+    monkeypatch.setattr(pipeline.asyncio, "run", lambda coro: (coro.close(), grew)[1])
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+
+    assert job.status != SyncJobStatus.PARTIAL
+    urls = {
+        row.normalized_url
+        for row in db.query(FactCrawlPageSnapshot)
+        .filter(FactCrawlPageSnapshot.client_id == client_a.id)
+        .all()
+    }
+    assert "https://example.com/n0" in urls

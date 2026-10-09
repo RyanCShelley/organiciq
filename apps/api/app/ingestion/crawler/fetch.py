@@ -12,6 +12,8 @@ import asyncio
 import gzip
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib import robotparser
 from urllib.parse import urldefrag, urljoin, urlsplit
 from xml.etree import ElementTree
@@ -22,6 +24,77 @@ from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
 from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 
 logger = logging.getLogger("organiciq.crawler")
+
+
+class Throttle:
+    """How long to wait before the next request, and when to wait longer.
+
+    A crawl used to run flat out at four requests in flight until it
+    finished. ACC Tek answers 429 under that load, so sixty of its pages came
+    back refused, were stored as HTTP 429 and surfaced as sixty findings
+    about the client's site. Nine clients have a single page in their latest
+    crawl for the same reason.
+
+    So the crawl listens. `robots.txt` may declare a `Crawl-delay`, which is
+    the site telling us its rate before we have asked for anything. After
+    that, every refusal widens the gap, and the gap never shrinks within a
+    run — a site that is struggling does not recover because we would like
+    it to.
+    """
+
+    def __init__(self, base_delay: float = 0.0) -> None:
+        self.delay = max(0.0, base_delay)
+        self.throttled = False
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0
+
+    def back_off(self) -> None:
+        """Called after the server turns a request away."""
+        self.throttled = True
+        self.delay = min(
+            MAX_THROTTLE_DELAY,
+            max(THROTTLED_MIN_DELAY, self.delay * THROTTLE_GROWTH),
+        )
+
+    async def wait(self) -> None:
+        """Space requests out, counting from when the last one started.
+
+        Serialised, so concurrent workers queue behind one another rather
+        than each sleeping the same interval and then firing together — which
+        is the burst the limiter is there to stop.
+        """
+        if self.delay <= 0:
+            return
+        async with self._lock:
+            now = asyncio.get_running_loop().time()
+            if now < self._next_at:
+                await asyncio.sleep(self._next_at - now)
+                now = asyncio.get_running_loop().time()
+            self._next_at = now + self.delay
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    """`Retry-After`, which is either seconds or an HTTP date.
+
+    Returns None when it is absent or unparseable, so the caller falls back
+    to its own backoff rather than treating a malformed header as zero.
+    """
+    if not value:
+        return None
+    text = value.strip()
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
 class RobotsUnreachable(Exception):
@@ -35,6 +108,25 @@ DEFAULT_PAGE_LIMIT = 500
 MAX_PAGE_LIMIT = 5000
 DEFAULT_CONCURRENCY = 4
 REQUEST_TIMEOUT = 20.0
+#: Statuses that mean "not now" rather than "not here". A page that answers
+#: one of these has told us nothing about itself.
+RATE_LIMIT_STATUSES = frozenset({429, 503})
+#: How many times to come back to a page a server is turning away. Three is
+#: enough for a burst limiter to reset and short enough that a site which is
+#: genuinely refusing us does not hold the crawl open.
+MAX_RATE_LIMIT_RETRIES = 3
+#: First wait after a 429 with no Retry-After, doubling each time.
+RATE_LIMIT_BASE_DELAY = 2.0
+#: A server asking for longer than this is asking us to come back another
+#: day, and waiting it out would hold a worker for the whole crawl window.
+MAX_RETRY_AFTER = 60.0
+#: Once a site rate-limits us, every later request waits at least this long.
+#: ACC Tek answered 429 on sixty pages in one run: the crawl kept four
+#: requests in flight the whole way down and never slowed.
+THROTTLED_MIN_DELAY = 1.0
+#: And the delay grows each time it happens again.
+THROTTLE_GROWTH = 1.5
+MAX_THROTTLE_DELAY = 10.0
 #: A redirect run longer than this is a loop as far as we are concerned.
 MAX_REDIRECT_HOPS = 5
 MAX_BODY_BYTES = 5_000_000
@@ -93,6 +185,11 @@ class CrawledPage:
     #: Scripts and stylesheets this page loads that robots.txt disallows.
     #: Google renders without them and sees a different page than a visitor.
     blocked_resources: int = 0
+    #: The server answered 429 or 503 every time we asked. This is us being
+    #: turned away, not the page being broken, and the two must not share a
+    #: status code: sixty of ACC Tek's pages were reported as "HTTP 429 on
+    #: page with demand", which read as sixty faults on the client's site.
+    rate_limited: bool = False
 
     @property
     def indexable(self) -> bool:
@@ -127,6 +224,13 @@ class CrawlResult:
     #: Where the sitemap was actually found, for the operator.
     sitemap_location: str | None = None
     hit_page_limit: bool = False
+    #: Pages the server turned away for the whole crawl. Reported as a
+    #: condition of the run, not as findings about the site.
+    rate_limited_pages: int = 0
+    #: Whether the site asked us to slow down at any point.
+    throttled: bool = False
+    #: `Crawl-delay` from robots.txt, when the site declares one.
+    crawl_delay: float | None = None
     links: list[InternalLink] = field(default_factory=list)
 
 
@@ -314,6 +418,18 @@ async def crawl_site(
             result.robots_txt_error = str(exc)[:300]
         result.robots_txt_found = robots is not None
         result.ai_crawlers_blocked = blocked_ai_crawlers(robots, root)
+
+        # The site's own stated rate, if it has one. This is the only rate
+        # we get before asking for anything, so it is the place to start.
+        declared_delay: float | None = None
+        if robots is not None:
+            try:
+                raw = robots.crawl_delay(USER_AGENT)
+                declared_delay = float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                declared_delay = None
+        result.crawl_delay = declared_delay
+        throttle = Throttle(declared_delay or 0.0)
         if robots is not None and not robots.can_fetch(USER_AGENT, root):
             result.robots_disallows_site = True
 
@@ -370,7 +486,9 @@ async def crawl_site(
 
         async def fetch_one(url: str) -> CrawledPage:
             async with semaphore:
-                return await _fetch_page(client, url, robots if respect_robots else None)
+                return await _fetch_page(
+                    client, url, robots if respect_robots else None, throttle
+                )
 
         while queue and len(pages) < page_limit:
             batch = queue[: max(1, concurrency)]
@@ -463,6 +581,17 @@ async def crawl_site(
             page.inbound_editorial_links = editorial.get(key, 0)
             page.in_sitemap = key in result.sitemap_urls
         result.pages = list(pages.values())
+        # A condition of the run, reported once, rather than one finding per
+        # page about a site that is answering us perfectly well when asked
+        # more slowly.
+        result.rate_limited_pages = sum(1 for p in result.pages if p.rate_limited)
+        result.throttled = throttle.throttled
+        if result.throttled:
+            logger.warning(
+                "%s rate limited the crawl: %d pages turned away, "
+                "final delay %.1fs between requests",
+                host, result.rate_limited_pages, throttle.delay,
+            )
         # Only edges between pages we actually crawled: an edge to a URL we never
         # fetched cannot be reasoned about and would bloat the table.
         result.links = [e for e in all_edges if e.to_url in crawled]
@@ -500,6 +629,7 @@ async def _fetch_page(
     client: httpx.AsyncClient,
     url: str,
     robots: robotparser.RobotFileParser | None,
+    throttle: Throttle | None = None,
 ) -> CrawledPage:
     normalized = normalize_url(url)
 
@@ -524,9 +654,63 @@ async def _fetch_page(
     # normalized URLs here reported every such page as unreachable.
     visited: set[str] = {url}
 
+    attempts = 0
     try:
         while True:
+            if throttle is not None:
+                await throttle.wait()
             response = await client.get(current)
+
+            # "Not now" is not "not here". Wait as long as the server asks,
+            # or back off on our own, and come back to the same URL — and
+            # slow every later request in this crawl, because a site that
+            # refused once at this rate will refuse again.
+            if response.status_code in RATE_LIMIT_STATUSES:
+                if throttle is not None:
+                    throttle.back_off()
+                if attempts < MAX_RATE_LIMIT_RETRIES:
+                    asked = retry_after_seconds(response.headers.get("retry-after"))
+                    if asked is not None and asked > MAX_RETRY_AFTER:
+                        # Being told to come back in an hour is a refusal.
+                        # Holding a worker open for it would stall the crawl.
+                        return CrawledPage(
+                            raw_url=url,
+                            normalized_url=normalized,
+                            status_code=None,
+                            redirect_url=None,
+                            redirect_count=0,
+                            blocked_by_robots=False,
+                            fetch_error=(
+                                f"rate limited; asked to wait {int(asked)}s"
+                            ),
+                            parsed=None,
+                            rate_limited=True,
+                        )
+                    wait = (
+                        asked
+                        if asked is not None
+                        else RATE_LIMIT_BASE_DELAY * (2**attempts)
+                    )
+                    attempts += 1
+                    await asyncio.sleep(wait)
+                    continue
+                # Out of retries. The status is deliberately not kept: stored
+                # as 429 it becomes "HTTP 429 on page with demand", which
+                # reads as a fault on the client's site rather than as our
+                # crawler being turned away.
+                logger.info("rate limited after %d attempts: %s", attempts, current)
+                return CrawledPage(
+                    raw_url=url,
+                    normalized_url=normalized,
+                    status_code=None,
+                    redirect_url=None,
+                    redirect_count=0,
+                    blocked_by_robots=False,
+                    fetch_error=f"rate limited (HTTP {response.status_code})",
+                    parsed=None,
+                    rate_limited=True,
+                )
+
             if first_status is None:
                 first_status = response.status_code
 
