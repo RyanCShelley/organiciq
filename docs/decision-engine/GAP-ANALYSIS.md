@@ -262,3 +262,71 @@ What survives: plan slots, no padding, `_collapse_by_page`, the refresh-queue
 suppression, the crawler's `sections` and `faq_questions` capture, the
 measured CTR curve, and the honesty rules — never show a number the engine
 cannot stand behind, never tune a threshold to make a rule fire.
+
+---
+
+# Status — 9 Oct 2026, end of day
+
+Same spec, unchanged. What moved, and what did not.
+
+## Shipped today
+
+| | |
+|---|---|
+| Conversion screen | A list of the client's GA4 events with a tick against each, replacing a one-at-a-time typed form. Checked against all 38 event names in the warehouse: 16 suggested, all leads on inspection. |
+| Crawler 429 | Honours `Crawl-delay`, retries on 429/503 with `Retry-After`, stores a refused page with no status so it stops reading as "HTTP 429 on page with demand". A partially throttled crawl no longer replaces a bigger one. ACCTek went from stalling at 106 pages to finishing all 197. |
+| AI Overview | Detection read a six-row table while 105 tracked keywords carried `sge`. Now 103 queries across 16 clients price on the right curve — roughly half the CTR at positions 1–3. |
+| `keyword_targets` | Migrated in production. `term_role`, `group_name`, `priority`, `source`, `confidence`. Editor ships with a priority checkbox, a role select that keeps "Not set" as an answer, and filters by priority and group. |
+| Embedding matcher | Prototyped and measured against 16,421 real query→page pairs: 32.8% → 72.2% on SMA. Not wired in. |
+
+## Where the spec's inputs actually stand
+
+| Input | Clients | Spec |
+|---|---|---|
+| GSC pages | **6 / 24** | required, §9 |
+| GSC query × page | **4 / 24** | required, §9 |
+| `conversion_definitions` | 4 / 24 | required, §9 |
+| `client_conversion_pages` | 2 / 24 | required, §9 |
+| `keyword_targets` with any row | 1 / 24 | required, §9 |
+| priority terms marked | **0** | V1 reads these |
+| crawl pages with `sections` | 669 / 3,936 | V-1, V-2 |
+| **passing the 7-day freshness gate** | **0 / 24** | §6 — all Withheld |
+
+Tooling now exists for every one of those. None of them is filled.
+
+## The blocker, and it is one bug
+
+Search Console jobs run daily at 11:00, report **`successful`**, and fetch
+**zero records**. Three clients confirmed in one sample; eighteen have no GSC
+pages at all, which is the same failure seen from the other end. A separate
+client (injury-care-clinic) fails honestly with `403 Forbidden` from
+googleapis, which is an auth problem and reports itself as one.
+
+A job that says "successful, fetched=0" is the same class of fault as the
+watermark that advanced without data: it reports a state nobody checked.
+
+Search Console feeds V3, V4, T1, T-1, the CTR curve and half of Decision 2.
+Until this is fixed, no amount of engine work changes any client's output,
+because every client is Withheld.
+
+## Still unbuilt from the spec
+
+- **Decision 1** — eleven tests; four partial, seven absent. No relaunch
+  override (`annotations` has 0 rows), no hysteresis, no incidents routing.
+- **Decision 2** — 1 of 5 scoring factors.
+- **Decision 3** — no slot cap in the engine, no spillover, no Withheld gate.
+- **The monthly record** — nothing is saved; the page recomputes on view.
+- **The client page** — not rebuilt to `client-page-spec.md`.
+- **`engine_actions`** — no assign, send, or results loop.
+
+## Fastest path to something shipped
+
+One client, green, end to end. SMA is the candidate: it has GSC pages, query ×
+page, a conversion definition, a crawl with `sections`, 73 grouped keywords and
+tracked AI prompts. Its only failing input is GSC freshness — 15 days — which
+is the bug above, not a build.
+
+1. Fix the GSC sync that reports success on zero rows.
+2. Mark SMA's priority terms and targets on the screen that now exists.
+3. Build Decision 1's eleven tests and the monthly record against SMA alone.
+4. Roll out once it is right on one site.
