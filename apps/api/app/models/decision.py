@@ -205,3 +205,98 @@ class KeywordTarget(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class MonthlyRecord(Base):
+    """One saved run per client per month.
+
+    The engine used to recompute on every page view, which made the page a
+    different thing each time it loaded: a run that named Visibility in the
+    morning could name Leads in the afternoon because a sync landed, with
+    nothing recording that it changed or what it said before.
+
+    Almost everything downstream needs a run to be a thing that happened.
+    `held_since` and the two-month hold need last month's answer; "do not
+    prescribe this action on this URL again before its check date" needs the
+    date it was prescribed; the results loop needs what was promised 28 to 45
+    days ago. None of that works against a function.
+    """
+
+    __tablename__ = "monthly_records"
+    __table_args__ = (
+        UniqueConstraint("client_id", "month", name="uq_monthly_records_grain"),
+        Index("ix_monthly_records_client_month", "client_id", "month"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    #: "2026-10". One plan a month; re-running replaces it.
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    run_saved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    #: The newest day the data actually covered, not the day asked for.
+    data_through: Mapped[date | None] = mapped_column(Date, nullable=True)
+    constraint_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    held_since: Mapped[str] = mapped_column(String(7), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(8), nullable=False)
+    #: The whole record, to monthly-record.schema.json. Stored as one document
+    #: rather than fifteen tables that have to be joined back into exactly the
+    #: shape the page reads — every join a chance for the page to disagree
+    #: with the run.
+    record: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EngineAction(Base):
+    """Workflow state for one action or incident, written by the page.
+
+    Kept apart from the record on purpose. The record is what the engine
+    decided and must not change when somebody assigns a task; this is what
+    the team did about it. `uid` is stable across re-runs of the same month,
+    so an assignment made on Monday survives a re-run on Tuesday.
+    """
+
+    __tablename__ = "engine_actions"
+    __table_args__ = (
+        UniqueConstraint("client_id", "uid", name="uq_engine_actions_uid"),
+        Index("ix_engine_actions_client_month", "client_id", "month"),
+        CheckConstraint(
+            "status IN ('planned', 'assigned', 'done', 'skipped')",
+            name="ck_engine_actions_status",
+        ),
+        CheckConstraint(
+            "result IS NULL OR result IN ('improved', 'no_change', 'worse', 'waiting')",
+            name="ck_engine_actions_result",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    uid: Mapped[str] = mapped_column(String(128), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="action")
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
+    skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shipped_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: The results loop, filled on the check date rather than at prescription.
+    before_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    after_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    result: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
