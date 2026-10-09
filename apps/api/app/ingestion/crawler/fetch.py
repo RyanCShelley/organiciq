@@ -43,18 +43,39 @@ class Throttle:
     """
 
     def __init__(self, base_delay: float = 0.0) -> None:
-        self.delay = max(0.0, base_delay)
+        #: What the site asked for in robots.txt. The gap never goes below
+        #: it, however well the crawl is going — that rate was stated, not
+        #: inferred.
+        self.floor = max(0.0, base_delay)
+        self.delay = self.floor
         self.throttled = False
+        self._clean_runs = 0
         self._lock = asyncio.Lock()
         self._next_at = 0.0
 
     def back_off(self) -> None:
         """Called after the server turns a request away."""
         self.throttled = True
+        self._clean_runs = 0
         self.delay = min(
             MAX_THROTTLE_DELAY,
             max(THROTTLED_MIN_DELAY, self.delay * THROTTLE_GROWTH),
         )
+
+    def succeeded(self) -> None:
+        """Called after a page comes back without being turned away.
+
+        Quick to back off and slow to relax, so the crawl converges on the
+        rate the site tolerates instead of being held at its worst moment
+        for the rest of the run.
+        """
+        if self.delay <= self.floor:
+            return
+        self._clean_runs += 1
+        if self._clean_runs < RECOVERY_AFTER:
+            return
+        self._clean_runs = 0
+        self.delay = max(self.floor, self.delay * THROTTLE_DECAY)
 
     async def wait(self) -> None:
         """Space requests out, counting from when the last one started.
@@ -127,6 +148,16 @@ THROTTLED_MIN_DELAY = 1.0
 #: And the delay grows each time it happens again.
 THROTTLE_GROWTH = 1.5
 MAX_THROTTLE_DELAY = 10.0
+#: Consecutive pages that have to come back cleanly before the gap narrows
+#: again. A crawl of acctek.com fetched 106 pages with nothing refused and
+#: still finished at the 10-second ceiling, because a handful of early
+#: blips — all absorbed by the retries — widened the gap and nothing ever
+#: brought it back.
+RECOVERY_AFTER = 20
+#: How much it narrows when they do. Slower to relax than to back off, so
+#: the crawl settles near the rate the site actually tolerates rather than
+#: oscillating around it.
+THROTTLE_DECAY = 0.7
 #: A redirect run longer than this is a loop as far as we are concerned.
 MAX_REDIRECT_HOPS = 5
 MAX_BODY_BYTES = 5_000_000
@@ -711,6 +742,8 @@ async def _fetch_page(
                     rate_limited=True,
                 )
 
+            if throttle is not None:
+                throttle.succeeded()
             if first_status is None:
                 first_status = response.status_code
 

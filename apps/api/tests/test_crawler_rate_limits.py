@@ -22,6 +22,7 @@ import pytest
 from app.ingestion.crawler.fetch import (
     MAX_RATE_LIMIT_RETRIES,
     RATE_LIMIT_BASE_DELAY,
+    RECOVERY_AFTER,
     THROTTLED_MIN_DELAY,
     CrawledPage,
     Throttle,
@@ -263,3 +264,58 @@ def test_a_rate_limited_page_is_not_indexable():
         rate_limited=True,
     )
     assert page.indexable is False
+
+
+# ── Recovery ──
+
+
+def test_the_gap_narrows_again_after_a_clean_run():
+    """A crawl of acctek.com fetched 106 pages with nothing refused and
+    still finished at the 10-second ceiling: a few early blips, all absorbed
+    by the retries, widened the gap and nothing brought it back."""
+    t = Throttle(0.0)
+    t.back_off()
+    t.back_off()
+    widened = t.delay
+    for _ in range(RECOVERY_AFTER):
+        t.succeeded()
+    assert t.delay < widened
+
+
+def test_it_takes_more_than_one_good_page_to_relax():
+    """Quick to back off, slow to relax."""
+    t = Throttle(0.0)
+    t.back_off()
+    widened = t.delay
+    for _ in range(RECOVERY_AFTER - 1):
+        t.succeeded()
+    assert t.delay == widened
+
+
+def test_a_refusal_resets_the_run_of_good_pages():
+    t = Throttle(0.0)
+    t.back_off()
+    widened = t.delay
+    for _ in range(RECOVERY_AFTER - 1):
+        t.succeeded()
+    t.back_off()
+    for _ in range(RECOVERY_AFTER - 1):
+        t.succeeded()
+    assert t.delay >= widened
+
+
+def test_it_never_relaxes_below_the_rate_the_site_declared():
+    """robots.txt stated that rate. Nothing we observe overrides it."""
+    t = Throttle(3.0)
+    t.back_off()
+    for _ in range(RECOVERY_AFTER * 20):
+        t.succeeded()
+    assert t.delay == 3.0
+
+
+def test_a_site_that_never_refuses_is_never_slowed():
+    t = Throttle(0.0)
+    for _ in range(RECOVERY_AFTER * 5):
+        t.succeeded()
+    assert t.delay == 0.0
+    assert t.throttled is False
