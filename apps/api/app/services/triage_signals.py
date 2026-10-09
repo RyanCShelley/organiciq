@@ -70,7 +70,9 @@ def _nearest_reading(
             model.metric_date <= when + timedelta(days=tolerance),
             column.isnot(None),
         )
-        .order_by(func.abs(func.extract("epoch", model.metric_date - when)))
+        # Postgres subtracts two dates into an integer day count, not an
+        # interval, so this is just "nearest by days".
+        .order_by(func.abs(model.metric_date - when))
         .first()
     )
     return float(row[0]) if row and row[0] is not None else None
