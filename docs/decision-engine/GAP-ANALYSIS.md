@@ -182,26 +182,52 @@ line "re-crawl with sections + faq_questions: 1–2 concurrent, back off on
 
 ---
 
-## 8. Conflicts you need to settle
+## 8. Decisions taken (9 Oct 2026)
 
-1. **Hysteresis vs. monthly truth.** A constraint holds 2 months unless every
-   test clears by 10%. With no saved history, month 1 of this is unknowable —
-   do we start hysteresis from first run, or backfill `held_since`?
-2. **"Weakest by comparison" goes.** Today's engine names a constraint even
-   when nothing is broken. The spec replaces that with Visibility expansion.
-   Confirm I should delete it.
-3. **Blocked ≠ passing.** Today a branch with no data quietly drops out of the
-   ladder. The spec makes it blocked, which cannot take slots *and* cannot be
-   the constraint. That changes which branch wins for most clients.
-4. **The count column.** Yesterday we settled on "keep it where measured".
-   The spec removes it entirely — evidence lives in "Why this page". The
-   spec is cleaner; confirm and I will drop it.
-5. **Three visibility rules collapse into V-2.** 3a, 3b and 6 are one spec
-   action. That removes most of SMA's 26-row list by design.
-6. **Date picker and Run Engine leave the client page.** Re-running moves to
-   an admin board that does not exist yet.
+All six settled with Ryan. These are the rules; where they differ from the
+spec, the decision wins and the reason is recorded.
 
----
+**1. Nothing failing → Visibility expansion.** "Weakest by comparison" is
+deleted. The engine will no longer name a constraint when no branch is below
+its line; everything passing means the next tier of keyword groups and
+untracked AI prompts become visibility targets. Removes `by_comparison` from
+`Constraint` and the "softest spot" copy from the band. Two clients sit in
+that state today (Popfoam, Robinson Unmanned); both have two unmeasurable
+branches, so under the new rules they are blocked rather than passing.
+
+**2. A blocked branch is skipped, not fatal.** Blocked is not failing, so the
+ladder passes over it and the first genuinely failing branch becomes the
+constraint — Visibility blocked and Leads failing means Leads. The blocked
+branch shows as Blocked with what is missing, and cannot take a slot. This
+matches today's behaviour, so no client's constraint changes on this alone.
+The run still loses confidence through the spec's `missing_input` reason, so
+the blocked branch surfaces in "Check before you assign" rather than in the
+constraint choice.
+
+**3. The count column goes.** Deleted from the card entirely; the evidence
+becomes a sentence in "Why this page". Against real data the column was blank
+on 25 of SMA's 26 rows and 10 of Element 6's 14, which is the spec's
+complaint exactly. `score` stays in the saved record and orders the slots
+without appearing on screen.
+
+**4. 3a, 3b and 6 stay as three rules.** They keep their own triggers and
+cards and all three write `V-2` into the record's `id`, which keeps the
+record valid against the closed enum. Consequence to handle: three triggers
+can fire on one page, so the one-action-per-URL rule arbitrates between them
+rather than the rules being mutually exclusive by construction.
+
+**5. Hysteresis starts from the first saved run.** The first record stamps
+`held_since` to its own month and the two-month hold begins there. No history
+is backfilled — SE Ranking keeps no per-month keyword history, so a backfill
+would have invented the Visibility branch, which is the one that gates the
+other two. Month-1 constraints can move freely; the rule is fully in force by
+the third run.
+
+**6. `keyword_page_map` becomes `keyword_targets`.** One migration: add
+`role` (primary/secondary), `group` and `priority`, rename the table and
+rename `page_url` to `target_url`, carry the two existing SMA rows. Keeps the
+admin screen and the term-to-page suggester already built, which is what will
+fill ten priority terms each across 24 clients.
 
 ## 9. What I would build first
 
