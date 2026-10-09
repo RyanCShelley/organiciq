@@ -37,3 +37,33 @@ export async function POST(request: Request) {
     headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
   });
 }
+
+/** Replace the whole set, because that is how the screen edits it. */
+export async function PUT(request: Request) {
+  const authHeaders = await getProxyAuthHeaders();
+  if (!authHeaders) {
+    return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const clientId = body.clientId as string | undefined;
+  if (!clientId) {
+    return NextResponse.json({ detail: "clientId required" }, { status: 400 });
+  }
+
+  const res = await fetch(`${API_URL}/admin/conversion-definitions`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      "X-OrganicIQ-Client-Id": clientId,
+    },
+    body: JSON.stringify(body.definitions ?? []),
+  });
+
+  const text = await res.text();
+  return new NextResponse(text, {
+    status: res.status,
+    headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
+  });
+}

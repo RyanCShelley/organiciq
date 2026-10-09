@@ -2,7 +2,6 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -15,10 +14,10 @@ from app.models.config import (
     ConversionDefinition,
     Topic,
 )
-from app.models.ga4 import FactGa4Event
 from app.models.integration import Integration
 from app.models.job import SyncJob
 from app.models.user import User, UserClient, UserRole
+from app.services.ga4_event_candidates import load_event_candidates
 from app.services.data_health import (
     WATERMARK_SOURCES,
     integration_status_label,
@@ -203,18 +202,71 @@ def list_ga4_events_for_conversions(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict]:
-    rows = (
-        db.query(
-            FactGa4Event.event_name,
-            func.coalesce(func.sum(FactGa4Event.event_count), 0).label("event_count"),
+    """Every event this client reports, with what is needed to judge it.
+
+    This returned a name and an all-time total, which flatters an event that
+    stopped reporting months ago. It carries the 90-day count, how many
+    landing pages fired it, whether GA4 collects it on its own, and whether
+    the name reads as a lead — see `ga4_event_candidates`.
+    """
+    return [c.as_dict() for c in load_event_candidates(db, client.id)]
+
+
+@router.put("/conversion-definitions", response_model=list[ConversionDefinitionOut])
+def replace_conversion_definitions(
+    payload: list[ConversionDefinitionCreate],
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[ConversionDefinitionOut]:
+    """Replace the whole set, because that is how the screen edits it.
+
+    The screen is a list of the client's events with a tick against each.
+    Adding them one at a time through a typed form is why twenty clients
+    have none, and why the Lead branch has never run for them.
+
+    One primary at most, as with conversion pages: the engine falls back to
+    the primary conversion, and two of them is a silent coin toss.
+    """
+    seen: set[str] = set()
+    cleaned: list[ConversionDefinitionCreate] = []
+    primary_taken = False
+    for entry in payload:
+        name = entry.event_name.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        is_primary = entry.is_primary and not primary_taken
+        primary_taken = primary_taken or is_primary
+        cleaned.append(
+            entry.model_copy(
+                update={
+                    "event_name": name,
+                    "conversion_name": entry.conversion_name.strip() or name,
+                    "is_primary": is_primary,
+                }
+            )
         )
-        .filter(FactGa4Event.client_id == client.id)
-        .group_by(FactGa4Event.event_name)
-        .order_by(func.sum(FactGa4Event.event_count).desc(), FactGa4Event.event_name.asc())
-        .limit(200)
-        .all()
-    )
-    return [{"event_name": name, "event_count": int(count)} for name, count in rows]
+
+    # Exactly one lead is primary. Without this the first client to tick two
+    # gets whichever the database returns first.
+    if cleaned and not primary_taken:
+        leads = [c for c in cleaned if c.conversion_type == "lead"]
+        if leads:
+            leads[0].is_primary = True
+
+    db.query(ConversionDefinition).filter(
+        ConversionDefinition.client_id == client.id
+    ).delete(synchronize_session=False)
+    rows = [
+        ConversionDefinition(client_id=client.id, **entry.model_dump())
+        for entry in cleaned
+    ]
+    db.add_all(rows)
+    db.commit()
+    for row in rows:
+        db.refresh(row)
+    return [ConversionDefinitionOut.model_validate(r) for r in rows]
 
 
 @router.get("/platform/overview")
