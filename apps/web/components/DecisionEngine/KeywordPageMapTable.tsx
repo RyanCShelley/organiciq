@@ -12,6 +12,11 @@ export type KeywordMapRow = {
   target_url: string | null;
   note: string | null;
   mapped: boolean;
+  /** primary | secondary | null. Null means nobody has said. */
+  term_role: "primary" | "secondary" | null;
+  group_name: string | null;
+  priority: boolean;
+  source: string | null;
   volume: number | null;
   difficulty: number | null;
   current_position: number | null;
@@ -44,18 +49,28 @@ function Row({
   pages: string[];
 }) {
   const [pageUrl, setPageUrl] = useState(row.target_url ?? "");
+  const [role, setRole] = useState(row.term_role ?? "");
+  const [priority, setPriority] = useState(row.priority);
   const [saved, setSaved] = useState<"idle" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const dirty = (row.target_url ?? "") !== pageUrl;
+  const dirty =
+    (row.target_url ?? "") !== pageUrl ||
+    (row.term_role ?? "") !== role ||
+    row.priority !== priority;
 
-  function save(nextUrl: string) {
+  function save(next?: { url?: string; role?: string; priority?: boolean }) {
     const data = new FormData();
     data.set("clientId", clientId);
     data.set("clientSlug", clientSlug);
     data.set("keyword", row.keyword);
-    data.set("target_url", nextUrl);
+    data.set("target_url", next?.url ?? pageUrl);
+    data.set("term_role", next?.role ?? role);
+    data.set("priority", String(next?.priority ?? priority));
+    // The group is SE Ranking's, not a judgement, and it rides along so a
+    // term keeps its group if the fact row is ever re-synced under it.
+    data.set("group_name", row.group_name ?? "");
     startTransition(async () => {
       const result = await saveKeywordPageMapAction(data);
       setSaved(result.ok ? "ok" : "error");
@@ -65,7 +80,31 @@ function Row({
 
   return (
     <tr className="align-top">
-      <td className="whitespace-nowrap font-medium">{row.keyword}</td>
+      <td className="font-medium">
+        <div className="flex items-start gap-2">
+          {/* V1 reads "priority-group keywords". Nothing marked one before,
+              so the test could not run for any client. One click. */}
+          <input
+            type="checkbox"
+            checked={priority}
+            onChange={(event) => {
+              setPriority(event.target.checked);
+              setSaved("idle");
+              save({ priority: event.target.checked });
+            }}
+            aria-label={`Mark ${row.keyword} a priority term`}
+            className="mt-1 h-4 w-4 flex-none"
+          />
+          <span>
+            {row.keyword}
+            {row.group_name ? (
+              <span className="mt-0.5 block text-xs font-normal text-[var(--text-tertiary)]">
+                {row.group_name}
+              </span>
+            ) : null}
+          </span>
+        </div>
+      </td>
       <td className="whitespace-nowrap text-right tabular-nums">
         {formatNum(row.volume)}
       </td>
@@ -78,6 +117,25 @@ function Row({
         ) : (
           Math.round(row.current_position)
         )}
+      </td>
+      <td className="whitespace-nowrap">
+        {/* A primary term earns a title rewrite; a secondary one earns a
+            section. Blank is its own answer and stays available — a rule
+            that wants a primary has to tell "nobody said" from "secondary". */}
+        <select
+          value={role}
+          onChange={(event) => {
+            setRole(event.target.value);
+            setSaved("idle");
+            save({ role: event.target.value });
+          }}
+          aria-label={`Role for ${row.keyword}`}
+          className="min-h-[36px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm"
+        >
+          <option value="">Not set</option>
+          <option value="primary">Primary</option>
+          <option value="secondary">Secondary</option>
+        </select>
       </td>
       <td className="min-w-[22rem]">
         <div className="flex items-center gap-2">
@@ -96,7 +154,7 @@ function Row({
             type="button"
             className="btn btn-secondary btn-sm"
             disabled={pending || (!dirty && row.mapped)}
-            onClick={() => save(pageUrl)}
+            onClick={() => save({ url: pageUrl })}
           >
             {pending ? "Saving…" : row.mapped && !dirty ? "Saved" : "Save"}
           </button>
@@ -159,20 +217,30 @@ export function KeywordPageMapTable({
 }) {
   const [query, setQuery] = useState("");
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
+  const [onlyPriority, setOnlyPriority] = useState(false);
+  const [group, setGroup] = useState("");
+
+  const groups = useMemo(
+    () => [...new Set(rows.map((r) => r.group_name).filter(Boolean))].sort() as string[],
+    [rows],
+  );
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return rows.filter((row) => {
       if (onlyUnmapped && row.mapped) return false;
+      if (onlyPriority && !row.priority) return false;
+      if (group && row.group_name !== group) return false;
       if (!needle) return true;
       return (
         row.keyword.toLowerCase().includes(needle) ||
         (row.target_url ?? "").toLowerCase().includes(needle)
       );
     });
-  }, [rows, query, onlyUnmapped]);
+  }, [rows, query, onlyUnmapped, onlyPriority, group]);
 
   const unmapped = rows.filter((row) => !row.mapped).length;
+  const priorityCount = rows.filter((row) => row.priority).length;
 
   return (
     <section className="workspace-section">
@@ -181,7 +249,8 @@ export function KeywordPageMapTable({
         description="Which page is meant to own each term. The engine asks for this on every ranking finding, because Search Console reports where Google currently shows a page — which on a term you do not rank for is either nothing or the wrong page."
         actions={
           <span className="text-xs text-[var(--text-tertiary)]">
-            {rows.length - unmapped} of {rows.length} mapped
+            {rows.length - unmapped} of {rows.length} mapped · {priorityCount}{" "}
+            priority
           </span>
         }
       />
@@ -204,6 +273,31 @@ export function KeywordPageMapTable({
           />
           Unmapped only{unmapped > 0 ? ` (${unmapped})` : ""}
         </label>
+        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            checked={onlyPriority}
+            onChange={(event) => setOnlyPriority(event.target.checked)}
+          />
+          Priority only ({priorityCount})
+        </label>
+        {/* The groups come from SE Ranking already. Working through one at a
+            time is how ten priority terms get marked without reading 73. */}
+        {groups.length > 1 ? (
+          <select
+            value={group}
+            onChange={(event) => setGroup(event.target.value)}
+            aria-label="Filter by keyword group"
+            className="min-h-[36px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm"
+          >
+            <option value="">All groups</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </div>
 
       {/* Shared by every row's input, so the browser offers real pages
@@ -225,10 +319,11 @@ export function KeywordPageMapTable({
           <table>
             <thead>
               <tr>
-                <th>Keyword</th>
+                <th>Priority · keyword</th>
                 <th className="text-right">Volume</th>
                 <th className="text-right">Difficulty</th>
                 <th className="text-right">Position</th>
+                <th>Role</th>
                 <th>Page that owns it</th>
                 <th>Status</th>
               </tr>
