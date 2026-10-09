@@ -36,8 +36,29 @@ from app.models.seranking import (
     FactSerSiteSummary,
 )
 
-#: Organic search and AI referrals. Everything else is somebody else's channel.
-MANAGED_CHANNELS = (OrganicChannel.ORGANIC_SEARCH, OrganicChannel.AI_REFERRAL)
+#: The channels a client's organic work actually produces.
+#:
+#: The spec says organic search and AI referrals only. Measured against the
+#: warehouse that discards most of the outcome: of SMA's six leads in a
+#: month, zero were organic_search — five were direct and one unattributed.
+#: Boys Electrical's split is 25 direct, 11 organic, 11 other. A lead rate
+#: built on organic alone was reporting 0 of 35 for a client that got six.
+#:
+#: Direct is in because it is mostly misattributed — a brand search after an
+#: AI answer, a phone typed from a Maps listing, a link pasted into Slack.
+#: SMA's own research on GA4 direct traffic is the argument for it.
+#:
+#: Paid search is out: a separate service with its own attribution, and
+#: Aquaman's eleven paid leads are not organic work. So is `other`, which is
+#: what GA4 could not attribute at all — 2,992 sessions a month of (not set).
+#: Counting those would mean a lead rate that includes traffic nobody can
+#: trace to anyone, including us.
+MANAGED_CHANNELS = (
+    OrganicChannel.ORGANIC_SEARCH,
+    OrganicChannel.AI_REFERRAL,
+    OrganicChannel.DIRECT_UNATTRIBUTED,
+    OrganicChannel.REFERRAL,
+)
 
 #: The comparison window the trend tests use.
 TREND_DAYS = 28

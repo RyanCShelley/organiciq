@@ -65,3 +65,34 @@ def test_what_ga4_could_not_attribute_stays_other():
     would be inventing attribution."""
     assert classify_channel("(not set)", "(not set)", RULES) is OrganicChannel.OTHER
     assert classify_channel("(data not available)", "(data not available)", RULES) is OrganicChannel.OTHER
+
+
+# ── What counts as the client's own outcome ──
+
+
+def test_the_managed_scope_is_what_the_work_produces():
+    """The spec says organic and AI only. Measured against the warehouse
+    that discards most of the outcome: of SMA's six leads in a month, zero
+    were organic_search — five direct, one unattributed."""
+    from app.services.triage_signals import MANAGED_CHANNELS
+
+    assert OrganicChannel.ORGANIC_SEARCH in MANAGED_CHANNELS
+    assert OrganicChannel.AI_REFERRAL in MANAGED_CHANNELS
+    assert OrganicChannel.DIRECT_UNATTRIBUTED in MANAGED_CHANNELS
+    assert OrganicChannel.REFERRAL in MANAGED_CHANNELS
+
+
+def test_paid_search_is_never_counted_as_organic_outcome():
+    """A separate service with its own attribution. Aquaman's eleven paid
+    leads are not organic work."""
+    from app.services.triage_signals import MANAGED_CHANNELS
+
+    assert OrganicChannel.PAID_SEARCH not in MANAGED_CHANNELS
+
+
+def test_what_ga4_could_not_attribute_is_not_counted_either():
+    """2,992 sessions a month of (not set). A lead rate including those is a
+    lead rate including traffic nobody can trace to anyone, us included."""
+    from app.services.triage_signals import MANAGED_CHANNELS
+
+    assert OrganicChannel.OTHER not in MANAGED_CHANNELS
