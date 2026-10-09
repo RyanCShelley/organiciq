@@ -27,6 +27,7 @@ from app.schemas import (
 from app.services import decisions as decision_service
 from app.services.decisions import upsert_keyword_page_map
 from app.services.decision_serialization import serialize_diagnose
+from app.services.monthly_run import latest_record, save_record
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
 
@@ -200,3 +201,89 @@ def put_keyword_page_map(
     """
     rows = upsert_keyword_page_map(db, client.id, payload.entries)
     return [KeywordTargetOut.model_validate(row) for row in rows]
+
+
+@router.get("/records")
+def list_monthly_records(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """The months this client has a saved run for, newest first.
+
+    The page offers these in a Run selector instead of a date picker. A date
+    picker invites a reader to ask for a window the engine never ran, and
+    then recomputes one on the spot — which is how the same page said
+    different things on the same day.
+    """
+    from app.models.decision import MonthlyRecord
+
+    rows = (
+        db.query(MonthlyRecord)
+        .filter(MonthlyRecord.client_id == client.id)
+        .order_by(MonthlyRecord.month.desc())
+        .all()
+    )
+    return [
+        {
+            "month": row.month,
+            "run_saved_at": row.run_saved_at.isoformat() if row.run_saved_at else None,
+            "data_through": row.data_through.isoformat() if row.data_through else None,
+            "constraint": row.constraint_name,
+            "confidence": row.confidence,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/records/{month}")
+def get_monthly_record(
+    month: str,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """One saved record. The page renders this and recomputes nothing."""
+    from app.models.decision import MonthlyRecord
+
+    row = (
+        db.query(MonthlyRecord)
+        .filter(MonthlyRecord.client_id == client.id, MonthlyRecord.month == month)
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No saved run for {month}.",
+        )
+    return row.record
+
+
+@router.get("/records/latest/current")
+def get_latest_record(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    row = latest_record(db, client)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This client has no saved run yet.",
+        )
+    return row.record
+
+
+@router.post("/records/run", status_code=status.HTTP_201_CREATED)
+def run_monthly(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Re-run this month and replace its record.
+
+    Admin only, and not on the client page: the spec moves re-running to the
+    admin board, because a Run button beside a plan invites someone to
+    re-roll an answer they did not like.
+    """
+    return save_record(db, client).record
