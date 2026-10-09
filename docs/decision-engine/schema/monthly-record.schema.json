@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smamarketing.com/organiciq/schema/monthly-record.json",
+  "title": "OrganicIQ decision engine monthly record",
+  "description": "One saved record per client per month. The client page renders it; it is never recomputed on view.",
+  "type": "object",
+  "required": ["client", "month", "run_saved_at", "data_through", "plan", "action_slots", "constraint", "reason_text", "held_since", "confidence", "branches", "actions"],
+  "properties": {
+    "client": { "type": "string", "description": "Client slug" },
+    "client_name": { "type": "string" },
+    "domain": { "type": "string" },
+    "month": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" },
+    "run_saved_at": { "type": "string", "format": "date-time" },
+    "data_through": { "type": "string", "format": "date" },
+    "plan": { "enum": ["launch", "legacy", "lift", "lead", "enterprise"] },
+    "action_slots": { "type": "integer", "minimum": 0 },
+    "constraint": { "enum": ["visibility", "traffic", "leads", "visibility_expansion", "withheld"] },
+    "reason_text": { "type": "string", "description": "One sentence with the failing numbers" },
+    "reason": {
+      "type": "array",
+      "items": { "type": "object", "properties": { "test": { "type": "string" }, "value": {}, "pass_line": {} } }
+    },
+    "override": { "type": ["string", "null"], "description": "e.g. relaunch_180d" },
+    "held_since": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "confidence_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "text"],
+        "properties": {
+          "code": { "enum": ["goal_misconfigured", "small_sample", "fallback_ctr_curve", "no_target_mapping", "stale_source", "missing_input"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "branches": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["branch", "status", "headline_test", "tests"],
+        "properties": {
+          "branch": { "enum": ["visibility", "traffic", "leads"] },
+          "status": { "enum": ["pass", "fail", "blocked"] },
+          "headline_test": { "type": "string", "description": "Test id shown on the tile: the first failing test, else the first test" },
+          "display": { "type": "string", "description": "Optional override for the tile value, e.g. '4 of 50 leads'" },
+          "missing": { "type": "array", "items": { "type": "string" } },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "metric_label", "pass_line", "direction", "unit", "status"],
+              "properties": {
+                "id": { "type": "string", "examples": ["V1", "T3", "L1"] },
+                "name": { "type": "string" },
+                "metric_label": { "type": "string" },
+                "value": { "type": ["number", "null"] },
+                "pass_line": { "type": "number" },
+                "direction": { "enum": ["min", "max"] },
+                "unit": { "enum": ["pct", "chg", "count"] },
+                "status": { "enum": ["pass", "fail", "blocked"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action_uid", "slot", "id", "title", "branch", "spillover", "target_url", "score", "effort_min", "why", "done_when", "metric", "check_on"],
+        "properties": {
+          "action_uid": { "type": "string" },
+          "slot": { "type": "integer", "minimum": 1 },
+          "id": { "enum": ["V-1", "V-2", "V-3", "V-4", "V-5", "V-6", "T-1", "T-2", "T-3", "L-1", "L-2", "L-3"] },
+          "title": { "type": "string", "description": "Verb-first" },
+          "branch": { "enum": ["visibility", "traffic", "leads", "visibility_expansion"] },
+          "spillover": { "type": "boolean" },
+          "target_url": { "type": "string" },
+          "term": { "type": ["string", "null"] },
+          "score": { "type": "number" },
+          "effort_min": { "type": "integer", "maximum": 60 },
+          "why": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "done_when": { "type": "string" },
+          "metric": { "type": "string" },
+          "check_on": { "type": "string", "format": "date" },
+          "flags": { "type": "array", "items": { "enum": ["small_sample", "fallback_used", "no_target_mapping"] } }
+        }
+      }
+    },
+    "empty_slots": {
+      "type": "array",
+      "items": { "type": "object", "properties": { "slot": { "type": "integer" }, "reason": { "type": "string" } } }
+    },
+    "incidents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["incident_uid", "title", "scope"],
+        "properties": {
+          "incident_uid": { "type": "string" },
+          "title": { "type": "string" },
+          "scope": { "type": "string" },
+          "detail": { "type": "string" },
+          "effort_min": { "type": "integer" }
+        }
+      }
+    },
+    "not_this_month": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "branch": { "type": "string" },
+          "branch_status": { "enum": ["pass", "fail", "blocked"] },
+          "target_url": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "data_gaps": {
+      "type": "array",
+      "items": { "type": "object", "properties": { "input": { "type": "string" }, "status": { "enum": ["missing", "partial", "stale"] } } }
+    },
+    "previous_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action_uid": { "type": "string" },
+          "title": { "type": "string" },
+          "metric": { "type": "string" },
+          "before": { "type": ["number", "null"] },
+          "after": { "type": ["number", "null"] },
+          "result": { "enum": ["improved", "no_change", "worse", "waiting"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "engine_action_workflow": {
+      "description": "Row in the engine_actions table: workflow state written by the page, keyed by action_uid or incident_uid.",
+      "type": "object",
+      "required": ["uid", "client", "month", "status"],
+      "properties": {
+        "uid": { "type": "string" },
+        "client": { "type": "string" },
+        "month": { "type": "string" },
+        "kind": { "enum": ["action", "incident"] },
+        "assignee_user_id": { "type": ["string", "null"] },
+        "due": { "type": ["string", "null"], "format": "date" },
+        "status": { "enum": ["planned", "assigned", "done", "skipped"] },
+        "skip_reason": { "type": ["string", "null"] },
+        "sent_at": { "type": ["string", "null"], "format": "date-time" },
+        "shipped_on": { "type": ["string", "null"], "format": "date" },
+        "before_value": { "type": ["number", "null"] },
+        "after_value": { "type": ["number", "null"] },
+        "result": { "enum": ["improved", "no_change", "worse", "waiting", null] }
+      }
+    }
+  }
+}

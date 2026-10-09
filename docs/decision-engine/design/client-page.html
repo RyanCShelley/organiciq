@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision Engine · Aquaman Leak Detection (reference design)</title>
+<!-- Reference design for the client Decision engine page. Static data from schema/example-record.aquaman.json; see docs/client-page-spec.md. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#F4F6F7}
+a{color:#15784F}a:hover{color:#0E5A3A}
+select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #15784F;outline-offset:2px}
+button:disabled{cursor:not-allowed}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, 'Helvetica Neue', Helvetica, sans-serif; color: #16202A; background: #F4F6F7; font-size: 14px; line-height: 1.45">
+
+  <!-- SIDEBAR (matches the existing app shell) -->
+  <nav aria-label="Main" style="flex: 1 1 248px; max-width: 100%; background: #1E2B37; color: #C9D3DC; padding: 24px 16px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px">
+    <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px">
+      <span style="font-size: 20px; font-weight: 700; color: #FFFFFF; letter-spacing: -0.01em">Organic<span style="color: #3DD68C">IQ</span></span>
+      <span style="font-size: 11px; letter-spacing: 0.14em; font-weight: 600; color: #8FA1B1">SMA MARKETING</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <label for="client-pick" style="font-size: 11px; letter-spacing: 0.12em; font-weight: 600; color: #8FA1B1; padding: 0 4px">CLIENT</label>
+      <select id="client-pick" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #263645; border: 1px solid #3A4C5D; border-radius: 8px; padding: 10px 12px">
+        <option>Aquaman Leak Detection</option>
+      </select>
+      <span style="font-size: 12px; color: #8FA1B1; padding: 0 4px">aquamanleakdetection.com</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <span style="font-size: 11px; letter-spacing: 0.12em; font-weight: 600; color: #8FA1B1; padding: 0 4px 6px">ACCOUNT</span>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Dashboard</a>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Watch list</a>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Content opportunities</a>
+      <a href="#" aria-current="page" style="color: #FFFFFF; text-decoration: none; padding: 9px 12px; border-radius: 8px; background: #2A4A45; font-weight: 600">Decision engine</a>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Keyword map</a>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Site crawl</a>
+      <a href="#" style="color: #C9D3DC; text-decoration: none; padding: 9px 12px; border-radius: 8px">Client settings</a>
+    </div>
+  </nav>
+
+  <!-- CONTENT -->
+  <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+
+    <!-- Top bar: a saved monthly record, no date picker -->
+    <header style="background: #FFFFFF; border-bottom: 1px solid #E1E6EA; padding: 18px 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <h1 style="margin: 0; font-size: 20px; font-weight: 700">Decision engine</h1>
+        <span style="color: #5B6672; font-size: 13px">October 2026 run · saved Oct 1 from data through Sep 28 · next run Nov 1</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+        <label for="month" style="font-size: 13px; color: #5B6672">Run</label>
+        <select id="month" style="font: inherit; padding: 8px 12px; border: 1px solid #CBD3DA; border-radius: 8px; background: #FFFFFF; color: #16202A">
+          <option>October 2026</option>
+          <option>September 2026</option>
+          <option>August 2026</option>
+        </select>
+      </div>
+    </header>
+
+    <div style="padding: 28px 32px 56px; display: flex; flex-direction: column; gap: 24px; max-width: 1120px; width: 100%; box-sizing: border-box">
+
+      <!-- Review bar: the manager's job on this page -->
+      <section aria-label="Review" style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 16px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px">
+        <div style="display: flex; flex-direction: column; gap: 2px">
+          <span id="reviewTitle" style="font-weight: 600; font-size: 15px">0 of 2 assigned</span>
+          <span id="reviewLine" style="color: #5B6672; font-size: 13px"></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+          <span id="sentMsg" hidden role="status" style="color: #15784F; font-weight: 600; font-size: 13px">Sent to the team. Tasks created.</span>
+          <button type="button" id="sendBtn" disabled style="font: inherit; font-weight: 600; min-height: 44px; padding: 0 20px; border-radius: 8px; border: 0; background: #9AA5AF; color: #FFFFFF; cursor: pointer">Send plan to team</button>
+        </div>
+      </section>
+
+      <!-- Constraint -->
+      <section aria-labelledby="h-constraint" style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 32px">
+          <div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 420px; min-width: 0">
+            <span style="font-size: 11px; letter-spacing: 0.12em; font-weight: 600; color: #5B6672">THIS MONTH'S CONSTRAINT</span>
+            <h2 id="h-constraint" style="margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.015em">Leads</h2>
+            <p style="margin: 0; font-size: 15px; max-width: 62ch">People reach the site but don't convert. 4 leads month to date against a goal of 50 for the month. Visibility and Traffic both pass, so every action slot goes to Leads.</p>
+          </div>
+          <dl style="margin: 0; display: grid; grid-template-columns: auto auto; gap: 8px 20px; align-content: start; font-size: 13px">
+            <dt style="color: #5B6672">Plan</dt><dd style="margin: 0; font-weight: 600">Launch · 1 action slot</dd>
+            <dt style="color: #5B6672">Held since</dt><dd style="margin: 0; font-weight: 600">October 2026 (month 1)</dd>
+            <dt style="color: #5B6672">Confidence</dt>
+            <dd style="margin: 0"><span style="display: inline-block; padding: 2px 10px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-weight: 600; font-size: 12px">Low · check 2 things first</span></dd>
+          </dl>
+        </div>
+
+        <!-- Confidence warnings: what to check before assigning -->
+        <div role="note" style="background: #FFF8EE; border: 1px solid #F3D9B5; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+          <span style="font-weight: 600; color: #6B3A06">Check before you assign</span>
+          <span>1. Lead goal of 50 a month looks high for a Launch client. Confirm it in client settings, or Leads will stay the constraint every month.</span>
+          <span>2. The top lead target has 34 sessions a month, below the 100-session minimum. Treat its result as directional.</span>
+        </div>
+
+        <!-- Branch tests, named metrics -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px">
+          <div style="border: 1px solid #E1E6EA; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+              <span style="font-weight: 600">Visibility</span>
+              <span style="padding: 2px 9px; border-radius: 999px; background: #E5F4EC; color: #15784F; font-size: 12px; font-weight: 600">Pass</span>
+            </div>
+            <span style="font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums">43%</span>
+            <span style="font-size: 12px; color: #5B6672">Priority terms in the top 10 · pass at 30% or more</span>
+          </div>
+          <div style="border: 1px solid #E1E6EA; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+              <span style="font-weight: 600">Traffic</span>
+              <span style="padding: 2px 9px; border-radius: 999px; background: #E5F4EC; color: #15784F; font-size: 12px; font-weight: 600">Pass</span>
+            </div>
+            <span style="font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums">83%</span>
+            <span style="font-size: 12px; color: #5B6672">[Traffic test name] · pass at 60% or more</span>
+          </div>
+          <div style="border: 2px solid #B4441C; border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 6px; background: #FDF4F0">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+              <span style="font-weight: 600">Leads</span>
+              <span style="padding: 2px 9px; border-radius: 999px; background: #B4441C; color: #FFFFFF; font-size: 12px; font-weight: 600">Fail · constraint</span>
+            </div>
+            <span style="font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; color: #8E3414">4 of 50 leads</span>
+            <span style="font-size: 12px; color: #5B6672">Goal pace 8% · pass at 80% or more</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- The plan: assign here -->
+      <section aria-labelledby="h-plan" style="display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px">
+          <h2 id="h-plan" style="margin: 0; font-size: 18px; font-weight: 700">Growth actions to assign</h2>
+          <span style="color: #5B6672; font-size: 13px">Launch plan: 1 slot, filled from the constraint</span>
+        </div>
+
+        <article style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px">
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px">
+            <div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 420px; min-width: 0">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+                <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #5B6672">Slot 1 · L-2</span>
+                <span style="padding: 2px 9px; border-radius: 999px; background: #FBE9E2; color: #8E3414; font-size: 12px; font-weight: 600">Leads</span>
+                <span style="padding: 2px 9px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-size: 12px; font-weight: 600">Small sample</span>
+              </div>
+              <h3 style="margin: 0; font-size: 17px; font-weight: 700">Add a call to action to the first screen of the hydrostatic relief valve article</h3>
+              <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #3E4954; overflow-wrap: anywhere">/blog/is-your-hydrostatic-relief-valve-leaking</span>
+            </div>
+            <div style="display: grid; grid-template-columns: auto auto; gap: 4px 16px; font-size: 13px; align-content: start">
+              <span style="color: #5B6672">Effort</span><span style="font-weight: 600">30 min</span>
+              <span style="color: #5B6672">Measured by</span><span style="font-weight: 600">Leads from this page</span>
+              <span style="color: #5B6672">Check on</span><span style="font-weight: 600">Nov 9</span>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px 24px; font-size: 13px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <span style="font-weight: 600">Why this page</span>
+              <span style="color: #3E4954">34 organic sessions a month start here and none convert. The crawl finds no call to action in the first section.</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <span style="font-weight: 600">Done when</span>
+              <span style="color: #3E4954">A leak-inspection call to action sits above the first H2, linked to the booking page, with the old version logged.</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; border-top: 1px solid #EEF1F3; padding-top: 16px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <label for="assign-a1" style="font-size: 12px; font-weight: 600; color: #3E4954">Assign to</label>
+              <select id="assign-a1"  style="font: inherit; min-height: 44px; min-width: 220px; padding: 0 12px; border: 1px solid #CBD3DA; border-radius: 8px; background: #FFFFFF; color: #16202A">
+                <option value="">Choose a person</option>
+                <option value="Beth">Beth · Content lead</option>
+                <option value="Jerome">Jerome · SEO lead</option>
+                <option value="Jared">Jared · Technical</option>
+                <option value="Amanda">Amanda · Account manager</option>
+              </select>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <label for="due-a1" style="font-size: 12px; font-weight: 600; color: #3E4954">Due</label>
+              <input id="due-a1" type="date" value="2026-10-16" style="font: inherit; min-height: 44px; padding: 0 12px; border: 1px solid #CBD3DA; border-radius: 8px; color: #16202A; box-sizing: border-box">
+            </div>
+            <button type="button" id="skipA1" style="font: inherit; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid #CBD3DA; background: #FFFFFF; color: #3E4954; cursor: pointer">Skip this month</button>
+          </div>
+        </article>
+
+        <!-- Routed to the baseline, not a growth slot -->
+        <article style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 18px 24px; display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px">
+          <div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 420px; min-width: 0">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+              <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #5B6672">Technical baseline · incident</span>
+              <span style="padding: 2px 9px; border-radius: 999px; background: #EEF1F3; color: #3E4954; font-size: 12px; font-weight: 600">Doesn't use a slot</span>
+            </div>
+            <h3 style="margin: 0; font-size: 16px; font-weight: 700">Fix the Organization schema that names the wrong brand</h3>
+            <span style="color: #3E4954; font-size: 13px">Site-wide. 1 structured-data check failing. 45 min. Fixes go through the monthly technical work, so they never compete with growth actions.</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <label for="assign-t1" style="font-size: 12px; font-weight: 600; color: #3E4954">Assign to</label>
+            <select id="assign-t1"  style="font: inherit; min-height: 44px; min-width: 220px; padding: 0 12px; border: 1px solid #CBD3DA; border-radius: 8px; background: #FFFFFF; color: #16202A">
+              <option value="">Choose a person</option>
+              <option value="Jared">Jared · Technical</option>
+              <option value="Jerome">Jerome · SEO lead</option>
+              <option value="Beth">Beth · Content lead</option>
+              <option value="Amanda">Amanda · Account manager</option>
+            </select>
+          </div>
+        </article>
+      </section>
+
+      <!-- Below the line -->
+      <section aria-labelledby="h-later" style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px">
+          <h2 id="h-later" style="margin: 0; font-size: 16px; font-weight: 700">Not this month</h2>
+          <span style="color: #5B6672; font-size: 13px">Kept for when its branch fails or a slot opens</span>
+        </div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 12px 0; border-top: 1px solid #EEF1F3">
+          <span style="font-weight: 600">Add an answer block for “What's the average cost of slab leak detection services?”</span>
+          <span style="padding: 2px 9px; border-radius: 999px; background: #E9EEF8; color: #2C4A86; font-size: 12px; font-weight: 600; align-self: start; white-space: nowrap">Visibility · passing</span>
+          <span style="color: #5B6672; font-size: 13px">Not cited in 30 AI checks. Visibility passes, so it can't take a slot this month.</span>
+        </div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 12px 0; border-top: 1px solid #EEF1F3">
+          <span style="font-weight: 600">[Second Visibility candidate]</span>
+          <span style="padding: 2px 9px; border-radius: 999px; background: #E9EEF8; color: #2C4A86; font-size: 12px; font-weight: 600; align-self: start; white-space: nowrap">Visibility · passing</span>
+          <span style="color: #5B6672; font-size: 13px">[Evidence line]</span>
+        </div>
+      </section>
+
+      <!-- Two side cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px">
+        <section aria-labelledby="h-results" style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 8px">
+          <h2 id="h-results" style="margin: 0; font-size: 16px; font-weight: 700">Last month's results</h2>
+          <p style="margin: 0; color: #5B6672; font-size: 13px">Each action is checked 28 to 45 days after it ships, on the metric it was meant to move.</p>
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 16px; font-size: 13px; padding-top: 8px; font-variant-numeric: tabular-nums">
+            <span style="color: #5B6672; font-weight: 600">Action</span><span style="color: #5B6672; font-weight: 600">Before → after</span><span style="color: #5B6672; font-weight: 600">Result</span>
+            <span>[September action and page]</span><span>[before → after]</span><span>[Improved]</span>
+          </div>
+        </section>
+        <section aria-labelledby="h-gaps" style="background: #FFFFFF; border: 1px solid #E1E6EA; border-radius: 12px; padding: 20px 24px; display: flex; flex-direction: column; gap: 10px">
+          <h2 id="h-gaps" style="margin: 0; font-size: 16px; font-weight: 700">Data that limited this run</h2>
+          <p style="margin: 0; color: #5B6672; font-size: 13px">Rules that need these didn't fire. Fixing them raises confidence.</p>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <span style="padding: 4px 10px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-size: 12px; font-weight: 600">Keyword targets: not set</span>
+            <span style="padding: 4px 10px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-size: 12px; font-weight: 600">Conversion pages: not tagged</span>
+            <span style="padding: 4px 10px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-size: 12px; font-weight: 600">SERP features: not pulled</span>
+            <span style="padding: 4px 10px; border-radius: 999px; background: #FDF1E3; color: #8A4B08; font-size: 12px; font-weight: 600">Scroll depth: not tracked</span>
+          </div>
+        </section>
+      </div>
+
+    </div>
+  </main>
+</div>
+<script>
+(() => {
+  const st = { a1: '', t1: '', skipped: false, sent: false };
+  const $ = (id) => document.getElementById(id);
+  const a1 = $('assign-a1'), t1 = $('assign-t1'), skip = $('skipA1'), send = $('sendBtn');
+  function render() {
+    const needed = (st.skipped ? 0 : 1) + 1;
+    const done = (!st.skipped && st.a1 ? 1 : 0) + (st.t1 ? 1 : 0);
+    const ready = done === needed;
+    $('reviewTitle').textContent = st.sent ? 'October plan sent' : (ready ? 'Ready to send' : done + ' of ' + needed + ' assigned');
+    $('reviewLine').textContent = st.sent ? 'Assignees have their tasks. Results show here after each check date.' : 'Assign each action, then send the plan to your team. Skipped actions are logged with the reason.';
+    send.disabled = !ready || st.sent;
+    send.style.background = send.disabled ? '#9AA5AF' : '#15784F';
+    send.textContent = st.sent ? 'Sent' : 'Send plan to team';
+    $('sentMsg').hidden = !st.sent;
+    a1.style.borderColor = st.a1 ? '#15784F' : '#CBD3DA';
+    t1.style.borderColor = st.t1 ? '#15784F' : '#CBD3DA';
+    a1.disabled = st.skipped;
+    skip.textContent = st.skipped ? 'Restore action' : 'Skip this month';
+  }
+  a1.addEventListener('change', () => { st.a1 = a1.value; st.sent = false; render(); });
+  t1.addEventListener('change', () => { st.t1 = t1.value; st.sent = false; render(); });
+  skip.addEventListener('click', () => { st.skipped = !st.skipped; st.a1 = ''; a1.value = ''; st.sent = false; render(); });
+  send.addEventListener('click', () => { st.sent = true; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

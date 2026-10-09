@@ -1,0 +1,81 @@
+{
+  "_note": "Illustrative record for the design. Visibility/Traffic/Leads headline values and the 34-session page come from the current app screen; the Traffic test name, dates, second Visibility candidate and prior results are placeholders.",
+  "client": "aquaman-leak-detection",
+  "client_name": "Aquaman Leak Detection",
+  "domain": "aquamanleakdetection.com",
+  "month": "2026-10",
+  "run_saved_at": "2026-10-01T06:00:00Z",
+  "data_through": "2026-09-28",
+  "plan": "launch",
+  "action_slots": 1,
+  "constraint": "leads",
+  "reason_text": "People reach the site but don't convert. 4 leads month to date against a goal of 50. Visibility and Traffic both pass, so every slot goes to Leads.",
+  "reason": [{ "test": "L1", "value": 0.08, "pass_line": 0.8 }],
+  "override": null,
+  "held_since": "2026-10",
+  "confidence": "low",
+  "confidence_reasons": [
+    { "code": "goal_misconfigured", "text": "Lead goal of 50 a month looks high for a Launch client. Confirm it in client settings, or Leads will stay the constraint every month." },
+    { "code": "small_sample", "text": "The top lead target has 34 sessions a month, below the 100-session minimum. Treat its result as directional." }
+  ],
+  "branches": [
+    {
+      "branch": "visibility", "status": "pass", "headline_test": "V1",
+      "tests": [{ "id": "V1", "name": "Priority-term coverage", "metric_label": "Priority terms in the top 10", "value": 0.43, "pass_line": 0.3, "direction": "min", "unit": "pct", "status": "pass" }]
+    },
+    {
+      "branch": "traffic", "status": "pass", "headline_test": "T?",
+      "tests": [{ "id": "T?", "name": "[Traffic test name]", "metric_label": "[Traffic metric]", "value": 0.83, "pass_line": 0.6, "direction": "min", "unit": "pct", "status": "pass" }]
+    },
+    {
+      "branch": "leads", "status": "fail", "headline_test": "L1", "display": "4 of 50 leads",
+      "tests": [{ "id": "L1", "name": "Goal pace", "metric_label": "Leads vs pro-rated monthly goal", "value": 0.08, "pass_line": 0.8, "direction": "min", "unit": "pct", "status": "fail" }]
+    }
+  ],
+  "actions": [
+    {
+      "action_uid": "aquaman-2026-10-s1",
+      "slot": 1,
+      "id": "L-2",
+      "title": "Add a call to action to the first screen of the hydrostatic relief valve article",
+      "branch": "leads",
+      "spillover": false,
+      "target_url": "/blog/is-your-hydrostatic-relief-valve-leaking",
+      "term": null,
+      "score": 0,
+      "effort_min": 30,
+      "why": "34 organic sessions a month start here and none convert. The crawl finds no call to action in the first section.",
+      "evidence": ["facts_ga4_traffic: 34 managed sessions/mo", "facts_ga4_events: 0 lead events", "crawl: conversion_elements = 0 in first section"],
+      "done_when": "A leak-inspection call to action sits above the first H2, linked to the booking page, with the old version logged.",
+      "metric": "Leads from this landing page",
+      "check_on": "2026-11-09",
+      "flags": ["small_sample"]
+    }
+  ],
+  "empty_slots": [],
+  "incidents": [
+    {
+      "incident_uid": "aquaman-2026-10-i1",
+      "title": "Fix the Organization schema that names the wrong brand",
+      "scope": "site-wide",
+      "detail": "1 structured-data check failing.",
+      "effort_min": 45
+    }
+  ],
+  "not_this_month": [
+    {
+      "id": "V-2",
+      "title": "Add an answer block for “What's the average cost of slab leak detection services?”",
+      "branch": "visibility",
+      "branch_status": "pass",
+      "reason": "Not cited in 30 AI checks. Visibility passes, so it can't take a slot this month."
+    }
+  ],
+  "data_gaps": [
+    { "input": "Keyword targets", "status": "missing" },
+    { "input": "Conversion pages", "status": "missing" },
+    { "input": "SERP features", "status": "missing" },
+    { "input": "Scroll depth", "status": "missing" }
+  ],
+  "previous_results": []
+}
