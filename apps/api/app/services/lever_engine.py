@@ -2062,17 +2062,48 @@ def _top_query_per_page(
 
 
 def _ai_overview_queries(db: Session, client_id: UUID) -> frozenset[str]:
-    """Queries whose SERP carries an AI Overview, lowercased."""
-    rows = (
+    """Queries whose SERP carries an AI Overview, lowercased.
+
+    This decides which CTR curve `expected_ctr_at` reads, and the two differ
+    most exactly where the money is. At position 1 the measured rate is 12.82%
+    with an AI Overview against 20.02% without, at 2 it is 5.16 against 10.36
+    and at 3 it is 1.63 against 3.89 — roughly half. Further down the AI
+    Overview curve is slightly *higher*: the answer takes the top clicks and
+    what is left redistributes. So reading the wrong curve overstates a page
+    ranking near the top and understates one ranking fifth.
+
+    It used to read only `facts_ser_domain_keywords`, which is keyword
+    *research* data and has six rows across all twenty-four clients. The
+    tracked keywords carry a feature list too, and a hundred and five of the
+    seven hundred and sixty-nine show `sge`. So the engine was treating
+    almost every AI Overview SERP as though it had none.
+
+    Both are read now. They mean slightly different things and the difference
+    is a floor rather than a problem: the research data says what is *on* the
+    SERP, while a tracked keyword's list says what the client *earned* on it,
+    which misses any SERP that has an AI Overview the client is not in. Under-
+    counting is the safe direction — a query wrongly treated as having none
+    gets the ordinary curve, which is where every query sat before.
+
+    The proper source is a SERP pull that reports every feature whether or not
+    the client holds it; see `docs/decision-engine/DECISIONS-LOG.md`.
+    """
+    found: set[str] = set()
+    for keyword, features in (
         db.query(FactSerDomainKeyword.keyword, FactSerDomainKeyword.serp_features)
         .filter(FactSerDomainKeyword.client_id == client_id)
         .all()
-    )
-    return frozenset(
-        (keyword or "").strip().lower()
-        for keyword, features in rows
-        if keyword and has_ai_overview(features)
-    )
+    ):
+        if keyword and has_ai_overview(features):
+            found.add(keyword.strip().lower())
+    for keyword, features in (
+        db.query(FactSerKeyword.keyword, FactSerKeyword.earned_serp_features)
+        .filter(FactSerKeyword.client_id == client_id)
+        .all()
+    ):
+        if keyword and has_ai_overview(features):
+            found.add(keyword.strip().lower())
+    return frozenset(found)
 
 
 def _per_page_cascade(
