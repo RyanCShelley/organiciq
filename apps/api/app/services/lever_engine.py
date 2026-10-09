@@ -3647,8 +3647,13 @@ def _recoverable_clicks_at_target(
     impressions: float, position: float, *, target: float, curve: dict[int, float] | None
 ) -> float:
     """Clicks the ranking would earn at the target position but does not now."""
-    now = expected_ctr_percent(position, curve=curve) if curve else expected_ctr_percent(position)
-    then = expected_ctr_percent(target, curve=curve) if curve else expected_ctr_percent(target)
+    # `_expected_ctr` is the one place that knows how to read a client's own
+    # curve. This called `expected_ctr_percent(position, curve=...)`, which
+    # takes no such argument — so the branch raised the moment a client had a
+    # curve of its own. None did, until Search Console started reporting
+    # again and SMA accumulated enough clicks to build one.
+    now = _expected_ctr(position, curve)
+    then = _expected_ctr(target, curve)
     return max(0.0, impressions * (then - now) / 100.0)
 
 

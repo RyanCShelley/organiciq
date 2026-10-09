@@ -12,6 +12,7 @@ hundred and sixty-nine tracked keywords carry `sge`.
 
 from __future__ import annotations
 
+import pytest
 from datetime import date
 from uuid import uuid4
 
@@ -117,3 +118,41 @@ def test_further_down_the_ai_overview_curve_is_higher():
     "an AI Overview is always worse" would have been wrong, which is how
     this test came to exist."""
     assert expected_ctr_at(5, ai_overview=True) > expected_ctr_percent(5)
+
+
+# ── The client's own CTR curve ──
+
+
+def test_recoverable_clicks_works_when_the_client_has_its_own_curve():
+    """This raised the moment a client had one.
+
+    `_recoverable_clicks_at_target` called `expected_ctr_percent(position,
+    curve=...)`, which takes no such argument. No client had enough clicks to
+    build a curve, so the branch never ran — until Search Console started
+    reporting again and SMA accumulated one, and the Decision Engine page
+    returned 500 for the first client to get fresh data.
+    """
+    from app.services.lever_engine import _recoverable_clicks_at_target
+
+    client_curve = {1: 25.0, 2: 12.0, 3: 6.0, 5: 2.0, 10: 0.5}
+    recovered = _recoverable_clicks_at_target(
+        1000.0, 10.0, target=3.0, curve=client_curve
+    )
+    # 6% at position three against 0.5% at ten, over a thousand impressions.
+    assert recovered == pytest.approx(55.0)
+
+
+def test_recoverable_clicks_falls_back_to_the_benchmark():
+    from app.services.lever_engine import _recoverable_clicks_at_target
+
+    assert _recoverable_clicks_at_target(1000.0, 10.0, target=3.0, curve=None) > 0
+
+
+def test_a_position_the_client_curve_does_not_cover_still_works():
+    """A sparse curve is the normal case — a client ranks at some positions
+    and not others."""
+    from app.services.lever_engine import _recoverable_clicks_at_target
+
+    assert _recoverable_clicks_at_target(
+        1000.0, 17.0, target=4.0, curve={1: 25.0, 2: 12.0}
+    ) > 0
