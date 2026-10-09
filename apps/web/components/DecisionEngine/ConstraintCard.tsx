@@ -143,9 +143,11 @@ export function ConstraintCard({ record }: { record: MonthlyRecord }) {
 
         <dl className="grid shrink-0 grid-cols-[auto_auto] content-start gap-x-5 gap-y-2 text-[13px]">
           <dt className="text-[var(--text-tertiary)]">Plan</dt>
-          <dd className="font-semibold capitalize">
-            {record.plan} · {record.action_slots}{" "}
-            {record.action_slots === 1 ? "slot" : "slots"}
+          <dd className="font-semibold">
+            {/* Only the plan name capitalises. `capitalize` on the whole
+                line gave "Enterprise · 5 Slots". */}
+            <span className="capitalize">{record.plan}</span> ·{" "}
+            {record.action_slots} {record.action_slots === 1 ? "slot" : "slots"}
           </dd>
           <dt className="text-[var(--text-tertiary)]">Held since</dt>
           <dd className="font-semibold">

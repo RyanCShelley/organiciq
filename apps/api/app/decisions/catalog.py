@@ -98,6 +98,13 @@ def v1_term_in_high_value_spots(
         )
         if not present
     ]
+    # "the title, the meta description, any heading" is a list read aloud by
+    # a machine. The last one takes an "or".
+    missing_text = (
+        missing[0]
+        if len(missing) == 1
+        else " or ".join([", ".join(missing[:-1]), missing[-1]])
+    )
     return Prescription(
         action_id="V-1",
         title=f"Put “{term}” in the title, a heading and the first 100 words",
@@ -108,8 +115,8 @@ def v1_term_in_high_value_spots(
         effort_min=30,
         why=(
             f"The page is mapped to “{term}” and does not use it in "
-            f"{', '.join(missing)}. A page that never says the phrase is "
-            "asking a search engine to infer it."
+            f"{missing_text}. A page that never says the phrase is asking a "
+            "search engine to infer it."
         ),
         done_when=(
             f"“{term}” appears in the title tag, in one H2, and in the first "
@@ -118,7 +125,7 @@ def v1_term_in_high_value_spots(
         metric="Term position",
         evidence=(
             f"keyword_targets: {term} -> {page.url}",
-            f"crawl: missing from {', '.join(missing)}",
+            f"crawl: missing from {missing_text}",
         ),
     )
 
