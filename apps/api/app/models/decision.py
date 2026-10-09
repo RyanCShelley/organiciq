@@ -300,3 +300,71 @@ class EngineAction(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ExcludedPage(Base):
+    """A page this client's engine should not look at.
+
+    Boys Electrical's traffic branch failed on a careers page — 52 sessions,
+    no conversions — which is correct and useless, because nobody is being
+    paid to recruit electricians this quarter.
+
+    Per client, not a global pattern list: some agencies really are running
+    recruitment campaigns, and deciding that centrally decides it for
+    everyone. A pattern ending in `*` takes the section.
+    """
+
+    __tablename__ = "excluded_pages"
+    __table_args__ = (
+        UniqueConstraint("client_id", "url_pattern", name="uq_excluded_pages_grain"),
+        Index("ix_excluded_pages_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    url_pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    #: In the words of whoever excluded it, so a decision taken in March is
+    #: legible in September.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ConstraintOverride(Base):
+    """A month where somebody overruled the engine's answer.
+
+    Not "this page is irrelevant" — that is an exclusion — but "I know what
+    the numbers say, work on visibility anyway". One per client per month,
+    because overriding is a decision about this month's plan rather than a
+    standing instruction that quietly never expires.
+    """
+
+    __tablename__ = "constraint_overrides"
+    __table_args__ = (
+        UniqueConstraint("client_id", "month", name="uq_constraint_overrides_grain"),
+        CheckConstraint(
+            "constraint_name IN ('visibility', 'traffic', 'leads', "
+            "'visibility_expansion')",
+            name="ck_constraint_overrides_name",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    constraint_name: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -32,7 +32,8 @@ from app.decisions.triage import (
 from app.decisions.thresholds import merge_thresholds
 from app.models.annotation import Annotation
 from app.models.client import Client
-from app.models.decision import MonthlyRecord
+from app.decisions.overrides import Exclusion
+from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
@@ -142,6 +143,24 @@ def _held_since(db: Session, client: Client, month: str, constraint: str) -> str
     return month
 
 
+def load_exclusions(db: Session, client: Client) -> list[Exclusion]:
+    return [
+        Exclusion(url_pattern=row.url_pattern, reason=row.reason)
+        for row in db.query(ExcludedPage).filter(ExcludedPage.client_id == client.id)
+    ]
+
+
+def load_override(db: Session, client: Client, month: str) -> ConstraintOverride | None:
+    return (
+        db.query(ConstraintOverride)
+        .filter(
+            ConstraintOverride.client_id == client.id,
+            ConstraintOverride.month == month,
+        )
+        .one_or_none()
+    )
+
+
 def build_record(
     db: Session, client: Client, *, today: date | None = None
 ) -> dict:
@@ -181,6 +200,20 @@ def build_record(
         withheld_reason=_stale_reason(db, client, today),
     )
 
+    # Somebody overruled it. The branches keep the statuses the tests
+    # produced — the override changes which one gets the slots, not what the
+    # numbers said, because a record that rewrote the evidence to match the
+    # decision would be unreadable a month later.
+    override = load_override(db, client, month)
+    engine_said = triage.constraint
+    if override is not None and triage.constraint != WITHHELD:
+        triage = Triage(
+            constraint=override.constraint_name,
+            reason_text=override.reason,
+            branches=triage.branches,
+            override="manual",
+        )
+
     blocked_inputs = [
         test.missing
         for branch in branches
@@ -189,6 +222,7 @@ def build_record(
     ]
     confidence, confidence_reasons = _confidence(triage, blocked_inputs=blocked_inputs)
 
+    exclusions = load_exclusions(db, client)
     allowances = resolve_plan_allowances(client, getattr(client, "tier", None))
     slots = 0 if triage.constraint == WITHHELD else allowances.growth_action_allowance
 
@@ -204,6 +238,17 @@ def build_record(
         "constraint": triage.constraint,
         "reason_text": triage.reason_text,
         "override": triage.override,
+        # What the tests produced, kept beside what a person chose. A record
+        # that showed only the override could not be read back as a
+        # disagreement, and the disagreement is the interesting part.
+        **(
+            {
+                "engine_constraint": engine_said,
+                "override_reason": override.reason,
+            }
+            if override is not None and triage.override == "manual"
+            else {}
+        ),
         "held_since": _held_since(db, client, month, triage.constraint),
         "confidence": confidence,
         "confidence_reasons": confidence_reasons,
@@ -242,6 +287,9 @@ def build_record(
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))
         ],
         "previous_results": [],
+        "excluded_pages": [
+            {"url_pattern": x.url_pattern, "reason": x.reason} for x in exclusions
+        ],
     }
 
 
