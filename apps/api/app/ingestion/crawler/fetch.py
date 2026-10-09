@@ -617,11 +617,21 @@ async def crawl_site(
         # more slowly.
         result.rate_limited_pages = sum(1 for p in result.pages if p.rate_limited)
         result.throttled = throttle.throttled
-        if result.throttled:
+        if result.rate_limited_pages:
             logger.warning(
-                "%s rate limited the crawl: %d pages turned away, "
-                "final delay %.1fs between requests",
+                "%s rate limited the crawl: %d pages turned away for good, "
+                "final delay %.2fs between requests",
                 host, result.rate_limited_pages, throttle.delay,
+            )
+        elif result.throttled:
+            # Backed off, absorbed it, finished clean. Worth a line for
+            # anyone reading why a crawl took longer than usual, but it is
+            # not a warning: "rate limited the crawl: 0 pages turned away"
+            # is a sentence that stops a reader for no reason.
+            logger.info(
+                "%s asked the crawl to slow down; every page came back, "
+                "settled at %.2fs between requests",
+                host, throttle.delay,
             )
         # Only edges between pages we actually crawled: an edge to a URL we never
         # fetched cannot be reasoned about and would bloat the table.
