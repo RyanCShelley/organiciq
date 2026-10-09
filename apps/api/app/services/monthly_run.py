@@ -32,11 +32,15 @@ from app.decisions.triage import (
 from app.decisions.thresholds import merge_thresholds
 from app.models.annotation import Annotation
 from app.models.client import Client
+from app.decisions.catalog import BLOCKED_ACTIONS, prescribe
 from app.decisions.overrides import Exclusion
+from app.decisions.slots import fill_slots
+from app.decisions.targets import rank_candidates
 from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
+from app.services.target_signals import load_target_inputs
 from app.services.triage_signals import lead_signals, traffic_signals, visibility_signals
 
 logger = logging.getLogger("organiciq.monthly_run")
@@ -44,6 +48,10 @@ logger = logging.getLogger("organiciq.monthly_run")
 #: A source older than this and the run is withheld rather than served. Acting
 #: on numbers that stopped updating is worse than acting on none.
 STALE_DAYS = 7
+
+#: When an action is judged. The spec checks at 28 to 45 days; 28 is the
+#: earliest a position change means anything.
+CHECK_AFTER_DAYS = 28
 
 #: A relaunch, migration or domain change inside this window forces Visibility.
 RELAUNCH_WINDOW_DAYS = 180
@@ -226,6 +234,35 @@ def build_record(
     allowances = resolve_plan_allowances(client, getattr(client, "tier", None))
     slots = 0 if triage.constraint == WITHHELD else allowances.growth_action_allowance
 
+    # ── Decisions 2 and 3 ───────────────────────────────────────────────
+    inputs = load_target_inputs(db, client, exclusions=exclusions)
+    ranked = rank_candidates(inputs.candidates, thresholds=thresholds)
+    prescriptions = []
+    for scored in ranked:
+        url = scored.candidate.target_url
+        page = inputs.pages.get(url) if url else None
+        if page is None:
+            # Nothing crawled for this page, so no trigger can be tested
+            # against it. V-6 is the exception and needs no page facts.
+            continue
+        found = prescribe(scored, page)
+        if found is not None:
+            prescriptions.append(found)
+
+    constraint_branch = next(
+        (b for b in Branch if b.value == triage.constraint), None
+    )
+    by_branch: dict[Branch, list] = {}
+    for prescription in prescriptions:
+        by_branch.setdefault(prescription.branch, []).append(prescription)
+
+    plan = fill_slots(
+        slots=slots,
+        constraint=constraint_branch,
+        branches=list(triage.branches),
+        prescriptions_by_branch=by_branch,
+    )
+
     return {
         "client": client.slug,
         "client_name": client.client_name,
@@ -277,19 +314,46 @@ def build_record(
             }
             for branch in triage.branches
         ],
-        # Decisions 2 and 3 fill these. The keys are present from the start so
-        # the page binds against one shape rather than two.
-        "actions": [],
-        "empty_slots": [],
+        "actions": [
+            {
+                "action_uid": f"{client.slug}-{month}-s{slot.slot}",
+                "slot": slot.slot,
+                "id": slot.prescription.action_id,
+                "title": slot.prescription.title,
+                "branch": slot.prescription.branch.value,
+                "spillover": slot.spillover,
+                "target_url": slot.prescription.target_url,
+                "term": slot.prescription.term,
+                "score": round(slot.prescription.score, 1),
+                "effort_min": slot.prescription.effort_min,
+                "why": slot.prescription.why,
+                "evidence": list(slot.prescription.evidence),
+                "done_when": slot.prescription.done_when,
+                "metric": slot.prescription.metric,
+                "check_on": (today + timedelta(days=CHECK_AFTER_DAYS)).isoformat(),
+                "flags": list(slot.prescription.flags),
+            }
+            for slot in plan.filled
+        ],
+        "empty_slots": [
+            {"slot": empty.slot, "reason": empty.reason} for empty in plan.empty
+        ],
         "incidents": [],
-        "not_this_month": [],
+        "not_this_month": list(plan.not_this_month),
         "data_gaps": [
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))
+        ]
+        + [
+            {"input": f"{a.action_id}: {a.reason}", "status": "missing"}
+            for a in BLOCKED_ACTIONS
         ],
         "previous_results": [],
         "excluded_pages": [
             {"url_pattern": x.url_pattern, "reason": x.reason} for x in exclusions
         ],
+        #: Targets dropped because their page is excluded. Said rather than
+        #: left as a silent absence.
+        "excluded_targets": inputs.excluded,
     }
 
 

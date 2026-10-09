@@ -377,15 +377,6 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
 
     baseline = getattr(client, "baseline_lead_rate_pct", None)
 
-    # L3 needs somewhere to route people to before it can ask whether anyone
-    # is being routed.
-    conversion_pages = (
-        db.query(func.count(ClientConversionPage.id))
-        .filter(ClientConversionPage.client_id == client.id)
-        .scalar()
-        or 0
-    )
-
     return LeadSignals(
         conversions_configured=configured,
         leads_month_to_date=leads_mtd,
