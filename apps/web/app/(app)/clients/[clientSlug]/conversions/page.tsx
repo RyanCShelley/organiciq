@@ -27,15 +27,27 @@ export default async function ClientConversionsPage({
   let conversionPages: ConversionPage[] = [];
   let pageStages: PageStagePayload | null = null;
   let error: string | null = null;
+  let stagesError: string | null = null;
 
   try {
-    [conversions, conversionPages, pageStages] = await Promise.all([
+    [conversions, conversionPages] = await Promise.all([
       apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", { clientId }),
       apiFetch<ConversionPage[]>("/admin/conversion-pages", { clientId }),
-      apiFetch<PageStagePayload>("/decisions/page-stages", { clientId }),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load conversions";
+  }
+
+  // Fetched on its own. Sharing a Promise.all with the two panels above meant
+  // one failing call took down all three and removed this section from the
+  // page without saying anything — a section that vanishes silently is
+  // indistinguishable from one that was never deployed.
+  try {
+    pageStages = await apiFetch<PageStagePayload>("/decisions/page-stages", {
+      clientId,
+    });
+  } catch (e) {
+    stagesError = e instanceof Error ? e.message : "Failed to load page stages";
   }
 
   return (
@@ -68,17 +80,21 @@ export default async function ClientConversionsPage({
         </div>
       </section>
 
-      {pageStages ? (
-        <section className="workspace-section">
-          <SectionHeader
-            title="Page stages"
-            description="Where the reader of each landing page is: learning, comparing, or ready to buy. A model reads the page and proposes; the engine reads only what you confirm. This is what the next-step test needs to tell a dead end from a page that is doing its job."
-          />
-          <div className="workspace-panel">
+      <section className="workspace-section">
+        <SectionHeader
+          title="Page stages"
+          description="Where the reader of each landing page is: learning, comparing, or ready to buy. A model reads the page and proposes; the engine reads only what you confirm. This is what the next-step test needs to tell a dead end from a page that is doing its job."
+        />
+        <div className="workspace-panel">
+          {pageStages ? (
             <PageStagesPanel clientId={clientId} initial={pageStages} />
-          </div>
-        </section>
-      ) : null}
+          ) : (
+            <Alert variant="danger">
+              {stagesError ?? "Page stages could not be loaded."}
+            </Alert>
+          )}
+        </div>
+      </section>
     </section>
   );
 }
