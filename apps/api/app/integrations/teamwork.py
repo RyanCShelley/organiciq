@@ -118,7 +118,9 @@ def create_task(
 ) -> dict:
     """Create one task and return `{id, url}`.
 
-    `due` is an ISO date; Teamwork v3 wants `YYYYMMDD`.
+    `due` is an ISO date, which is what v3's `dueAt` takes (`format: date` in
+    its OpenAPI). v1 wanted `YYYYMMDD`; copying that into a v3 call is how the
+    first real send would have been rejected.
     """
     config = config or load_config()
     if config is None:
@@ -132,7 +134,7 @@ def create_task(
 
     payload: dict = {"task": {"name": name, "description": description}}
     if due:
-        payload["task"]["dueAt"] = due.replace("-", "")
+        payload["task"]["dueAt"] = due
     if assignee_teamwork_id:
         payload["task"]["assignees"] = {"userIds": [int(assignee_teamwork_id)]}
 

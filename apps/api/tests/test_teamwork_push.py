@@ -82,8 +82,9 @@ def test_create_task_posts_the_task_and_returns_its_url():
     assert created == {"id": "4821", "url": "https://acme.teamwork.com/app/tasks/4821"}
     assert seen["url"] == "https://acme.teamwork.com/projects/api/v3/tasklists/99/tasks.json"
     assert seen["auth"].startswith("Basic ")
-    # Teamwork v3 wants YYYYMMDD, not an ISO date.
-    assert '"dueAt":"20261020"' in seen["body"]
+    # v3's `dueAt` is `format: date` — an ISO date. The YYYYMMDD this used to
+    # send is v1's shape, and v3 would have refused it.
+    assert '"dueAt":"2026-10-20"' in seen["body"]
 
 
 def test_teamwork_refusing_is_reported_with_its_own_words():
