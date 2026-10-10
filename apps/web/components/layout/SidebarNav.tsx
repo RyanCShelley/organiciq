@@ -69,7 +69,9 @@ export function SidebarNav({
   signOutAction: () => Promise<void>;
 }) {
   const pathname = usePathname();
-  const platformOnly = isPlatformContext(pathname);
+  // Only steers where the logo goes. It used to hide the client switcher and
+  // every client link, which is what made the platform pages a dead end.
+  const onPlatformPage = isPlatformContext(pathname);
   const accountToolMatch = pathname.match(
     ACCOUNT_TOOL_PATH,
   );
@@ -81,7 +83,7 @@ export function SidebarNav({
   const effectiveClientId = pathClient?.id || clientId;
   const selected = clients.find((client) => client.id === effectiveClientId);
   const groups = accountNavGroups(selected?.slug ?? "");
-  const logoHref = platformOnly
+  const logoHref = onPlatformPage
     ? withNavContext("/clients", effectiveClientId, from, to)
     : withNavContext(
         selected?.slug ? accountToolHref(selected.slug, "dashboard") : "/dashboard",
@@ -101,63 +103,59 @@ export function SidebarNav({
         </Link>
       </div>
 
-      {!platformOnly ? (
-        <div className="border-b border-[var(--sidebar-border)] px-3.5 py-3.5">
-          <p className="mb-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
-            Client
-          </p>
-          <Suspense fallback={<div className="h-11 rounded-[10px] bg-[var(--sidebar-field)]" />}>
-            <ClientSwitcher
-              clients={clients}
-              clientId={effectiveClientId}
-              from={from}
-              to={to}
-              tone="dark"
-            />
-          </Suspense>
-        </div>
-      ) : null}
+      {/* On every page, platform ones included. Hiding it on /clients and
+          /platform left those screens with no client link anywhere in the
+          chrome: the only way back to a client was the browser's back
+          button, or knowing to click a row. */}
+      <div className="border-b border-[var(--sidebar-border)] px-3.5 py-3.5">
+        <p className="mb-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
+          Client
+        </p>
+        <Suspense fallback={<div className="h-11 rounded-[10px] bg-[var(--sidebar-field)]" />}>
+          <ClientSwitcher
+            clients={clients}
+            clientId={effectiveClientId}
+            from={from}
+            to={to}
+            tone="dark"
+          />
+        </Suspense>
+      </div>
 
       <nav className="flex flex-1 flex-col gap-[18px] overflow-y-auto px-2.5 py-3.5">
-        {!platformOnly
-          ? groups.map((group) => (
-              <div key={group.label}>
-                <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
-                  {group.label}
-                </p>
-                <ul className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const active = isNavActive(pathname, item.href, item.exact);
-                    const Icon = ACCOUNT_ICONS[item.label] ?? Settings2;
-                    return (
-                      <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
-                        <Link
-                          href={withNavContext(item.href, effectiveClientId, from, to, {
-                            tab: item.tab,
-                          })}
-                          className={cn(
-                            "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
-                            active
-                              ? "sidebar-link-active"
-                              : "text-white hover:bg-[var(--sidebar-field)]",
-                          )}
-                        >
-                          <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                          <span>{item.label}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          : null}
+        {groups.map((group) => (
+          <div key={group.label}>
+            <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
+              {group.label}
+            </p>
+            <ul className="space-y-0.5">
+              {group.items.map((item) => {
+                const active = isNavActive(pathname, item.href, item.exact);
+                const Icon = ACCOUNT_ICONS[item.label] ?? Settings2;
+                return (
+                  <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
+                    <Link
+                      href={withNavContext(item.href, effectiveClientId, from, to, {
+                        tab: item.tab,
+                      })}
+                      className={cn(
+                        "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
+                        active
+                          ? "sidebar-link-active"
+                          : "text-white hover:bg-[var(--sidebar-field)]",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                      <span>{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
 
-        <div
-          className={cn(
-            !platformOnly && "mt-auto border-t border-[var(--sidebar-border)] pt-3.5",
-          )}
-        >
+        <div className="mt-auto border-t border-[var(--sidebar-border)] pt-3.5">
           <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
             Platform
           </p>
