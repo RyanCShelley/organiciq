@@ -9,12 +9,6 @@ import { Alert } from "@/components/ui/Alert";
 import { FieldLabel, Input, Select } from "@/components/ui/Input";
 import type { Tier } from "@/lib/api";
 
-const STATUS_OPTIONS = [
-  { value: "onboarding", label: "Onboarding" },
-  { value: "active", label: "Active" },
-  { value: "paused", label: "Paused" },
-];
-
 export function AddClientForm({ tiers }: { tiers: Tier[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -108,23 +102,14 @@ export function AddClientForm({ tiers }: { tiers: Tier[] }) {
           </Select>
         </FieldLabel>
 
-        <FieldLabel label="Status">
-          <Select name="status" defaultValue="onboarding">
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </FieldLabel>
-
-        <FieldLabel label="Monthly lead goal (optional)">
-          <Input name="monthly_lead_goal" type="number" min={0} placeholder="31" />
-        </FieldLabel>
-
-        <FieldLabel label="Start date (optional)">
-          <Input name="start_date" type="date" />
-        </FieldLabel>
+        {/* Three fields, because the rest are answers this form cannot have
+            yet. The monthly lead goal is written by the baseline snapshot
+            from GA4 — asking for it here invites a number that gets
+            overwritten, and nothing is measured against it in between. The
+            status is `onboarding` by definition: the client is being added.
+            Both are editable in the workspace once there is something to base
+            them on. */}
+        <input type="hidden" name="status" value="onboarding" />
 
         <div className="flex items-center gap-2 sm:col-span-2">
           <button type="submit" className="btn btn-primary" disabled={pending || noTiers}>

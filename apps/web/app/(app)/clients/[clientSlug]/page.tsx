@@ -4,6 +4,10 @@ import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ClientTeamPanel } from "@/components/ClientTeamPanel";
+import {
+  SetupChecklist,
+  type SetupState,
+} from "@/components/SetupChecklist";
 import { ConversionDefinitionsPanel } from "@/components/ConversionDefinitionsPanel";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -36,6 +40,7 @@ export default async function ClientSettingsPage({
   // These endpoints are admin-only; a 403 means "cannot manage", not an error.
   let canManageTeam = true;
   let loadError: string | null = null;
+  let setup: SetupState | null = null;
 
   try {
     const [tierRows, healthRows, conversionRows, freshClient] = await Promise.all([
@@ -50,6 +55,13 @@ export default async function ClientSettingsPage({
     Object.assign(client, freshClient);
   } catch (e) {
     loadError = e instanceof Error ? e.message : "Failed to load client settings";
+  }
+
+  try {
+    setup = await apiFetch<SetupState>(`/clients/${clientId}/setup`, { clientId });
+  } catch {
+    // The checklist is a guide, not the page. Losing it costs nothing else.
+    setup = null;
   }
 
   try {
@@ -73,6 +85,20 @@ export default async function ClientSettingsPage({
       {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
 
       <div className="space-y-[var(--section-gap)]">
+        {/* First, because it is the only thing on this page that says what to
+            do rather than offering another field to fill in. */}
+        {setup ? (
+          <section className="workspace-section">
+            <SectionHeader
+              title="Setup"
+              description="In order, because each step reads what the one before it produced. Measured now, not remembered."
+            />
+            <div className="workspace-panel">
+              <SetupChecklist state={setup} clientSlug={client.slug} />
+            </div>
+          </section>
+        ) : null}
+
         <section className="workspace-section">
           <SectionHeader title="Account record" description="Core fields for this Organic IQ client." />
           <div className="workspace-panel">

@@ -2,12 +2,21 @@ import Link from "next/link";
 
 import { clientHref } from "@/lib/client-path";
 
+/**
+ * In the order a client is set up, which is the order the data depends on.
+ *
+ * Integrations came after Settings when Settings was where you began. It is
+ * not: nothing on it can be filled in usefully before a source is connected
+ * and pulled, and the lead definitions screen has no event names to offer
+ * until GA4's first pull has landed. Setup is the first thing on Settings,
+ * and it links onward from there.
+ */
 const WORKSPACE_LINKS = [
-  { segment: "", label: "Settings" },
+  { segment: "", label: "Setup" },
   { segment: "integrations", label: "Integrations" },
-  { segment: "conversions", label: "Conversions" },
-  { segment: "data-health", label: "Data health" },
   { segment: "jobs", label: "Sync jobs" },
+  { segment: "data-health", label: "Data health" },
+  { segment: "conversions", label: "Conversions" },
 ];
 
 export function ClientWorkspaceNav({

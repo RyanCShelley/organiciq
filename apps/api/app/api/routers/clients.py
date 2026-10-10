@@ -20,6 +20,8 @@ from app.services import baseline_snapshot, clients as client_service
 
 from app.services.plan_allowances import resolve_plan_allowances
 
+from app.services.client_setup import setup_state
+
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
@@ -97,6 +99,28 @@ def delete_client(
     if not client_service.delete_client(db, client_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{client_id}/setup")
+def client_setup(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """What is set up for this client and what has to happen next.
+
+    Measured from the data on every request rather than stored. A saved
+    "step 4 complete" would outlive the thing it describes the moment somebody
+    deletes a conversion definition.
+    """
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client"
+        )
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    return setup_state(db, client)
 
 
 @router.get("/{client_id}/baseline/preview", response_model=BaselineSnapshotPreviewOut)

@@ -362,6 +362,11 @@
   }
 
   .field-control {
+    /* Fills its cell. Inside a `.field-label` the flex column already
+       stretched it, so forms built that way looked right and any input
+       placed anywhere else rendered at the browser's default width — two
+       different widths for the same control, depending on its wrapper. */
+    width: 100%;
     height: var(--control-height);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);

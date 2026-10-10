@@ -89,7 +89,7 @@ export function ClientSettingsForm({
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <FieldLabel label="Company name">
           <Input name="client_name" defaultValue={client.client_name} required />
         </FieldLabel>
@@ -271,7 +271,7 @@ export function ClientSettingsForm({
             returned, so raise it only for accounts that justify the spend.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <FieldLabel label="Max prompts per lookup">
             <Input
               name="ai_search_prompt_limit"
@@ -303,7 +303,7 @@ export function ClientSettingsForm({
             own day.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <FieldLabel label="Max pages per crawl">
             <Input
               name="crawl_page_limit"
@@ -385,7 +385,7 @@ export function ClientSettingsForm({
               Watch List limits and the Decision Engine growth-plan allowance.
             </p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <FieldLabel label="Watchlist (keywords + AI prompts)">
               <Input
                 name="custom_tracked_keyword_limit"
