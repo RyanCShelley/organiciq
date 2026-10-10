@@ -390,6 +390,10 @@ class LeadSignals:
     baseline_lead_rate: float | None = None
     tofu_sessions_share: float | None = None
     next_step_measurable: bool = False
+    #: Why L3 cannot run, in the reader's terms. Hardcoded prose here once
+    #: told clients with conversion pages declared that they had none, which
+    #: sent them to fix something that was not broken.
+    next_step_blocked_by: str | None = None
 
 
 def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[TestResult]:
@@ -455,7 +459,10 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
             direction="max",
             missing=None
             if signals.next_step_measurable
-            else "no conversion pages declared to route to",
+            else (
+                signals.next_step_blocked_by
+                or "no conversion pages declared to route to"
+            ),
         )
     )
     return results

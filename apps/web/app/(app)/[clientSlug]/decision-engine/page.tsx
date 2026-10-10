@@ -127,7 +127,8 @@ export default async function DecisionEnginePage({
             <RunEngineButton
               clientId={clientId}
               slug={selectedClient.slug}
-              month={monthName(currentMonth)}
+              month={currentMonth}
+              currentMonth={currentMonth}
             />
           </div>
         ) : null}
@@ -178,7 +179,8 @@ export default async function DecisionEnginePage({
           <RunEngineButton
             clientId={clientId}
             slug={selectedClient.slug}
-            month={monthName(record.month)}
+            month={record.month}
+            currentMonth={currentMonth}
           />
         ) : null}
         </div>

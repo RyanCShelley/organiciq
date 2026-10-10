@@ -17,6 +17,7 @@ from app.models.decision import DecisionStatus, EngineAction
 from app.schemas import (
     EngineActionAssign,
     EngineActionSkip,
+    MonthlyRunRequest,
     KeywordTargetOut,
     KeywordTargetUpdate,
     DecisionEnsureRequest,
@@ -284,14 +285,23 @@ def run_monthly(
     client: Annotated[Client, Depends(require_client)],
     _: Annotated[AuthUser, Depends(require_sma_admin)],
     db: Annotated[Session, Depends(get_db)],
+    payload: MonthlyRunRequest | None = None,
 ) -> dict:
-    """Re-run this month and replace its record.
+    """Run a month and replace its record. Admin only.
 
-    Admin only, and not on the client page: the spec moves re-running to the
-    admin board, because a Run button beside a plan invites someone to
-    re-roll an answer they did not like.
+    `month` picks which one. A month is normally reviewed once it has
+    finished, so running November's engine over October's data is the common
+    case rather than the exception; without it the only month anybody could
+    run was the one they were standing in, measured to whatever day that
+    happened to be.
     """
-    return save_record(db, client).record
+    month = (payload.month if payload else None) or None
+    try:
+        return save_record(db, client, month=month).record
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 # ── The workflow beside the record ──────────────────────────────────────────

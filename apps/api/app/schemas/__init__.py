@@ -432,6 +432,12 @@ class ClientTeamMemberOut(BaseModel):
     via_admin: bool = False
 
 
+class MonthlyRunRequest(BaseModel):
+    """Which month to run. Absent means the one we are in, to date."""
+
+    month: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$")
+
+
 class EngineActionAssign(BaseModel):
     """Hand a slot to somebody. A null assignee returns it to planned."""
 

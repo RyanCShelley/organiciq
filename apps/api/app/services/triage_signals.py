@@ -377,6 +377,35 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
 
     baseline = getattr(client, "baseline_lead_rate_pct", None)
 
+    # L3 asks what share of managed sessions land on a top-of-funnel page with
+    # no in-content route onward. Two of its three inputs are here: the
+    # internal-link graph is stored, and the conversion pages are declared.
+    # The third is not — nothing records which *landing* pages are
+    # top-of-funnel. `classify_page_url` would guess it from the URL, and
+    # guessing from the URL is the thing declared conversion pages exist to
+    # stop, so L3 stays blocked.
+    #
+    # Which of the two it blocks on decides what the page tells someone to go
+    # and fix, so it is read rather than asserted. This said "no conversion
+    # pages declared" to every client, including the ones that had declared
+    # them.
+    declared_conversion_pages = (
+        db.query(func.count(ClientConversionPage.id))
+        .filter(ClientConversionPage.client_id == client.id)
+        .scalar()
+        or 0
+    )
+    next_step_blocked_by = (
+        "no conversion pages declared to route to"
+        if not declared_conversion_pages
+        else (
+            f"{declared_conversion_pages} conversion "
+            f"{'page' if declared_conversion_pages == 1 else 'pages'} declared, "
+            "but nothing records which landing pages are top of funnel — "
+            "the engine will not guess that from the URL"
+        )
+    )
+
     return LeadSignals(
         conversions_configured=configured,
         leads_month_to_date=leads_mtd,
@@ -384,11 +413,7 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
         monthly_goal=monthly_goal,
         lead_rate=lead_rate,
         baseline_lead_rate=float(baseline) if baseline else None,
-        # L3 asks what share of managed sessions land on a top-of-funnel page
-        # with no in-content route onward. The internal-link graph is stored
-        # and the conversion pages are declared for two clients; the stage
-        # tags that say which page is top-of-funnel are not. Blocked, named,
-        # and not guessed at from the URL.
         tofu_sessions_share=None,
         next_step_measurable=False,
+        next_step_blocked_by=next_step_blocked_by,
     )

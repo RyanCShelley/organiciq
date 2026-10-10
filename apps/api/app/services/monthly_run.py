@@ -11,6 +11,7 @@ renders field for field.
 
 from __future__ import annotations
 
+import calendar
 import logging
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -62,6 +63,27 @@ RELAUNCH_WORDS = ("relaunch", "migration", "migrated", "redesign", "domain chang
 
 def month_key(when: date) -> str:
     return f"{when.year:04d}-{when.month:02d}"
+
+
+def as_of(month: str, *, today: date | None = None) -> date:
+    """The day a run for `month` is made as of.
+
+    The last day of that month, or today, whichever comes first. Running
+    October in November judges the whole of October; running October on the
+    14th judges October to the 14th. One rule covers "I run last month's data
+    at the start of this one" and "show me where we are so far".
+
+    Raises ValueError on anything that is not `YYYY-MM`, because a bad month
+    silently falling back to today is how a run gets filed under the wrong
+    one.
+    """
+    try:
+        year, month_number = (int(part) for part in month.split("-"))
+        last_day = calendar.monthrange(year, month_number)[1]
+        month_end = date(year, month_number, last_day)
+    except (ValueError, calendar.IllegalMonthError) as exc:
+        raise ValueError(f"{month!r} is not a month in YYYY-MM form.") from exc
+    return min(month_end, today or date.today())
 
 
 def _previous_month(key: str) -> str:
@@ -177,7 +199,12 @@ def build_record(
     month = month_key(today)
     thresholds = merge_thresholds(getattr(client, "decision_thresholds", None))
 
+    # Clamped to the run's own day. Running October in November would
+    # otherwise take GSC's window up to November's newest row and report
+    # "data through Nov 5" on a record filed as October.
     gsc_newest = _last_fact(db, FactGscPage, FactGscPage.date, client.id)
+    if gsc_newest and gsc_newest > today:
+        gsc_newest = today
     gsc_period = (today - timedelta(days=29), gsc_newest) if gsc_newest else None
     ai_period = (today - timedelta(days=29), today)
 
@@ -357,15 +384,26 @@ def build_record(
     }
 
 
-def save_record(db: Session, client: Client, *, today: date | None = None) -> MonthlyRecord:
+def save_record(
+    db: Session,
+    client: Client,
+    *,
+    today: date | None = None,
+    month: str | None = None,
+) -> MonthlyRecord:
     """Run the engine and store the month's record, replacing any earlier one.
 
-    One plan a month: re-running corrects this month's answer rather than
+    One plan a month: re-running corrects that month's answer rather than
     adding a second one. Workflow state lives in `engine_actions`, keyed by a
     uid that survives the replacement, so an assignment made before a re-run
     is not lost by it.
+
+    `month` runs a month other than the one we are in — the usual case, since
+    a month is reviewed once it has finished. It is judged as of its last day,
+    so every month-to-date measure covers the whole month rather than the few
+    days elapsed in the month somebody happens to be sitting in.
     """
-    today = today or date.today()
+    today = as_of(month, today=today) if month else (today or date.today())
     record = build_record(db, client, today=today)
     month = record["month"]
 

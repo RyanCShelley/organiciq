@@ -18,8 +18,17 @@ import { apiFetch } from "@/lib/api";
  * the same answer twice. What changes is the saved timestamp, which the page
  * shows, and `held_since`, which the engine carries forward rather than
  * resetting.
+ *
+ * `month` runs one that is not the month we are in. A month gets reviewed
+ * once it has finished, so this is the ordinary case: it is judged as of its
+ * last day rather than to whatever day it is in the month somebody happens to
+ * be sitting in.
  */
-export async function runMonthlyRecordAction(clientId: string, slug: string) {
+export async function runMonthlyRecordAction(
+  clientId: string,
+  slug: string,
+  month?: string,
+) {
   if (!clientId) {
     return { ok: false as const, error: "Missing client" };
   }
@@ -28,6 +37,7 @@ export async function runMonthlyRecordAction(clientId: string, slug: string) {
     const record = await apiFetch<{ month: string }>("/decisions/records/run", {
       method: "POST",
       clientId,
+      body: { month: month ?? null },
     });
     revalidatePath(`/${slug}/decision-engine`);
     return { ok: true as const, month: record.month };
