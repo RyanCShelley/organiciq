@@ -26,6 +26,7 @@ from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.triage import LeadSignals, TrafficSignals, VisibilitySignals
 from app.models.client import Client
 from app.models.config import ClientConversionPage, ConversionDefinition, OrganicChannel
+from app.models.crawl import FactCrawlInternalLink
 from app.models.decision import KeywordTarget
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
@@ -334,6 +335,105 @@ def traffic_signals(
     )
 
 
+#: How much of the month's managed traffic has to sit on a page with a
+#: confirmed stage before L3's share means anything. A judgement, not a
+#: measurement: below it the number would be real and unrepresentative, which
+#: is the kind of number that reads as fact and is not. The actual coverage is
+#: reported either way, so the gap is a progress bar rather than a wall.
+NEXT_STEP_COVERAGE_FLOOR = 0.6
+
+
+def _next_step(
+    db: Session, client: Client, start: date, end: date
+) -> tuple[float | None, str | None]:
+    """L3: the share of covered sessions landing with nowhere to go.
+
+    Three inputs, all now present: which landing pages are top of funnel
+    (confirmed, never guessed from the URL), the in-content link graph, and
+    the declared conversion pages. A page counts as a dead end when it is top
+    of funnel and has no in-content, non-template link to a conversion page.
+
+    The denominator is sessions on pages with a *confirmed* stage, not all
+    managed sessions. Dividing by everything would let an unlabelled site
+    score well by being unlabelled.
+    """
+    conversion_pages = {
+        (p.normalized_url or "").strip()
+        for p in db.query(ClientConversionPage).filter(
+            ClientConversionPage.client_id == client.id
+        )
+        if (p.normalized_url or "").strip()
+    }
+    if not conversion_pages:
+        return None, "no conversion pages declared to route to"
+
+    # Imported here: page_stage reads MANAGED_CHANNELS from this module, so a
+    # top-level import would close the circle.
+    from app.services.page_stage import confirmed_stages
+
+    stages = confirmed_stages(db, client.id)
+    if not stages:
+        return None, (
+            f"{len(conversion_pages)} conversion "
+            f"{'page' if len(conversion_pages) == 1 else 'pages'} declared, but no "
+            "landing page has a confirmed funnel stage yet — label them on the "
+            "Page stages screen"
+        )
+
+    sessions_by_page = dict(
+        db.query(
+            FactGa4Traffic.normalized_url,
+            func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
+        )
+        .filter(
+            FactGa4Traffic.client_id == client.id,
+            FactGa4Traffic.date >= start,
+            FactGa4Traffic.date <= end,
+            FactGa4Traffic.channel.in_(MANAGED_CHANNELS),
+        )
+        .group_by(FactGa4Traffic.normalized_url)
+        .all()
+    )
+    total = sum(float(v or 0) for v in sessions_by_page.values())
+    if not total:
+        return None, "no managed sessions in the month to judge"
+
+    covered = sum(
+        float(sessions_by_page.get(url, 0) or 0) for url in stages
+    )
+    coverage = covered / total
+    if coverage < NEXT_STEP_COVERAGE_FLOOR:
+        return None, (
+            f"funnel stages cover {coverage * 100:.0f}% of managed sessions — "
+            f"{NEXT_STEP_COVERAGE_FLOOR * 100:.0f}% is needed before the share "
+            "means anything"
+        )
+
+    # One query for every in-content route out of a page we care about.
+    tofu_pages = {url for url, stage in stages.items() if stage == "tofu"}
+    if not tofu_pages:
+        return None, None if covered else "no top-of-funnel pages among those labelled"
+
+    routed = {
+        row[0]
+        for row in db.query(FactCrawlInternalLink.from_url)
+        .filter(
+            FactCrawlInternalLink.client_id == client.id,
+            FactCrawlInternalLink.from_url.in_(tofu_pages),
+            FactCrawlInternalLink.to_url.in_(conversion_pages),
+            FactCrawlInternalLink.in_content.is_(True),
+            FactCrawlInternalLink.is_template.is_(False),
+        )
+        .distinct()
+    }
+    dead_end_sessions = sum(
+        float(sessions_by_page.get(url, 0) or 0)
+        for url in tofu_pages
+        if url not in routed
+    )
+    return dead_end_sessions / covered * 100.0, None
+
+
 def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
     events = [
         d.event_name
@@ -377,34 +477,7 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
 
     baseline = getattr(client, "baseline_lead_rate_pct", None)
 
-    # L3 asks what share of managed sessions land on a top-of-funnel page with
-    # no in-content route onward. Two of its three inputs are here: the
-    # internal-link graph is stored, and the conversion pages are declared.
-    # The third is not — nothing records which *landing* pages are
-    # top-of-funnel. `classify_page_url` would guess it from the URL, and
-    # guessing from the URL is the thing declared conversion pages exist to
-    # stop, so L3 stays blocked.
-    #
-    # Which of the two it blocks on decides what the page tells someone to go
-    # and fix, so it is read rather than asserted. This said "no conversion
-    # pages declared" to every client, including the ones that had declared
-    # them.
-    declared_conversion_pages = (
-        db.query(func.count(ClientConversionPage.id))
-        .filter(ClientConversionPage.client_id == client.id)
-        .scalar()
-        or 0
-    )
-    next_step_blocked_by = (
-        "no conversion pages declared to route to"
-        if not declared_conversion_pages
-        else (
-            f"{declared_conversion_pages} conversion "
-            f"{'page' if declared_conversion_pages == 1 else 'pages'} declared, "
-            "but nothing records which landing pages are top of funnel — "
-            "the engine will not guess that from the URL"
-        )
-    )
+    tofu_share, next_step_blocked_by = _next_step(db, client, month_start, today)
 
     return LeadSignals(
         conversions_configured=configured,
@@ -413,7 +486,7 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
         monthly_goal=monthly_goal,
         lead_rate=lead_rate,
         baseline_lead_rate=float(baseline) if baseline else None,
-        tofu_sessions_share=None,
-        next_step_measurable=False,
+        tofu_sessions_share=tofu_share,
+        next_step_measurable=tofu_share is not None,
         next_step_blocked_by=next_step_blocked_by,
     )

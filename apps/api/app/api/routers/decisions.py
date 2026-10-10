@@ -12,12 +12,15 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.core.settings import get_settings
 from app.integrations import teamwork
+from app.services import page_stage
+from app.services.triage_signals import NEXT_STEP_COVERAGE_FLOOR
 from app.models.client import Client
 from app.models.decision import DecisionStatus, EngineAction
 from app.schemas import (
     EngineActionAssign,
     EngineActionSkip,
     MonthlyRunRequest,
+    PageStageIn,
     KeywordTargetOut,
     KeywordTargetUpdate,
     DecisionEnsureRequest,
@@ -493,3 +496,120 @@ def send_slot(
     )
     db.commit()
     return engine_action_service.serialise(row, slot=slot)
+
+
+# ── Funnel stage on landing pages ───────────────────────────────────────────
+#
+# L3's missing third input. A model proposes, a person confirms, and only the
+# confirmed stage is read by the engine — the same shape as conversion
+# definitions and conversion pages, for the same reason.
+
+
+@router.get("/page-stages")
+def list_page_stages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The landing pages worth labelling, busiest first.
+
+    Carries the sessions each page drew and the share already confirmed, so
+    the screen can say how much of the traffic is covered rather than how many
+    rows are ticked. Thirty rows covering 5% of sessions is not progress.
+    """
+    from app.models.config import ClientPageStage
+
+    candidates = page_stage.load_candidates(db, client)
+    stored = {
+        row.normalized_url: row
+        for row in db.query(ClientPageStage).filter(
+            ClientPageStage.client_id == client.id
+        )
+    }
+
+    total_sessions = sum(c.sessions for c in candidates) or 0.0
+    confirmed_sessions = sum(
+        c.sessions
+        for c in candidates
+        if (row := stored.get(c.normalized_url)) is not None and row.confirmed_at
+    )
+
+    return {
+        "model_ready": page_stage.configured(),
+        "coverage": {
+            "pages": len(candidates),
+            "confirmed_pages": sum(
+                1
+                for c in candidates
+                if (row := stored.get(c.normalized_url)) is not None and row.confirmed_at
+            ),
+            "sessions": total_sessions,
+            "confirmed_sessions": confirmed_sessions,
+            "floor": NEXT_STEP_COVERAGE_FLOOR,
+        },
+        "pages": [
+            {
+                "normalized_url": c.normalized_url,
+                "title": c.title,
+                "sessions": c.sessions,
+                "stage": (row := stored.get(c.normalized_url)) and row.stage,
+                "suggested_stage": row and row.suggested_stage,
+                "confidence": row and row.confidence,
+                "rationale": row and row.rationale,
+                "confirmed": bool(row and row.confirmed_at),
+            }
+            for c in candidates
+        ],
+    }
+
+
+@router.post("/page-stages/suggest")
+def suggest_page_stages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Ask the model to read the pages and propose a stage for each.
+
+    Suggestions never overwrite a confirmed stage: re-running this must not
+    revise an answer somebody already agreed to.
+    """
+    classifier = page_stage.load_classifier()
+    if classifier is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "No model is configured for this. Set ANTHROPIC_API_KEY to let "
+                "it read the pages, or set the stages by hand."
+            ),
+        )
+    candidates = page_stage.load_candidates(db, client)
+    if not candidates:
+        return {"suggested": 0, "pages": 0}
+    try:
+        suggestions = classifier.classify(candidates)
+    except page_stage.NotConfigured as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+    written = page_stage.save_suggestions(
+        db, client, suggestions, model=classifier.name
+    )
+    return {"suggested": written, "pages": len(candidates)}
+
+
+@router.put("/page-stages")
+def confirm_page_stages(
+    payload: list[PageStageIn],
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Record the stages somebody agreed to. These are what the engine reads."""
+    written = page_stage.confirm(
+        db,
+        client,
+        [(entry.normalized_url, entry.stage) for entry in payload],
+        user_id=user.id,
+    )
+    return {"confirmed": written}

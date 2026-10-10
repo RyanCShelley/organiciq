@@ -129,6 +129,47 @@ class ClientConversionPage(Base):
     )
 
 
+class ClientPageStage(Base):
+    """Where a landing page sits in the funnel.
+
+    L3 needs to know which landing pages are top of funnel. The URL will not
+    say: `classify_page_url` guesses from fragments, and that guessing is what
+    `ClientConversionPage` exists to stop.
+
+    So a model proposes and a person confirms. `suggested_stage` is what the
+    model said, `stage` is what somebody agreed to, and only a row with
+    `confirmed_at` is read by the engine. Both are kept, because where they
+    differ is the interesting part — it is the record of the model being wrong
+    about this client.
+    """
+
+    __tablename__ = "client_page_stages"
+    __table_args__ = (
+        UniqueConstraint("client_id", "normalized_url", name="uq_client_page_stage"),
+        Index("ix_client_page_stages_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    suggested_stage: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    suggested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class RefreshQueueEntry(Base):
     """Pages already booked for a content refresh this month.
 

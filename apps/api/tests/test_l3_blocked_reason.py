@@ -35,6 +35,8 @@ def test_l3_uses_the_reason_it_was_given():
 
 
 def test_l3_falls_back_when_no_reason_is_supplied():
+    # The fallback only fires if a caller forgets to supply one; the readers
+    # in triage_signals always do.
     result = _l3(LeadSignals(conversions_configured=True))
     assert result.missing == "no conversion pages declared to route to"
 
@@ -61,9 +63,9 @@ def test_a_client_with_conversion_pages_is_told_the_real_gap(
 
     signals = read_lead_signals(db, client_a, today=date.today())
     reason = signals.next_step_blocked_by or ""
-    # Not "you have none" — they have one.
+    # Not "you have none" — they have one. The gap has moved on to the stages.
     assert "1 conversion page declared" in reason
-    assert "top of funnel" in reason
+    assert "confirmed funnel stage" in reason
 
     db.add(
         ClientConversionPage(
@@ -71,4 +73,6 @@ def test_a_client_with_conversion_pages_is_told_the_real_gap(
         )
     )
     db.commit()
-    assert "2 conversion pages declared" in (read_lead_signals(db, client_a, today=date.today()).next_step_blocked_by or "")
+    assert "2 conversion pages declared" in (
+        read_lead_signals(db, client_a, today=date.today()).next_step_blocked_by or ""
+    )

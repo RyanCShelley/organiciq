@@ -432,6 +432,13 @@ class ClientTeamMemberOut(BaseModel):
     via_admin: bool = False
 
 
+class PageStageIn(BaseModel):
+    """A funnel stage somebody is confirming for a landing page."""
+
+    normalized_url: str
+    stage: Literal["tofu", "mofu", "bofu"]
+
+
 class MonthlyRunRequest(BaseModel):
     """Which month to run. Absent means the one we are in, to date."""
 

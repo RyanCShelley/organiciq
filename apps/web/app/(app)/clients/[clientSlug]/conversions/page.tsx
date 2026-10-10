@@ -4,6 +4,10 @@ import {
   ConversionPagesPanel,
   type ConversionPage,
 } from "@/components/ConversionPagesPanel";
+import {
+  PageStagesPanel,
+  type PageStagePayload,
+} from "@/components/PageStagesPanel";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type ConversionDefinition } from "@/lib/api";
@@ -21,12 +25,14 @@ export default async function ClientConversionsPage({
 
   let conversions: ConversionDefinition[] = [];
   let conversionPages: ConversionPage[] = [];
+  let pageStages: PageStagePayload | null = null;
   let error: string | null = null;
 
   try {
-    [conversions, conversionPages] = await Promise.all([
+    [conversions, conversionPages, pageStages] = await Promise.all([
       apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", { clientId }),
       apiFetch<ConversionPage[]>("/admin/conversion-pages", { clientId }),
+      apiFetch<PageStagePayload>("/decisions/page-stages", { clientId }),
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load conversions";
@@ -61,6 +67,18 @@ export default async function ClientConversionsPage({
           <ConversionPagesPanel clientId={clientId} initial={conversionPages} />
         </div>
       </section>
+
+      {pageStages ? (
+        <section className="workspace-section">
+          <SectionHeader
+            title="Page stages"
+            description="Where the reader of each landing page is: learning, comparing, or ready to buy. A model reads the page and proposes; the engine reads only what you confirm. This is what the next-step test needs to tell a dead end from a page that is doing its job."
+          />
+          <div className="workspace-panel">
+            <PageStagesPanel clientId={clientId} initial={pageStages} />
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
