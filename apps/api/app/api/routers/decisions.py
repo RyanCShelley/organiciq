@@ -13,6 +13,7 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.core.settings import get_settings
 from app.integrations import teamwork
 from app.services import page_stage
+from app.services import portfolio as portfolio_service
 from app.services.triage_signals import NEXT_STEP_COVERAGE_FLOOR
 from app.models.client import Client
 from app.models.decision import DecisionStatus, EngineAction
@@ -210,6 +211,30 @@ def put_keyword_page_map(
     """
     rows = upsert_keyword_page_map(db, client.id, payload.entries)
     return [KeywordTargetOut.model_validate(row) for row in rows]
+
+
+@router.get("/portfolio")
+def get_portfolio(
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+) -> dict:
+    """Every client's month on one screen.
+
+    Portfolio-wide, so it takes no client header — but it is filtered to the
+    clients the caller can see. An admin sees all of them; anybody else sees
+    the ones they are assigned, because a staff list of every client's
+    constraint is a different thing from the client they were given.
+    """
+    from app.models.user import UserClient, UserRole
+
+    allowed: set[str] | None = None
+    if user.role != UserRole.SMA_ADMIN:
+        allowed = {
+            str(row.client_id)
+            for row in db.query(UserClient).filter(UserClient.user_id == user.id)
+        }
+    return portfolio_service.portfolio(db, month=month, allowed_client_ids=allowed)
 
 
 @router.get("/records")

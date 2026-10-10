@@ -2,6 +2,11 @@ import Link from "next/link";
 
 import { AddClientForm } from "@/components/AddClientForm";
 import { DeleteClientButton } from "@/components/DeleteClientButton";
+import {
+  PortfolioOverview,
+  type Portfolio,
+} from "@/components/PortfolioOverview";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
@@ -21,6 +26,7 @@ export default async function ClientsIndexPage({
   let clients: Client[] = [];
   let overview: PlatformOverviewRow[] = [];
   let tiers: Tier[] = [];
+  let portfolio: Portfolio | null = null;
   let error: string | null = null;
 
   try {
@@ -46,6 +52,13 @@ export default async function ClientsIndexPage({
     tiers = [];
   }
 
+  // Its own call, so a failure costs the overview and not the client list.
+  try {
+    portfolio = await apiFetch<Portfolio>("/decisions/portfolio");
+  } catch {
+    portfolio = null;
+  }
+
   const overviewById = new Map(overview.map((row) => [row.client_id, row]));
   const rows: ClientRow[] = clients.map((client) => ({
     ...client,
@@ -69,6 +82,18 @@ export default async function ClientsIndexPage({
           {error}
         </Alert>
       ) : null}
+
+      {portfolio ? (
+        <section className="workspace-section mb-[var(--section-gap)]">
+          <SectionHeader
+            title="Portfolio"
+            description="Every client's saved run, counted rather than recomputed — so a row here and the client's own page cannot disagree."
+          />
+          <PortfolioOverview data={portfolio} />
+        </section>
+      ) : null}
+
+      <SectionHeader title="All clients" description="Every client record and its data health." />
 
       <DataTable
         columns={[
