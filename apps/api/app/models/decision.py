@@ -288,7 +288,16 @@ class EngineAction(Base):
     due: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
     skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: What was on screen when somebody acted on this slot. `uid` is keyed on
+    #: the slot number, so a re-run that reshuffles the slots would otherwise
+    #: carry an assignment onto a different action without saying so.
+    action_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Set when the action was pushed to Teamwork, so a second press links
+    #: rather than creating a duplicate task.
+    teamwork_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     shipped_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     #: The results loop, filled on the check date rather than at prescription.
     before_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

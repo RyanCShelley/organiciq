@@ -432,6 +432,24 @@ class ClientTeamMemberOut(BaseModel):
     via_admin: bool = False
 
 
+class EngineActionAssign(BaseModel):
+    """Hand a slot to somebody. A null assignee returns it to planned."""
+
+    assignee_user_id: UUID | None = None
+    due: Date | None = None
+
+
+class EngineActionSkip(BaseModel):
+    """Take a slot off the table, or put it back.
+
+    A reason is required on the way out. "Skipped" with nothing beside it is
+    what makes next month unable to tell a wrong action from a busy month.
+    """
+
+    reason: str | None = None
+    undo: bool = False
+
+
 class HealthOut(BaseModel):
     status: str
     service: str

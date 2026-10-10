@@ -1,6 +1,8 @@
 import Link from "next/link";
 
 import { ConstraintCard } from "@/components/DecisionEngine/ConstraintCard";
+import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
+import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch } from "@/lib/api";
@@ -10,8 +12,11 @@ import {
   BRANCH_LABEL,
   formatDay,
   monthName,
+  type Assignee,
   type MonthlyRecord,
   type RunSummary,
+  type SlotState,
+  type Workflow,
 } from "@/lib/monthly-record";
 import { withNavContext } from "@/lib/navigation";
 
@@ -27,10 +32,23 @@ export default async function DecisionEnginePage({
   const selectedClient = await requireAccountClient(clientSlug, "decision-engine");
   const clientId = selectedClient.id;
   const wanted = typeof query.run === "string" ? query.run : null;
+  const now = new Date();
+  const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 
   let runs: RunSummary[] = [];
   let record: MonthlyRecord | null = null;
   let error: string | null = null;
+
+  // Re-running replaces a saved record, so it stays an admin action. The API
+  // enforces it; this only decides whether the button is drawn, because a
+  // button that always 403s is worse than no button.
+  let canRun = false;
+  try {
+    const me = await apiFetch<{ role: string }>("/auth/me", { clientId });
+    canRun = me.role === "sma_admin";
+  } catch {
+    canRun = false;
+  }
 
   try {
     runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
@@ -43,6 +61,30 @@ export default async function DecisionEnginePage({
     }
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load the saved run";
+  }
+
+  // The workflow is fetched apart from the record for the same reason it is
+  // stored apart: assigning a task must not be able to change what the engine
+  // decided. A failure here leaves the plan readable and the buttons inert,
+  // which is the right way round.
+  let slotStates = new Map<string, SlotState>();
+  let assignees: Assignee[] = [];
+  let teamworkReady = false;
+  if (record) {
+    try {
+      const [workflow, people] = await Promise.all([
+        apiFetch<Workflow>(
+          `/decisions/records/${encodeURIComponent(record.month)}/workflow`,
+          { clientId },
+        ),
+        apiFetch<Assignee[]>("/decisions/assignees", { clientId }),
+      ]);
+      slotStates = new Map(workflow.actions.map((row) => [row.uid, row]));
+      teamworkReady = workflow.teamwork_ready;
+      assignees = people;
+    } catch {
+      // Leave the plan readable.
+    }
   }
 
   // Content opportunities still works in date ranges, so it is handed the
@@ -80,6 +122,15 @@ export default async function DecisionEnginePage({
           The engine runs monthly and saves a record; this page renders it rather
           than recomputing, so there is nothing to show until the first run.
         </p>
+        {canRun ? (
+          <div className="mt-4 flex">
+            <RunEngineButton
+              clientId={clientId}
+              slug={selectedClient.slug}
+              month={monthName(currentMonth)}
+            />
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -103,6 +154,7 @@ export default async function DecisionEnginePage({
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-4">
         {runs.length > 1 ? (
           <nav aria-label="Saved runs" className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] text-[var(--text-tertiary)]">Run</span>
@@ -122,6 +174,14 @@ export default async function DecisionEnginePage({
             ))}
           </nav>
         ) : null}
+        {canRun ? (
+          <RunEngineButton
+            clientId={clientId}
+            slug={selectedClient.slug}
+            month={monthName(record.month)}
+          />
+        ) : null}
+        </div>
       </div>
 
       <ConstraintCard record={record} />
@@ -152,7 +212,17 @@ export default async function DecisionEnginePage({
             </div>
 
             {record.actions.map((action) => (
-              <SlotCard key={action.action_uid} action={action} />
+              <SlotCard key={action.action_uid} action={action}>
+                <SlotActionBar
+                  action={action}
+                  state={slotStates.get(action.action_uid)}
+                  assignees={assignees}
+                  clientId={clientId}
+                  slug={selectedClient.slug}
+                  month={record.month}
+                  teamworkReady={teamworkReady}
+                />
+              </SlotCard>
             ))}
             {record.empty_slots.map((slot) => (
               <EmptySlotCard key={slot.slot} slot={slot.slot} reason={slot.reason} />

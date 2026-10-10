@@ -10,9 +10,13 @@ from sqlalchemy.orm import Session
 from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
+from app.core.settings import get_settings
+from app.integrations import teamwork
 from app.models.client import Client
-from app.models.decision import DecisionStatus
+from app.models.decision import DecisionStatus, EngineAction
 from app.schemas import (
+    EngineActionAssign,
+    EngineActionSkip,
     KeywordTargetOut,
     KeywordTargetUpdate,
     DecisionEnsureRequest,
@@ -25,6 +29,7 @@ from app.schemas import (
     DiagnoseResponse,
 )
 from app.services import decisions as decision_service
+from app.services import engine_actions as engine_action_service
 from app.services.decisions import upsert_keyword_page_map
 from app.services.decision_serialization import serialize_diagnose
 from app.services.monthly_run import latest_record, save_record
@@ -287,3 +292,194 @@ def run_monthly(
     re-roll an answer they did not like.
     """
     return save_record(db, client).record
+
+
+# ── The workflow beside the record ──────────────────────────────────────────
+#
+# The saved record is what the engine decided and never changes here. These
+# endpoints own the other half — who the slot went to, whether it was skipped,
+# whether it was pushed to Teamwork — in `engine_actions`.
+
+
+def _slot_or_404(db: Session, client: Client, month: str, uid: str):
+    record = engine_action_service.load_record(db, client, month)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No saved run for {month}.",
+        )
+    slots = engine_action_service.slots_in_record(record.record)
+    slot = slots.get(uid)
+    if slot is None:
+        # Without this the endpoint is an open write to a table keyed by a
+        # string the caller chooses.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{uid} is not a slot in the {month} run.",
+        )
+    return record, slot
+
+
+@router.get("/records/{month}/workflow")
+def get_workflow(
+    month: str,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """What the team has done about this month's slots.
+
+    Served apart from the record so that assigning a task never rewrites what
+    the engine decided.
+    """
+    record = engine_action_service.load_record(db, client, month)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No saved run for {month}.",
+        )
+    slots = engine_action_service.slots_in_record(record.record)
+    rows = engine_action_service.list_workflow(db, client, month)
+    return {
+        "month": month,
+        "teamwork_ready": teamwork.configured() and bool(client.teamwork_tasklist_id),
+        "actions": [
+            engine_action_service.serialise(row, slot=slots.get(row.uid)) for row in rows
+        ],
+    }
+
+
+@router.get("/assignees")
+def list_assignees(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """Who can be given work on this client.
+
+    Admins are included because they can see every client without an
+    assignment; leaving them out would make the list read as "nobody".
+    """
+    from app.models.user import User, UserClient, UserRole
+
+    out: list[dict] = []
+    seen: set[UUID] = set()
+    for user in (
+        db.query(User)
+        .filter(User.role == UserRole.SMA_ADMIN, User.is_active.is_(True))
+        .order_by(User.email.asc())
+        .all()
+    ):
+        seen.add(user.id)
+        out.append({"user_id": str(user.id), "email": user.email, "name": user.name})
+
+    assigned = (
+        db.query(User)
+        .join(UserClient, UserClient.user_id == User.id)
+        .filter(UserClient.client_id == client.id, User.is_active.is_(True))
+        .order_by(User.email.asc())
+        .all()
+    )
+    for user in assigned:
+        if user.id in seen:
+            continue
+        seen.add(user.id)
+        out.append({"user_id": str(user.id), "email": user.email, "name": user.name})
+    return out
+
+
+@router.post("/records/{month}/slots/{uid}/assign")
+def assign_slot(
+    month: str,
+    uid: str,
+    payload: EngineActionAssign,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    _, slot = _slot_or_404(db, client, month, uid)
+    row = engine_action_service.assign(
+        db,
+        client,
+        slot,
+        month,
+        assignee_user_id=payload.assignee_user_id,
+        due=payload.due,
+    )
+    db.commit()
+    return engine_action_service.serialise(row, slot=slot)
+
+
+@router.post("/records/{month}/slots/{uid}/skip")
+def skip_slot(
+    month: str,
+    uid: str,
+    payload: EngineActionSkip,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    _, slot = _slot_or_404(db, client, month, uid)
+    try:
+        row = (
+            engine_action_service.unskip(db, client, slot, month)
+            if payload.undo
+            else engine_action_service.skip(db, client, slot, month, reason=payload.reason or "")
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    db.commit()
+    return engine_action_service.serialise(row, slot=slot)
+
+
+@router.post("/records/{month}/slots/{uid}/send")
+def send_slot(
+    month: str,
+    uid: str,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Push the slot to Teamwork as a task.
+
+    Idempotent by the stored task id: a second press links to the task that
+    exists rather than creating a twin.
+    """
+    record, slot = _slot_or_404(db, client, month, uid)
+    existing = (
+        db.query(EngineAction)
+        .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
+        .one_or_none()
+    )
+    if existing is not None and existing.teamwork_task_id:
+        return engine_action_service.serialise(existing, slot=slot)
+
+    name, description = teamwork.task_body(
+        title=slot.title,
+        why=slot.why,
+        done_when=slot.done_when,
+        target_url=slot.target_url,
+        metric=slot.metric,
+        check_on=slot.check_on,
+        effort_min=slot.effort_min,
+        record_url=f"{get_settings().web_app_url}/{client.slug}/decision-engine?run={month}",
+    )
+    try:
+        created = teamwork.create_task(
+            tasklist_id=client.teamwork_tasklist_id or "",
+            name=name,
+            description=description,
+            due=existing.due.isoformat() if existing is not None and existing.due else None,
+        )
+    except teamwork.TeamworkError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+
+    row = engine_action_service.mark_sent(
+        db, client, slot, month, task_id=created["id"], task_url=created["url"]
+    )
+    db.commit()
+    return engine_action_service.serialise(row, slot=slot)

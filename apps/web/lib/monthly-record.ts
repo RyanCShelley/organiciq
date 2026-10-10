@@ -160,3 +160,36 @@ export function monthsHeld(heldSince: string, month: string): number {
   if (!hy || !hm || !my || !mm) return 1;
   return Math.max(1, (my - hy) * 12 + (mm - hm) + 1);
 }
+
+/** Who can be given work on this client. */
+export type Assignee = {
+  user_id: string;
+  email: string;
+  name: string | null;
+};
+
+/**
+ * What the team did about one slot.
+ *
+ * Served apart from the record, because assigning a task must not rewrite
+ * what the engine decided.
+ */
+export type SlotState = {
+  uid: string;
+  status: "planned" | "assigned" | "done" | "skipped";
+  assignee_user_id: string | null;
+  due: string | null;
+  skip_reason: string | null;
+  sent_at: string | null;
+  teamwork_task_id: string | null;
+  teamwork_task_url: string | null;
+  assigned_action_id: string | null;
+  /** The slot holds a different action now from the one that was assigned. */
+  stale: boolean;
+};
+
+export type Workflow = {
+  month: string;
+  teamwork_ready: boolean;
+  actions: SlotState[];
+};

@@ -50,6 +50,9 @@ class Client(Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     primary_market: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
+    #: The Teamwork tasklist a sent growth action lands in. The site and token
+    #: are install-wide; this is the only per-client part of the mapping.
+    teamwork_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: Fallback goal, used only when there is no projection to read a
     #: checkpoint from. The dashboard's goal comes from the curve.
     monthly_lead_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
