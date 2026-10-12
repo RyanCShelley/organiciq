@@ -46,6 +46,12 @@ export function DataTable<T>({
   rowLabel,
   sort,
   onSortChange,
+  sortHref,
+  searchAction,
+  searchParam = "q",
+  searchValue,
+  searchPlaceholder,
+  searchKeep,
 }: {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -63,6 +69,22 @@ export function DataTable<T>({
   /** Current ordering. Columns with `sortValue` become clickable when set. */
   sort?: SortState | null;
   onSortChange?: (key: string) => void;
+  /**
+   * Where a header click goes, for a table rendered on the server.
+   *
+   * Sorting was controlled from outside, so a table could only sort if its
+   * whole page was a client component — which is why almost none of them
+   * did. A link needs no state, survives a refresh, and can be sent to
+   * somebody.
+   */
+  sortHref?: (key: string, dir: "asc" | "desc") => string;
+  /** Where the search box submits. Omit it and no box is drawn. */
+  searchAction?: string;
+  searchParam?: string;
+  searchValue?: string;
+  searchPlaceholder?: string;
+  /** Hidden fields the search form must preserve, as name/value pairs. */
+  searchKeep?: Record<string, string>;
 }) {
   const sortColumn = sort ? columns.find((column) => column.key === sort.key) : undefined;
   if (sortColumn?.sortValue) {
@@ -83,15 +105,50 @@ export function DataTable<T>({
     });
   }
 
+  const search = searchAction ? (
+    // A plain GET form: no state, no client component, and the result is a
+    // URL somebody can send to a colleague.
+    <form
+      action={searchAction}
+      method="get"
+      className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2"
+    >
+      {Object.entries(searchKeep ?? {}).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
+      <label className="sr-only" htmlFor={`${searchParam}-search`}>
+        Search this table
+      </label>
+      <input
+        id={`${searchParam}-search`}
+        type="search"
+        name={searchParam}
+        defaultValue={searchValue ?? ""}
+        placeholder={searchPlaceholder ?? "Search…"}
+        className="field-control max-w-[280px]"
+      />
+      <button type="submit" className="btn btn-secondary btn-sm">
+        Search
+      </button>
+      {searchValue ? (
+        <a href={searchAction} className="text-xs text-[var(--text-secondary)]">
+          Clear
+        </a>
+      ) : null}
+    </form>
+  ) : null;
+
   if (rows.length === 0) {
     return (
-      <div
-        className={cn(
-          "table-shell px-3 py-6 text-center text-xs text-[var(--text-secondary)]",
-          className,
-        )}
-      >
-        {emptyMessage}
+      <div className={cn("table-shell", className)}>
+        {/* The box stays: a search that matched nothing has to be
+            changeable without going back. */}
+        {search}
+        <div className="px-3 py-6 text-center text-xs text-[var(--text-secondary)]">
+          {searchValue
+            ? `Nothing matches “${searchValue}”.`
+            : emptyMessage}
+        </div>
       </div>
     );
   }
@@ -103,11 +160,22 @@ export function DataTable<T>({
           {title}
         </div>
       ) : null}
+      {search}
       <table>
         <thead>
           <tr>
             {columns.map((column) => {
-              const sortable = Boolean(column.sortValue && onSortChange);
+              const sortable = Boolean(
+                column.sortValue && (onSortChange || sortHref),
+              );
+              // Clicking the column you are already on turns it around;
+              // a new column opens the way that column reads best.
+              const nextDir: "asc" | "desc" =
+                sort?.key === column.key && sort.dir === "desc"
+                  ? "asc"
+                  : sort?.key === column.key
+                    ? "desc"
+                    : (column.sortInitial ?? "desc");
               const active = sort?.key === column.key;
               return (
                 <th
@@ -117,7 +185,21 @@ export function DataTable<T>({
                     active ? (sort?.dir === "asc" ? "ascending" : "descending") : undefined
                   }
                 >
-                  {sortable ? (
+                  {sortable && sortHref && !onSortChange ? (
+                    <Link
+                      href={sortHref(column.key, nextDir)}
+                      scroll={false}
+                      className={cn(
+                        "inline-flex items-center gap-1 no-underline hover:text-[var(--text-primary)]",
+                        active && "text-[var(--text-primary)]",
+                      )}
+                    >
+                      {column.header}
+                      <span aria-hidden className="text-[9px] leading-none">
+                        {active ? (sort?.dir === "asc" ? "▲" : "▼") : "⇅"}
+                      </span>
+                    </Link>
+                  ) : sortable ? (
                     <button
                       type="button"
                       onClick={() => onSortChange?.(column.key)}

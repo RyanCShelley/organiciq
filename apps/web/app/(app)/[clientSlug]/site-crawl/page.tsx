@@ -9,6 +9,7 @@ import { RunCrawlButton } from "@/components/analytics/RunCrawlButton";
 import {
   apiFetch,
   type CrawlPageDetail as PageDetail,
+  type CrawledPageRow,
   type CrawledPagesPayload,
   type StructuredDataPayload,
 } from "@/lib/api";
@@ -203,6 +204,28 @@ export default async function SiteCrawlPage({
     if (value) filterQs.set(key, value);
   }
   const listHref = filterQs.toString() ? `${base}?${filterQs}` : base;
+
+  // Sort and search live in the URL: the table renders on the server, so a
+  // header that needed client state could not sort at all — and a URL can
+  // be refreshed, bookmarked and sent to somebody.
+  const sortKey = typeof query.sort === "string" ? query.sort : null;
+  const sortDir = query.dir === "asc" ? "asc" : "desc";
+  const sort = sortKey ? { key: sortKey, dir: sortDir as "asc" | "desc" } : null;
+  const search = typeof query.q === "string" ? query.q.trim() : "";
+  const sortHref = (key: string, dir: "asc" | "desc") => {
+    const qs = new URLSearchParams(filterQs);
+    if (search) qs.set("q", search);
+    qs.set("sort", key);
+    qs.set("dir", dir);
+    return `${base}?${qs}`;
+  };
+  // Matched on what a reader can see — the URL and the title — rather than
+  // every column, so a search for "blog" does not hit a word count of 1300.
+  const visibleRows = search
+    ? pages.items.filter((row) =>
+        `${row.url} ${row.title ?? ""}`.toLowerCase().includes(search.toLowerCase()),
+      )
+    : pages.items;
   const detailHref = (url: string) => {
     const qs = new URLSearchParams(filterQs);
     qs.set("url", url);
@@ -311,7 +334,7 @@ export default async function SiteCrawlPage({
               description="In URL order. Click a status, indexability, schema or sitemap cell to filter by it."
               actions={
                 <span className="text-xs text-[var(--text-tertiary)]">
-                  {pages.items.length.toLocaleString()} shown
+                  {visibleRows.length.toLocaleString()} shown
                   {pages.truncated ? ` of ${pages.matched_pages.toLocaleString()}` : ""}
                 </span>
               }
@@ -322,6 +345,8 @@ export default async function SiteCrawlPage({
                   {
                     key: "url",
                     header: "Page",
+                    sortValue: (row: CrawledPageRow) => row.url,
+                    sortInitial: "asc" as const,
                     render: (row) => (
                       <span
                         className="block max-w-[26rem] truncate font-medium"
@@ -333,6 +358,8 @@ export default async function SiteCrawlPage({
                   },
                   {
                     key: "status_code",
+                    sortValue: (row: CrawledPageRow) => row.status_code,
+                    sortInitial: "asc" as const,
                     header: "Status",
                     align: "right",
                     interactive: true,
@@ -353,6 +380,7 @@ export default async function SiteCrawlPage({
                   },
                   {
                     key: "indexable",
+                    sortValue: (row: CrawledPageRow) => (row.indexable ? 1 : 0),
                     header: "Indexable",
                     interactive: true,
                     render: (row) => (
@@ -372,6 +400,7 @@ export default async function SiteCrawlPage({
                   },
                   {
                     key: "inbound_editorial_links",
+                    sortValue: (row: CrawledPageRow) => row.inbound_editorial_links,
                     header: "Editorial links in",
                     align: "right",
                     render: (row) => (
@@ -392,12 +421,14 @@ export default async function SiteCrawlPage({
                   },
                   {
                     key: "word_count",
+                    sortValue: (row: CrawledPageRow) => row.word_count,
                     header: "Words",
                     align: "right",
                     render: (row) => row.word_count.toLocaleString(),
                   },
                   {
                     key: "schema_blocks",
+                    sortValue: (row: CrawledPageRow) => row.schema_blocks,
                     header: "Schema",
                     align: "right",
                     interactive: true,
@@ -416,34 +447,42 @@ export default async function SiteCrawlPage({
                       </FilterCell>
                     ),
                   },
-                  {
-                    key: "in_sitemap",
-                    header: "Sitemap",
-                    interactive: true,
-                    render: (row) => {
-                      // Without a sitemap, "missing from it" says nothing — the
-                      // finding is the site-level one, not a mark on every row.
-                      if (!pages.sitemap_found) {
-                        return <span className="text-[var(--text-tertiary)]">No sitemap</span>;
-                      }
-                      return (
-                        <FilterCell
-                          base={base}
-                          active={filters}
-                          param="sitemap"
-                          value={row.in_sitemap ? "in" : "missing"}
-                        >
-                          {row.in_sitemap ? (
-                            <span className="badge badge-success">In</span>
-                          ) : (
-                            <span className="badge badge-warning">Missing</span>
-                          )}
-                        </FilterCell>
-                      );
-                    },
-                  },
+                  // Only where there is a sitemap to be in. It used to print
+                  // "No sitemap" on every row of a site that has none, which
+                  // is the site-level finding said 478 times — and the banner
+                  // above already says it once.
+                  ...(pages.sitemap_found
+                    ? [
+                        {
+                          key: "in_sitemap",
+                          header: "Sitemap",
+                          sortValue: (row: CrawledPageRow) => (row.in_sitemap ? 1 : 0),
+                          interactive: true,
+                          render: (row: CrawledPageRow) => (
+                            <FilterCell
+                              base={base}
+                              active={filters}
+                              param="sitemap"
+                              value={row.in_sitemap ? "in" : "missing"}
+                            >
+                              {row.in_sitemap ? (
+                                <span className="badge badge-success">In</span>
+                              ) : (
+                                <span className="badge badge-warning">Missing</span>
+                              )}
+                            </FilterCell>
+                          ),
+                        },
+                      ]
+                    : []),
                 ]}
-                rows={pages.items}
+                rows={visibleRows}
+                sort={sort}
+                sortHref={sortHref}
+                searchAction={base}
+                searchValue={search}
+                searchPlaceholder="Search by URL or title…"
+                searchKeep={Object.fromEntries(filterQs)}
                 getRowKey={(row) => row.url}
                 rowHref={(row) => detailHref(row.url)}
                 rowLabel={(row) => `Open ${row.url}`}
