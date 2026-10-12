@@ -364,4 +364,34 @@ def test_still_unranked_at_the_check_is_not_an_improvement(
     _record(db, client_a)
     _rank(db, client_a, PRESCRIBED, 0.0)
     _rank(db, client_a, CHECK_ON, 0.0)
-    assert check_due(db, client_a, today=CHECK_ON) == []
+    judged = check_due(db, client_a, today=CHECK_ON)
+    assert [r.result for r in judged] == ["no_change"]
+
+
+def test_still_unranked_at_the_check_is_no_change_not_silence(
+    db: Session, client_a: Client
+):
+    """An action that did not work has to say so.
+
+    Skipping the unranked reading left it showing "not checked yet" forever,
+    which claims less than is known: it was checked, and nothing moved.
+    """
+    _record(db, client_a)
+    _rank(db, client_a, PRESCRIBED, 0.0)
+    _rank(db, client_a, CHECK_ON, 0.0)
+
+    judged = check_due(db, client_a, today=CHECK_ON)
+    assert len(judged) == 1
+    assert judged[0].result == "no_change"
+
+
+def test_falling_out_of_the_rankings_is_worse(db: Session, client_a: Client):
+    record = _record(db, client_a)
+    _rank(db, client_a, PRESCRIBED, 12.0)
+    capture_before(db, client_a, record)
+    _rank(db, client_a, CHECK_ON, 0.0)
+
+    judged = check_due(db, client_a, today=CHECK_ON)
+    assert len(judged) == 1
+    assert judged[0].result == "worse"
+    assert judged[0].after_value is None

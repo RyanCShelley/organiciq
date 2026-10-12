@@ -386,7 +386,10 @@ def check_due(
                 term=action.get("term"),
                 as_of=today,
             )
-            if reading.value is None:
+            # "Still not ranking" is an outcome, not a gap. Skipping it left
+            # an action that did not work reading as "not checked yet"
+            # forever, which claims less than is known.
+            if reading.value is None and not reading.unranked:
                 continue
 
             before = (
@@ -414,7 +417,15 @@ def check_due(
                 row.action_id = action.get("id")
                 row.target_url = action.get("target_url")
                 row.after_value = reading.value
-                row.result = "improved"
+                # Off the rankings then, off them now.
+                row.result = "no_change" if reading.unranked else "improved"
+                judged.append(row)
+                continue
+
+            if reading.unranked:
+                # It had a position when it was prescribed and has none now.
+                row.after_value = None
+                row.result = "worse"
                 judged.append(row)
                 continue
 
