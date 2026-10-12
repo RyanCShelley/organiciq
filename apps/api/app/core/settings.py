@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Comma-separated. Both are accepted through the .com migration; existing
     # staff accounts and Google Workspace aliases are still on .net.
     sma_google_hosted_domain: str = "smamarketing.com,smamarketing.net"
+    # Domains that are the same company, for matching a person across
+    # systems. Deliberately not the login setting above: that one answers
+    # "who may sign in" and gets narrowed, and narrowing it should not make
+    # beth@smamarketing.com a different person from beth@smamarketing.net
+    # while the move from .net to .com is half done.
+    identity_domains: str = "smamarketing.com,smamarketing.net"
     integration_token_key: str = INSECURE_TOKEN_KEY
     # Set only while rotating; see app/rotate_integration_key.py.
     integration_token_key_previous: str = ""

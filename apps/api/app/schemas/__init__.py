@@ -466,9 +466,15 @@ class MonthlyRunRequest(BaseModel):
 
 
 class EngineActionAssign(BaseModel):
-    """Hand a slot to somebody. A null assignee returns it to planned."""
+    """Hand a slot to somebody. A null assignee returns it to planned.
 
-    assignee_user_id: UUID | None = None
+    Identified by email, because most of the team does the work and never
+    opens this tool — and because email is already how a sent task finds its
+    owner in Teamwork.
+    """
+
+    assignee_email: str | None = None
+    assignee_name: str | None = None
     due: Date | None = None
 
 

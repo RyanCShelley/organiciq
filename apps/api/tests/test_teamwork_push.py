@@ -322,7 +322,7 @@ def test_the_task_carries_the_assignee(
     client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/assign",
         headers=headers,
-        json={"assignee_user_id": str(admin_user.id), "due": None},
+        json={"assignee_email": admin_user.email, "due": None},
     )
     assert client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/send", headers=headers
@@ -374,9 +374,80 @@ def test_an_assignee_with_no_teamwork_account_still_sends(
     client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/assign",
         headers=headers,
-        json={"assignee_user_id": str(admin_user.id), "due": None},
+        json={"assignee_email": admin_user.email, "due": None},
     )
     assert client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/send", headers=headers
     ).status_code == 200
     assert seen["assignee_teamwork_id"] is None
+
+
+def test_the_two_workspace_domains_are_one_person():
+    """SMA is mid-move from .net to .com and Teamwork is half updated.
+
+    Beth is on .com there and most of the team is still on .net, so an
+    address has to find its person either way round.
+    """
+    people = [
+        teamwork.Person(id="157450", email="beth@smamarketing.com", name="Beth"),
+        teamwork.Person(id="157449", email="ryan@smamarketing.net", name="Ryan"),
+    ]
+    for address, expected in (
+        ("beth@smamarketing.com", "157450"),
+        ("beth@smamarketing.net", "157450"),
+        ("ryan@smamarketing.net", "157449"),
+        ("ryan@smamarketing.com", "157449"),
+        # Only within the workspace: a local part is not an identity at
+        # large, or beth@gmail.com would be Beth.
+        ("beth@gmail.com", None),
+        ("someone.else@smamarketing.com", None),
+    ):
+        assert teamwork.person_id_for(address, people) == expected, address
+
+
+def test_assignees_come_from_teamwork_when_it_is_connected(
+    client, client_a, admin_user, monkeypatch
+):
+    """Most of the team does the work and never opens this tool.
+
+    Listing only the accounts that can sign in here left four of the eight
+    people in Teamwork unassignable.
+    """
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="a", token="t")
+    )
+    monkeypatch.setattr(
+        teamwork,
+        "list_people",
+        lambda: [
+            teamwork.Person(id="1", email="haley@smamarketing.net", name="Haley Zimmerman"),
+            teamwork.Person(id="2", email="beth@smamarketing.com", name="Beth Walker"),
+        ],
+    )
+    rows = client.get(
+        "/decisions/assignees", headers=client_header(client_a.id, admin_user.email)
+    ).json()
+    assert [r["email"] for r in rows] == [
+        "beth@smamarketing.com",
+        "haley@smamarketing.net",
+    ]
+    assert all(r["source"] == "teamwork" for r in rows)
+
+
+def test_assignees_fall_back_to_staff_when_teamwork_is_unreachable(
+    client, client_a, admin_user, monkeypatch
+):
+    """An empty dropdown is worse than a short one."""
+
+    def explode(**kwargs):
+        raise teamwork.TeamworkError("down")
+
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="a", token="t")
+    )
+    monkeypatch.setattr(teamwork, "list_people", explode)
+    rows = client.get(
+        "/decisions/assignees", headers=client_header(client_a.id, admin_user.email)
+    ).json()
+    assert admin_user.email in [r["email"] for r in rows]
+    assert all(r["source"] == "organiciq" for r in rows)

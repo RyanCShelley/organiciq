@@ -52,7 +52,8 @@ export async function runMonthlyRecordAction(
 type SlotState = {
   uid: string;
   status: string;
-  assignee_user_id: string | null;
+  assignee_email: string | null;
+  assignee_name: string | null;
   due: string | null;
   skip_reason: string | null;
   sent_at: string | null;
@@ -95,14 +96,19 @@ export async function assignSlotAction(input: {
   slug: string;
   month: string;
   uid: string;
-  assigneeUserId: string | null;
+  assigneeEmail: string | null;
+  assigneeName?: string | null;
   due: string | null;
 }): Promise<SlotResult> {
   return slotPost(
     input.clientId,
     input.slug,
     `/decisions/records/${encodeURIComponent(input.month)}/slots/${encodeURIComponent(input.uid)}/assign`,
-    { assignee_user_id: input.assigneeUserId || null, due: input.due || null },
+    {
+      assignee_email: input.assigneeEmail || null,
+      assignee_name: input.assigneeName || null,
+      due: input.due || null,
+    },
   );
 }
 

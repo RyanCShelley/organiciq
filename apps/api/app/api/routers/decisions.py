@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -398,36 +399,45 @@ def list_assignees(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict]:
-    """Who can be given work on this client.
+    """Who can be given work.
 
-    Admins are included because they can see every client without an
-    assignment; leaving them out would make the list read as "nobody".
+    Teamwork's people where it is connected, because that is who does the
+    work: most of the team never opens this tool, and listing only the
+    accounts that can sign in here left four of eight unassignable. Falls
+    back to OrganicIQ staff so the dropdown is never empty.
     """
     from app.models.user import User, UserClient, UserRole
 
+    if teamwork.configured():
+        try:
+            return [
+                {"email": p.email, "name": p.name, "source": "teamwork"}
+                for p in sorted(teamwork.list_people(), key=lambda p: p.name.lower())
+            ]
+        except teamwork.TeamworkError:
+            logger.warning("Could not read Teamwork people; falling back to staff")
+
     out: list[dict] = []
-    seen: set[UUID] = set()
+    seen: set[str] = set()
     for user in (
         db.query(User)
         .filter(User.role == UserRole.SMA_ADMIN, User.is_active.is_(True))
         .order_by(User.email.asc())
-        .all()
     ):
-        seen.add(user.id)
-        out.append({"user_id": str(user.id), "email": user.email, "name": user.name})
-
-    assigned = (
+        seen.add(user.email.lower())
+        out.append({"email": user.email, "name": user.name or user.email,
+                    "source": "organiciq"})
+    for user in (
         db.query(User)
         .join(UserClient, UserClient.user_id == User.id)
         .filter(UserClient.client_id == client.id, User.is_active.is_(True))
         .order_by(User.email.asc())
-        .all()
-    )
-    for user in assigned:
-        if user.id in seen:
+    ):
+        if user.email.lower() in seen:
             continue
-        seen.add(user.id)
-        out.append({"user_id": str(user.id), "email": user.email, "name": user.name})
+        seen.add(user.email.lower())
+        out.append({"email": user.email, "name": user.name or user.email,
+                    "source": "organiciq"})
     return out
 
 
@@ -440,14 +450,24 @@ def assign_slot(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
+    from app.models.user import User
+
     _, slot = _slot_or_404(db, client, month, uid)
+    email = (payload.assignee_email or "").strip().lower() or None
+    account = (
+        db.query(User).filter(func.lower(User.email) == email).one_or_none()
+        if email
+        else None
+    )
     row = engine_action_service.assign(
         db,
         client,
         slot,
         month,
-        assignee_user_id=payload.assignee_user_id,
+        assignee_email=email,
+        assignee_name=payload.assignee_name or (account.name if account else None),
         due=payload.due,
+        db_user_id=account.id if account else None,
     )
     db.commit()
     return engine_action_service.serialise(row, slot=slot)
@@ -532,19 +552,13 @@ def send_slot(
     # addresses are the same in both systems. No match means the task is
     # created unassigned rather than not created.
     assignee_teamwork_id: str | None = None
-    if existing is not None and existing.assignee_user_id:
-        from app.models.user import User
-
-        assignee = db.get(User, existing.assignee_user_id)
-        if assignee is not None:
-            try:
-                assignee_teamwork_id = teamwork.person_id_for(
-                    assignee.email, teamwork.list_people()
-                )
-            except teamwork.TeamworkError:
-                logger.warning(
-                    "Could not read Teamwork people; sending %s unassigned", uid
-                )
+    if existing is not None and existing.assignee_email:
+        try:
+            assignee_teamwork_id = teamwork.person_id_for(
+                existing.assignee_email, teamwork.list_people()
+            )
+        except teamwork.TeamworkError:
+            logger.warning("Could not read Teamwork people; sending %s unassigned", uid)
 
     try:
         created = teamwork.create_task(

@@ -384,9 +384,40 @@ def list_people(
     return found
 
 
+def _workspace_domains() -> set[str]:
+    """The domains that are the same company.
+
+    SMA is mid-move from .net to .com and not everyone has updated Teamwork,
+    so beth@smamarketing.com and the rest on .net are one team. Its own
+    setting rather than the login's list of hosted domains: that one answers
+    who may sign in, and narrowing it should not split a person in two.
+    """
+    from app.core.settings import get_settings
+
+    raw = get_settings().identity_domains or ""
+    return {
+        part.strip().lower().lstrip("@")
+        for part in raw.split(",")
+        if part.strip()
+    }
+
+
+def email_key(email: str | None) -> str:
+    """An address reduced to the person.
+
+    Within the workspace domains the local part is the identity, so an
+    account on either side of the .net/.com move is the same person.
+    """
+    text = (email or "").strip().lower()
+    if not text or "@" not in text:
+        return text
+    local, _, domain = text.partition("@")
+    return local if domain in _workspace_domains() else text
+
+
 def person_id_for(email: str | None, people: list[Person]) -> str | None:
-    """The Teamwork id for an OrganicIQ address, where there is one."""
-    target = (email or "").strip().lower()
+    """The Teamwork id for an address, where there is one."""
+    target = email_key(email)
     if not target:
         return None
-    return next((p.id for p in people if p.email == target), None)
+    return next((p.id for p in people if email_key(p.email) == target), None)

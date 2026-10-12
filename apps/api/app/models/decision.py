@@ -282,6 +282,13 @@ class EngineAction(Base):
     )
     month: Mapped[str] = mapped_column(String(7), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="action")
+    #: Who holds this slot. Email rather than a user id, because most of the
+    #: team does the work and never opens this tool — and because email is
+    #: already how a sent task finds its owner in Teamwork.
+    assignee_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    assignee_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: Kept for the people who are both, and for rows written before the
+    #: slot stopped requiring an account here.
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

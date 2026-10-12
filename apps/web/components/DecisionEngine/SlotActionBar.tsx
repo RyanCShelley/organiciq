@@ -15,9 +15,9 @@ const BUTTON =
 const FIELD =
   "min-h-[34px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-[12.5px] text-[var(--text-primary)]";
 
-function who(assignees: Assignee[], id: string | null): string {
-  const found = assignees.find((a) => a.user_id === id);
-  return found ? found.name || found.email : "somebody";
+function who(assignees: Assignee[], email: string | null): string {
+  const found = assignees.find((a) => a.email === email);
+  return found ? found.name || found.email : email || "somebody";
 }
 
 /**
@@ -50,7 +50,7 @@ export function SlotActionBar({
   const [askingSkip, setAskingSkip] = useState(false);
   const [reason, setReason] = useState("");
 
-  const [assignee, setAssignee] = useState(state?.assignee_user_id ?? "");
+  const [assignee, setAssignee] = useState(state?.assignee_email ?? "");
   const [due, setDue] = useState(state?.due ?? "");
   const shippedOn = state?.shipped_on ?? null;
 
@@ -72,7 +72,9 @@ export function SlotActionBar({
         slug,
         month,
         uid: action.action_uid,
-        assigneeUserId: nextAssignee || null,
+        assigneeEmail: nextAssignee || null,
+        assigneeName:
+          assignees.find((a) => a.email === nextAssignee)?.name ?? null,
         due: nextDue || null,
       }),
     );
@@ -157,10 +159,15 @@ export function SlotActionBar({
         >
           <option value="">Unassigned</option>
           {assignees.map((person) => (
-            <option key={person.user_id} value={person.user_id}>
+            <option key={person.email} value={person.email}>
               {person.name || person.email}
             </option>
           ))}
+          {/* Somebody assigned before they appeared in the list — a left
+              colleague, or a Teamwork account that has moved domain. */}
+          {assignee && !assignees.some((a) => a.email === assignee) ? (
+            <option value={assignee}>{assignee}</option>
+          ) : null}
         </select>
 
         <label className="sr-only" htmlFor={`due-${action.action_uid}`}>

@@ -77,7 +77,7 @@ def test_uid_outside_the_record_is_refused(client, client_a, admin_user, saved_r
     response = client.post(
         f"/decisions/records/{MONTH}/slots/not-a-slot/assign",
         headers=client_header(client_a.id, admin_user.email),
-        json={"assignee_user_id": None, "due": None},
+        json={"assignee_email": None, "due": None},
     )
     assert response.status_code == 404
     assert "not a slot" in response.json()["detail"]
@@ -92,18 +92,18 @@ def test_assign_then_clear_returns_the_slot_to_planned(
     assigned = client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/assign",
         headers=headers,
-        json={"assignee_user_id": str(admin_user.id), "due": "2026-10-20"},
+        json={"assignee_email": admin_user.email, "due": "2026-10-20"},
     )
     assert assigned.status_code == 200
     body = assigned.json()
     assert body["status"] == "assigned"
-    assert body["assignee_user_id"] == str(admin_user.id)
+    assert body["assignee_email"] == admin_user.email.lower()
     assert body["due"] == "2026-10-20"
 
     cleared = client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/assign",
         headers=headers,
-        json={"assignee_user_id": None, "due": None},
+        json={"assignee_email": None, "due": None},
     )
     assert cleared.status_code == 200
     # Not "assigned to nobody", which reads as handled and is not.
@@ -149,7 +149,7 @@ def test_a_rerun_that_changes_the_slot_marks_the_assignment_stale(
     client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/assign",
         headers=headers,
-        json={"assignee_user_id": str(admin_user.id), "due": None},
+        json={"assignee_email": admin_user.email, "due": None},
     )
 
     fresh = client.get(f"/decisions/records/{MONTH}/workflow", headers=headers)
@@ -165,7 +165,7 @@ def test_a_rerun_that_changes_the_slot_marks_the_assignment_stale(
     after = client.get(f"/decisions/records/{MONTH}/workflow", headers=headers)
     row = after.json()["actions"][0]
     assert row["stale"] is True
-    assert row["assignee_user_id"] == str(admin_user.id)
+    assert row["assignee_email"] == admin_user.email.lower()
 
 
 def test_send_without_teamwork_configured_says_so(

@@ -106,18 +106,29 @@ def assign(
     slot: RecordSlot,
     month: str,
     *,
-    assignee_user_id: uuid.UUID | None,
+    assignee_email: str | None,
+    assignee_name: str | None = None,
     due: date | None,
+    db_user_id: uuid.UUID | None = None,
 ) -> EngineAction:
-    """Hand the slot to somebody.
+    """Hand the slot to somebody, by email.
+
+    Email rather than a user id, because most of the team does the work and
+    never opens this tool — of the eight people in Teamwork, four had an
+    account here and the rest could not be assigned anything. `db_user_id`
+    is filled where the person also has one, so anything keyed on OrganicIQ
+    users still resolves.
 
     Clearing the assignee returns the slot to `planned` rather than leaving it
     `assigned` with nobody on it — a state that reads as handled and is not.
     """
+    email = (assignee_email or "").strip().lower() or None
     row = _row_for(db, client, month, slot)
-    row.assignee_user_id = assignee_user_id
+    row.assignee_email = email
+    row.assignee_name = (assignee_name or "").strip() or None
+    row.assignee_user_id = db_user_id
     row.due = due
-    row.status = "assigned" if assignee_user_id else "planned"
+    row.status = "assigned" if email else "planned"
     row.skip_reason = None
     # Provenance: what this slot held at the moment somebody took it on.
     row.action_id = slot.action_id
@@ -141,6 +152,8 @@ def skip(
     row = _row_for(db, client, month, slot)
     row.status = "skipped"
     row.skip_reason = reason
+    row.assignee_email = None
+    row.assignee_name = None
     row.assignee_user_id = None
     row.due = None
     row.action_id = slot.action_id
@@ -223,7 +236,8 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
     return {
         "uid": row.uid,
         "status": row.status,
-        "assignee_user_id": str(row.assignee_user_id) if row.assignee_user_id else None,
+        "assignee_email": row.assignee_email,
+        "assignee_name": row.assignee_name,
         "due": row.due.isoformat() if row.due else None,
         "skip_reason": row.skip_reason,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,

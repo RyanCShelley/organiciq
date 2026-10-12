@@ -175,10 +175,11 @@ export function monthsHeld(heldSince: string, month: string): number {
 }
 
 /** Who can be given work on this client. */
+/** Somebody who can be given work — from Teamwork where it is connected. */
 export type Assignee = {
-  user_id: string;
   email: string;
   name: string | null;
+  source?: "teamwork" | "organiciq";
 };
 
 /**
@@ -190,7 +191,8 @@ export type Assignee = {
 export type SlotState = {
   uid: string;
   status: "planned" | "assigned" | "done" | "skipped";
-  assignee_user_id: string | null;
+  assignee_email: string | null;
+  assignee_name: string | null;
   due: string | null;
   skip_reason: string | null;
   sent_at: string | null;
