@@ -12,6 +12,8 @@ which page it meant.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from datetime import date
 from statistics import median
@@ -58,22 +60,27 @@ def _is_question(text: str) -> bool:
     return first in _QUESTION_OPENERS
 
 
-def _answered_questions(sections: list[dict]) -> tuple[str, ...]:
-    """Questions the page asks and answers.
+#: A heading that announces an FAQ section. Narrow on purpose: a page that
+#: says this has one, and a page that does not is a guess.
+_FAQ_HEADING = re.compile(
+    r"^\s*(?:faqs?|frequently\s+asked(?:\s+questions?)?|common\s+questions?"
+    r"|questions?\s+(?:and|&)\s+answers?)\b",
+    re.IGNORECASE,
+)
 
-    The heading has to be a question and the passage under it has to say
-    something. Asking alone is a sales line — "Is your brand mentioned in AI
-    search?" — and counting those made V-7 fire on 111 of SMA's 142 pages.
+
+def _has_faq_section(sections: list[dict]) -> bool:
+    """Whether a heading says the page has an FAQ.
+
+    Read rather than inferred. Two passes at inferring it from
+    question-shaped headings were wrong in both directions on SMA's
+    /capabilities/local-seo: they caught three marketing headings and missed
+    the actual "Frequently asked questions" section, whose Q&A pairs sit in
+    an accordion and so are not headings at all.
     """
-    from app.decisions.catalog import MIN_ANSWER_CHARS
-
-    out: list[str] = []
-    for section in sections:
-        heading = str(section.get("heading") or "").strip()
-        answer = str(section.get("first_paragraph") or "").strip()
-        if heading and _is_question(heading) and len(answer) >= MIN_ANSWER_CHARS:
-            out.append(heading)
-    return tuple(out)
+    return any(
+        _FAQ_HEADING.match(str(section.get("heading") or "")) for section in sections
+    )
 
 
 def _declares_faq(raw: object) -> bool:
@@ -298,7 +305,7 @@ def load_target_inputs(
                 description=getattr(snapshot, "description", None),
                 headings=headings,
                 sections=sections,
-                answered_questions=_answered_questions(raw_sections),
+                has_faq_section=_has_faq_section(raw_sections),
                 has_faq_schema=url in faq_schema_urls,
                 faq_questions=faqs,
                 entity_properties=frozenset(schema_by_url.get(url, set())),

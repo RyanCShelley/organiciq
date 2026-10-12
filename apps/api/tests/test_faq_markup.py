@@ -13,11 +13,7 @@ import pytest
 
 from app.decisions.catalog import PageFacts, prescribe, v7_mark_up_the_faq
 from app.decisions.targets import Candidate, ScoredCandidate
-from app.services.target_signals import (
-    _answered_questions,
-    _declares_faq,
-    _is_question,
-)
+from app.services.target_signals import _declares_faq, _has_faq_section, _is_question
 
 QUESTIONS = ("How is carbon fibre made", "Why does it cost more?", "Is it recyclable?")
 
@@ -37,7 +33,7 @@ def _target() -> ScoredCandidate:
 
 
 def _page(**kw) -> PageFacts:
-    base = dict(url="/a", answered_questions=QUESTIONS, has_faq_schema=False)
+    base = dict(url="/a", has_faq_section=True, has_faq_schema=False)
     base.update(kw)
     return PageFacts(**base)
 
@@ -46,8 +42,8 @@ def test_it_fires_on_questions_the_page_answers_without_markup():
     found = v7_mark_up_the_faq(_target(), _page())
     assert found is not None
     assert found.action_id == "V-7"
-    assert "3 questions" in found.title
-    assert "How is carbon fibre made" in found.why
+    assert "FAQ" in found.title
+    assert "frequently asked questions" in found.why
     # Markup, not writing: the answers already exist.
     assert found.effort_min == 15
     assert found.metric_key == "ai_presence"
@@ -57,11 +53,8 @@ def test_it_stays_quiet_where_the_markup_is_already_there():
     assert v7_mark_up_the_faq(_target(), _page(has_faq_schema=True)) is None
 
 
-def test_one_question_shaped_heading_is_not_an_faq():
-    # A page with a single "How we work" heading is not an FAQ, and marking
-    # it up as one would be declaring something that is not there.
-    assert v7_mark_up_the_faq(_target(), _page(answered_questions=("How we work?",))) is None
-    assert v7_mark_up_the_faq(_target(), _page(answered_questions=())) is None
+def test_a_page_with_no_faq_section_is_left_alone():
+    assert v7_mark_up_the_faq(_target(), _page(has_faq_section=False)) is None
 
 
 def test_the_done_when_forbids_inventing_answers():
@@ -120,38 +113,44 @@ def test_a_question_heading_is_what_a_visitor_reads_as_one(heading, is_question)
     assert _is_question(heading) is is_question
 
 
-# ── Asking is not answering ─────────────────────────────────────────────────
+# ── Read, not inferred ──────────────────────────────────────────────────────
 
 
-def test_a_question_with_no_answer_under_it_does_not_count():
-    """On its first run V-7 fired on 111 of SMA's 142 mapped pages.
+def test_an_faq_is_a_heading_that_says_so():
+    """SMA's /capabilities/local-seo, verbatim.
 
-    "Is your brand mentioned in AI search?" is a sales line, not an FAQ
-    entry, and marking it up declares an answer that is not there.
+    Two passes at inferring an FAQ from question-shaped headings were wrong
+    in both directions here: they caught three marketing headings and missed
+    the actual "Frequently asked questions" section, whose Q&A pairs sit in
+    an accordion and so are not headings at all.
     """
-    found = _answered_questions(
-        [
-            {"heading": "Is your brand mentioned in AI search?", "first_paragraph": "Find out."},
-            {
-                "heading": "How is carbon fibre made",
-                "first_paragraph": (
-                    "It is made by heating precursor fibres in an inert atmosphere "
-                    "until only carbon remains, then weaving them into cloth."
-                ),
-            },
-            {
-                "heading": "Our services",
-                "first_paragraph": (
-                    "A long paragraph about the many services we offer to clients "
-                    "across the region, which is not a question at all."
-                ),
-            },
-        ]
-    )
-    # Only the one that is both asked and answered.
-    assert found == ("How is carbon fibre made",)
+    real_page = [
+        {"heading": "Local SEO built to win the job"},
+        {"heading": "Struggling with these local SEO challenges?"},
+        {"heading": "Why choose SMA as your local SEO agency"},
+        {"heading": "What our clients say about us"},
+        {"heading": "Frequently asked questions"},
+    ]
+    assert _has_faq_section(real_page) is True
+    # Without the last heading there is no FAQ on this page, whatever the
+    # question marks suggest.
+    assert _has_faq_section(real_page[:-1]) is False
 
 
-def test_a_question_with_no_paragraph_at_all_does_not_count():
-    assert _answered_questions([{"heading": "Why us?", "first_paragraph": ""}]) == ()
-    assert _answered_questions([{"heading": "Why us?"}]) == ()
+@pytest.mark.parametrize(
+    "heading,found",
+    [
+        ("Frequently asked questions", True),
+        ("FAQ", True),
+        ("FAQs", True),
+        ("Common questions", True),
+        ("Questions and answers", True),
+        # Narrow on purpose: a page that says it has one does, and a page
+        # that does not is a guess.
+        ("Frequently", False),
+        ("Ask us anything", False),
+        ("Our services", False),
+    ],
+)
+def test_the_heading_has_to_announce_an_faq(heading, found):
+    assert _has_faq_section([{"heading": heading}]) is found

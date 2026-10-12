@@ -53,11 +53,16 @@ class PageFacts:
     faq_questions: tuple[str, ...] = ()
     #: Entity markup present on the page: `about`, `mentions`, `sameAs`.
     entity_properties: frozenset[str] = frozenset()
-    #: Questions the page asks *and answers*: a question-shaped heading with
-    #: a paragraph under it. Asking alone is not enough — "Is your brand
-    #: mentioned in AI search?" is a sales line, and on the first run V-7
-    #: fired on 111 of SMA's 142 pages because most of them talk like that.
-    answered_questions: tuple[str, ...] = ()
+    #: The page has a section that announces itself as an FAQ.
+    #:
+    #: Read off a heading that says so, not inferred from question-shaped
+    #: headings. Two passes at inferring it were wrong in both directions on
+    #: SMA's /capabilities/local-seo: it caught "Struggling with these local
+    #: SEO challenges?", "Why choose SMA as your local SEO agency" and "What
+    #: our clients say about us" — all marketing — and missed the actual
+    #: "Frequently asked questions" section, whose Q&A pairs are an
+    #: accordion and so are not headings at all.
+    has_faq_section: bool = False
     #: The page carries an FAQPage or QAPage block.
     has_faq_schema: bool = False
     #: Headings with their format flags, for V-5. Empty where the crawl
@@ -281,12 +286,7 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
     )
 
 
-#: Enough answered questions that the page is an FAQ rather than a page with
-#: one question-shaped heading in it.
-MIN_FAQ_QUESTIONS = 2
 
-#: A paragraph shorter than this is a caption or a stray line, not an answer.
-MIN_ANSWER_CHARS = 80
 
 
 def v7_mark_up_the_faq(
@@ -298,33 +298,30 @@ def v7_mark_up_the_faq(
     headings are there, and an engine assembling a response has to infer
     from prose what FAQPage would have told it outright. No new content.
     """
-    if page.has_faq_schema or len(page.answered_questions) < MIN_FAQ_QUESTIONS:
+    if page.has_faq_schema or not page.has_faq_section:
         return None
-    count = len(page.answered_questions)
-    first = page.answered_questions[0]
     return Prescription(
         action_id="V-7",
-        title=f"Mark up the {count} questions this page already answers",
+        title="Mark up the FAQ this page already has",
         branch=Branch.VISIBILITY,
         target_url=page.url,
         term=target.candidate.keyword,
         score=target.score,
         effort_min=15,
         why=(
-            f"The page asks {count} questions and answers them in the text "
-            f"below — “{first}” among them — and carries no FAQPage markup. "
-            "The answers are already written; nothing tells an engine "
-            "assembling a response that they are answers."
+            "The page carries a section headed as frequently asked questions "
+            "and no FAQPage markup. The answers are already written; nothing "
+            "tells an engine assembling a response that they are answers."
         ),
         done_when=(
-            "FAQPage markup lists each visible question with the answer the "
-            "page already gives, word for word, and nothing that is not on "
-            "the page."
+            "FAQPage markup lists every question in that section with the "
+            "answer the page already gives, word for word, and nothing that "
+            "is not on the page."
         ),
         metric="Brand mention or citation",
         metric_key="ai_presence",
         evidence=(
-            f"facts_crawl_page_snapshots: {count} answered questions",
+            "facts_crawl_page_snapshots: a heading announcing an FAQ",
             "facts_crawl_page_schema: no FAQPage block",
         ),
         check_after_days=30,
