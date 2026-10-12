@@ -163,7 +163,10 @@ export function ConstraintCard({
   const label = CONSTRAINT_LABEL[record.constraint] ?? record.constraint;
   const held = monthsHeld(record.held_since, record.month);
   const overridden = record.override === "manual";
-  const checks = record.confidence_reasons ?? [];
+  // Counted off the card it points at, not off `confidence_reasons`: the
+  // two lists overlap but are not the same length, and a chip saying "2
+  // gaps below" above a card listing three is worse than no chip.
+  const gaps = record.data_gaps?.length ?? 0;
 
   return (
     <section
@@ -232,30 +235,16 @@ export function ConstraintCard({
               }`}
             >
               {record.confidence[0].toUpperCase() + record.confidence.slice(1)}
-              {checks.length
-                ? ` · check ${checks.length} thing${checks.length === 1 ? "" : "s"}`
-                : ""}
+              {gaps ? ` · ${gaps} gap${gaps === 1 ? "" : "s"} below` : ""}
             </span>
           </dd>
         </dl>
       </div>
 
-      {/* Low confidence with no list is an accusation without an address. */}
-      {checks.length > 0 ? (
-        <div
-          role="note"
-          className="mt-5 rounded-[10px] border border-[#F3D9B5] bg-[#FFF8EE] px-4 py-3.5"
-        >
-          <p className="text-[13px] font-semibold text-[#6B3A06]">
-            Check before you assign
-          </p>
-          <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            {checks.map((check) => (
-              <li key={check.code + check.text}>{check.text}</li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
+      {/* The list that stood here was "Data that limited this run", printed
+          a second time: both are built from the same blocked inputs, so one
+          was always a strict subset of the other. The chip above still says
+          how many there are, and that card says what they are. */}
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         {record.branches.map((branch) => (
