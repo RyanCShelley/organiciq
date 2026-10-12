@@ -273,3 +273,33 @@ def test_an_unjudged_action_still_appears_as_waiting(db: Session, client_a: Clie
     rows = previous_results(db, client_a, "2026-10", previous=SEPT)
     assert rows[0]["result"] == "waiting"
     assert rows[0]["before"] is None
+
+
+def test_a_record_written_before_metric_key_existed_is_still_measurable(
+    db: Session, client_a: Client
+):
+    """September's record has no `metric_key` on its actions.
+
+    Falling back to "decision" made every one of them unmeasurable, which
+    defeats the whole point of being able to measure backwards. The action's
+    own id says what it is judged on.
+    """
+    from app.services.results import metric_key_for
+
+    assert metric_key_for({"id": "V-1"}) == "term_position"
+    assert metric_key_for({"id": "T-3"}) == "engagement_rate"
+    assert metric_key_for({"id": "L-1"}) == "page_lead_rate"
+    assert metric_key_for({"id": "V-6"}) == "decision"
+    # A stored key always wins, so a check months later uses the key the
+    # action was actually prescribed with.
+    assert metric_key_for({"id": "V-1", "metric_key": "page_clicks"}) == "page_clicks"
+
+    record = _record(db, client_a)
+    for action in record.record["actions"]:
+        del action["metric_key"]
+    record.record = dict(record.record)
+    db.commit()
+
+    _rank(db, client_a, PRESCRIBED, 18.0)
+    assert capture_before(db, client_a, record) == 1
+    assert float(db.query(EngineAction).one().before_value) == 18.0

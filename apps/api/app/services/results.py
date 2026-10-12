@@ -55,6 +55,33 @@ LOWER_IS_BETTER = frozenset({"term_position"})
 #: Metrics that settle an argument rather than move a number.
 NOT_MEASURED = frozenset({"decision"})
 
+#: What each action is judged on, for records written before `metric_key` was
+#: stored on them. Those records are the whole reason the loop had to be able
+#: to measure backwards, and without this every one of their actions falls
+#: back to "decision" and measures nothing.
+METRIC_BY_ACTION = {
+    "V-1": "term_position",
+    "V-2": "ai_presence",
+    "V-3": "term_position",
+    "V-4": "term_position",
+    "V-5": "term_position",
+    "V-6": "decision",
+    "T-1": "page_clicks",
+    "T-2": "page_clicks",
+    "T-3": "engagement_rate",
+    "L-1": "page_lead_rate",
+    "L-2": "page_lead_rate",
+    "L-3": "page_lead_rate",
+}
+
+
+def metric_key_for(action: dict) -> str:
+    """The key the action is judged on, stored or inferred from its id."""
+    stored = (action.get("metric_key") or "").strip()
+    if stored:
+        return stored
+    return METRIC_BY_ACTION.get((action.get("id") or "").strip().upper(), "decision")
+
 
 @dataclass(frozen=True)
 class Measurement:
@@ -284,7 +311,7 @@ def capture_before(
         reading = measure(
             db,
             client,
-            action.get("metric_key") or "decision",
+            metric_key_for(action),
             url=action.get("target_url"),
             term=action.get("term"),
             as_of=as_of,
@@ -325,7 +352,7 @@ def check_due(
             )
             if row is None or row.before_value is None or row.after_value is not None:
                 continue
-            metric_key = action.get("metric_key") or "decision"
+            metric_key = metric_key_for(action)
             reading = measure(
                 db,
                 client,
