@@ -382,3 +382,77 @@ def test_a_client_without_search_console_data_is_not_pulled_for(
     )
     db.commit()
     assert _worth_pulling_for(db, client_a) is True
+
+
+def test_the_pull_covers_the_key_t2_reads(db: Session, client_a: Client):
+    """Two readers, two keys, and only one was being served.
+
+    T-2 looks the SERP up by the query a page actually draws, from Search
+    Console; V-5 looks it up by the declared target term. Pulling only
+    declared targets left 2 of SMA's 334 pages with a SERP for the query
+    they draw, so T-2 could not fire however many credits were spent.
+    """
+    from datetime import date as _date, timedelta
+
+    from app.models.decision import KeywordTarget
+    from app.models.gsc import FactGscPage, FactGscQueryPage
+
+    today = _date.today()
+    db.add(KeywordTarget(client_id=client_a.id, keyword="declared term", target_url="/a"))
+    for day in range(3):
+        when = today - timedelta(days=day)
+        # Averaging position 4: close enough to win a feature.
+        db.add(
+            FactGscPage(
+                client_id=client_a.id,
+                date=when,
+                raw_url="https://x.test/a",
+                normalized_url="https://x.test/a",
+                impressions=500,
+                clicks=20,
+                average_position=4,
+            )
+        )
+        db.add(
+            FactGscQueryPage(
+                client_id=client_a.id,
+                date=when,
+                query="what the page actually draws",
+                raw_url="https://x.test/a",
+                normalized_url="https://x.test/a",
+                impressions=500,
+                clicks=20,
+                average_position=4,
+            )
+        )
+        # Page two: a feature is drawn from page one, so this is not worth
+        # a credit.
+        db.add(
+            FactGscPage(
+                client_id=client_a.id,
+                date=when,
+                raw_url="https://x.test/deep",
+                normalized_url="https://x.test/deep",
+                impressions=500,
+                clicks=1,
+                average_position=42,
+            )
+        )
+        db.add(
+            FactGscQueryPage(
+                client_id=client_a.id,
+                date=when,
+                query="a term we are nowhere for",
+                raw_url="https://x.test/deep",
+                normalized_url="https://x.test/deep",
+                impressions=500,
+                clicks=1,
+                average_position=42,
+            )
+        )
+    db.commit()
+
+    terms = terms_to_pull(db, client_a, limit=10)
+    assert "what the page actually draws" in terms
+    assert "declared term" in terms
+    assert "a term we are nowhere for" not in terms

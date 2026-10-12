@@ -47,14 +47,92 @@ class SerpRow:
         return any(target in h for h in self.holders.get(feature, ()))
 
 
+def _page_one_queries(db: Session, client: Client, *, limit: int) -> list[str]:
+    """The query each page-one page actually draws, newest 28 days.
+
+    This is the key T-2 reads. Pulling only declared targets left the two
+    sets barely overlapping — 2 of SMA's 334 pages had a SERP for the query
+    they draw — so T-2 could not fire however many credits were spent.
+    """
+    from datetime import timedelta
+
+    from app.models.gsc import FactGscPage, FactGscQueryPage
+
+    end = date.today()
+    start = end - timedelta(days=27)
+
+    # Pages averaging page one: a feature is drawn from those results, so a
+    # SERP for anything deeper cannot produce an action.
+    on_page_one = {
+        url
+        for url, impressions, weighted in db.query(
+            FactGscPage.normalized_url,
+            func.coalesce(func.sum(FactGscPage.impressions), 0),
+            func.coalesce(
+                func.sum(FactGscPage.average_position * FactGscPage.impressions), 0
+            ),
+        )
+        .filter(
+            FactGscPage.client_id == client.id,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .group_by(FactGscPage.normalized_url)
+        .all()
+        if impressions and float(weighted) / float(impressions) <= 10.0
+    }
+    if not on_page_one:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for url, query, _ in (
+        db.query(
+            FactGscQueryPage.normalized_url,
+            FactGscQueryPage.query,
+            func.coalesce(func.sum(FactGscQueryPage.impressions), 0).label("imp"),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.normalized_url.in_(on_page_one),
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.normalized_url, FactGscQueryPage.query)
+        .order_by(func.sum(FactGscQueryPage.impressions).desc())
+        .all()
+    ):
+        term = (query or "").strip()
+        key = term.lower()
+        if not term or key in seen:
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def terms_to_pull(db: Session, client: Client, *, limit: int = DEFAULT_LIMIT) -> list[str]:
     """The terms worth spending a credit on.
 
-    Declared targets first — those are the ones somebody said matter — then
-    tracked terms by volume. Capped, because this is money.
+    Two readers want different keys and both have to be served. T-2 looks up
+    the SERP by the query a page actually draws, from Search Console; V-5
+    looks it up by the declared target term. Pulling only the second left
+    T-2 unable to fire at all.
+
+    Page-one queries come first: those are measured demand on pages close
+    enough to win a feature. Declared targets follow, then tracked terms by
+    volume. Capped, because this is money.
     """
     seen: set[str] = set()
     out: list[str] = []
+
+    for term in _page_one_queries(db, client, limit=max(1, limit // 2)):
+        key = term.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(term)
 
     for row in (
         db.query(KeywordTarget)
