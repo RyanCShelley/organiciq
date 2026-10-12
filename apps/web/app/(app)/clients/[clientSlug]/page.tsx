@@ -5,6 +5,10 @@ import { ClientSettingsForm } from "@/components/ClientSettingsForm";
 import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { ClientTeamPanel } from "@/components/ClientTeamPanel";
 import {
+  ExcludedPagesPanel,
+  type ExcludedPage,
+} from "@/components/ExcludedPagesPanel";
+import {
   SetupChecklist,
   type SetupState,
 } from "@/components/SetupChecklist";
@@ -41,6 +45,7 @@ export default async function ClientSettingsPage({
   let canManageTeam = true;
   let loadError: string | null = null;
   let setup: SetupState | null = null;
+  let excluded: ExcludedPage[] = [];
 
   try {
     const [tierRows, healthRows, conversionRows, freshClient] = await Promise.all([
@@ -55,6 +60,12 @@ export default async function ClientSettingsPage({
     Object.assign(client, freshClient);
   } catch (e) {
     loadError = e instanceof Error ? e.message : "Failed to load client settings";
+  }
+
+  try {
+    excluded = await apiFetch<ExcludedPage[]>("/decisions/excluded-pages", { clientId });
+  } catch {
+    excluded = [];
   }
 
   try {
@@ -107,6 +118,16 @@ export default async function ClientSettingsPage({
               tiers={tiers}
               hasLeadConversions={hasLeadConversions}
             />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Pages the engine leaves alone"
+            description="Sections you are not working on. The engine will not prescribe growth actions for these, and the reason stays on the record so a decision taken in March is legible in September."
+          />
+          <div className="workspace-panel">
+            <ExcludedPagesPanel clientId={clientId} initial={excluded} />
           </div>
         </section>
 

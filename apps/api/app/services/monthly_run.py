@@ -184,11 +184,36 @@ def _held_since(db: Session, client: Client, month: str, constraint: str) -> str
     return month
 
 
-def load_exclusions(db: Session, client: Client) -> list[Exclusion]:
-    return [
+def load_exclusions(
+    db: Session, client: Client, *, today: date | None = None
+) -> list[Exclusion]:
+    """Pages this run must not prescribe for.
+
+    Two sources. `excluded_pages` is a standing decision — "we are not
+    working on careers" — and `refresh_queue` is this month only: a page
+    already booked for a rewrite is paid for out of the content allowance,
+    so spending a growth slot on it charges the client twice for one job.
+    The old lever engine honoured the second and the new one did not.
+    """
+    from app.models.config import RefreshQueueEntry
+
+    today = today or date.today()
+    out = [
         Exclusion(url_pattern=row.url_pattern, reason=row.reason)
         for row in db.query(ExcludedPage).filter(ExcludedPage.client_id == client.id)
     ]
+    out.extend(
+        Exclusion(
+            url_pattern=row.normalized_url,
+            reason="already booked for a content rewrite this month",
+        )
+        for row in db.query(RefreshQueueEntry).filter(
+            RefreshQueueEntry.client_id == client.id,
+            RefreshQueueEntry.month == today.replace(day=1),
+        )
+        if row.normalized_url
+    )
+    return out
 
 
 def load_override(db: Session, client: Client, month: str) -> ConstraintOverride | None:
@@ -268,7 +293,7 @@ def build_record(
     ]
     confidence, confidence_reasons = _confidence(triage, blocked_inputs=blocked_inputs)
 
-    exclusions = load_exclusions(db, client)
+    exclusions = load_exclusions(db, client, today=today)
     allowances = resolve_plan_allowances(client, getattr(client, "tier", None))
     slots = 0 if triage.constraint == WITHHELD else allowances.growth_action_allowance
 

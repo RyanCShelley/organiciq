@@ -111,6 +111,7 @@ export type Client = {
   timezone: string;
   monthly_lead_goal: number | null;
   account_sheet_url?: string | null;
+  teamwork_tasklist_id?: string | null;
   baseline_as_of?: string | null;
   baseline_period_start?: string | null;
   baseline_period_end?: string | null;

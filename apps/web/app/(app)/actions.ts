@@ -117,6 +117,8 @@ export async function updateClientSettingsAction(formData: FormData) {
     timezone: String(formData.get("timezone") || "").trim() || "America/New_York",
     monthly_lead_goal: monthlyRaw === "" ? null : Number(monthlyRaw),
     account_sheet_url: sheetRaw || null,
+    teamwork_tasklist_id:
+      String(formData.get("teamwork_tasklist_id") || "").trim() || null,
     baseline_as_of: baselineAsOf,
     baseline_monthly_sessions: baselineSessions,
     baseline_monthly_leads: baselineLeads,

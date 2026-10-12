@@ -16,10 +16,11 @@ from app.services import page_stage
 from app.services import portfolio as portfolio_service
 from app.services.triage_signals import NEXT_STEP_COVERAGE_FLOOR
 from app.models.client import Client
-from app.models.decision import DecisionStatus, EngineAction
+from app.models.decision import DecisionStatus, EngineAction, ExcludedPage
 from app.schemas import (
     EngineActionAssign,
     EngineActionShipped,
+    ExcludedPageIn,
     EngineActionSkip,
     MonthlyRunRequest,
     PageStageIn,
@@ -657,3 +658,68 @@ def confirm_page_stages(
         user_id=user.id,
     )
     return {"confirmed": written}
+
+
+# ── Pages the engine must leave alone ───────────────────────────────────────
+#
+# The table has existed since the engine did and nothing could write to it,
+# so "we are not working on careers" was a thing somebody could say and not
+# record. Boys Electrical's only traffic action was on /careers.
+
+
+@router.get("/excluded-pages")
+def list_excluded_pages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    return [
+        {"url_pattern": row.url_pattern, "reason": row.reason}
+        for row in db.query(ExcludedPage)
+        .filter(ExcludedPage.client_id == client.id)
+        .order_by(ExcludedPage.url_pattern)
+    ]
+
+
+@router.put("/excluded-pages")
+def replace_excluded_pages(
+    payload: list[ExcludedPageIn],
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """Replace the whole list, because that is how the panel edits it.
+
+    A reason is required. An excluded page with no reason is a rule nobody
+    can review later, and next year nobody will remember why the engine
+    stopped looking at a section of the site.
+    """
+    seen: set[str] = set()
+    cleaned: list[tuple[str, str]] = []
+    for entry in payload:
+        pattern = entry.url_pattern.strip()
+        reason = entry.reason.strip()
+        if not pattern:
+            continue
+        if not reason:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{pattern} needs a reason.",
+            )
+        if pattern in seen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{pattern} is listed twice",
+            )
+        seen.add(pattern)
+        cleaned.append((pattern, reason))
+
+    db.query(ExcludedPage).filter(ExcludedPage.client_id == client.id).delete(
+        synchronize_session=False
+    )
+    for pattern, reason in cleaned:
+        db.add(
+            ExcludedPage(client_id=client.id, url_pattern=pattern, reason=reason)
+        )
+    db.commit()
+    return list_excluded_pages(client=client, _=_, db=db)

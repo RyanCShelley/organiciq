@@ -65,6 +65,10 @@ class ClientCreate(BaseModel):
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
     account_sheet_url: str | None = None
+    #: Where this client's sent growth actions land in Teamwork. The site and
+    #: token are install-wide; this is the only per-client part, and without
+    #: it the slot cards offer Copy instead of Send.
+    teamwork_tasklist_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -145,6 +149,7 @@ class ClientOut(ORMModel):
     timezone: str
     monthly_lead_goal: int | None
     account_sheet_url: str | None
+    teamwork_tasklist_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -430,6 +435,17 @@ class ClientTeamMemberOut(BaseModel):
     is_active: bool
     # True when access comes from the SMA_ADMIN role rather than an assignment.
     via_admin: bool = False
+
+
+class ExcludedPageIn(BaseModel):
+    """A page or section the engine must not prescribe for.
+
+    `/careers*` takes the careers index and everything under it, which is
+    what somebody means by "we are not working on careers".
+    """
+
+    url_pattern: str
+    reason: str
 
 
 class PageStageIn(BaseModel):

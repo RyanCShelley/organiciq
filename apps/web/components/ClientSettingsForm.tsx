@@ -187,6 +187,24 @@ export function ClientSettingsForm({
         ) : null}
       </div>
 
+      {/* The only per-client part of the Teamwork link: the site and token
+          are install-wide. Without it a slot card offers Copy rather than
+          Send, because there is nowhere for a task to land. */}
+      <div className="flex flex-col gap-1">
+        <FieldLabel label="Teamwork tasklist ID">
+          <Input
+            name="teamwork_tasklist_id"
+            inputMode="numeric"
+            defaultValue={client.teamwork_tasklist_id ?? ""}
+            placeholder="e.g. 2859633"
+          />
+        </FieldLabel>
+        <p className="text-xs text-[var(--text-tertiary)]">
+          Where sent growth actions land. It is the number in the tasklist&rsquo;s
+          own Teamwork URL. Leave it empty and slot cards offer Copy instead.
+        </p>
+      </div>
+
       <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
