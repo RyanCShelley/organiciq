@@ -327,6 +327,10 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
         or page.position > SNIPPET_MAX_POSITION
         or page.impressions < MIN_IMPRESSIONS
         or missed < 1
+        # A query naming the site is navigation. The shortfall is real and
+        # the snippet is not the cause, so this would be a rewrite sold on a
+        # number it cannot move.
+        or page.top_query_is_navigational
     ):
         return None
     return Prescription(
@@ -501,8 +505,12 @@ def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None
     """Every route out goes somewhere the reader is not ready for."""
     if page.stage is None or not page.routes_onward or not page.matched_offers:
         return None
-    fits = STAGE_FIT.get(page.stage, ())
-    if page.linked_offer_stages & set(fits):
+    # "generic" is an offer nobody gave a stage. It suits any reader by
+    # definition — `matched_offers` already counts it as a match — so a page
+    # linking to one is not pointing its reader somewhere wrong. Without this
+    # L-3 would tell somebody to link to the page they already link to.
+    fits = set(STAGE_FIT.get(page.stage, ())) | {"generic"}
+    if page.linked_offer_stages & fits:
         return None
     linked = ", ".join(sorted(page.linked_offer_stages)) or "none"
     return Prescription(

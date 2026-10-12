@@ -36,6 +36,13 @@ class PageCandidate:
     #: The query drawing the most impressions, so the action can name what
     #: the snippet has to answer rather than saying "the term".
     top_query: str | None = None
+    #: Whether that query names the site itself. Boys Electrical's /about-us
+    #: sat at position 1.9 on 3,872 impressions with 4 clicks — 418 "missed"
+    #: by the curve — for the query "boyselectrical.com leadership team". The
+    #: clicks went to the homepage at position 1. On a query that names the
+    #: site, CTR is decided by which of your own results sits top, and no
+    #: title rewrite moves it.
+    top_query_is_navigational: bool = False
 
     # ── Engagement ──
     sessions: float = 0.0

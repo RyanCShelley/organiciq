@@ -225,3 +225,59 @@ def test_leads_rank_on_the_sessions_being_spent():
 
 def test_a_page_with_no_sessions_is_not_a_lead_candidate():
     assert rank_for_leads([lead(sessions=0.0)]) == []
+
+
+# ── What running it against real data found ─────────────────────────────────
+
+
+def test_t1_refuses_a_query_that_names_the_site():
+    """Boys Electrical, verbatim.
+
+    /about-us sat at position 1.9 on 3,872 impressions with 4 clicks — 418
+    "missed" against the curve, and the top three Traffic actions for that
+    client. The query was "boyselectrical.com leadership team": the clicks
+    went to the homepage at position 1. The shortfall is real and the snippet
+    is not the cause.
+    """
+    page = traffic(
+        impressions=3872.0,
+        clicks=4.0,
+        position=1.9,
+        expected_clicks=422.0,
+        top_query="boyselectrical.com leadership team",
+        top_query_is_navigational=True,
+    )
+    assert _t(page) is None
+    # The same page on a topic query is still a real finding.
+    assert _t(traffic(**{**page.__dict__, "top_query_is_navigational": False})).action_id == "T-1"
+
+
+def test_an_offer_with_no_declared_stage_suits_any_reader():
+    """Every conversion page in the warehouse has a null stage.
+
+    Treating that as "matches nothing" meant `matched_offers` was empty for
+    every client, and no lead action could fire for anybody.
+    """
+    from app.services.page_signals import brand_terms, is_navigational  # noqa: F401
+
+    # A page that links only to the stageless offer is already routed.
+    assert _l(lead(linked_offer_stages=frozenset({"generic"}))) is None
+    # One that links nowhere still gets L-1, pointed at that offer.
+    found = _l(lead(matched_offers=("/contact",)))
+    assert found is not None and found.action_id == "L-1"
+    assert "/contact" in found.done_when
+
+
+def test_brand_terms_cover_the_domain_and_the_name():
+    from app.models.client import Client
+    from app.services.page_signals import brand_terms, is_navigational
+
+    client = Client(client_name="Boys Electrical Contractors", domain="www.boyselectrical.com")
+    terms = brand_terms(client)
+    assert "boyselectrical.com" in terms
+    assert "boyselectrical" in terms
+
+    assert is_navigational("boyselectrical.com leadership team", terms)
+    assert is_navigational("boys electrical contractors reviews", terms)
+    # The topic the client actually wants to win is not navigation.
+    assert not is_navigational("emergency electrician nashville", terms)

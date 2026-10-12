@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import statistics
 from datetime import date, timedelta
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import func
@@ -32,8 +33,45 @@ from app.services.triage_signals import MANAGED_CHANNELS
 #: The window the traffic and lead facts are read over.
 WINDOW_DAYS = 28
 
+#: Sessions a page needs before its rate joins the site median — enough that
+#: the rate is not 0/1 or 1/1.
+MEDIAN_SESSION_FLOOR = 10
+
+#: Pages needed before a median describes anything.
+MIN_PAGES_FOR_MEDIAN = 5
+
 #: Which offers suit a reader at each stage, matching the catalog's own rule.
 from app.decisions.catalog import STAGE_FIT  # noqa: E402
+
+
+def brand_terms(client: Client) -> set[str]:
+    """What a searcher types when they mean this site rather than the topic.
+
+    The bare domain ("boyselectrical"), the host ("boyselectrical.com") and
+    the company name. A query carrying any of them is navigation.
+    """
+    terms: set[str] = set()
+    domain = (client.domain or "").strip().lower()
+    if domain:
+        if "://" in domain:
+            domain = urlsplit(domain).netloc or domain
+        domain = domain.split("/")[0].removeprefix("www.")
+        if domain:
+            terms.add(domain)
+            bare = domain.split(".")[0]
+            if len(bare) > 3:
+                terms.add(bare)
+    name = (client.client_name or "").strip().lower()
+    if len(name) > 3:
+        terms.add(name)
+    return terms
+
+
+def is_navigational(query: str | None, terms: set[str]) -> bool:
+    text = (query or "").strip().lower()
+    if not text:
+        return False
+    return any(term in text for term in terms)
 
 
 def _gsc_pages(db: Session, client_id: UUID, start: date, end: date) -> dict[str, dict]:
@@ -129,6 +167,7 @@ def load_page_candidates(
     queries = _top_queries(db, client.id, start, today)
     sessions = _sessions(db, client.id, start, today)
     stages = confirmed_stages(db, client.id)
+    brand = brand_terms(client)
 
     newest_crawl = (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
@@ -145,6 +184,11 @@ def load_page_candidates(
             )
         }
 
+    # An offer with no declared stage is the generic one and suits any
+    # reader — which is what `ClientConversionPage` already assumes when it
+    # falls back to the primary offer. Treating a null stage as "matches
+    # nothing" meant that for every client in the warehouse, all of whose
+    # conversion pages have a null stage, no lead action could ever fire.
     offers = {
         (row.normalized_url or "").strip(): (row.stage or "").strip().lower() or None
         for row in db.query(ClientConversionPage).filter(
@@ -166,18 +210,26 @@ def load_page_candidates(
             )
             .distinct()
         ):
-            stage = offers.get(to_url)
-            if stage:
-                routes.setdefault(from_url, set()).add(stage)
+            # A link to a stageless offer is still a route out; it is
+            # recorded as "generic" so L-3 can tell "no route" from "a route
+            # to something unlabelled".
+            routes.setdefault(from_url, set()).add(offers.get(to_url) or "generic")
 
-    # The site's own median engagement, over pages with enough sessions for
-    # the rate to mean anything.
+    # The site's own median engagement. The floor is low because this is a
+    # description of the site, not a test: it only has to keep a page with
+    # one session (a rate of 0% or 100%) from dragging the middle. What stops
+    # a *candidate* being judged on noise is MIN_SESSIONS_FOR_ENGAGEMENT,
+    # which is much higher. At 30 sessions this starved itself — SMA had 109
+    # pages with engagement data and four above the floor, so the median came
+    # out None and T-3 could never fire for anybody.
     rates = [
         engaged / total
         for total, engaged in sessions.values()
-        if engaged is not None and total >= 30
+        if engaged is not None and total >= MEDIAN_SESSION_FLOOR
     ]
-    median_engagement = statistics.median(rates) if len(rates) >= 5 else None
+    median_engagement = (
+        statistics.median(rates) if len(rates) >= MIN_PAGES_FOR_MEDIAN else None
+    )
 
     urls = set(gsc) | set(sessions)
     out: list[PageCandidate] = []
@@ -204,13 +256,14 @@ def load_page_candidates(
                 position=position,
                 expected_clicks=expected,
                 top_query=queries.get(url),
+                top_query_is_navigational=is_navigational(queries.get(url), brand),
                 sessions=total_sessions,
                 engaged_sessions=engaged,
                 site_median_engagement=median_engagement,
                 stage=stage,
                 linked_offer_stages=frozenset(routes.get(url, set())),
                 matched_offers=tuple(
-                    sorted(u for u, s in offers.items() if s in fits)
+                    sorted(u for u, s in offers.items() if s is None or s in fits)
                 ),
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None
