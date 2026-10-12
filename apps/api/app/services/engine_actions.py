@@ -181,6 +181,33 @@ def mark_sent(
     return row
 
 
+def mark_shipped(
+    db: Session,
+    client: Client,
+    slot: RecordSlot,
+    month: str,
+    *,
+    on: date | None,
+) -> EngineAction:
+    """Record the day the work went live.
+
+    The results loop reads this to tell "the metric did not move" from "the
+    metric did not move and nobody did the work". Without it every verdict
+    carries the unshipped caveat, and a warning on every row is a warning
+    nobody reads.
+
+    Clearing it is allowed: somebody marks the wrong slot eventually.
+    """
+    row = _row_for(db, client, month, slot)
+    row.shipped_on = on
+    if on is not None and row.status == "planned":
+        row.status = "assigned"
+    row.action_id = slot.action_id
+    row.target_url = slot.target_url
+    db.flush()
+    return row
+
+
 def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
     """One row as the page reads it.
 
@@ -200,6 +227,7 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
         "due": row.due.isoformat() if row.due else None,
         "skip_reason": row.skip_reason,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+        "shipped_on": row.shipped_on.isoformat() if row.shipped_on else None,
         "teamwork_task_id": row.teamwork_task_id,
         "teamwork_task_url": row.teamwork_task_url,
         "assigned_action_id": row.action_id,

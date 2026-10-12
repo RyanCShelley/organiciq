@@ -201,3 +201,33 @@ def test_assignees_include_admins_and_assigned_team(
     emails = {row["email"] for row in response.json()}
     assert admin_user.email in emails
     assert team_user.email in emails
+
+
+def test_marking_shipped_records_the_day_the_work_went_live(
+    client, client_a, admin_user, saved_run
+):
+    """The results loop reads this.
+
+    Without it every verdict carries "not recorded as shipped", and a caveat
+    on every row is one nobody reads.
+    """
+    headers = client_header(client_a.id, admin_user.email)
+    uid = _uid(client_a)
+
+    shipped = client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/shipped",
+        headers=headers,
+        json={"shipped_on": "2026-10-14"},
+    )
+    assert shipped.status_code == 200
+    assert shipped.json()["shipped_on"] == "2026-10-14"
+    # A planned slot that shipped is no longer planned.
+    assert shipped.json()["status"] == "assigned"
+
+    cleared = client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/shipped",
+        headers=headers,
+        json={"shipped_on": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["shipped_on"] is None

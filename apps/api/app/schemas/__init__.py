@@ -452,6 +452,12 @@ class EngineActionAssign(BaseModel):
     due: Date | None = None
 
 
+class EngineActionShipped(BaseModel):
+    """The day the work went live. Null clears it."""
+
+    shipped_on: Date | None = None
+
+
 class EngineActionSkip(BaseModel):
     """Take a slot off the table, or put it back.
 

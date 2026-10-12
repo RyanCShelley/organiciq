@@ -5,9 +5,10 @@ import { useState, useTransition } from "react";
 import {
   assignSlotAction,
   sendSlotAction,
+  shipSlotAction,
   skipSlotAction,
 } from "@/app/(app)/[clientSlug]/decision-engine/actions";
-import type { Assignee, RecordAction, SlotState } from "@/lib/monthly-record";
+import { formatDay, type Assignee, type RecordAction, type SlotState } from "@/lib/monthly-record";
 
 const BUTTON =
   "inline-flex min-h-[34px] items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12.5px] font-semibold text-[var(--text-primary)] disabled:opacity-60";
@@ -51,6 +52,7 @@ export function SlotActionBar({
 
   const [assignee, setAssignee] = useState(state?.assignee_user_id ?? "");
   const [due, setDue] = useState(state?.due ?? "");
+  const shippedOn = state?.shipped_on ?? null;
 
   const status = state?.status ?? "planned";
   const sentUrl = state?.teamwork_task_url ?? null;
@@ -202,6 +204,50 @@ export function SlotActionBar({
           // button that only ever errors.
           <button type="button" className={BUTTON} onClick={copyTask}>
             {copied ? "Copied" : "Copy for Teamwork"}
+          </button>
+        )}
+
+        {/* Until this is set, every verdict on this action carries "not
+            recorded as shipped" — and a caveat on every row is one nobody
+            reads. */}
+        {shippedOn ? (
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={pending}
+            title="Clear the shipped date"
+            onClick={() =>
+              run(() =>
+                shipSlotAction({
+                  clientId,
+                  slug,
+                  month,
+                  uid: action.action_uid,
+                  shippedOn: null,
+                }),
+              )
+            }
+          >
+            Shipped {formatDay(shippedOn)}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={pending}
+            onClick={() =>
+              run(() =>
+                shipSlotAction({
+                  clientId,
+                  slug,
+                  month,
+                  uid: action.action_uid,
+                  shippedOn: new Date().toISOString().slice(0, 10),
+                }),
+              )
+            }
+          >
+            Mark shipped
           </button>
         )}
 

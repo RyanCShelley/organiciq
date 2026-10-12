@@ -19,6 +19,7 @@ from app.models.client import Client
 from app.models.decision import DecisionStatus, EngineAction
 from app.schemas import (
     EngineActionAssign,
+    EngineActionShipped,
     EngineActionSkip,
     MonthlyRunRequest,
     PageStageIn,
@@ -468,6 +469,24 @@ def skip_slot(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+    db.commit()
+    return engine_action_service.serialise(row, slot=slot)
+
+
+@router.post("/records/{month}/slots/{uid}/shipped")
+def ship_slot(
+    month: str,
+    uid: str,
+    payload: EngineActionShipped,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Record when the work went live, which is what the results loop reads."""
+    _, slot = _slot_or_404(db, client, month, uid)
+    row = engine_action_service.mark_shipped(
+        db, client, slot, month, on=payload.shipped_on
+    )
     db.commit()
     return engine_action_service.serialise(row, slot=slot)
 

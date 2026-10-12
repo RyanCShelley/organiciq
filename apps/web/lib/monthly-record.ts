@@ -187,6 +187,8 @@ export type SlotState = {
   due: string | null;
   skip_reason: string | null;
   sent_at: string | null;
+  /** The day the work went live. The results loop reads this. */
+  shipped_on: string | null;
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
   assigned_action_id: string | null;

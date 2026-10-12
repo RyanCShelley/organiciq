@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     #: bad crawl can be backed out by flipping one variable.
     crawl_facts_source: str = "site_crawl"
     daily_sync_lookback_days: int = 3
+    #: Judge the actions whose check date has arrived, once a day. Later than
+    #: the sync hour so the day's facts have landed before anything is judged
+    #: on them.
+    results_check_enabled: bool = True
+    results_check_hour_utc: int = 14
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))

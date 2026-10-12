@@ -114,6 +114,19 @@ def _maybe_daily_sync() -> None:
         db.close()
 
 
+def _maybe_check_results() -> None:
+    from app.services.results import maybe_check_results
+
+    db = SessionLocal()
+    try:
+        maybe_check_results(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("Results check scheduler failed")
+    finally:
+        db.close()
+
+
 def main() -> None:
     settings = get_settings()
     logger.warning(
@@ -130,6 +143,7 @@ def main() -> None:
     )
     while True:
         _maybe_daily_sync()
+        _maybe_check_results()
         worked = run_once()
         if not worked:
             time.sleep(settings.worker_poll_interval_seconds)

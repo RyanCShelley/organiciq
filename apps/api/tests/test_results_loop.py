@@ -395,3 +395,25 @@ def test_falling_out_of_the_rankings_is_worse(db: Session, client_a: Client):
     assert len(judged) == 1
     assert judged[0].result == "worse"
     assert judged[0].after_value is None
+
+
+def test_the_daily_check_runs_once_and_only_after_its_hour(
+    db: Session, client_a: Client, monkeypatch
+):
+    """Hooked into the worker beside the sync, and guarded the same way."""
+    from app.core import settings as settings_module
+    from app.services.results import maybe_check_results
+
+    settings = settings_module.get_settings()
+    monkeypatch.setattr(settings, "results_check_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "results_check_hour_utc", 99, raising=False)
+    # Before its hour, nothing happens.
+    assert maybe_check_results(db) is False
+
+    monkeypatch.setattr(settings, "results_check_hour_utc", 0, raising=False)
+    assert maybe_check_results(db) is True
+    # Twice in one day would re-read every client for nothing.
+    assert maybe_check_results(db) is False
+
+    monkeypatch.setattr(settings, "results_check_enabled", False, raising=False)
+    assert maybe_check_results(db) is False

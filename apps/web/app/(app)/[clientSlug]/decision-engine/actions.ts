@@ -56,6 +56,7 @@ type SlotState = {
   due: string | null;
   skip_reason: string | null;
   sent_at: string | null;
+  shipped_on: string | null;
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
   stale: boolean;
@@ -119,6 +120,27 @@ export async function skipSlotAction(input: {
     input.slug,
     `/decisions/records/${encodeURIComponent(input.month)}/slots/${encodeURIComponent(input.uid)}/skip`,
     { reason: input.reason ?? null, undo: Boolean(input.undo) },
+  );
+}
+
+/**
+ * Record the day the work went live.
+ *
+ * The results loop reads this to tell "the metric did not move" from "the
+ * metric did not move and nobody did the work". Passing null clears it.
+ */
+export async function shipSlotAction(input: {
+  clientId: string;
+  slug: string;
+  month: string;
+  uid: string;
+  shippedOn: string | null;
+}): Promise<SlotResult> {
+  return slotPost(
+    input.clientId,
+    input.slug,
+    `/decisions/records/${encodeURIComponent(input.month)}/slots/${encodeURIComponent(input.uid)}/shipped`,
+    { shipped_on: input.shippedOn || null },
   );
 }
 

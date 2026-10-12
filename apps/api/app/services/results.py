@@ -479,3 +479,76 @@ def previous_results(
             }
         )
     return out
+
+
+# ── Running it ──────────────────────────────────────────────────────────────
+
+RESULTS_CHECKPOINT = "results_check"
+
+
+def maybe_check_results(db: Session) -> bool:
+    """Judge every client's due actions, once a day.
+
+    Runs later in the day than the sync, so the facts an action is judged on
+    have landed before it is judged on them. Returns True when a run was
+    attempted.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.settings import get_settings
+    from app.models.scheduler import SchedulerCheckpoint
+
+    settings = get_settings()
+    if not settings.results_check_enabled:
+        return False
+
+    now = datetime.now(timezone.utc)
+    if now.hour < settings.results_check_hour_utc:
+        return False
+
+    # Locked for the same reason the sync's is: two workers both reading an
+    # unlocked checkpoint would both decide the run is due.
+    checkpoint = (
+        db.query(SchedulerCheckpoint)
+        .filter(SchedulerCheckpoint.name == RESULTS_CHECKPOINT)
+        .with_for_update()
+        .one_or_none()
+    )
+    if checkpoint is None:
+        checkpoint = SchedulerCheckpoint(name=RESULTS_CHECKPOINT, last_run_date=None)
+        db.add(checkpoint)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            return False
+
+    today = now.date()
+    if checkpoint.last_run_date == today:
+        db.rollback()
+        return False
+
+    judged = 0
+    captured = 0
+    for client in db.query(Client).all():
+        records = (
+            db.query(MonthlyRecord).filter(MonthlyRecord.client_id == client.id).all()
+        )
+        for record in records:
+            # A record saved before this existed, or one whose metric could
+            # not be read at the time, still gets its starting reading —
+            # every metric is readable as-of a date.
+            captured += capture_before(db, client, record)
+        judged += len(check_due(db, client, today=today))
+
+    checkpoint.last_run_date = today
+    checkpoint.updated_at = now
+    db.commit()
+    logger.info(
+        "Results check: captured %d before-reading(s), judged %d action(s)",
+        captured,
+        judged,
+    )
+    return True
