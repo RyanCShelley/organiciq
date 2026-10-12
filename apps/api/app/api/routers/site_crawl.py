@@ -192,6 +192,62 @@ def crawled_pages(
     }
 
 
+@router.get("/schema/pages")
+def structured_data_pages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    type: str = Query(..., min_length=1, max_length=128),
+    has: str = Query("yes", pattern="^(yes|no)$"),
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+) -> dict[str, Any]:
+    """Which indexable pages carry a structured-data type, and which do not.
+
+    The coverage tab counted blocks per type and stopped there, so "we have
+    Article markup" could not be checked against "on which pages" — which is
+    the question somebody validating or troubleshooting it actually has.
+
+    Indexable pages only, on both sides: a noindex page without Article
+    markup is not a gap.
+    """
+    pages = (
+        db.query(FactCrawlPageSnapshot)
+        .filter(
+            FactCrawlPageSnapshot.client_id == client.id,
+            FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
+            FactCrawlPageSnapshot.indexable.is_(True),
+        )
+        .order_by(FactCrawlPageSnapshot.normalized_url)
+        .all()
+    )
+    schema = _schema_by_url(db, client.id)
+    wanted = type.strip().lower()
+
+    matched: list[dict[str, Any]] = []
+    for page in pages:
+        types = {
+            (b.schema_type or "").strip().lower()
+            for b in schema.get(page.normalized_url, [])
+        }
+        if (wanted in types) == (has == "yes"):
+            matched.append(
+                {
+                    "url": page.normalized_url,
+                    "title": page.title,
+                    "blocks": len(schema.get(page.normalized_url, [])),
+                }
+            )
+
+    return {
+        "type": type,
+        "has": has,
+        "crawled_at": _crawled_at(db, client.id),
+        "total": len(matched),
+        "truncated": len(matched) > limit,
+        "pages": matched[:limit],
+    }
+
+
 @router.get("/schema")
 def structured_data(
     client: Annotated[Client, Depends(require_client)],

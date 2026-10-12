@@ -297,6 +297,14 @@ export type SchemaGapRow = {
   types: string[];
 };
 
+export type SchemaTypePagesPayload = {
+  type: string;
+  has: "yes" | "no";
+  total: number;
+  truncated: boolean;
+  pages: { url: string; title: string | null; blocks: number }[];
+};
+
 export type StructuredDataPayload = {
   crawled_at: string | null;
   indexable_pages: number;

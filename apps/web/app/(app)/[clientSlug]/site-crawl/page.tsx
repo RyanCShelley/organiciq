@@ -11,6 +11,7 @@ import {
   type CrawlPageDetail as PageDetail,
   type CrawledPageRow,
   type CrawledPagesPayload,
+  type SchemaTypePagesPayload,
   type StructuredDataPayload,
 } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
@@ -164,6 +165,11 @@ export default async function SiteCrawlPage({
   let pages: CrawledPagesPayload = EMPTY_PAGES;
   let schema: StructuredDataPayload = EMPTY_SCHEMA;
   let detail: PageDetail | null = null;
+  // Which structured-data type is open, and whether we are looking at the
+  // pages that carry it or the ones that do not.
+  const schemaType = typeof query.schema_type === "string" ? query.schema_type : null;
+  const schemaHas = query.schema_has === "no" ? "no" : "yes";
+  let typePages: SchemaTypePagesPayload | null = null;
   let error: string | null = null;
 
   try {
@@ -185,6 +191,13 @@ export default async function SiteCrawlPage({
       }
     } else {
       schema = await apiFetch<StructuredDataPayload>("/site-crawl/schema", { clientId });
+      if (schemaType) {
+        typePages = await apiFetch<SchemaTypePagesPayload>(
+          `/site-crawl/schema/pages?type=${encodeURIComponent(schemaType)}`
+            + `&has=${schemaHas}`,
+          { clientId },
+        );
+      }
     }
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load the site crawl";
@@ -522,14 +535,89 @@ export default async function SiteCrawlPage({
                 description="What the markup on this site actually declares."
               />
               <div className="workspace-panel">
+                {/* A count on its own cannot be checked. Each type opens
+                    the pages that carry it, and the ones that do not. */}
                 <div className="flex flex-wrap gap-2">
-                  {schema.types.map((row) => (
-                    <span key={row.type} className="badge badge-neutral">
-                      {row.type}
-                      <span className="ml-1.5 text-[var(--text-tertiary)]">{row.count}</span>
-                    </span>
-                  ))}
+                  {schema.types.map((row) => {
+                    const open = schemaType === row.type;
+                    const qs = new URLSearchParams({ tab: "schema" });
+                    if (!open) qs.set("schema_type", row.type);
+                    return (
+                      <Link
+                        key={row.type}
+                        href={`${base}?${qs}`}
+                        scroll={false}
+                        className={`badge no-underline ${
+                          open ? "badge-success" : "badge-neutral"
+                        }`}
+                      >
+                        {row.type}
+                        <span className="ml-1.5 text-[var(--text-tertiary)]">
+                          {row.count}
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </div>
+
+                {typePages ? (
+                  <div className="mt-4 border-t border-[var(--border)] pt-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(["yes", "no"] as const).map((which) => {
+                        const qs = new URLSearchParams({
+                          tab: "schema",
+                          schema_type: schemaType ?? "",
+                        });
+                        if (which === "no") qs.set("schema_has", "no");
+                        return (
+                          <Link
+                            key={which}
+                            href={`${base}?${qs}`}
+                            scroll={false}
+                            aria-current={schemaHas === which ? "page" : undefined}
+                            className={`min-h-[30px] rounded-full border px-3 py-1 text-[12.5px] font-semibold no-underline ${
+                              schemaHas === which
+                                ? "border-[var(--brand-teal-deep)] text-[var(--text-primary)]"
+                                : "border-[var(--border)] text-[var(--text-secondary)]"
+                            }`}
+                          >
+                            {which === "yes" ? "Has it" : "Missing it"}
+                          </Link>
+                        );
+                      })}
+                      <span className="text-xs text-[var(--text-tertiary)]">
+                        {typePages.total.toLocaleString()} indexable page
+                        {typePages.total === 1 ? "" : "s"}
+                        {typePages.truncated ? ", first 200 shown" : ""}
+                      </span>
+                    </div>
+                    {typePages.pages.length === 0 ? (
+                      <p className="mt-3 text-xs text-[var(--text-secondary)]">
+                        {schemaHas === "yes"
+                          ? `No indexable page carries ${schemaType}.`
+                          : `Every indexable page carries ${schemaType}.`}
+                      </p>
+                    ) : (
+                      <ul className="mt-3 space-y-1">
+                        {typePages.pages.map((row) => (
+                          <li key={row.url} className="text-[12.5px]">
+                            <Link
+                              href={detailHref(row.url)}
+                              className="font-[family-name:var(--font-mono)] text-[var(--brand-teal-hover)]"
+                            >
+                              {row.url.replace(/^https?:\/\/[^/]+/, "") || "/"}
+                            </Link>
+                            {row.title ? (
+                              <span className="ml-2 text-[var(--text-tertiary)]">
+                                {row.title}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
