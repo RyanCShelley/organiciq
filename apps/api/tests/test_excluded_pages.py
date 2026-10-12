@@ -107,3 +107,24 @@ def test_both_sources_arrive_together(db: Session, client_a: Client):
     db.commit()
     patterns = {e.url_pattern for e in load_exclusions(db, client_a, today=TODAY)}
     assert patterns == {"/careers*", "https://x.test/guide"}
+
+
+def test_the_tasklist_id_survives_a_save(client, client_a, admin_user):
+    """It silently did not.
+
+    `ClientCreate` and `ClientUpdate` carry the same field names, so an edit
+    aimed at the second landed in the first — and the settings form PATCHes,
+    so Teamwork's tasklist id was dropped on every save while the field
+    appeared to work.
+    """
+    headers = client_header(client_a.id, admin_user.email)
+    saved = client.patch(
+        f"/clients/{client_a.id}",
+        headers=headers,
+        json={"teamwork_tasklist_id": "2859633"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["teamwork_tasklist_id"] == "2859633"
+
+    fetched = client.get(f"/clients/{client_a.id}", headers=headers)
+    assert fetched.json()["teamwork_tasklist_id"] == "2859633"

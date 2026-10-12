@@ -231,3 +231,35 @@ def test_marking_shipped_records_the_day_the_work_went_live(
     )
     assert cleared.status_code == 200
     assert cleared.json()["shipped_on"] is None
+
+
+def test_send_appears_only_with_both_credentials_and_a_tasklist(
+    client, db, client_a, admin_user, saved_run, monkeypatch
+):
+    """The card offers Copy until a task has somewhere to land.
+
+    Credentials alone are not enough: without a tasklist there is nowhere to
+    create the task, so Send would only ever error.
+    """
+    from app.integrations import teamwork
+
+    headers = client_header(client_a.id, admin_user.email)
+
+    def ready() -> bool:
+        return client.get(
+            f"/decisions/records/{MONTH}/workflow", headers=headers
+        ).json()["teamwork_ready"]
+
+    # Neither.
+    assert ready() is False
+
+    # Credentials but no tasklist.
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="acme", token="t")
+    )
+    assert ready() is False
+
+    # Both.
+    client_a.teamwork_tasklist_id = "2859633"
+    db.commit()
+    assert ready() is True
