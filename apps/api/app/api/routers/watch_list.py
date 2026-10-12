@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -54,6 +54,111 @@ def search_watch_list(
         }
         for r in rows
     ]
+
+
+def _ai_answer_site_id(db: Session, client: Client) -> str | None:
+    from app.models.integration import Integration, IntegrationProvider
+
+    row = (
+        db.query(Integration)
+        .filter(
+            Integration.client_id == client.id,
+            Integration.provider == IntegrationProvider.SE_RANKING,
+        )
+        .one_or_none()
+    )
+    return row.external_property_id if row else None
+
+
+@router.get("/ai/answer")
+def ai_prompt_answer(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    prompt_id: str,
+    on: str | None = None,
+) -> dict:
+    """What the model actually said, and which URLs it cited.
+
+    Fetched when somebody opens a row rather than synced. The answer is one
+    API call per prompt per day, and 24 clients at 40 prompts is a thousand
+    calls a day for something almost nobody opens — so the cost is paid by
+    the person asking.
+
+    The rankings we do sync carry a position and a count and no URL: "cited
+    at 2 of 9" with nothing to open.
+    """
+    from datetime import date as _date
+
+    from app.core.settings import get_settings
+    from app.ingestion.seranking.client import get_airt_prompt_answer
+
+    row = (
+        db.query(FactSerAiPrompt)
+        .filter(
+            FactSerAiPrompt.client_id == client.id,
+            FactSerAiPrompt.prompt_id == prompt_id,
+        )
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such prompt for this client.")
+    if not row.prompt_llm_id or not row.llm_id:
+        return {
+            "available": False,
+            "reason": "This prompt predates the ids the answer lookup needs.",
+        }
+
+    site_id = _ai_answer_site_id(db, client)
+    api_key = (get_settings().se_ranking_api_key or "").strip()
+    if not site_id or not api_key:
+        return {"available": False, "reason": "SE Ranking is not connected for this client."}
+
+    when = _date.today()
+    if on:
+        try:
+            when = _date.fromisoformat(on)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="`on` must be YYYY-MM-DD.")
+    elif row.checked_at:
+        when = row.checked_at.date() if hasattr(row.checked_at, "date") else row.checked_at
+
+    try:
+        answer = get_airt_prompt_answer(
+            api_key=api_key,
+            site_id=site_id,
+            llm_id=row.llm_id,
+            prompt_llm_id=row.prompt_llm_id,
+            on=when,
+        )
+    except Exception as exc:  # noqa: BLE001 — a missing answer is not an error
+        # SE Ranking keeps a year of answers and 400s past that, and a day
+        # with no check has none. Neither is worth a 500 on a panel somebody
+        # opened out of curiosity.
+        return {
+            "available": False,
+            "reason": f"No cached answer for {when.isoformat()}.",
+            "detail": str(exc)[:200],
+        }
+
+    return {
+        "available": True,
+        "date": answer.get("date") or when.isoformat(),
+        "prompt": answer.get("prompt") or row.prompt,
+        "text": answer.get("text"),
+        # The whole point: which URLs the model cited, in the order it cited
+        # them, and who it named alongside.
+        "sources": [
+            {"url": item.get("url"), "position": item.get("position")}
+            for item in (answer.get("sources") or [])
+            if isinstance(item, dict) and item.get("url")
+        ],
+        "brands": [
+            {"name": item.get("name"), "position": item.get("position")}
+            for item in (answer.get("brands") or [])
+            if isinstance(item, dict) and item.get("name")
+        ],
+    }
 
 
 @router.get("/ai")

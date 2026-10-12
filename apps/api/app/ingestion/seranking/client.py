@@ -444,6 +444,38 @@ def list_airt_prompt_rankings_paginated(
     return rows
 
 
+def get_airt_prompt_answer(
+    *,
+    api_key: str,
+    site_id: str | int,
+    llm_id: str | int,
+    prompt_llm_id: str | int,
+    on: date,
+) -> dict[str, Any]:
+    """The cached answer for one prompt on one day.
+
+    The rankings endpoint gives a position and a count and no URL — "cited
+    at 2 of 9" with nothing to open. This is where the cited URLs live, and
+    the brands cited alongside.
+
+    One call per prompt per day, so it is fetched when somebody asks for it
+    rather than synced: 24 clients at 40 prompts is a thousand calls a day
+    for something almost nobody opens.
+    """
+    data = _request(
+        api_key=api_key,
+        method="GET",
+        path="/project-management/airt/prompts/answer",
+        params={
+            "site_id": site_id,
+            "llm_id": llm_id,
+            "prompt_llm_id": prompt_llm_id,
+            "date": on.isoformat(),
+        },
+    )
+    return data if isinstance(data, dict) else {}
+
+
 DOMAIN_KEYWORDS_MAX_LIMIT = 1000
 
 
