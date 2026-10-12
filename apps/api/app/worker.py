@@ -127,6 +127,19 @@ def _maybe_check_results() -> None:
         db.close()
 
 
+def _maybe_pull_serp_features() -> None:
+    from app.services.serp_features import maybe_pull_serp_features
+
+    db = SessionLocal()
+    try:
+        maybe_pull_serp_features(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("SERP feature pull scheduler failed")
+    finally:
+        db.close()
+
+
 def main() -> None:
     settings = get_settings()
     logger.warning(
@@ -144,6 +157,7 @@ def main() -> None:
     while True:
         _maybe_daily_sync()
         _maybe_check_results()
+        _maybe_pull_serp_features()
         worked = run_once()
         if not worked:
             time.sleep(settings.worker_poll_interval_seconds)

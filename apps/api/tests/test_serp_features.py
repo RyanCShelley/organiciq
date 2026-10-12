@@ -310,3 +310,76 @@ def test_the_pull_asks_for_the_ai_overview_to_be_resolved():
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
     assert '"load_async_ai_overview":true' in seen["body"].replace(" ", "")
+
+
+# ── The monthly schedule ────────────────────────────────────────────────────
+
+
+def _as_configured(monkeypatch):
+    import app.integrations.dataforseo as dfs
+
+    monkeypatch.setattr(
+        dfs, "load_config", lambda: dataforseo.DataForSeoConfig(login="l", password="p")
+    )
+
+
+def test_the_pull_runs_once_a_month_not_once_a_day(
+    db: Session, client_a: Client, monkeypatch
+):
+    from app.core import settings as settings_module
+    from app.services.serp_features import maybe_pull_serp_features
+
+    _as_configured(monkeypatch)
+    settings = settings_module.get_settings()
+    monkeypatch.setattr(settings, "serp_pull_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "serp_pull_hour_utc", 99, raising=False)
+    # Before its hour, nothing.
+    assert maybe_pull_serp_features(db) is False
+
+    monkeypatch.setattr(settings, "serp_pull_hour_utc", 0, raising=False)
+    assert maybe_pull_serp_features(db) is True
+    # Every query is billed, so a second pass the same month must not start
+    # the bill again.
+    assert maybe_pull_serp_features(db) is False
+
+
+def test_nothing_pulls_when_dataforseo_is_not_configured(
+    db: Session, client_a: Client, monkeypatch
+):
+    from app.core import settings as settings_module
+    from app.services.serp_features import maybe_pull_serp_features
+    import app.integrations.dataforseo as dfs
+
+    monkeypatch.setattr(dfs, "load_config", lambda: None)
+    settings = settings_module.get_settings()
+    monkeypatch.setattr(settings, "serp_pull_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "serp_pull_hour_utc", 0, raising=False)
+    assert maybe_pull_serp_features(db) is False
+
+
+def test_a_client_without_search_console_data_is_not_pulled_for(
+    db: Session, client_a: Client
+):
+    """T-2 needs the page's position and top query, both from Search Console.
+
+    Without them a SERP reading has nothing to attach to and expires — they
+    are read back for 45 days — before anything can use it.
+    """
+    from datetime import date as _date
+    from app.models.gsc import FactGscPage
+    from app.services.serp_features import _worth_pulling_for
+
+    assert _worth_pulling_for(db, client_a) is False
+
+    db.add(
+        FactGscPage(
+            client_id=client_a.id,
+            date=_date(2026, 10, 1),
+            raw_url="https://x.test/a",
+            normalized_url="https://x.test/a",
+            impressions=10,
+            clicks=1,
+        )
+    )
+    db.commit()
+    assert _worth_pulling_for(db, client_a) is True

@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     #: on them.
     results_check_enabled: bool = True
     results_check_hour_utc: int = 14
+    #: The SERP feature pull. Monthly, because every query is a billed call
+    #: and a reading stays usable for 45 days.
+    serp_pull_enabled: bool = True
+    serp_pull_hour_utc: int = 15
+    #: Terms per client per month. The cost is this times the number of
+    #: clients whose Search Console data makes the result actionable.
+    serp_pull_limit: int = 20
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))

@@ -178,3 +178,102 @@ def coverage(db: Session, client: Client, *, today: date | None = None) -> tuple
     wanted = {t.lower() for t in terms_to_pull(db, client)}
     have = set(load(db, client, today=today))
     return len(wanted & have), len(wanted)
+
+
+# ── Running it ──────────────────────────────────────────────────────────────
+
+SERP_CHECKPOINT = "serp_feature_pull"
+
+
+def _worth_pulling_for(db: Session, client: Client) -> bool:
+    """Whether a SERP reading for this client could be acted on.
+
+    T-2 needs the page's average position and its top query, both of which
+    come from Search Console. Without that pull there is nothing to attach a
+    SERP feature to, so buying one spends a credit on a reading that expires
+    — they are good for 45 days — before anything can read it.
+    """
+    from app.models.gsc import FactGscPage
+
+    return (
+        db.query(FactGscPage.id).filter(FactGscPage.client_id == client.id).first()
+        is not None
+    )
+
+
+def maybe_pull_serp_features(db: Session) -> bool:
+    """Pull each eligible client's terms, once a month.
+
+    Monthly rather than daily: every query is billed, and a reading is read
+    back for 45 days. Returns True when a run was attempted.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.settings import get_settings
+    from app.models.scheduler import SchedulerCheckpoint
+
+    settings = get_settings()
+    if not settings.serp_pull_enabled or not dataforseo.configured():
+        return False
+
+    now = datetime.now(timezone.utc)
+    if now.hour < settings.serp_pull_hour_utc:
+        return False
+
+    checkpoint = (
+        db.query(SchedulerCheckpoint)
+        .filter(SchedulerCheckpoint.name == SERP_CHECKPOINT)
+        .with_for_update()
+        .one_or_none()
+    )
+    if checkpoint is None:
+        checkpoint = SchedulerCheckpoint(name=SERP_CHECKPOINT, last_run_date=None)
+        db.add(checkpoint)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            return False
+
+    today = now.date()
+    last = checkpoint.last_run_date
+    # Monthly, not every 30 days: a calendar month is what the spec's cadence
+    # means and what somebody reading the bill expects.
+    if last is not None and (last.year, last.month) == (today.year, today.month):
+        db.rollback()
+        return False
+
+    # Claim the month before spending anything. A crash halfway through would
+    # otherwise let the next loop start the whole bill again.
+    checkpoint.last_run_date = today
+    checkpoint.updated_at = now
+    db.commit()
+
+    pulled = 0
+    skipped = 0
+    for client in db.query(Client).all():
+        if not _worth_pulling_for(db, client):
+            skipped += 1
+            continue
+        try:
+            count, failures = pull(db, client, limit=settings.serp_pull_limit)
+        except dataforseo.DataForSeoAuthError:
+            # Will not come right for the next client either.
+            logger.exception("SERP pull stopped: credentials rejected")
+            return True
+        pulled += count
+        if failures:
+            logger.warning(
+                "SERP pull for %s: %d failed, first: %s",
+                client.slug, len(failures), failures[0],
+            )
+
+    logger.info(
+        "SERP feature pull: %d query(s) pulled, %d client(s) skipped for want of "
+        "Search Console data",
+        pulled,
+        skipped,
+    )
+    return True
