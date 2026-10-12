@@ -20,7 +20,12 @@ from datetime import date
 from app.core.db import SessionLocal
 from app.models.client import Client
 from app.models.decision import MonthlyRecord
-from app.services.results import capture_before, check_due
+from app.services.results import (
+    capture_before,
+    check_due,
+    measure,
+    metric_key_for,
+)
 
 
 def main() -> None:
@@ -31,6 +36,11 @@ def main() -> None:
         "--capture-missing",
         action="store_true",
         help="read the before value for actions saved before this existed",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-read a before value already stored, to correct a bad one",
     )
     parser.add_argument("--today", help="ISO date to judge as of; defaults to today")
     args = parser.parse_args()
@@ -51,16 +61,12 @@ def main() -> None:
         if not records:
             continue
 
+        # `capture_before` and `check_due` commit, so a rollback afterwards
+        # undoes nothing — the first "dry run" of this wrote ten rows and
+        # then reported nothing to do. Nothing writing code runs at all
+        # unless --apply was given.
         captured = 0
-        if args.capture_missing:
-            for record in records:
-                captured += capture_before(db, client, record)
-            if not args.apply:
-                db.rollback()
-
-        judged = check_due(db, client, today=today) if args.apply else []
         if not args.apply:
-            db.rollback()
             due = sum(
                 1
                 for record in records
@@ -68,9 +74,31 @@ def main() -> None:
                 if action.get("check_on")
                 and date.fromisoformat(action["check_on"]) <= today
             )
-            print(f"{client.slug}: {due} action(s) due, {captured} before-reading(s) available")
+            readable = sum(
+                1
+                for record in records
+                for action in (record.record or {}).get("actions") or []
+                if measure(
+                    db,
+                    client,
+                    metric_key_for(action),
+                    url=action.get("target_url"),
+                    term=action.get("term"),
+                    as_of=record.data_through
+                    or date.fromisoformat(f"{record.month}-01"),
+                ).value
+                is not None
+            )
+            print(
+                f"{client.slug}: {due} action(s) due, "
+                f"{readable} before-reading(s) available (nothing written)"
+            )
             continue
 
+        if args.capture_missing:
+            for record in records:
+                captured += capture_before(db, client, record, force=args.force)
+        judged = check_due(db, client, today=today)
         print(f"{client.slug}: captured {captured}, judged {len(judged)}")
         for row in judged:
             print(

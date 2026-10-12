@@ -303,3 +303,65 @@ def test_a_record_written_before_metric_key_existed_is_still_measurable(
     _rank(db, client_a, PRESCRIBED, 18.0)
     assert capture_before(db, client_a, record) == 1
     assert float(db.query(EngineAction).one().before_value) == 18.0
+
+
+# ── What production found ───────────────────────────────────────────────────
+
+
+def test_position_zero_is_not_a_position(db: Session, client_a: Client):
+    """SE Ranking writes 0 for "not in the results we checked".
+
+    `_rank` in triage_signals has always known this and the results reader
+    did not, so every before value came out as position zero — and 2,810 of
+    SMA's 2,934 ranking rows are zeroes.
+    """
+    _rank(db, client_a, PRESCRIBED, 0.0)
+    found = measure(db, client_a, "term_position", term="seo agency", as_of=PRESCRIBED)
+    assert found.value is None
+    assert found.unranked is True
+    assert "outside the top 100" in (found.missing or "")
+
+    _rank(db, client_a, PRESCRIBED, 101.0)
+    assert measure(db, client_a, "term_position", term="seo agency", as_of=PRESCRIBED).unranked
+
+
+def test_no_reading_is_different_from_not_ranking(db: Session, client_a: Client):
+    found = measure(db, client_a, "term_position", term="seo agency", as_of=PRESCRIBED)
+    assert found.value is None
+    # Nothing was measured at all, which is not the same as measured-and-absent.
+    assert found.unranked is False
+
+
+def test_nothing_measurable_leaves_no_row_behind(db: Session, client_a: Client):
+    """The row used to be created before the metric was read."""
+    record = _record(db, client_a)
+    assert capture_before(db, client_a, record) == 0
+    assert db.query(EngineAction).count() == 0
+
+
+def test_entering_the_rankings_counts_as_improved(db: Session, client_a: Client):
+    """Where almost every visibility action starts.
+
+    The term was off the rankings when it was prescribed, so there is no
+    before to compare. That is a real starting state, not a gap, and the
+    measurement being as-of a date is what lets the check establish it.
+    """
+    record = _record(db, client_a)
+    _rank(db, client_a, PRESCRIBED, 0.0)
+    assert capture_before(db, client_a, record) == 0
+
+    _rank(db, client_a, CHECK_ON, 34.0)
+    judged = check_due(db, client_a, today=CHECK_ON)
+    assert len(judged) == 1
+    assert judged[0].result == "improved"
+    assert judged[0].before_value is None
+    assert float(judged[0].after_value) == 34.0
+
+
+def test_still_unranked_at_the_check_is_not_an_improvement(
+    db: Session, client_a: Client
+):
+    _record(db, client_a)
+    _rank(db, client_a, PRESCRIBED, 0.0)
+    _rank(db, client_a, CHECK_ON, 0.0)
+    assert check_due(db, client_a, today=CHECK_ON) == []

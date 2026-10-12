@@ -88,6 +88,11 @@ class Measurement:
     value: float | None
     #: Why there is no number, where there is none.
     missing: str | None = None
+    #: Measured, and the term was outside the results we check. A real state
+    #: and not a missing reading: 96% of SMA's tracked terms sit here, so
+    #: treating it as "no data" would leave almost every visibility action
+    #: permanently unjudged.
+    unranked: bool = False
 
 
 def _window(as_of: date) -> tuple[date, date]:
@@ -117,7 +122,17 @@ def _term_position(
     )
     if row is None:
         return Measurement(None, f"no tracked position for “{term}” on or before {as_of}")
-    return Measurement(float(row[0]))
+    # SE Ranking writes 0 or 101 for "not in the results we checked", which
+    # `_rank` in triage_signals has always known and this did not: every
+    # before reading came out as position zero.
+    position = float(row[0])
+    if not 0 < position <= 100:
+        return Measurement(
+            None,
+            f"“{term}” was outside the top 100 on {row[1]}",
+            unranked=True,
+        )
+    return Measurement(position)
 
 
 def _page_clicks(db: Session, client_id: UUID, url: str | None, as_of: date) -> Measurement:
@@ -305,8 +320,12 @@ def capture_before(
         uid = action.get("action_uid")
         if not uid:
             continue
-        row = _row_for(db, client, uid, record.month, "action")
-        if row.before_value is not None and not force:
+        existing = (
+            db.query(EngineAction)
+            .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
+            .one_or_none()
+        )
+        if existing is not None and existing.before_value is not None and not force:
             continue
         reading = measure(
             db,
@@ -316,8 +335,11 @@ def capture_before(
             term=action.get("term"),
             as_of=as_of,
         )
+        # Measure first, then write. Creating the row up front left a junk
+        # row behind for every action whose metric could not be read.
         if reading.value is None:
             continue
+        row = existing or _row_for(db, client, uid, record.month, "action")
         row.before_value = reading.value
         row.action_id = action.get("id")
         row.target_url = action.get("target_url")
@@ -350,7 +372,10 @@ def check_due(
                 .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
                 .one_or_none()
             )
-            if row is None or row.before_value is None or row.after_value is not None:
+            # `row` may legitimately not exist: an action whose term was
+            # off the rankings when it was prescribed has no before reading
+            # to store, and that is the most common start there is.
+            if row is not None and row.after_value is not None:
                 continue
             metric_key = metric_key_for(action)
             reading = measure(
@@ -363,8 +388,38 @@ def check_due(
             )
             if reading.value is None:
                 continue
+
+            before = (
+                float(row.before_value)
+                if row is not None and row.before_value is not None
+                else None
+            )
+            if before is None:
+                # No stored reading. It may be that the term was off the
+                # rankings when it was prescribed, which is a real starting
+                # state rather than a gap — and the measurement is as-of a
+                # date, so that can be established now.
+                started = measure(
+                    db,
+                    client,
+                    metric_key,
+                    url=action.get("target_url"),
+                    term=action.get("term"),
+                    as_of=record.data_through
+                    or date.fromisoformat(f"{record.month}-01"),
+                )
+                if not started.unranked:
+                    continue
+                row = row or _row_for(db, client, uid, record.month, "action")
+                row.action_id = action.get("id")
+                row.target_url = action.get("target_url")
+                row.after_value = reading.value
+                row.result = "improved"
+                judged.append(row)
+                continue
+
             row.after_value = reading.value
-            row.result = verdict(metric_key, float(row.before_value), reading.value)
+            row.result = verdict(metric_key, before, reading.value)
             if row.status == "assigned":
                 row.status = "done"
             judged.append(row)
