@@ -207,7 +207,7 @@ export function ClientSettingsForm({
 
       <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
             Lead goal by checkpoint
           </p>
         </div>
@@ -241,9 +241,9 @@ export function ClientSettingsForm({
           downstream would catch it. */}
       <TeamworkTasklistField value={client.teamwork_tasklist_id ?? null} />
 
-      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
             Dashboard baseline snapshot
           </p>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -314,9 +314,9 @@ export function ClientSettingsForm({
 
       {/* Cost ceiling, not a plan allowance — this one spends SE Ranking credits
           per prompt returned, so it lives outside the tier blocks. */}
-      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
             AI prompt discovery
           </p>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -346,9 +346,9 @@ export function ClientSettingsForm({
 
       {/* Crawl budget, not a plan allowance: it bounds time spent on someone
           else's server, so it sits with the other operational ceilings. */}
-      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
             Site crawl
           </p>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -393,7 +393,7 @@ export function ClientSettingsForm({
 
       {selectedTier && !enterprise ? (
         <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
             {selectedTier.tier_name} plan allowances
           </p>
           <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -429,9 +429,9 @@ export function ClientSettingsForm({
       ) : null}
 
       {enterprise ? (
-        <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
+        <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+            <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
               Enterprise custom allowances
             </p>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
