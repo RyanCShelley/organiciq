@@ -34,6 +34,14 @@ export function TeamworkTasklistField({ value }: { value: string | null }) {
   const [failed, setFailed] = useState(false);
   const [chosen, setChosen] = useState(value ?? "");
 
+  // `useState` reads the prop once. Saving revalidates the page and the
+  // server sends the new value down, but React keeps this instance, so the
+  // select went on showing "Not set" after a save that had worked — and
+  // came right only on a full reload.
+  useEffect(() => {
+    setChosen(value ?? "");
+  }, [value]);
+
   useEffect(() => {
     let live = true;
     fetch("/api/proxy/teamwork-tasklists")
