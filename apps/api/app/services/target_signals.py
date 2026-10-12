@@ -36,6 +36,57 @@ from app.services.page_eligibility import classify_page_url
 #: Entity properties V-3 looks for, as they appear in JSON-LD.
 _ENTITY_KEYS = ("about", "mentions", "sameAs")
 
+#: Schema types that declare a page's questions as questions.
+_FAQ_TYPES = ("faqpage", "qapage")
+
+#: A heading that reads as a question. Matches the crawler's own test, so a
+#: heading counted here is the one a visitor sees as a question.
+_QUESTION_OPENERS = frozenset(
+    "what how why when where which who can does do is are should".split()
+)
+
+
+def _is_question(text: str) -> bool:
+    import re
+
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    if stripped.endswith("?"):
+        return True
+    first = re.split(r"[^a-z']+", stripped.lower(), maxsplit=1)[0]
+    return first in _QUESTION_OPENERS
+
+
+def _declares_faq(raw: object) -> bool:
+    """Whether the page's JSON-LD declares an FAQ.
+
+    Walks the document for the same reason `_entity_properties` does: a
+    graph has to be walked rather than read off the top.
+    """
+    found = False
+
+    def walk(node: object) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        declared = node.get("@type")
+        types = declared if isinstance(declared, list) else [declared]
+        if any(isinstance(t, str) and t.strip().lower() in _FAQ_TYPES for t in types):
+            found = True
+            return
+        for value in node.values():
+            walk(value)
+
+    walk(raw)
+    return found
+
 
 @dataclass(frozen=True)
 class TargetInputs:
@@ -136,6 +187,7 @@ def load_target_inputs(
     site_median = float(median(link_counts)) if link_counts else 0.0
 
     schema_by_url: dict[str, set[str]] = {}
+    faq_schema_urls: set[str] = set()
     if snapshot_date:
         for row in db.query(FactCrawlPageSchema).filter(
             FactCrawlPageSchema.client_id == client.id,
@@ -144,6 +196,10 @@ def load_target_inputs(
             schema_by_url.setdefault(row.normalized_url, set()).update(
                 _entity_properties(row.raw)
             )
+            if (row.schema_type or "").strip().lower() in _FAQ_TYPES or _declares_faq(
+                row.raw
+            ):
+                faq_schema_urls.add(row.normalized_url)
 
     candidates: list[Candidate] = []
     pages: dict[str, PageFacts] = {}
@@ -224,6 +280,8 @@ def load_target_inputs(
                 description=getattr(snapshot, "description", None),
                 headings=headings,
                 sections=sections,
+                question_headings=tuple(h for h in headings if _is_question(h)),
+                has_faq_schema=url in faq_schema_urls,
                 faq_questions=faqs,
                 entity_properties=frozenset(schema_by_url.get(url, set())),
                 inbound_editorial_links=int(

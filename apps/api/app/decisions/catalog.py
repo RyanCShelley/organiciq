@@ -53,6 +53,13 @@ class PageFacts:
     faq_questions: tuple[str, ...] = ()
     #: Entity markup present on the page: `about`, `mentions`, `sameAs`.
     entity_properties: frozenset[str] = frozenset()
+    #: Headings that read as questions. The crawl merges schema-sourced and
+    #: visible questions into `faq_questions`, which cannot tell "the page
+    #: asks this" from "the markup declares it" — and that difference is the
+    #: whole of V-7.
+    question_headings: tuple[str, ...] = ()
+    #: The page carries an FAQPage or QAPage block.
+    has_faq_schema: bool = False
     #: Headings with their format flags, for V-5. Empty where the crawl
     #: predates the capture — which is why V-5 says nothing rather than
     #: reporting every page as unstructured.
@@ -274,6 +281,53 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
     )
 
 
+#: Enough visible questions that the page is an FAQ rather than a page with
+#: one question-shaped heading in it.
+MIN_FAQ_QUESTIONS = 2
+
+
+def v7_mark_up_the_faq(
+    target: ScoredCandidate, page: PageFacts
+) -> Prescription | None:
+    """The page already answers questions and never says so in the markup.
+
+    The cheapest AI-visibility work there is: the answers are written, the
+    headings are there, and an engine assembling a response has to infer
+    from prose what FAQPage would have told it outright. No new content.
+    """
+    if page.has_faq_schema or len(page.question_headings) < MIN_FAQ_QUESTIONS:
+        return None
+    count = len(page.question_headings)
+    first = page.question_headings[0]
+    return Prescription(
+        action_id="V-7",
+        title=f"Mark up the {count} questions this page already answers",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=target.candidate.keyword,
+        score=target.score,
+        effort_min=15,
+        why=(
+            f"The page asks {count} questions in its headings — “{first}” among "
+            "them — and carries no FAQPage markup. The answers are already "
+            "written; nothing tells an engine assembling a response that they "
+            "are answers."
+        ),
+        done_when=(
+            "FAQPage markup lists each visible question with the answer the "
+            "page already gives, word for word, and nothing that is not on "
+            "the page."
+        ),
+        metric="Brand mention or citation",
+        metric_key="ai_presence",
+        evidence=(
+            f"facts_crawl_page_snapshots: {count} question headings",
+            "facts_crawl_page_schema: no FAQPage block",
+        ),
+        check_after_days=30,
+    )
+
+
 def v5_add_an_extractable_structure(
     target: ScoredCandidate, page: PageFacts
 ) -> Prescription | None:
@@ -347,6 +401,10 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
     v6_rehoming,
     v1_term_in_high_value_spots,
     v2_answer_block,
+    # Before the rest: the answers are already written, so this is fifteen
+    # minutes of markup against a page rewrite. Cheapest first where the
+    # cheap thing is also the right thing.
+    v7_mark_up_the_faq,
     # Before V-3 and V-4: when an engine is visibly lifting an answer,
     # giving it something to lift beats marking up or linking to a page it
     # cannot quote.
