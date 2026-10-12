@@ -140,6 +140,19 @@ def _maybe_pull_serp_features() -> None:
         db.close()
 
 
+def _maybe_run_month() -> None:
+    from app.services.monthly_run import maybe_run_month
+
+    db = SessionLocal()
+    try:
+        maybe_run_month(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("Monthly engine run scheduler failed")
+    finally:
+        db.close()
+
+
 def main() -> None:
     settings = get_settings()
     logger.warning(
@@ -158,6 +171,7 @@ def main() -> None:
         _maybe_daily_sync()
         _maybe_check_results()
         _maybe_pull_serp_features()
+        _maybe_run_month()
         worked = run_once()
         if not worked:
             time.sleep(settings.worker_poll_interval_seconds)

@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     #: Terms per client per month. The cost is this times the number of
     #: clients whose Search Console data makes the result actionable.
     serp_pull_limit: int = 20
+    #: The monthly engine run. On this day of the month it runs the month
+    #: before — Search Console lags about three days, so by the fifth the
+    #: previous month has closed out.
+    monthly_run_enabled: bool = True
+    monthly_run_day: int = 5
+    monthly_run_hour_utc: int = 12
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))

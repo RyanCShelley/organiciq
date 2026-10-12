@@ -493,3 +493,93 @@ def latest_record(db: Session, client: Client) -> MonthlyRecord | None:
         .order_by(MonthlyRecord.month.desc())
         .first()
     )
+
+
+# ── Running it ──────────────────────────────────────────────────────────────
+
+RUN_CHECKPOINT = "monthly_engine_run"
+
+
+def _has_data(db: Session, client: Client) -> bool:
+    """Whether there is anything to run on at all.
+
+    Deliberately weak: a client whose sync has gone stale should get a
+    Withheld record saying so, which is a more useful thing to open than an
+    empty page. What this excludes is a client with no data whatsoever, where
+    a run would produce noise rather than an answer.
+    """
+    return (
+        _last_fact(db, FactGa4Traffic, FactGa4Traffic.date, client.id) is not None
+        and _last_fact(db, FactGscPage, FactGscPage.date, client.id) is not None
+    )
+
+
+def maybe_run_month(db: Session, *, today: date | None = None) -> bool:
+    """Run last month for every client with data, once a month.
+
+    The month before, not the one we are in: a month is reviewed once it has
+    finished. It replaces whatever is saved for that month rather than
+    skipping it — a run made mid-month from partial data is exactly what this
+    supersedes, and the engine reads the same facts every time, so there is
+    no answer somebody preferred to protect. Assignments survive: they are
+    keyed on the slot uid, and a slot whose action changed says so.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.settings import get_settings
+    from app.models.scheduler import SchedulerCheckpoint
+
+    settings = get_settings()
+    if not settings.monthly_run_enabled:
+        return False
+
+    now = datetime.now(timezone.utc)
+    today = today or now.date()
+    if today.day < settings.monthly_run_day or now.hour < settings.monthly_run_hour_utc:
+        return False
+
+    checkpoint = (
+        db.query(SchedulerCheckpoint)
+        .filter(SchedulerCheckpoint.name == RUN_CHECKPOINT)
+        .with_for_update()
+        .one_or_none()
+    )
+    if checkpoint is None:
+        checkpoint = SchedulerCheckpoint(name=RUN_CHECKPOINT, last_run_date=None)
+        db.add(checkpoint)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            return False
+
+    last = checkpoint.last_run_date
+    if last is not None and (last.year, last.month) == (today.year, today.month):
+        db.rollback()
+        return False
+
+    # Claim the month before running anything, so a crash partway through
+    # does not restart the whole portfolio on the next loop.
+    checkpoint.last_run_date = today
+    checkpoint.updated_at = now
+    db.commit()
+
+    month = _previous_month(month_key(today))
+    ran = 0
+    skipped = 0
+    for client in db.query(Client).all():
+        if not _has_data(db, client):
+            skipped += 1
+            continue
+        try:
+            save_record(db, client, month=month, today=today)
+            ran += 1
+        except Exception:  # noqa: BLE001 — one bad client must not stop the rest
+            db.rollback()
+            logger.exception("Monthly run failed for %s", client.slug)
+
+    logger.info(
+        "Monthly run for %s: %d client(s) run, %d skipped for want of data",
+        month, ran, skipped,
+    )
+    return True
