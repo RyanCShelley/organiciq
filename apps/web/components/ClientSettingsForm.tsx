@@ -54,6 +54,19 @@ function formatCadence(cadence?: string | null): string {
   }
 }
 
+/**
+ * The markets SE Ranking has an index for.
+ *
+ * Spelled as `resolve_source` matches them, so a saved value resolves to a
+ * real index rather than silently falling back.
+ */
+const SEARCH_MARKETS = [
+  { value: "United States" },
+  { value: "United Kingdom" },
+  { value: "Canada" },
+  { value: "Australia" },
+] as const;
+
 export function ClientSettingsForm({
   client,
   tiers,
@@ -149,9 +162,44 @@ export function ClientSettingsForm({
             placeholder="From growth calculator"
           />
         </FieldLabel>
-        <FieldLabel label="Primary market">
-          <Input name="primary_market" defaultValue={client.primary_market ?? ""} />
-        </FieldLabel>
+        {/* It picks which SE Ranking regional index the domain pull reads,
+            and matches on a country. As free text it invited "Central NY",
+            which matches nothing and falls back to the United States while
+            looking filled in. */}
+        <div className="flex flex-col gap-1">
+          <FieldLabel label="Search market">
+            <Select
+              name="primary_market"
+              defaultValue={
+                SEARCH_MARKETS.some((m) => m.value === client.primary_market)
+                  ? (client.primary_market as string)
+                  : client.primary_market
+                    ? "__other"
+                    : ""
+              }
+            >
+              <option value="">Not set — United States</option>
+              {SEARCH_MARKETS.map((market) => (
+                <option key={market.value} value={market.value}>
+                  {market.value}
+                </option>
+              ))}
+              {/* Whatever is already stored stays selectable, so opening
+                  this page and saving cannot quietly rewrite it. */}
+              {client.primary_market &&
+              !SEARCH_MARKETS.some((m) => m.value === client.primary_market) ? (
+                <option value="__other">
+                  {client.primary_market} — not a search market, treated as
+                  United States
+                </option>
+              ) : null}
+            </Select>
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            Which SE Ranking index the domain pull reads. It is a country, not
+            a city — the four above are the ones SE Ranking has.
+          </p>
+        </div>
         <FieldLabel label="Timezone">
           <Input name="timezone" defaultValue={client.timezone} />
         </FieldLabel>

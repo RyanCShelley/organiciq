@@ -108,12 +108,18 @@ export async function updateClientSettingsAction(formData: FormData) {
     }
   }
 
+  // The market dropdown keeps whatever was already stored as a selectable
+  // option, under a sentinel. Choosing it means "leave it alone", so the
+  // field is omitted rather than saved as the sentinel.
+  const marketRaw = String(formData.get("primary_market") || "").trim();
+  const market = marketRaw === "__other" ? undefined : marketRaw || null;
+
   const body = {
     client_name: String(formData.get("client_name") || "").trim(),
     domain: String(formData.get("domain") || "").trim(),
     tier_id: String(formData.get("tier_id") || "").trim(),
     start_date: startRaw || null,
-    primary_market: String(formData.get("primary_market") || "").trim() || null,
+    ...(market === undefined ? {} : { primary_market: market }),
     timezone: String(formData.get("timezone") || "").trim() || "America/New_York",
     monthly_lead_goal: monthlyRaw === "" ? null : Number(monthlyRaw),
     account_sheet_url: sheetRaw || null,
