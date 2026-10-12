@@ -295,6 +295,11 @@ class EngineAction(Base):
     due: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
     skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Whether a person put this in the plan or took it out. Null defers to
+    #: the engine. The engine ranks; it does not know the team is on a
+    #: larger project this month.
+    in_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    in_plan_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: What was on screen when somebody acted on this slot. `uid` is keyed on
     #: the slot number, so a re-run that reshuffles the slots would otherwise
     #: carry an assignment onto a different action without saying so.

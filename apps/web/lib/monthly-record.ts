@@ -50,6 +50,13 @@ export type RecordAction = {
   flags?: string[];
 };
 
+/** Everything the engine weighed, slotted or not. */
+export type Candidate = RecordAction & {
+  /** Null when the engine left it out; the reason says why. */
+  slot: number | null;
+  not_slotted_because: string | null;
+};
+
 export type MonthlyRecord = {
   client: string;
   client_name?: string;
@@ -87,6 +94,7 @@ export type MonthlyRecord = {
     target_url?: string;
     reason?: string;
   }[];
+  candidates?: Candidate[];
   data_gaps: { input: string; status: string }[];
   previous_results: {
     action_uid?: string;
@@ -195,6 +203,9 @@ export type SlotState = {
   assignee_name: string | null;
   due: string | null;
   skip_reason: string | null;
+  /** A person put it in the plan or took it out. Null defers to the engine. */
+  in_plan: boolean | null;
+  in_plan_reason: string | null;
   sent_at: string | null;
   /** The day the work went live. The results loop reads this. */
   shipped_on: string | null;

@@ -71,6 +71,23 @@ class EmptySlot:
 
 
 @dataclass(frozen=True)
+class Considered:
+    """A prescription the engine judged, slotted or not.
+
+    Every one of them, not the handful that fit. SMA's October had 67 viable
+    actions, five in slots and four named as skipped: the other 58 existed
+    nowhere a reader could see them, so "show me the options" had no answer.
+    """
+
+    prescription: Prescription
+    #: The slot it took, or None.
+    slot: int | None = None
+    spillover: bool = False
+    #: Why it took no slot. None when it did.
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class Plan:
     filled: tuple[FilledSlot, ...]
     empty: tuple[EmptySlot, ...]
@@ -78,6 +95,8 @@ class Plan:
     #: "Not this month" so a passing branch's work is visible without
     #: competing for the month.
     not_this_month: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    #: Everything the engine weighed, in rank order, whatever became of it.
+    considered: tuple[Considered, ...] = field(default_factory=tuple)
 
 
 def _branch_status(branches: list[BranchResult], branch: Branch) -> Status | None:
@@ -98,7 +117,7 @@ def fill_slots(
     it. This decides who gets a slot, not what is worth doing.
     """
     if slots <= 0:
-        return Plan(filled=(), empty=(), not_this_month=())
+        return Plan(filled=(), empty=(), not_this_month=(), considered=())
 
     # The constraint first, then the other failing branches down the ladder.
     order: list[Branch] = []
@@ -113,11 +132,20 @@ def fill_slots(
     filled: list[FilledSlot] = []
     used_urls: set[str] = set()
     skipped: list[dict[str, Any]] = []
+    considered: list[Considered] = []
 
     for branch in order:
         for prescription in prescriptions_by_branch.get(branch, []):
             if len(filled) >= slots:
-                break
+                # Out of slots, not out of work. Recorded rather than
+                # dropped: this is the bulk of what the engine found.
+                considered.append(
+                    Considered(
+                        prescription=prescription,
+                        reason="The plan's slots were taken by higher-scoring work.",
+                    )
+                )
+                continue
             url = (prescription.target_url or "").rstrip("/").lower()
             if url and url in used_urls:
                 # One action per URL per month. Three findings on one page is
@@ -135,6 +163,15 @@ def fill_slots(
                         ),
                     }
                 )
+                considered.append(
+                    Considered(
+                        prescription=prescription,
+                        reason=(
+                            "Another action this month already takes this page, "
+                            "and one page is one job."
+                        ),
+                    )
+                )
                 continue
             used_urls.add(url)
             filled.append(
@@ -144,8 +181,13 @@ def fill_slots(
                     spillover=branch is not constraint,
                 )
             )
-        if len(filled) >= slots:
-            break
+            considered.append(
+                Considered(
+                    prescription=prescription,
+                    slot=len(filled),
+                    spillover=branch is not constraint,
+                )
+            )
 
     # Everything in a branch that cannot take a slot. Shown, not hidden: a
     # passing branch's candidates are real work, they are simply not this
@@ -171,12 +213,29 @@ def fill_slots(
                     ),
                 }
             )
+            considered.append(
+                Considered(
+                    prescription=prescription,
+                    reason=(
+                        f"{branch.value.title()} passes, so it cannot take a slot "
+                        "this month."
+                        if status is Status.PASS
+                        else f"{branch.value.title()} could not be judged, so it "
+                        "cannot take a slot this month."
+                    ),
+                )
+            )
 
     empty = tuple(
         EmptySlot(slot=n, reason=_empty_reason(branches, order))
         for n in range(len(filled) + 1, slots + 1)
     )
-    return Plan(filled=tuple(filled), empty=empty, not_this_month=tuple(skipped))
+    return Plan(
+        filled=tuple(filled),
+        empty=empty,
+        not_this_month=tuple(skipped),
+        considered=tuple(considered),
+    )
 
 
 def _empty_reason(branches: list[BranchResult], order: list[Branch]) -> str:

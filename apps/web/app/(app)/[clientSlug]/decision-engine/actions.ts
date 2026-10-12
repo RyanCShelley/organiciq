@@ -56,6 +56,8 @@ type SlotState = {
   assignee_name: string | null;
   due: string | null;
   skip_reason: string | null;
+  in_plan: boolean | null;
+  in_plan_reason: string | null;
   sent_at: string | null;
   shipped_on: string | null;
   teamwork_task_id: string | null;
@@ -147,6 +149,29 @@ export async function shipSlotAction(input: {
     input.slug,
     `/decisions/records/${encodeURIComponent(input.month)}/slots/${encodeURIComponent(input.uid)}/shipped`,
     { shipped_on: input.shippedOn || null },
+  );
+}
+
+/**
+ * Put an action in the month's plan, or take it out.
+ *
+ * The engine ranks and fills the slots; it does not know the team is on a
+ * larger project this month. Passing null hands the decision back to it
+ * rather than freezing whatever it last said.
+ */
+export async function setInPlanAction(input: {
+  clientId: string;
+  slug: string;
+  month: string;
+  uid: string;
+  inPlan: boolean | null;
+  reason?: string;
+}): Promise<SlotResult> {
+  return slotPost(
+    input.clientId,
+    input.slug,
+    `/decisions/records/${encodeURIComponent(input.month)}/slots/${encodeURIComponent(input.uid)}/in-plan`,
+    { in_plan: input.inPlan, reason: input.reason ?? null },
   );
 }
 

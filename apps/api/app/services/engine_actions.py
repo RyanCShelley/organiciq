@@ -42,12 +42,21 @@ class RecordSlot:
 
 
 def slots_in_record(record: dict) -> dict[str, RecordSlot]:
-    """Every uid the saved record offers, actions and incidents alike."""
+    """Every uid the saved record offers.
+
+    `candidates` is in here as well as `actions`: an action the engine left
+    out can be put into the plan, and from that moment it is assigned, sent
+    and measured like any other. Only the slotted ones carry a slot number.
+    """
     out: dict[str, RecordSlot] = {}
-    for kind, key in (("action", "actions"), ("incident", "incidents")):
+    for kind, key in (
+        ("action", "actions"),
+        ("incident", "incidents"),
+        ("action", "candidates"),
+    ):
         for row in record.get(key) or []:
             uid = row.get("action_uid")
-            if not uid:
+            if not uid or uid in out:
                 continue
             out[uid] = RecordSlot(
                 uid=uid,
@@ -221,6 +230,30 @@ def mark_shipped(
     return row
 
 
+def set_in_plan(
+    db: Session,
+    client: Client,
+    slot: RecordSlot,
+    month: str,
+    *,
+    in_plan: bool | None,
+    reason: str | None = None,
+) -> EngineAction:
+    """Put an action in the month's plan, or take it out.
+
+    `None` hands the decision back to the engine rather than freezing
+    whatever it last said, so a re-run with better data can change its mind
+    about anything nobody has an opinion on.
+    """
+    row = _row_for(db, client, month, slot)
+    row.in_plan = in_plan
+    row.in_plan_reason = (reason or "").strip() or None
+    row.action_id = slot.action_id
+    row.target_url = slot.target_url
+    db.flush()
+    return row
+
+
 def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
     """One row as the page reads it.
 
@@ -240,6 +273,8 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
         "assignee_name": row.assignee_name,
         "due": row.due.isoformat() if row.due else None,
         "skip_reason": row.skip_reason,
+        "in_plan": row.in_plan,
+        "in_plan_reason": row.in_plan_reason,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
         "shipped_on": row.shipped_on.isoformat() if row.shipped_on else None,
         "teamwork_task_id": row.teamwork_task_id,

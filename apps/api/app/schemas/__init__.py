@@ -478,6 +478,17 @@ class EngineActionAssign(BaseModel):
     due: Date | None = None
 
 
+class EngineActionInPlan(BaseModel):
+    """Put an action in the month's plan, or take it out.
+
+    Null hands the decision back to the engine rather than freezing what it
+    last said.
+    """
+
+    in_plan: bool | None = None
+    reason: str | None = None
+
+
 class EngineActionShipped(BaseModel):
     """The day the work went live. Null clears it."""
 

@@ -72,6 +72,22 @@ RELAUNCH_WINDOW_DAYS = 180
 RELAUNCH_WORDS = ("relaunch", "migration", "migrated", "redesign", "domain change")
 
 
+def action_uid(slug: str, month: str, prescription) -> str:
+    """A stable name for one action on one page.
+
+    Keyed on what the action *is*, not on the slot it happened to take. The
+    slot number was the key until now, so a re-run that reshuffled the order
+    carried an assignment onto a different action — and an action outside
+    the slots had no name at all, which is why none of them could be
+    assigned, sent or measured.
+    """
+    import hashlib
+
+    seed = f"{prescription.action_id}|{prescription.target_url or ''}|{prescription.term or ''}"
+    digest = hashlib.sha1(seed.encode()).hexdigest()[:8]
+    return f"{slug}-{month}-{prescription.action_id.lower()}-{digest}"
+
+
 def month_key(when: date) -> str:
     return f"{when.year:04d}-{when.month:02d}"
 
@@ -395,7 +411,7 @@ def build_record(
         ],
         "actions": [
             {
-                "action_uid": f"{client.slug}-{month}-s{slot.slot}",
+                "action_uid": action_uid(client.slug, month, slot.prescription),
                 "slot": slot.slot,
                 "id": slot.prescription.action_id,
                 "title": slot.prescription.title,
@@ -439,6 +455,37 @@ def build_record(
             )
         ],
         "not_this_month": list(plan.not_this_month),
+        # Everything the engine weighed, so a plan can be argued with. The
+        # slotted ones are in here too, marked — one list to read rather
+        # than two to reconcile.
+        "candidates": [
+            {
+                "action_uid": action_uid(client.slug, month, c.prescription),
+                "slot": c.slot,
+                "spillover": c.spillover,
+                "not_slotted_because": c.reason,
+                "id": c.prescription.action_id,
+                "title": c.prescription.title,
+                "branch": c.prescription.branch.value,
+                "target_url": c.prescription.target_url,
+                "term": c.prescription.term,
+                "score": round(c.prescription.score, 1),
+                "effort_min": c.prescription.effort_min,
+                "why": c.prescription.why,
+                "evidence": list(c.prescription.evidence),
+                "done_when": c.prescription.done_when,
+                "metric": c.prescription.metric,
+                "metric_key": c.prescription.metric_key,
+                "check_on": (
+                    today
+                    + timedelta(
+                        days=c.prescription.check_after_days or CHECK_AFTER_DAYS
+                    )
+                ).isoformat(),
+                "flags": list(c.prescription.flags),
+            }
+            for c in plan.considered
+        ],
         "data_gaps": [
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))
         ]

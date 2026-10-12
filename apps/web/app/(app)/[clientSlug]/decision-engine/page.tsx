@@ -5,6 +5,7 @@ import {
   type SlotProgress,
 } from "@/components/DecisionEngine/ConstraintCard";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
+import { OptionsPanel } from "@/components/DecisionEngine/OptionsPanel";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
@@ -16,6 +17,7 @@ import {
   formatDay,
   monthName,
   type Assignee,
+  type Candidate,
   type MonthlyRecord,
   type RunSummary,
   type SlotState,
@@ -159,12 +161,31 @@ export default async function DecisionEnginePage({
     );
   }
 
+  // The plan is the engine's ranking unless somebody said otherwise. An
+  // action taken out drops off; one added joins the end, because a slot
+  // number belongs to the engine's ordering and this is not that.
+  const candidates: Candidate[] = record.candidates ?? [];
+  const engineChose = new Set(
+    candidates.filter((c) => c.slot !== null).map((c) => c.action_uid),
+  );
+  const planned = candidates.filter((c) => {
+    const override = slotStates.get(c.action_uid)?.in_plan;
+    return override ?? engineChose.has(c.action_uid);
+  });
+  // Fall back to the saved actions for a record written before candidates
+  // were stored, so an older month still renders its plan.
+  const actions = candidates.length ? planned : record.actions;
+  const added = planned.filter((c) => !engineChose.has(c.action_uid)).length;
+  const removed = candidates.filter(
+    (c) => engineChose.has(c.action_uid) && slotStates.get(c.action_uid)?.in_plan === false,
+  ).length;
+
   // Counted from what the team did, not from what the engine prescribed:
   // five filled slots nobody owns is not five slots of progress.
-  const states = record.actions.map((a) => slotStates.get(a.action_uid)?.status);
+  const states = actions.map((a) => slotStates.get(a.action_uid)?.status);
   const progress: SlotProgress = {
     total: record.action_slots,
-    filled: record.actions.length,
+    filled: actions.length,
     assigned: states.filter((s) => s === "assigned" || s === "done").length,
     skipped: states.filter((s) => s === "skipped").length,
   };
@@ -292,10 +313,17 @@ export default async function DecisionEnginePage({
                 {record.action_slots}{" "}
                 {record.action_slots === 1 ? "slot" : "slots"}, filled from the
                 constraint. Leftovers go to the next failing branch.
+                {added || removed ? (
+                  <span className="ml-1 font-semibold text-[var(--text-primary)]">
+                    {added ? `${added} added` : ""}
+                    {added && removed ? ", " : ""}
+                    {removed ? `${removed} taken out` : ""} by you.
+                  </span>
+                ) : null}
               </p>
             </div>
 
-            {record.actions.map((action) => (
+            {actions.map((action) => (
               <SlotCard
                 key={action.action_uid}
                 action={action}
@@ -322,6 +350,16 @@ export default async function DecisionEnginePage({
               </p>
             ) : null}
           </section>
+
+          {candidates.length > 0 ? (
+            <OptionsPanel
+              candidates={candidates}
+              states={slotStates}
+              clientId={clientId}
+              slug={selectedClient.slug}
+              month={record.month}
+            />
+          ) : null}
 
           {record.not_this_month.length > 0 ? (
             <section

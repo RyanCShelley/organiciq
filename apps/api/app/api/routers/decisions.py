@@ -21,6 +21,7 @@ from app.models.client import Client
 from app.models.decision import DecisionStatus, EngineAction, ExcludedPage
 from app.schemas import (
     EngineActionAssign,
+    EngineActionInPlan,
     EngineActionShipped,
     ExcludedPageIn,
     EngineActionSkip,
@@ -468,6 +469,29 @@ def assign_slot(
         assignee_name=payload.assignee_name or (account.name if account else None),
         due=payload.due,
         db_user_id=account.id if account else None,
+    )
+    db.commit()
+    return engine_action_service.serialise(row, slot=slot)
+
+
+@router.post("/records/{month}/slots/{uid}/in-plan")
+def set_slot_in_plan(
+    month: str,
+    uid: str,
+    payload: EngineActionInPlan,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Put an action in the month's plan, or take it out.
+
+    The engine ranks and fills the slots; it does not know the team is on a
+    larger project this month. Sending `null` hands the decision back rather
+    than freezing whatever the engine last said.
+    """
+    _, slot = _slot_or_404(db, client, month, uid)
+    row = engine_action_service.set_in_plan(
+        db, client, slot, month, in_plan=payload.in_plan, reason=payload.reason
     )
     db.commit()
     return engine_action_service.serialise(row, slot=slot)
