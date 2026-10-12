@@ -18,6 +18,7 @@ import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
+import { AiAnswerCell } from "@/components/analytics/AiAnswerCell";
 import { tableControls, filterRows } from "@/lib/table-sort";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
@@ -426,6 +427,20 @@ export default async function WatchListPage({
                     key: "checked",
                     header: "Checked",
                     render: (row) => <CheckedAt value={row.checked_at} />,
+                  },
+                  {
+                    key: "answer",
+                    header: "Answer",
+                    // Its own control, so the row's own link does not
+                    // swallow the click.
+                    interactive: true,
+                    render: (row) => (
+                      <AiAnswerCell
+                        clientId={clientId}
+                        promptId={row.prompt_id}
+                        cited={row.brand_cited}
+                      />
+                    ),
                   },
                 ]}
                 rows={filterRows(aiRows, aiTable.searchValue, (row) => [
