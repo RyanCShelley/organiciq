@@ -13,7 +13,11 @@ import pytest
 
 from app.decisions.catalog import PageFacts, prescribe, v7_mark_up_the_faq
 from app.decisions.targets import Candidate, ScoredCandidate
-from app.services.target_signals import _declares_faq, _is_question
+from app.services.target_signals import (
+    _answered_questions,
+    _declares_faq,
+    _is_question,
+)
 
 QUESTIONS = ("How is carbon fibre made", "Why does it cost more?", "Is it recyclable?")
 
@@ -33,7 +37,7 @@ def _target() -> ScoredCandidate:
 
 
 def _page(**kw) -> PageFacts:
-    base = dict(url="/a", question_headings=QUESTIONS, has_faq_schema=False)
+    base = dict(url="/a", answered_questions=QUESTIONS, has_faq_schema=False)
     base.update(kw)
     return PageFacts(**base)
 
@@ -56,8 +60,8 @@ def test_it_stays_quiet_where_the_markup_is_already_there():
 def test_one_question_shaped_heading_is_not_an_faq():
     # A page with a single "How we work" heading is not an FAQ, and marking
     # it up as one would be declaring something that is not there.
-    assert v7_mark_up_the_faq(_target(), _page(question_headings=("How we work?",))) is None
-    assert v7_mark_up_the_faq(_target(), _page(question_headings=())) is None
+    assert v7_mark_up_the_faq(_target(), _page(answered_questions=("How we work?",))) is None
+    assert v7_mark_up_the_faq(_target(), _page(answered_questions=())) is None
 
 
 def test_the_done_when_forbids_inventing_answers():
@@ -114,3 +118,40 @@ def test_faq_schema_is_found_anywhere_in_the_document(raw, expected):
 )
 def test_a_question_heading_is_what_a_visitor_reads_as_one(heading, is_question):
     assert _is_question(heading) is is_question
+
+
+# ── Asking is not answering ─────────────────────────────────────────────────
+
+
+def test_a_question_with_no_answer_under_it_does_not_count():
+    """On its first run V-7 fired on 111 of SMA's 142 mapped pages.
+
+    "Is your brand mentioned in AI search?" is a sales line, not an FAQ
+    entry, and marking it up declares an answer that is not there.
+    """
+    found = _answered_questions(
+        [
+            {"heading": "Is your brand mentioned in AI search?", "first_paragraph": "Find out."},
+            {
+                "heading": "How is carbon fibre made",
+                "first_paragraph": (
+                    "It is made by heating precursor fibres in an inert atmosphere "
+                    "until only carbon remains, then weaving them into cloth."
+                ),
+            },
+            {
+                "heading": "Our services",
+                "first_paragraph": (
+                    "A long paragraph about the many services we offer to clients "
+                    "across the region, which is not a question at all."
+                ),
+            },
+        ]
+    )
+    # Only the one that is both asked and answered.
+    assert found == ("How is carbon fibre made",)
+
+
+def test_a_question_with_no_paragraph_at_all_does_not_count():
+    assert _answered_questions([{"heading": "Why us?", "first_paragraph": ""}]) == ()
+    assert _answered_questions([{"heading": "Why us?"}]) == ()

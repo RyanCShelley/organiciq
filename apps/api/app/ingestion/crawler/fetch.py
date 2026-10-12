@@ -254,6 +254,11 @@ class CrawlResult:
     sitemap_unreadable: bool = False
     #: Where the sitemap was actually found, for the operator.
     sitemap_location: str | None = None
+    #: What went wrong at each sitemap tried, as `(url, reason)`. "Not found"
+    #: and "declared at a URL that 404s" are different problems: the second
+    #: means something is pointing search engines at a dead address, and
+    #: only the first is fixed by finding where the sitemap really is.
+    sitemap_failures: list[tuple[str, str]] = field(default_factory=list)
     hit_page_limit: bool = False
     #: Pages the server turned away for the whole crawl. Reported as a
     #: condition of the run, not as findings about the site.
@@ -353,6 +358,7 @@ async def _load_sitemap_urls(
     host: str,
     budget: int,
     scope: str | None = None,
+    failures: list[tuple[str, str]] | None = None,
 ) -> set[str]:
     """URLs listed in the sitemaps, following index files one level down.
 
@@ -372,6 +378,10 @@ async def _load_sitemap_urls(
         try:
             response = await client.get(url, follow_redirects=True)
             if response.status_code >= 400:
+                # A declared sitemap that 404s is not the same as no
+                # sitemap: something is sending crawlers to a dead address.
+                if failures is not None:
+                    failures.append((url, f"returns {response.status_code}"))
                 continue
             body = response.content
             # WordPress and Yoast both serve .xml.gz, and httpx only
@@ -381,10 +391,24 @@ async def _load_sitemap_urls(
             if body[:2] == b"\x1f\x8b":
                 body = gzip.decompress(body)
             root = ElementTree.fromstring(body)
-        except (httpx.HTTPError, ElementTree.ParseError, OSError, EOFError) as exc:
+        except ElementTree.ParseError as exc:
+            if failures is not None:
+                failures.append((url, "is not valid XML"))
+            logger.info("sitemap %s unreadable: %s", url, exc)
+            continue
+        except (httpx.HTTPError, OSError, EOFError) as exc:
+            if failures is not None:
+                failures.append((url, f"could not be fetched: {exc}"))
             logger.info("sitemap %s unreadable: %s", url, exc)
             continue
         tag = root.tag.rsplit("}", 1)[-1]
+        if tag not in ("urlset", "sitemapindex"):
+            # Parsed, and not a sitemap. A soft 404 that serves XHTML gets
+            # this far, and without the check it reads as a sitemap with no
+            # URLs in it rather than as the wrong document.
+            if failures is not None:
+                failures.append((url, f"is a <{tag}> document, not a sitemap"))
+            continue
         for loc in root.iter():
             if loc.tag.rsplit("}", 1)[-1] != "loc" or not (loc.text or "").strip():
                 continue
@@ -470,7 +494,12 @@ async def crawl_site(
         if sitemap_url:
             sitemap_locations = [sitemap_url, *sitemap_locations]
         result.sitemap_urls = await _load_sitemap_urls(
-            client, sitemap_locations, host=host, budget=page_limit * 4, scope=scope
+            client,
+            sitemap_locations,
+            host=host,
+            budget=page_limit * 4,
+            scope=scope,
+            failures=result.sitemap_failures,
         )
 
         # Nothing declared, or what was declared yielded nothing: try the usual

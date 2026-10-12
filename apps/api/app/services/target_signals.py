@@ -58,6 +58,24 @@ def _is_question(text: str) -> bool:
     return first in _QUESTION_OPENERS
 
 
+def _answered_questions(sections: list[dict]) -> tuple[str, ...]:
+    """Questions the page asks and answers.
+
+    The heading has to be a question and the passage under it has to say
+    something. Asking alone is a sales line — "Is your brand mentioned in AI
+    search?" — and counting those made V-7 fire on 111 of SMA's 142 pages.
+    """
+    from app.decisions.catalog import MIN_ANSWER_CHARS
+
+    out: list[str] = []
+    for section in sections:
+        heading = str(section.get("heading") or "").strip()
+        answer = str(section.get("first_paragraph") or "").strip()
+        if heading and _is_question(heading) and len(answer) >= MIN_ANSWER_CHARS:
+            out.append(heading)
+    return tuple(out)
+
+
 def _declares_faq(raw: object) -> bool:
     """Whether the page's JSON-LD declares an FAQ.
 
@@ -280,7 +298,7 @@ def load_target_inputs(
                 description=getattr(snapshot, "description", None),
                 headings=headings,
                 sections=sections,
-                question_headings=tuple(h for h in headings if _is_question(h)),
+                answered_questions=_answered_questions(raw_sections),
                 has_faq_schema=url in faq_schema_urls,
                 faq_questions=faqs,
                 entity_properties=frozenset(schema_by_url.get(url, set())),

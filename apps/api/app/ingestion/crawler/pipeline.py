@@ -45,6 +45,19 @@ UPSERT_BATCH_SIZE = 500
 MAX_STORED_LINKS = 100_000
 
 
+def _sitemap_failure_note(result) -> str | None:
+    """Why the declared sitemap did not work, in the words of the failure.
+
+    "Not found" sent people looking for a sitemap that was never missing:
+    SMA's robots.txt declares /sitemap_index.xml and that URL returns 404,
+    which is a different job from finding where the sitemap really is.
+    """
+    if not getattr(result, "sitemap_failures", None):
+        return None
+    url, reason = result.sitemap_failures[0]
+    return f"sitemap declared at {url} {reason}"
+
+
 def _duplicate_keys(pages: list[CrawledPage], attribute: str) -> set[str]:
     """Values that appear on more than one indexable page."""
     counts = Counter(
@@ -215,8 +228,14 @@ def _site_issue_rows(
         codes.append(("robots_disallow_crawling", {}))
 
     if result.sitemap_unreadable:
-        # Declared and broken, which is worse than absent: something references it.
-        codes.append(("robots_has_errors", {"reason": "sitemap declared but unreadable"}))
+        # Declared and broken, which is worse than absent: something
+        # references it, so crawlers are being sent to a dead address.
+        codes.append(
+            (
+                "robots_has_errors",
+                {"reason": _sitemap_failure_note(result) or "sitemap declared but unreadable"},
+            )
+        )
     elif not result.sitemap_urls:
         codes.append(("sitemap_missing", {}))
 
@@ -460,7 +479,7 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
             where = result.sitemap_location or "robots.txt"
             sitemap_note = f"sitemap {len(result.sitemap_urls)} URLs via {where}"
         elif result.sitemap_unreadable:
-            sitemap_note = "sitemap declared but unreadable"
+            sitemap_note = _sitemap_failure_note(result) or "sitemap declared but unreadable"
         else:
             sitemap_note = "no sitemap found"
         job.error_message = (
