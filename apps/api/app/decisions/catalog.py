@@ -447,12 +447,22 @@ FEATURE_SHAPE = {
 }
 
 
+#: A SERP feature is drawn from the results on page one. Prescribing the
+#: format that wins one, to a page sitting at 47, is work that cannot pay:
+#: the page is not in the set the feature is built from. SMA's "aeo agency"
+#: is the case — the SERP carries an AI Overview, a People Also Ask box and
+#: an image pack, and SMA holds no organic position on the page at all.
+FEATURE_MAX_POSITION = 10.0
+
+
 def t2_match_the_serp_format(page: PageCandidate) -> Prescription | None:
     """A feature on the query that the client does not hold."""
     if not page.serp_pulled or not page.top_query:
         return None
     # A navigational query's SERP is not a format to match.
     if page.top_query_is_navigational:
+        return None
+    if page.position is None or page.position > FEATURE_MAX_POSITION:
         return None
     winnable = [f for f in page.missing_serp_features if f in WINNABLE_FEATURES]
     if not winnable:
@@ -469,9 +479,10 @@ def t2_match_the_serp_format(page: PageCandidate) -> Prescription | None:
         effort_min=45,
         why=(
             f"“{page.top_query}” draws {page.impressions:.0f} impressions to "
-            f"this page and the results carry {WINNABLE_FEATURES[feature]} "
-            "that the site does not hold. The page is competing for what is "
-            "left after it."
+            f"this page, which averages position {page.position:.1f}, and the "
+            f"results carry {WINNABLE_FEATURES[feature]} the site does not "
+            "hold. The page is on page one and competing for what is left "
+            "after it."
         ),
         done_when=(
             f"The page carries {FEATURE_SHAPE[feature]}, answering the query "

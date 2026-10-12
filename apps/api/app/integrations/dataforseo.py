@@ -160,6 +160,11 @@ def fetch(
             "language_code": language_code,
             "depth": depth,
             "device": "desktop",
+            # Without this the AI Overview comes back as a type with no
+            # references, so "the client does not hold it" would be a
+            # consequence of not having looked — on the one feature where
+            # that matters most.
+            "load_async_ai_overview": True,
         }
     ]
     owns_client = client is None

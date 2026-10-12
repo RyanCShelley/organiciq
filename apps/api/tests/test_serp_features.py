@@ -276,3 +276,37 @@ def test_a_pull_stops_on_bad_credentials_rather_than_failing_once_per_term(
         dfs.load_config = original  # type: ignore[assignment]
 
     assert len(calls) == 1, "kept going after the credentials were rejected"
+
+
+def test_t2_does_not_prescribe_a_feature_a_page_cannot_reach():
+    """SMA's "aeo agency", verbatim.
+
+    The SERP carries an AI Overview, a People Also Ask box and an image pack,
+    and SMA holds no organic position on page one at all. A feature is drawn
+    from the results on page one, so the format that wins one cannot pay for
+    a page sitting at 47.
+    """
+    assert _t(_page(position=47.0)) is None
+    assert _t(_page(position=None)) is None
+
+    found = _t(_page(position=4.0))
+    assert found is not None and found.action_id == "T-2"
+    assert "position 4.0" in found.why
+
+
+def test_the_pull_asks_for_the_ai_overview_to_be_resolved():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(
+            200,
+            json={"tasks": [{"status_code": 20000, "result": [{"keyword": "x", "item_types": []}]}]},
+        )
+
+    dataforseo.fetch(
+        "x",
+        config=dataforseo.DataForSeoConfig(login="l", password="p"),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert '"load_async_ai_overview":true' in seen["body"].replace(" ", "")
