@@ -124,6 +124,7 @@ def v1_term_in_high_value_spots(
             "100 words, reading as a sentence rather than an insertion."
         ),
         metric="Term position",
+        metric_key="term_position",
         evidence=(
             f"keyword_targets: {term} -> {page.url}",
             f"crawl: missing from {missing_text}",
@@ -159,6 +160,7 @@ def v2_answer_block(target: ScoredCandidate, page: PageFacts) -> Prescription | 
             "FAQPage."
         ),
         metric="Brand mention or citation",
+        metric_key="ai_presence",
         evidence=(f"crawl: {len(page.faq_questions)} questions on the page, none matching",),
     )
 
@@ -185,6 +187,7 @@ def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription |
             "`sameAs` where one exists."
         ),
         metric="Term position and AI citation",
+        metric_key="term_position",
         evidence=(f"facts_crawl_page_schema: {sorted(page.entity_properties) or 'no entity properties'}",),
     )
 
@@ -213,6 +216,7 @@ def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription 
             "or a variant as the anchor."
         ),
         metric="Term position",
+        metric_key="term_position",
         evidence=(
             f"facts_crawl_internal_links: {page.inbound_editorial_links} editorial "
             f"inbound, site median {page.site_median_links:.0f}",
@@ -243,6 +247,7 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
             "change the mapping, or build a page for it."
         ),
         metric="Decision only",
+        metric_key="decision",
         evidence=(
             f"keyword_targets: {candidate.target_url}",
             f"facts_ser_keywords ranking_url: {candidate.ranking_url}",
@@ -354,6 +359,7 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
             "logged so the check has something to compare."
         ),
         metric="Clicks against the curve's expectation",
+        metric_key="page_clicks",
         evidence=(
             f"facts_gsc_pages: {page.clicks:.0f} clicks, "
             f"{page.impressions:.0f} impressions, position {page.position:.1f}",
@@ -393,6 +399,7 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
             "opening logged."
         ),
         metric="Engaged session rate",
+        metric_key="engagement_rate",
         evidence=(
             f"facts_ga4_traffic: {page.sessions:.0f} sessions, "
             f"{rate * 100:.0f}% engaged",
@@ -458,6 +465,7 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
             "page has finished answering what they came for."
         ),
         metric="Leads from sessions starting on this page",
+        metric_key="page_lead_rate",
         evidence=(
             f"facts_crawl_internal_links: no in-content link to a conversion page",
             f"facts_ga4_traffic: {page.sessions:.0f} sessions",
@@ -491,6 +499,7 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
             "page is about rather than the site's standard line."
         ),
         metric="Lead rate for sessions landing on this page",
+        metric_key="page_lead_rate",
         evidence=(
             "facts_crawl_page_snapshots: conversion_elements = 0",
             f"facts_ga4_traffic: {page.sessions:.0f} sessions",
@@ -534,6 +543,7 @@ def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None
             "the link text rewritten for what that offer gives this reader."
         ),
         metric="Lead rate for sessions landing on this page",
+        metric_key="page_lead_rate",
         evidence=(
             f"client_page_stages: {page.stage}",
             f"linked offer stages: {linked}",

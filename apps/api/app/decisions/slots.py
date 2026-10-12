@@ -42,7 +42,13 @@ class Prescription:
     effort_min: int
     why: str
     done_when: str
+    #: What a reader is told the action is judged on.
     metric: str
+    #: What the results loop reads to judge it. A stable key rather than the
+    #: sentence above: parsing "Clicks against the curve's expectation" to
+    #: decide which table to query is a rename away from silently measuring
+    #: nothing. `decision` means there is no number — V-6 settles an argument.
+    metric_key: str = "decision"
     evidence: tuple[str, ...] = field(default_factory=tuple)
     flags: tuple[str, ...] = field(default_factory=tuple)
     #: When this action is judged, where the default 28 days is too soon. A

@@ -49,6 +49,7 @@ from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
 from app.services.page_signals import load_page_candidates
+from app.services.results import capture_before, previous_results
 from app.services.target_signals import load_target_inputs
 from app.services.triage_signals import lead_signals, traffic_signals, visibility_signals
 
@@ -381,6 +382,10 @@ def build_record(
                 "evidence": list(slot.prescription.evidence),
                 "done_when": slot.prescription.done_when,
                 "metric": slot.prescription.metric,
+                # What the results loop reads to judge it. Stored on the
+                # record so a check months later uses the key the action was
+                # prescribed with, not whatever the catalog says by then.
+                "metric_key": slot.prescription.metric_key,
                 "check_on": (
                     today
                     + timedelta(
@@ -403,7 +408,9 @@ def build_record(
             {"input": f"{a.action_id}: {a.reason}", "status": "missing"}
             for a in BLOCKED_ACTIONS
         ],
-        "previous_results": [],
+        "previous_results": previous_results(
+            db, client, month, previous=_previous_month(month)
+        ),
         "excluded_pages": [
             {"url_pattern": x.url_pattern, "reason": x.reason} for x in exclusions
         ],
@@ -455,9 +462,13 @@ def save_record(
     existing.record = record
     db.commit()
     db.refresh(existing)
+
+    # The reading each action starts from, taken as-of the data the run saw.
+    # Without it the check date arrives with nothing to compare against.
+    captured = capture_before(db, client, existing)
     logger.info(
-        "%s %s: %s (%s confidence)",
-        client.slug, month, record["constraint"], record["confidence"],
+        "%s %s: %s (%s confidence), %d before-readings captured",
+        client.slug, month, record["constraint"], record["confidence"], captured,
     )
     return existing
 

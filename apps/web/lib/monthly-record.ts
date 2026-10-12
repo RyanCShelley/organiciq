@@ -84,10 +84,16 @@ export type MonthlyRecord = {
   previous_results: {
     action_uid?: string;
     title?: string;
+    target_url?: string;
     metric?: string;
     before?: number | null;
     after?: number | null;
     result?: "improved" | "no_change" | "worse" | "waiting";
+    check_on?: string;
+    /** Somebody recorded shipping it. Without this the verdict is about the
+     *  metric, not about the work. */
+    shipped?: boolean;
+    skipped?: boolean;
   }[];
   excluded_pages?: { url_pattern: string; reason: string }[];
   excluded_targets?: { keyword: string; target_url: string; reason: string }[];
