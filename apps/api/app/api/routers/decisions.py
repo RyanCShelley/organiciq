@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Annotated
 from uuid import UUID
@@ -40,6 +41,8 @@ from app.services import engine_actions as engine_action_service
 from app.services.decisions import upsert_keyword_page_map
 from app.services.decision_serialization import serialize_diagnose
 from app.services.monthly_run import latest_record, save_record
+
+logger = logging.getLogger("organiciq.decisions")
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
 
@@ -524,12 +527,32 @@ def send_slot(
         effort_min=slot.effort_min,
         record_url=f"{get_settings().web_app_url}/{client.slug}/decision-engine?run={month}",
     )
+    # Whoever holds the slot here should hold the task there. Matched on
+    # email rather than through a mapping somebody has to maintain — the
+    # addresses are the same in both systems. No match means the task is
+    # created unassigned rather than not created.
+    assignee_teamwork_id: str | None = None
+    if existing is not None and existing.assignee_user_id:
+        from app.models.user import User
+
+        assignee = db.get(User, existing.assignee_user_id)
+        if assignee is not None:
+            try:
+                assignee_teamwork_id = teamwork.person_id_for(
+                    assignee.email, teamwork.list_people()
+                )
+            except teamwork.TeamworkError:
+                logger.warning(
+                    "Could not read Teamwork people; sending %s unassigned", uid
+                )
+
     try:
         created = teamwork.create_task(
             tasklist_id=client.teamwork_tasklist_id or "",
             name=name,
             description=description,
             due=existing.due.isoformat() if existing is not None and existing.due else None,
+            assignee_teamwork_id=assignee_teamwork_id,
         )
     except teamwork.TeamworkError as exc:
         raise HTTPException(
@@ -665,6 +688,41 @@ def confirm_page_stages(
 # The table has existed since the engine did and nothing could write to it,
 # so "we are not working on careers" was a thing somebody could say and not
 # record. Boys Electrical's only traffic action was on /careers.
+
+
+@router.get("/teamwork/people")
+def list_teamwork_people(
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Teamwork people, matched to OrganicIQ staff by email.
+
+    What the page needs is not the list but the gaps in it: an assignee with
+    no Teamwork account means a task that arrives with nobody on it, and
+    that is worth saying before somebody presses Send.
+    """
+    from app.models.user import User
+
+    if not teamwork.configured():
+        return {"configured": False, "matched": [], "unmatched": [], "error": None}
+    try:
+        people = teamwork.list_people()
+    except teamwork.TeamworkError as exc:
+        return {"configured": True, "matched": [], "unmatched": [], "error": str(exc)}
+
+    matched: list[dict] = []
+    unmatched: list[dict] = []
+    for user in db.query(User).filter(User.is_active.is_(True)).order_by(User.email):
+        found = teamwork.person_id_for(user.email, people)
+        row = {"email": user.email, "name": user.name, "teamwork_id": found}
+        (matched if found else unmatched).append(row)
+    return {
+        "configured": True,
+        "error": None,
+        "people": len(people),
+        "matched": matched,
+        "unmatched": unmatched,
+    }
 
 
 @router.get("/teamwork/tasklists")

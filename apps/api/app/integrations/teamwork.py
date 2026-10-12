@@ -295,3 +295,98 @@ def list_tasklists(
 
     found.sort(key=lambda t: ((t.project_name or "~").lower(), t.name.lower()))
     return found
+
+
+@dataclass(frozen=True)
+class Person:
+    id: str
+    email: str
+    name: str
+
+
+PEOPLE_PAGE_SIZE = 250
+MAX_PEOPLE_PAGES = 8
+
+
+def parse_people(body: dict) -> list[Person]:
+    """People from a v3 response.
+
+    Matched to OrganicIQ staff by email rather than through a mapping table
+    somebody has to maintain: the addresses are the same in both systems,
+    and a mapping that drifts is worse than no mapping.
+    """
+    rows = body.get("people")
+    if not isinstance(rows, list):
+        rows = body.get("users") if isinstance(body.get("users"), list) else []
+
+    out: list[Person] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        person_id = _as_text(row.get("id"))
+        email = _as_text(row.get("email")) or _as_text(row.get("email-address"))
+        if not person_id or not email:
+            continue
+        name = " ".join(
+            part
+            for part in (_as_text(row.get("firstName")), _as_text(row.get("lastName")))
+            if part
+        )
+        out.append(Person(id=person_id, email=email.lower(), name=name or email))
+    return out
+
+
+def list_people(
+    *,
+    config: TeamworkConfig | None = None,
+    client: httpx.Client | None = None,
+) -> list[Person]:
+    config = config or load_config()
+    if config is None:
+        raise TeamworkError(
+            "Teamwork is not configured. Set TEAMWORK_SITE and TEAMWORK_API_TOKEN."
+        )
+
+    owns_client = client is None
+    client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
+    found: list[Person] = []
+    try:
+        for page in range(1, MAX_PEOPLE_PAGES + 1):
+            try:
+                response = client.get(
+                    f"{config.base_url}/projects/api/v3/people.json",
+                    params={"page": page, "pageSize": PEOPLE_PAGE_SIZE},
+                    headers={"Authorization": config.auth_header},
+                )
+            except httpx.HTTPError as exc:
+                raise TeamworkError(f"Teamwork did not answer: {exc}") from exc
+            if response.status_code in (401, 403):
+                raise TeamworkError(
+                    "Teamwork rejected the credentials. The API token is in your "
+                    "profile under API & Mobile, and is not the account password."
+                )
+            if response.status_code >= 400:
+                raise TeamworkError(
+                    f"Teamwork refused the request ({response.status_code}): "
+                    f"{response.text[:200]}"
+                )
+            try:
+                body = response.json()
+            except ValueError as exc:
+                raise TeamworkError("Teamwork returned something that was not JSON.") from exc
+            batch = parse_people(body)
+            found.extend(batch)
+            if len(batch) < PEOPLE_PAGE_SIZE:
+                break
+    finally:
+        if owns_client:
+            client.close()
+    return found
+
+
+def person_id_for(email: str | None, people: list[Person]) -> str | None:
+    """The Teamwork id for an OrganicIQ address, where there is one."""
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+    return next((p.id for p in people if p.email == target), None)

@@ -245,3 +245,138 @@ def test_the_endpoint_reports_a_failure_rather_than_erroring(
     assert response.status_code == 200
     assert response.json()["configured"] is True
     assert "rejected the credentials" in response.json()["error"]
+
+
+# ── Who the task lands on ───────────────────────────────────────────────────
+
+
+def test_people_are_matched_on_email_whatever_the_case():
+    people = teamwork.parse_people(
+        {
+            "people": [
+                {"id": 5, "email": "Ryan@SMAMarketing.net", "firstName": "Ryan",
+                 "lastName": "Shelley"},
+            ]
+        }
+    )
+    assert people[0].name == "Ryan Shelley"
+    assert teamwork.person_id_for("ryan@smamarketing.net", people) == "5"
+    assert teamwork.person_id_for("RYAN@smamarketing.NET", people) == "5"
+    # Somebody with no Teamwork account is not a match, and not an error.
+    assert teamwork.person_id_for("new.starter@smamarketing.net", people) is None
+    assert teamwork.person_id_for(None, people) is None
+
+
+def test_a_person_with_no_email_is_skipped():
+    # Nothing can be matched on, so listing them would offer a choice that
+    # cannot be acted on.
+    assert teamwork.parse_people({"people": [{"id": 9, "firstName": "Ghost"}]}) == []
+
+
+def test_the_task_carries_the_assignee(
+    client, db: Session, client_a: Client, admin_user, monkeypatch
+):
+    """Whoever holds the slot here should hold the task there."""
+    uid = f"{client_a.slug}-{MONTH}-s1"
+    db.add(
+        MonthlyRecord(
+            client_id=client_a.id,
+            month=MONTH,
+            run_saved_at=datetime.now(timezone.utc),
+            constraint_name="visibility",
+            held_since=MONTH,
+            confidence="medium",
+            record={
+                "actions": [
+                    {
+                        "action_uid": uid, "slot": 1, "id": "V-1",
+                        "title": "Put the term in the title", "target_url": "/a",
+                        "why": "w", "done_when": "d", "metric": "Term position",
+                        "check_on": "2026-11-07", "effort_min": 30,
+                    }
+                ],
+                "incidents": [],
+            },
+        )
+    )
+    client_a.teamwork_tasklist_id = "99"
+    db.commit()
+
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="acme", token="t")
+    )
+    monkeypatch.setattr(
+        teamwork,
+        "list_people",
+        lambda: [teamwork.Person(id="5", email=admin_user.email.lower(), name="Admin")],
+    )
+    seen: dict = {}
+
+    def fake_create(**kwargs):
+        seen.update(kwargs)
+        return {"id": "4821", "url": "https://acme.teamwork.com/app/tasks/4821"}
+
+    monkeypatch.setattr(teamwork, "create_task", fake_create)
+
+    headers = client_header(client_a.id, admin_user.email)
+    client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/assign",
+        headers=headers,
+        json={"assignee_user_id": str(admin_user.id), "due": None},
+    )
+    assert client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/send", headers=headers
+    ).status_code == 200
+    assert seen["assignee_teamwork_id"] == "5"
+
+
+def test_an_assignee_with_no_teamwork_account_still_sends(
+    client, db: Session, client_a: Client, admin_user, monkeypatch
+):
+    """Unassigned in Teamwork beats not created at all."""
+    uid = f"{client_a.slug}-{MONTH}-s1"
+    db.add(
+        MonthlyRecord(
+            client_id=client_a.id,
+            month=MONTH,
+            run_saved_at=datetime.now(timezone.utc),
+            constraint_name="visibility",
+            held_since=MONTH,
+            confidence="medium",
+            record={
+                "actions": [
+                    {
+                        "action_uid": uid, "slot": 1, "id": "V-1",
+                        "title": "t", "target_url": "/a", "why": "w",
+                        "done_when": "d", "metric": "Term position",
+                        "check_on": "2026-11-07", "effort_min": 30,
+                    }
+                ],
+                "incidents": [],
+            },
+        )
+    )
+    client_a.teamwork_tasklist_id = "99"
+    db.commit()
+
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="acme", token="t")
+    )
+    monkeypatch.setattr(teamwork, "list_people", lambda: [])
+    seen: dict = {}
+    monkeypatch.setattr(
+        teamwork,
+        "create_task",
+        lambda **kw: (seen.update(kw), {"id": "1", "url": "u"})[1],
+    )
+
+    headers = client_header(client_a.id, admin_user.email)
+    client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/assign",
+        headers=headers,
+        json={"assignee_user_id": str(admin_user.id), "due": None},
+    )
+    assert client.post(
+        f"/decisions/records/{MONTH}/slots/{uid}/send", headers=headers
+    ).status_code == 200
+    assert seen["assignee_teamwork_id"] is None
