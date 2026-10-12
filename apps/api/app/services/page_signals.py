@@ -74,6 +74,14 @@ def is_navigational(query: str | None, terms: set[str]) -> bool:
     return any(term in text for term in terms)
 
 
+def is_addressable(url: str | None) -> bool:
+    """Whether this names a page somebody could open and change."""
+    text = (url or "").strip()
+    if not text:
+        return False
+    return text.startswith("http://") or text.startswith("https://") or text.startswith("/")
+
+
 def _gsc_pages(db: Session, client_id: UUID, start: date, end: date) -> dict[str, dict]:
     rows = (
         db.query(
@@ -231,7 +239,11 @@ def load_page_candidates(
         statistics.median(rates) if len(rates) >= MIN_PAGES_FOR_MEDIAN else None
     )
 
-    urls = set(gsc) | set(sessions)
+    # GA4 reports a landing page it could not resolve as "(not set)", and it
+    # arrives with real sessions attached. It reached the candidate list and
+    # drew a T-3 telling somebody to rewrite the opening of "(not set)".
+    # Anything that is not an address cannot be acted on.
+    urls = {u for u in (set(gsc) | set(sessions)) if is_addressable(u)}
     out: list[PageCandidate] = []
     for url in sorted(urls):
         page = gsc.get(url, {})
@@ -262,9 +274,17 @@ def load_page_candidates(
                 site_median_engagement=median_engagement,
                 stage=stage,
                 linked_offer_stages=frozenset(routes.get(url, set())),
+                # Never itself. SMA's declared conversion page is its
+                # homepage, so the top lead action told the homepage to add
+                # an in-content link to the homepage.
                 matched_offers=tuple(
-                    sorted(u for u, s in offers.items() if s is None or s in fits)
+                    sorted(
+                        u
+                        for u, s in offers.items()
+                        if (s is None or s in fits) and u != url
+                    )
                 ),
+                is_conversion_page=url in offers,
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None
                 ),

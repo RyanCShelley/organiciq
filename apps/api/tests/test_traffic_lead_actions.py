@@ -281,3 +281,32 @@ def test_brand_terms_cover_the_domain_and_the_name():
     assert is_navigational("boys electrical contractors reviews", terms)
     # The topic the client actually wants to win is not navigation.
     assert not is_navigational("emergency electrician nashville", terms)
+
+
+def test_ga4s_unresolved_landing_page_is_not_a_candidate():
+    """GA4 reports a landing page it could not resolve as "(not set)".
+
+    It arrives with real sessions attached, reached the candidate list, and
+    drew a T-3 telling somebody to rewrite the opening of "(not set)".
+    """
+    from app.services.page_signals import is_addressable
+
+    assert not is_addressable("(not set)")
+    assert not is_addressable("")
+    assert not is_addressable(None)
+    assert is_addressable("https://example.com/a")
+    assert is_addressable("/a")
+
+
+def test_a_conversion_page_is_not_told_to_route_onward():
+    """SMA's declared conversion page is its homepage.
+
+    So the highest-scoring lead action told the homepage to add an in-content
+    link to the homepage.
+    """
+    page = lead(url="/", is_conversion_page=True, matched_offers=())
+    assert _l(page) is None
+
+    # And it is never offered as its own destination.
+    routed = lead(url="/", is_conversion_page=True, matched_offers=("/contact",))
+    assert _l(routed) is None

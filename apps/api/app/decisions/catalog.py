@@ -435,7 +435,8 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
     """A page people land on with no in-content way forward."""
     if page.stage is None or page.stage == "bofu" or page.routes_onward:
         return None
-    if not page.matched_offers:
+    # The destination does not need a route to a destination.
+    if page.is_conversion_page or not page.matched_offers:
         return None
     return Prescription(
         action_id="L-1",
@@ -504,6 +505,8 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
 def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None:
     """Every route out goes somewhere the reader is not ready for."""
     if page.stage is None or not page.routes_onward or not page.matched_offers:
+        return None
+    if page.is_conversion_page:
         return None
     # "generic" is an offer nobody gave a stage. It suits any reader by
     # definition — `matched_offers` already counts it as a match — so a page

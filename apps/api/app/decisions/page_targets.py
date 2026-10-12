@@ -63,6 +63,9 @@ class PageCandidate:
     #: The crawl's count of forms and calls to action. None where the crawl
     #: predates the capture — distinct from a page with none.
     conversion_elements: int | None = None
+    #: This page is itself a declared conversion page. It is the destination,
+    #: so "route the reader onward" has nowhere left to send them.
+    is_conversion_page: bool = False
 
     @property
     def missed_clicks(self) -> float | None:
