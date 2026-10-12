@@ -79,29 +79,27 @@ def test_pages_being_added_is_not_an_incident():
     assert _ids(IncidentSignals(indexable_now=900, indexable_before=500)) == []
 
 
-# ── The markup names somebody else ──────────────────────────────────────────
+# ── The markup naming somebody else is NOT reported ─────────────────────────
 
 
-def test_markup_naming_another_company_is_an_incident():
-    found = check(
-        IncidentSignals(foreign_brands=(("Acme Dental", 40),), pages_with_organization=42),
-        month="2026-10",
-        slug="x",
+def test_a_foreign_brand_in_the_markup_is_not_an_incident():
+    """The spec's example, written and then removed.
+
+    Over the warehouse it flagged three clients and was wrong about all
+    three: SMA's markup names OpenAI and Google because its blog posts cite
+    them, Robinson Unmanned's names the manufacturers it resells, and
+    ACCTek's names "ACC Technical Services Inc.", which is ACCTek.
+    Structured data says who is mentioned as readily as who owns the site.
+    """
+    assert (
+        _ids(
+            IncidentSignals(
+                foreign_brands=(("OpenAI", 40), ("Google", 12)),
+                pages_with_organization=2440,
+            )
+        )
+        == []
     )
-    assert len(found) == 1
-    assert "Acme Dental" in found[0].detail
-
-
-def test_several_wrong_names_are_one_fault_not_several():
-    found = check(
-        IncidentSignals(
-            foreign_brands=(("Acme Dental", 40), ("Other Co", 12)),
-            pages_with_organization=42,
-        ),
-        month="2026-10",
-        slug="x",
-    )
-    assert len(found) == 1
 
 
 # ── Reading them ────────────────────────────────────────────────────────────
@@ -121,6 +119,7 @@ def test_organization_names_are_found_anywhere_in_the_document():
 
 
 def test_the_clients_own_name_is_not_a_foreign_brand(db: Session, client_a: Client):
+    """Nothing reports on this, but the signal is still read."""
     db.add(
         FactCrawlPageSnapshot(
             client_id=client_a.id,

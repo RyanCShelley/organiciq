@@ -6,16 +6,24 @@ problem, and spending a growth slot on it would be answering the wrong
 question — while saying nothing would let the engine keep prescribing
 optimisation on a page nobody can convert on.
 
-Three of them, each from a fact the warehouse already holds:
+Two of them, each from a fact the warehouse already holds:
 
   * leads stopped — zero lead events for a fortnight, after a history of them
   * pages vanished — a fifth of the indexable pages gone since the last crawl
-  * the markup names somebody else — Organization schema carrying a brand
-    that is not this client's
 
-All three are *site-wide*. A single page losing its schema is on-page work
-and belongs in the retainer; the whole site naming the wrong company is an
-incident.
+Both are *site-wide*. A single page losing its schema is on-page work and
+belongs in the retainer.
+
+A third was written and removed: the spec's example of a site-wide fault is
+"schema that names the wrong brand", and run over the warehouse it flagged
+three clients and was wrong about all three. SMA's markup names `OpenAI` and
+`Google` because its blog posts cite them; Robinson Unmanned's names the
+manufacturers it resells; ACCTek's names "ACC Technical Services Inc.", which
+is ACCTek. Structured data says who is *mentioned* as readily as who owns the
+site, and nothing in it separates a legal name from a brand name. A check that
+cries wolf on every client teaches people to ignore the card, so it is not
+here. It needs a signal for site identity — a publisher node tied to the
+client's own domain — that the crawl does not isolate today.
 """
 
 from __future__ import annotations
@@ -56,8 +64,9 @@ class IncidentSignals:
     indexable_before: int | None = None
     crawl_before_date: str | None = None
 
-    #: Organization names found in the site's markup that are not the
-    #: client's, with how many pages carry each.
+    #: Kept so a reader of the record can see what the markup names, and so
+    #: the signal is there if a site-identity check is built later. Nothing
+    #: reports on it: see the module docstring.
     foreign_brands: tuple[tuple[str, int], ...] = ()
     pages_with_organization: int = 0
 
@@ -125,26 +134,5 @@ def check(signals: IncidentSignals, *, month: str, slug: str) -> list[Incident]:
                 ),
             )
         )
-
-    for brand, pages in signals.foreign_brands:
-        found.append(
-            Incident(
-                uid=f"{slug}-{month}-wrong-brand",
-                title="The site's markup names a different company",
-                scope="Site-wide",
-                detail=(
-                    f"Organization schema on {pages} pages names “{brand}”. "
-                    "Structured data is what an engine reads to decide who a "
-                    "site belongs to, so this is telling them the site is "
-                    "somebody else's."
-                ),
-                evidence=(
-                    f"facts_crawl_page_schema: Organization name “{brand}” on "
-                    f"{pages} of {signals.pages_with_organization} pages",
-                ),
-            )
-        )
-        # One card, not one per wrong name: it is the same fault.
-        break
 
     return found
