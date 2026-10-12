@@ -37,6 +37,97 @@ function formatNum(value: number | null): string {
  * work is done a term at a time, and a form that loses half of it on a
  * reload is a form that stays empty.
  */
+/**
+ * The site's own origin, taken from the pages the crawl found.
+ *
+ * Every row on this table points at the same domain, so showing it in every
+ * field spends two dozen characters saying the one thing that is never in
+ * question — and truncates the part that is. Half a dozen capabilities
+ * pages all read "https://smamarketing.com/capabilities" and there is no
+ * way to tell which is which.
+ */
+function siteOrigin(pages: string[]): string | null {
+  for (const page of pages) {
+    try {
+      return new URL(page).origin;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** What goes in the box: a path on this site, a whole URL anywhere else. */
+function forDisplay(url: string, origin: string | null): string {
+  if (!origin || !url.startsWith(`${origin}/`)) return url;
+  return url.slice(origin.length) || "/";
+}
+
+/** What gets saved: a path typed here belongs to this site. */
+function forSaving(value: string, origin: string | null): string {
+  const text = value.trim();
+  if (!origin || !text.startsWith("/")) return text;
+  return `${origin}${text}`;
+}
+
+/** A column header that orders the table. */
+function SortHeader({
+  column,
+  children,
+  align,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  column: SortKey;
+  children: React.ReactNode;
+  align?: "right";
+  sortKey: SortKey;
+  sortDir: "asc" | "desc";
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === column;
+  return (
+    <th className={align === "right" ? "text-right" : undefined}
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]"
+      >
+        {children}
+        <span aria-hidden className="text-[9px] leading-none">
+          {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+type SortKey =
+  | "priority"
+  | "keyword"
+  | "volume"
+  | "difficulty"
+  | "position"
+  | "role"
+  | "page"
+  | "status";
+
+/** What each column orders by — the value, not the control that shows it. */
+const SORTERS: Record<SortKey, (row: KeywordMapRow) => number | string | null> = {
+  priority: (row) => (row.priority ? 1 : 0),
+  keyword: (row) => row.keyword.toLowerCase(),
+  volume: (row) => row.volume,
+  difficulty: (row) => row.difficulty,
+  // Not ranking sorts last rather than first: 0 would read as the best
+  // position on the site.
+  position: (row) => row.current_position,
+  role: (row) => row.term_role ?? "",
+  page: (row) => (row.target_url ?? "").toLowerCase(),
+  status: (row) => (row.mapped ? 1 : 0),
+};
+
 function Row({
   row,
   clientId,
@@ -47,8 +138,10 @@ function Row({
   clientId: string;
   clientSlug: string;
   pages: string[];
+  origin: string | null;
 }) {
-  const [pageUrl, setPageUrl] = useState(row.target_url ?? "");
+  // Held as it is shown — a path for this site — and expanded on save.
+  const [pageUrl, setPageUrl] = useState(forDisplay(row.target_url ?? "", origin));
   const [role, setRole] = useState(row.term_role ?? "");
   const [priority, setPriority] = useState(row.priority);
   const [saved, setSaved] = useState<"idle" | "ok" | "error">("idle");
@@ -56,7 +149,7 @@ function Row({
   const [pending, startTransition] = useTransition();
 
   const dirty =
-    (row.target_url ?? "") !== pageUrl ||
+    (row.target_url ?? "") !== forSaving(pageUrl, origin) ||
     (row.term_role ?? "") !== role ||
     row.priority !== priority;
 
@@ -65,7 +158,7 @@ function Row({
     data.set("clientId", clientId);
     data.set("clientSlug", clientSlug);
     data.set("keyword", row.keyword);
-    data.set("target_url", next?.url ?? pageUrl);
+    data.set("target_url", next?.url ?? forSaving(pageUrl, origin));
     data.set("term_role", next?.role ?? role);
     data.set("priority", String(next?.priority ?? priority));
     // The group is SE Ranking's, not a judgement, and it rides along so a
@@ -93,6 +186,11 @@ function Row({
               save({ priority: event.target.checked });
             }}
             aria-label={`Mark ${row.keyword} a priority term`}
+            title={
+              priority
+                ? "Counted in the visibility test. Untick to leave it out."
+                : "Tick to count this term in the visibility test."
+            }
             className="mt-1 h-4 w-4 flex-none"
           />
           <span>
@@ -137,7 +235,7 @@ function Row({
           <option value="secondary">Secondary</option>
         </select>
       </td>
-      <td className="min-w-[22rem]">
+      <td className="min-w-[30rem]">
         <div className="flex items-center gap-2">
           <Input
             list="keyword-map-pages"
@@ -148,7 +246,9 @@ function Row({
             }}
             placeholder="No page owns this yet"
             aria-label={`Page for ${row.keyword}`}
-            className="flex-1"
+            // The whole URL on hover, for a path that still runs long.
+            title={forSaving(pageUrl, origin) || undefined}
+            className="flex-1 font-[family-name:var(--font-mono)] text-[12.5px]"
           />
           <button
             type="button"
@@ -166,7 +266,7 @@ function Row({
             type="button"
             className="mt-1 text-left text-xs text-[var(--brand-teal-hover)] hover:underline"
             onClick={() => {
-              setPageUrl(row.suggested_target_url ?? "");
+              setPageUrl(forDisplay(row.suggested_target_url ?? "", origin));
               setSaved("idle");
             }}
           >
@@ -219,6 +319,29 @@ export function KeywordPageMapTable({
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
   const [onlyPriority, setOnlyPriority] = useState(false);
   const [group, setGroup] = useState("");
+  // Volume first: the question this table is usually opened with is "what
+  // are the biggest terms nobody has mapped yet".
+  const [sortKey, setSortKey] = useState<SortKey>("volume");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const origin = useMemo(() => siteOrigin(pages), [pages]);
+  const sortProps = {
+    sortKey,
+    sortDir,
+    onSort: (key: SortKey) => {
+      // Turn the column you are on around; open a new one the way it
+      // reads best — biggest first for a number, A–Z for a name.
+      if (key === sortKey) {
+        setSortDir(sortDir === "desc" ? "asc" : "desc");
+        return;
+      }
+      setSortKey(key);
+      setSortDir(
+        key === "keyword" || key === "page" || key === "role" || key === "position"
+          ? "asc"
+          : "desc",
+      );
+    },
+  };
 
   const groups = useMemo(
     () => [...new Set(rows.map((r) => r.group_name).filter(Boolean))].sort() as string[],
@@ -238,6 +361,24 @@ export function KeywordPageMapTable({
       );
     });
   }, [rows, query, onlyUnmapped, onlyPriority, group]);
+
+  const sorted = useMemo(() => {
+    const read = SORTERS[sortKey];
+    const direction = sortDir === "asc" ? 1 : -1;
+    return [...visible].sort((a, b) => {
+      const left = read(a);
+      const right = read(b);
+      // A term with no volume or no position is never the answer to "show
+      // me the biggest" or "show me the closest", so it sinks either way.
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      if (typeof left === "number" && typeof right === "number") {
+        return (left - right) * direction;
+      }
+      return String(left).localeCompare(String(right)) * direction;
+    });
+  }, [visible, sortKey, sortDir]);
 
   const unmapped = rows.filter((row) => !row.mapped).length;
   const priorityCount = rows.filter((row) => row.priority).length;
@@ -300,11 +441,22 @@ export function KeywordPageMapTable({
         ) : null}
       </div>
 
+      {/* A tick in a column headed "Priority" says nothing about what it
+          does. The visibility test reads exactly these terms, and that is
+          the only reason to tick one. */}
+      <p className="mt-2 text-xs text-[var(--text-secondary)]">
+        <strong className="text-[var(--text-primary)]">Priority</strong> is the
+        set the visibility test judges: it asks how many of these reach the top
+        ten. Tick the terms you are trying to win — {priorityCount} ticked
+        {priorityCount === 0 ? ", so the test cannot run" : ""}. Everything else
+        stays tracked and mappable.
+      </p>
+
       {/* Shared by every row's input, so the browser offers real pages
           instead of leaving someone to type a URL from memory. */}
       <datalist id="keyword-map-pages">
         {pages.map((page) => (
-          <option key={page} value={page} />
+          <option key={page} value={forDisplay(page, origin)} />
         ))}
       </datalist>
 
@@ -319,21 +471,36 @@ export function KeywordPageMapTable({
           <table>
             <thead>
               <tr>
-                <th>Priority · keyword</th>
-                <th className="text-right">Volume</th>
-                <th className="text-right">Difficulty</th>
-                <th className="text-right">Position</th>
-                <th>Role</th>
-                <th>Page that owns it</th>
-                <th>Status</th>
+                <SortHeader column="keyword" {...sortProps}>
+                  Keyword
+                </SortHeader>
+                <SortHeader column="volume" align="right" {...sortProps}>
+                  Volume
+                </SortHeader>
+                <SortHeader column="difficulty" align="right" {...sortProps}>
+                  Difficulty
+                </SortHeader>
+                <SortHeader column="position" align="right" {...sortProps}>
+                  Position
+                </SortHeader>
+                <SortHeader column="role" {...sortProps}>
+                  Role
+                </SortHeader>
+                <SortHeader column="page" {...sortProps}>
+                  Page that owns it
+                </SortHeader>
+                <SortHeader column="status" {...sortProps}>
+                  Status
+                </SortHeader>
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
+              {sorted.map((row) => (
                 <Row
                   key={row.keyword}
                   row={row}
                   pages={pages}
+                  origin={origin}
                   clientId={clientId}
                   clientSlug={clientSlug}
                 />
