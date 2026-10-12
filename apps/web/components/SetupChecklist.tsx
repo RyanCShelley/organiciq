@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { accountToolHref } from "@/lib/account-routes";
 import { clientHref } from "@/lib/client-path";
 
 export type SetupStep = {
@@ -9,6 +10,8 @@ export type SetupStep = {
   done: boolean;
   blocked_by: string | null;
   link: string;
+  /** Which route tree the step lives in. */
+  scope?: "workspace" | "tool";
 };
 
 export type SetupState = {
@@ -113,7 +116,11 @@ export function SetupChecklist({
 
               {!step.done && !step.blocked_by ? (
                 <Link
-                  href={clientHref(clientSlug, step.link)}
+                  href={
+                    step.scope === "tool"
+                      ? accountToolHref(clientSlug, step.link)
+                      : clientHref(clientSlug, step.link)
+                  }
                   className="shrink-0 text-[12.5px] font-semibold text-[var(--brand-teal-hover)] underline"
                 >
                   Open

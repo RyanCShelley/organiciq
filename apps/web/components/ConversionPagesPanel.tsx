@@ -49,6 +49,21 @@ export function ConversionPagesPanel({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // `useState` reads the prop once. Anything on this page that calls
+  // `router.refresh()` — running the page stages, for one — sends a fresh
+  // `initial` down, and without this the panel keeps showing whatever it
+  // held before: a saved conversion page reads as gone.
+  //
+  // Compared by value rather than reset on every render, so a half-typed
+  // row is not thrown away each time something else on the page refreshes.
+  const [lastSeen, setLastSeen] = useState(() => JSON.stringify(initial));
+  const incoming = JSON.stringify(initial);
+  if (incoming !== lastSeen) {
+    setLastSeen(incoming);
+    setRows(initial.length > 0 ? initial : [blank()]);
+    setSaved(false);
+  }
+
   function update(index: number, patch: Partial<ConversionPage>) {
     setSaved(false);
     setRows((current) =>

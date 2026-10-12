@@ -42,18 +42,22 @@ from app.models.gsc import FactGscPage
 from app.models.integration import ConnectionStatus, Integration
 from app.models.seranking import FactSerKeyword
 
-#: Where each step is done, so the checklist can send somebody straight there.
-#: Relative to the client workspace.
+#: Where each step is done, as `(scope, segment)`.
+#:
+#: Two route trees: the client workspace under /clients/<slug>, and the
+#: account tools under /<slug>. Sending every step to the workspace put
+#: "Keyword targets" on the conversions page, which is neither where it is
+#: done nor anything to do with it.
 LINKS = {
-    "account": "",
-    "sources": "integrations",
-    "pull": "jobs",
-    "leads": "conversions",
-    "baseline": "",
-    "conversion_pages": "conversions",
-    "page_stages": "conversions",
-    "keyword_targets": "conversions",
-    "first_run": "",
+    "account": ("workspace", ""),
+    "sources": ("workspace", "integrations"),
+    "pull": ("workspace", "jobs"),
+    "leads": ("workspace", "conversions"),
+    "baseline": ("workspace", ""),
+    "conversion_pages": ("workspace", "conversions"),
+    "page_stages": ("workspace", "conversions"),
+    "keyword_targets": ("tool", "keyword-map"),
+    "first_run": ("tool", "decision-engine"),
 }
 
 
@@ -76,7 +80,8 @@ class Step:
             "detail": self.detail,
             "done": self.done,
             "blocked_by": self.blocked_by,
-            "link": LINKS.get(self.key, ""),
+            "scope": LINKS.get(self.key, ("workspace", ""))[0],
+            "link": LINKS.get(self.key, ("workspace", ""))[1],
         }
 
 

@@ -144,3 +144,28 @@ def test_another_clients_setup_is_refused(client, client_b, team_user):
         headers=client_header(client_b.id, team_user.email),
     )
     assert response.status_code == 403
+
+
+def test_each_step_links_to_where_it_is_actually_done(db: Session, client_a: Client):
+    """Two route trees, and every step was sent to the wrong one.
+
+    The client workspace lives under /clients/<slug> and the account tools
+    under /<slug>. Sending everything to the workspace put "Keyword targets"
+    on the conversions page, which is neither where it is done nor anything
+    to do with it.
+    """
+    steps = {s["key"]: s for s in setup_state(db, client_a)["steps"]}
+
+    assert steps["keyword_targets"]["scope"] == "tool"
+    assert steps["keyword_targets"]["link"] == "keyword-map"
+    assert steps["first_run"]["scope"] == "tool"
+    assert steps["first_run"]["link"] == "decision-engine"
+
+    for key, link in (
+        ("sources", "integrations"),
+        ("leads", "conversions"),
+        ("conversion_pages", "conversions"),
+        ("page_stages", "conversions"),
+    ):
+        assert steps[key]["scope"] == "workspace", key
+        assert steps[key]["link"] == link, key
