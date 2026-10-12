@@ -71,7 +71,14 @@ export type MonthlyRecord = {
   branches: BranchResult[];
   actions: RecordAction[];
   empty_slots: { slot: number; reason: string }[];
-  incidents: { incident_uid: string; title: string; scope: string; detail?: string; effort_min?: number }[];
+  incidents: {
+    incident_uid: string;
+    title: string;
+    scope: string;
+    detail?: string;
+    evidence?: string[];
+    effort_min?: number;
+  }[];
   not_this_month: {
     id?: string;
     title?: string;

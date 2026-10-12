@@ -208,6 +208,55 @@ export default async function DecisionEnginePage({
 
       <ConstraintCard record={record} />
 
+      {/* Above the plan, because a plan read as if the site were working is
+          worse than no plan. An incident takes no slot and does not change
+          the constraint — it is a fault, not a growth action. */}
+      {record.incidents.length > 0 ? (
+        <section aria-labelledby="incidents-heading" className="space-y-3">
+          <h2
+            id="incidents-heading"
+            className="font-[family-name:var(--font-display)] text-[18px] font-extrabold text-[var(--text-primary)]"
+          >
+            Fix before anything else
+          </h2>
+          {record.incidents.map((incident) => (
+            <article
+              key={incident.incident_uid}
+              className="rounded-[var(--radius-lg,14px)] border-2 border-[#B4441C] bg-[#FDF4F0] px-6 py-5"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#B4441C] px-2.5 py-0.5 text-[11.5px] font-semibold text-white">
+                  Incident
+                </span>
+                <span className="text-[11.5px] font-semibold text-[#8E3414]">
+                  {incident.scope} · no slot used
+                </span>
+              </div>
+              <h3 className="mt-1.5 font-[family-name:var(--font-display)] text-[17px] font-extrabold leading-snug text-[var(--text-primary)]">
+                {incident.title}
+              </h3>
+              {incident.detail ? (
+                <p className="mt-1 max-w-[80ch] text-[13.5px] leading-relaxed text-[var(--text-secondary)]">
+                  {incident.detail}
+                </p>
+              ) : null}
+              {incident.evidence?.length ? (
+                <ul className="mt-2 space-y-0.5">
+                  {incident.evidence.map((line) => (
+                    <li
+                      key={line}
+                      className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]"
+                    >
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ))}
+        </section>
+      ) : null}
+
       {withheld ? (
         <Alert variant="danger">
           Nothing is prescribed this month. {record.reason_text}

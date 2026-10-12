@@ -41,6 +41,7 @@ from app.decisions.catalog import (
     prescribe_page,
 )
 from app.decisions.page_targets import rank_for_leads, rank_for_traffic
+from app.decisions.incidents import check as check_incidents
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.slots import fill_slots
 from app.decisions.targets import rank_candidates
@@ -48,6 +49,7 @@ from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
+from app.services.incident_signals import read_incident_signals
 from app.services.page_signals import load_page_candidates
 from app.services.results import capture_before, previous_results
 from app.services.target_signals import load_target_inputs
@@ -399,7 +401,18 @@ def build_record(
         "empty_slots": [
             {"slot": empty.slot, "reason": empty.reason} for empty in plan.empty
         ],
-        "incidents": [],
+        # Incidents take no slot and do not change the constraint: a site
+        # that stopped recording leads has a broken tag, not a conversion
+        # problem. They are reported beside the plan so the plan is not read
+        # as if the site were working.
+        "incidents": [
+            incident.as_dict()
+            for incident in check_incidents(
+                read_incident_signals(db, client, today=today),
+                month=month,
+                slug=client.slug,
+            )
+        ],
         "not_this_month": list(plan.not_this_month),
         "data_gaps": [
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))
