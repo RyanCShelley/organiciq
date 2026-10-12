@@ -63,6 +63,12 @@ class PageCandidate:
     #: The crawl's count of forms and calls to action. None where the crawl
     #: predates the capture — distinct from a page with none.
     conversion_elements: int | None = None
+    #: Features on this page's top query that the client does not hold, in
+    #: DataForSEO's spelling. Empty where no SERP has been pulled — which is
+    #: not the same as a SERP with nothing on it, so T-2 needs `serp_pulled`
+    #: before it will speak.
+    missing_serp_features: tuple[str, ...] = ()
+    serp_pulled: bool = False
     #: This page is itself a declared conversion page. It is the destination,
     #: so "route the reader onward" has nowhere left to send them.
     is_conversion_page: bool = False

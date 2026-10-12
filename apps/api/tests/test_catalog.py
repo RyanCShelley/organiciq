@@ -143,10 +143,17 @@ def test_nothing_fires_on_a_healthy_page():
 
 
 def test_the_actions_that_cannot_fire_say_why():
-    """Rather than being an action that silently never appears."""
+    """Rather than being an action that silently never appears.
+
+    T-2 was here until the SERP feature list was pulled. V-5 needs that *and*
+    per-section table, list and number flags from the crawl, so it stays —
+    with a reason naming the half that is still missing rather than the one
+    that is now answered.
+    """
     blocked = {a.action_id: a.reason for a in BLOCKED_ACTIONS}
-    assert set(blocked) == {"V-5", "T-2"}
-    assert all("SERP feature" in reason for reason in blocked.values())
+    assert set(blocked) == {"V-5"}
+    assert "per-section table" in blocked["V-5"]
+    assert all(reason.strip() for reason in blocked.values())
 
 
 def test_the_order_is_the_argument():

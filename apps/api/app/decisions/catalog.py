@@ -269,8 +269,15 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
 #: Defined, and unable to fire. Kept here so the gap is visible rather than
 #: being an action that silently never appears.
 BLOCKED_ACTIONS: tuple[SkippedAction, ...] = (
-    SkippedAction("V-5", NO_SERP_FEATURES),
-    SkippedAction("T-2", NO_SERP_FEATURES),
+    # V-5 needs two things: the SERP (now pulled) and per-section table,
+    # list and number flags from the crawl, which the crawler does not
+    # capture. Half unblocked is still blocked, and the reason says which
+    # half rather than repeating the old one.
+    SkippedAction(
+        "V-5",
+        "needs per-section table, list and number flags from the crawl, which "
+        "are not captured — the SERP half of this is now pulled",
+    ),
 )
 
 
@@ -408,8 +415,82 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
     )
 
 
+#: The features worth a growth action, and how each reads in a sentence. A
+#: SERP carries a dozen element types and most are not something a page can
+#: win by being rewritten; these are.
+WINNABLE_FEATURES = {
+    "featured_snippet": "a featured snippet",
+    "ai_overview": "an AI Overview",
+    "people_also_ask": "a People Also Ask box",
+    "faq": "an FAQ block",
+    "video": "a video result",
+    "images": "an image pack",
+    "table": "a table",
+}
+
+#: How the work differs by feature, so "match the format" names a format.
+FEATURE_SHAPE = {
+    "featured_snippet": (
+        "a 40 to 60 word answer directly under a heading that asks the query"
+    ),
+    "ai_overview": (
+        "a short, quotable answer under a heading that asks the query, with "
+        "the claim and its source in the same sentence"
+    ),
+    "people_also_ask": (
+        "each related question as its own heading with a short answer under it"
+    ),
+    "faq": "a question-and-answer pair marked up as FAQPage",
+    "video": "an embedded video with a transcript on the page",
+    "images": "a captioned, descriptively named image near the answer",
+    "table": "the comparison as a real table rather than prose",
+}
+
+
+def t2_match_the_serp_format(page: PageCandidate) -> Prescription | None:
+    """A feature on the query that the client does not hold."""
+    if not page.serp_pulled or not page.top_query:
+        return None
+    # A navigational query's SERP is not a format to match.
+    if page.top_query_is_navigational:
+        return None
+    winnable = [f for f in page.missing_serp_features if f in WINNABLE_FEATURES]
+    if not winnable:
+        return None
+
+    feature = winnable[0]
+    return Prescription(
+        action_id="T-2",
+        title=f"Add the format that wins {WINNABLE_FEATURES[feature]}",
+        branch=Branch.TRAFFIC,
+        target_url=page.url,
+        term=page.top_query,
+        score=page.impressions,
+        effort_min=45,
+        why=(
+            f"“{page.top_query}” draws {page.impressions:.0f} impressions to "
+            f"this page and the results carry {WINNABLE_FEATURES[feature]} "
+            "that the site does not hold. The page is competing for what is "
+            "left after it."
+        ),
+        done_when=(
+            f"The page carries {FEATURE_SHAPE[feature]}, answering the query "
+            "in the words it is asked in."
+        ),
+        metric="Clicks against the curve's expectation",
+        metric_key="page_clicks",
+        evidence=(
+            f"facts_serp_features: {', '.join(page.missing_serp_features)} "
+            "present and not held",
+            f"facts_gsc_pages: {page.impressions:.0f} impressions",
+        ),
+        check_after_days=30,
+    )
+
+
 TRAFFIC_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
     t1_rewrite_snippet,
+    t2_match_the_serp_format,
     t3_realign_to_the_audience,
 )
 

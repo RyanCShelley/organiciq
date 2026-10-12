@@ -517,3 +517,38 @@ class FactSerKeywordMetric(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerpFeature(Base):
+    """Every element on a query's SERP, held or not.
+
+    Distinct from `FactSerKeyword.earned_serp_features`, which is what the
+    client won. T-2 fires on a feature present that the client does *not*
+    hold, so the difference between the two is the whole finding.
+
+    Dated: a SERP changes, and an action judged in November should be
+    readable against the SERP that was there when it was prescribed.
+    """
+
+    __tablename__ = "facts_serp_features"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id", "pulled_on", "keyword", "location_code",
+            name="uq_facts_serp_features_grain",
+        ),
+        Index("ix_facts_serp_features_client_keyword", "client_id", "keyword"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    pulled_on: Mapped[date] = mapped_column(Date, nullable=False)
+    keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    location_code: Mapped[int] = mapped_column(Integer, nullable=False, default=2840)
+    item_types: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    holders: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="dataforseo")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

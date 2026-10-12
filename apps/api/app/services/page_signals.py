@@ -28,6 +28,7 @@ from app.models.crawl import FactCrawlInternalLink, FactCrawlPageSnapshot
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.services.page_stage import confirmed_stages
+from app.services.serp_features import load as load_serp_features
 from app.services.triage_signals import MANAGED_CHANNELS
 
 #: The window the traffic and lead facts are read over.
@@ -72,6 +73,20 @@ def is_navigational(query: str | None, terms: set[str]) -> bool:
     if not text:
         return False
     return any(term in text for term in terms)
+
+
+def _missing_features(row, domain: str | None) -> tuple[str, ...]:
+    """Features on the SERP that this client does not hold.
+
+    Where DataForSEO named no domain for a feature, it is counted as not
+    held: a feature we cannot show the client holding is one to look at, and
+    the action says what the evidence is.
+    """
+    if row is None:
+        return ()
+    return tuple(
+        sorted(f for f in row.item_types if not row.held_by(f, domain or ""))
+    )
 
 
 def is_addressable(url: str | None) -> bool:
@@ -176,6 +191,10 @@ def load_page_candidates(
     sessions = _sessions(db, client.id, start, today)
     stages = confirmed_stages(db, client.id)
     brand = brand_terms(client)
+    # Read, never pulled: a page view that spends credits is one somebody
+    # will refresh. `python -m app.pull_serp_features --apply` does the
+    # spending, deliberately.
+    serp = load_serp_features(db, client, today=today)
 
     newest_crawl = (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
@@ -269,6 +288,10 @@ def load_page_candidates(
                 expected_clicks=expected,
                 top_query=queries.get(url),
                 top_query_is_navigational=is_navigational(queries.get(url), brand),
+                missing_serp_features=_missing_features(
+                    serp.get((queries.get(url) or "").strip().lower()), client.domain
+                ),
+                serp_pulled=(queries.get(url) or "").strip().lower() in serp,
                 sessions=total_sessions,
                 engaged_sessions=engaged,
                 site_median_engagement=median_engagement,
