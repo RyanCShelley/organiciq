@@ -85,13 +85,28 @@ def page_text(page: FactCrawlPageSnapshot) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+_MODEL = None
+
+
+def _model():
+    """The loaded model, kept for the life of the process.
+
+    Building it reads the weights off disk, which one run does three times
+    — pages, the terms it calibrates on, and then every term.
+    """
+    global _MODEL
+    if _MODEL is None:
+        from fastembed import TextEmbedding
+
+        _MODEL = TextEmbedding(MODEL_NAME)
+    return _MODEL
+
+
 def _embed(texts: list[str]):
     """Vectors for a batch, L2-normalised so a dot product is a cosine."""
     import numpy as np
-    from fastembed import TextEmbedding
 
-    model = TextEmbedding(MODEL_NAME)
-    vectors = np.array(list(model.embed(texts)), dtype="float32")
+    vectors = np.array(list(_model().embed(texts)), dtype="float32")
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return vectors / norms
@@ -120,12 +135,26 @@ def crawled_pages(db: Session, client: Client) -> list[FactCrawlPageSnapshot]:
     return [page for page in rows if page_text(page)]
 
 
-def match(terms: list[str], pages: list[FactCrawlPageSnapshot]) -> list[Match]:
+def embed_pages(pages: list[FactCrawlPageSnapshot]):
+    """Vectors for the pages, computed once and passed around.
+
+    Calibrating and matching both need them, and embedding 300 pages twice
+    is most of the runtime of a job somebody is waiting on.
+    """
+    return _embed([page_text(page) for page in pages])
+
+
+def match(
+    terms: list[str],
+    pages: list[FactCrawlPageSnapshot],
+    *,
+    page_vectors=None,
+) -> list[Match]:
     """The best page for each term, and how far clear of the runner-up."""
     if not terms or len(pages) < 2:
         return []
 
-    page_vectors = _embed([page_text(page) for page in pages])
+    page_vectors = embed_pages(pages) if page_vectors is None else page_vectors
     term_vectors = _embed(terms)
     similarity = term_vectors @ page_vectors.T
 
@@ -147,7 +176,12 @@ def match(terms: list[str], pages: list[FactCrawlPageSnapshot]) -> list[Match]:
 
 
 def calibrate(
-    db: Session, client: Client, pages: list[FactCrawlPageSnapshot], *, today: date | None = None
+    db: Session,
+    client: Client,
+    pages: list[FactCrawlPageSnapshot],
+    *,
+    today: date | None = None,
+    page_vectors=None,
 ) -> float | None:
     """The margin this client's own data says is trustworthy.
 
@@ -193,7 +227,7 @@ def calibrate(
         return None
 
     terms = list(truth)[:400]
-    results = match(terms, pages)
+    results = match(terms, pages, page_vectors=page_vectors)
 
     # The lowest margin at which the model is right often enough. Walking up
     # rather than down, so the answer is the most coverage that clears the
@@ -239,11 +273,12 @@ def refresh_for(
     if len(pages) < 2 or not terms:
         return {"pages": len(pages), "terms": len(terms), "stored": 0, "margin": None}
 
-    measured = calibrate(db, client, pages, today=today)
+    page_vectors = embed_pages(pages)
+    measured = calibrate(db, client, pages, today=today, page_vectors=page_vectors)
     margin = measured if measured is not None else DEFAULT_MARGIN
     client.keyword_match_margin = margin
 
-    results = match(terms, pages)
+    results = match(terms, pages, page_vectors=page_vectors)
     kept = [r for r in results if r.margin >= margin]
 
     from app.models.decision import KeywordPageSuggestion

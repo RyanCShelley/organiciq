@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { saveKeywordPageMapAction } from "@/app/(app)/keyword-map-actions";
@@ -328,6 +329,10 @@ export function KeywordPageMapTable({
   clientId: string;
   clientSlug: string;
 }) {
+  const router = useRouter();
+  const [matching, startMatching] = useTransition();
+  const [matchNote, setMatchNote] = useState<string | null>(null);
+  const [matchError, setMatchError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
   const [onlyPriority, setOnlyPriority] = useState(false);
@@ -396,18 +401,72 @@ export function KeywordPageMapTable({
   const unmapped = rows.filter((row) => !row.mapped).length;
   const priorityCount = rows.filter((row) => row.priority).length;
 
+  /**
+   * Read the site and propose a page for every unmapped term.
+   *
+   * It runs while you wait rather than in the background, because the thing
+   * you do next is read what it proposed. A large site takes tens of
+   * seconds: it embeds every crawled page once, then every term.
+   */
+  function suggestPages() {
+    setMatchError(null);
+    setMatchNote(null);
+    startMatching(async () => {
+      const res = await fetch("/api/proxy/keyword-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMatchError(body.detail || "The matcher did not finish");
+        return;
+      }
+      if (body.reason) {
+        setMatchError(body.reason);
+        return;
+      }
+      // Say what it did not propose as well as what it did: a term with no
+      // page close enough to name is the finding, not an omission.
+      const short = (body.terms ?? 0) - (body.stored ?? 0);
+      setMatchNote(
+        `Read ${body.pages} pages against ${body.terms} terms and proposed ${body.stored}` +
+          `${short > 0 ? `. The other ${short} had no page close enough to name` : ""}` +
+          `${body.measured === false ? " (margin not measured — too few confirmed pairs, so the default was used)" : ""}.`,
+      );
+      router.refresh();
+    });
+  }
+
   return (
     <section className="workspace-section">
       <SectionHeader
         title="Keyword to page map"
         description="Which page is meant to own each term. The engine asks for this on every ranking finding, because Search Console reports where Google currently shows a page — which on a term you do not rank for is either nothing or the wrong page."
         actions={
-          <span className="text-xs text-[var(--text-tertiary)]">
-            {rows.length - unmapped} of {rows.length} mapped · {priorityCount}{" "}
-            priority
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--text-tertiary)]">
+              {rows.length - unmapped} of {rows.length} mapped · {priorityCount}{" "}
+              priority
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={suggestPages}
+              disabled={matching}
+            >
+              {matching ? "Reading the site…" : "Suggest pages"}
+            </button>
+          </div>
         }
       />
+
+      {matchError ? (
+        <p className="mb-3 text-sm text-[var(--danger)]">{matchError}</p>
+      ) : null}
+      {matchNote ? (
+        <p className="mb-3 text-sm text-[var(--text-secondary)]">{matchNote}</p>
+      ) : null}
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="max-w-md flex-1">

@@ -793,6 +793,37 @@ def list_teamwork_tasklists(
     }
 
 
+@router.post("/keyword-suggestions/run")
+def run_keyword_suggestions(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Match every tracked term to a page by subject, and store what clears
+    this client's margin.
+
+    Synchronous because somebody pressed a button and is waiting: it reads
+    the newest crawl, so it is the same work whenever it runs, and the model
+    is loaded in-process. Tens of seconds on a large site.
+    """
+    from app.services.keyword_matcher import refresh_for
+
+    try:
+        found = refresh_for(db, client)
+    except Exception as exc:  # noqa: BLE001 — a model failure is not a 500 page
+        logger.exception("Keyword matching failed for %s", client.slug)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"The matcher did not finish: {exc}"[:300],
+        ) from exc
+
+    if not found["pages"]:
+        return {**found, "reason": "No crawled page has a title or headings to read."}
+    if not found["terms"]:
+        return {**found, "reason": "No tracked keywords to match."}
+    return found
+
+
 @router.get("/excluded-pages")
 def list_excluded_pages(
     client: Annotated[Client, Depends(require_client)],
