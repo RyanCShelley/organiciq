@@ -18,6 +18,7 @@ import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
+import { tableControls, filterRows } from "@/lib/table-sort";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { resolveDateRange } from "@/lib/context";
 import { withNavContext } from "@/lib/navigation";
@@ -191,6 +192,10 @@ export default async function WatchListPage({
     { id: "ai", label: "AI" },
   ];
   const watchHref = accountToolHref(client.slug, "watch-list");
+  // The tab is carried, or sorting the keywords would drop you back on the
+  // first tab mid-thought.
+  const keywordsTable = tableControls(query, watchHref, "kw", { keep: ["tab"] });
+  const aiTable = tableControls(query, watchHref, "ai", { keep: ["tab"] });
 
   return (
     <section>
@@ -267,6 +272,8 @@ export default async function WatchListPage({
                   {
                     key: "keyword",
                     header: "Keyword",
+                    sortValue: (row) => row.keyword,
+                    sortInitial: "asc" as const,
                     render: (row) => (
                       <span className="block max-w-[22rem] truncate" title={row.keyword}>
                         {row.keyword}
@@ -276,23 +283,29 @@ export default async function WatchListPage({
                   {
                     key: "group",
                     header: "Group",
+                    sortValue: (row) => row.group_name,
+                    sortInitial: "asc" as const,
                     render: (row) => row.group_name ?? "—",
                   },
                   {
                     key: "volume",
                     header: "Volume",
+                    sortValue: (row) => row.volume,
                     align: "right",
                     render: (row) => formatNum(row.volume),
                   },
                   {
                     key: "position",
                     header: "Position",
+                    sortValue: (row) => row.current_position,
+                    sortInitial: "asc" as const,
                     align: "right",
                     render: (row) => formatNum(row.current_position),
                   },
                   {
                     key: "change",
                     header: "Change",
+                    sortValue: (row) => row.ranking_change,
                     align: "right",
                     render: (row) => formatNum(row.ranking_change),
                   },
@@ -308,7 +321,17 @@ export default async function WatchListPage({
                     render: (row) => <CheckedAt value={row.checked_at} />,
                   },
                 ]}
-                rows={searchRows}
+                rows={filterRows(searchRows, keywordsTable.searchValue, (row) => [
+                  row.keyword,
+                  row.group_name,
+                ])}
+                sort={keywordsTable.sort}
+                sortHref={keywordsTable.sortHref}
+                searchAction={keywordsTable.searchAction}
+                searchParam={keywordsTable.searchParam}
+                searchValue={keywordsTable.searchValue}
+                searchKeep={keywordsTable.searchKeep}
+                searchPlaceholder="Search keywords or groups…"
                 getRowKey={(row) => `${row.site_engine_id}-${row.keyword_id}`}
                 emptyMessage="No search keywords."
               />
@@ -347,6 +370,8 @@ export default async function WatchListPage({
                   {
                     key: "prompt",
                     header: "Prompt",
+                    sortValue: (row) => row.prompt,
+                    sortInitial: "asc" as const,
                     render: (row) => (
                       // Unconstrained free text was squeezing every other
                       // column on this tab.
@@ -358,32 +383,42 @@ export default async function WatchListPage({
                   {
                     key: "engine",
                     header: "Engine",
+                    sortValue: (row) => row.engine,
+                    sortInitial: "asc" as const,
                     render: (row) => row.engine,
                   },
                   {
                     key: "group",
                     header: "Group",
+                    sortValue: (row) => row.group_name,
+                    sortInitial: "asc" as const,
                     render: (row) => row.group_name ?? "—",
                   },
                   {
                     key: "mentioned",
                     header: "Mentioned",
+                    sortValue: (row) => (row.brand_mentioned ? 1 : 0),
                     render: (row) => formatBool(row.brand_mentioned),
                   },
                   {
                     key: "cited",
                     header: "Cited",
+                    sortValue: (row) => (row.brand_cited ? 1 : 0),
                     render: (row) => formatBool(row.brand_cited),
                   },
                   {
                     key: "mention_pos",
                     header: "Mention Pos",
+                    sortValue: (row) => row.mention_position,
+                    sortInitial: "asc" as const,
                     align: "right",
                     render: (row) => formatNum(row.mention_position),
                   },
                   {
                     key: "citation_pos",
                     header: "Citation Pos",
+                    sortValue: (row) => row.url_position,
+                    sortInitial: "asc" as const,
                     align: "right",
                     render: (row) => formatNum(row.url_position),
                   },
@@ -393,7 +428,18 @@ export default async function WatchListPage({
                     render: (row) => <CheckedAt value={row.checked_at} />,
                   },
                 ]}
-                rows={aiRows}
+                rows={filterRows(aiRows, aiTable.searchValue, (row) => [
+                  row.prompt,
+                  row.group_name,
+                  row.engine,
+                ])}
+                sort={aiTable.sort}
+                sortHref={aiTable.sortHref}
+                searchAction={aiTable.searchAction}
+                searchParam={aiTable.searchParam}
+                searchValue={aiTable.searchValue}
+                searchKeep={aiTable.searchKeep}
+                searchPlaceholder="Search prompts or groups…"
                 getRowKey={(row) => `${row.engine}-${row.prompt_id}`}
                 emptyMessage="No AI prompts."
               />

@@ -7,6 +7,7 @@ import { Sparkline } from "@/components/analytics/Sparkline";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { SectionHeader, SubsectionTitle } from "@/components/ui/SectionHeader";
+import { tableControls, filterRows } from "@/lib/table-sort";
 import { apiFetch } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { clientHref } from "@/lib/client-path";
@@ -67,6 +68,15 @@ export default async function DashboardPage({
   const showComparison = compare !== "none";
   const clientPath = clientHref(selectedClient.slug);
   const conversionsPath = clientHref(selectedClient.slug, "conversions");
+
+  // One set per table, so ordering Top pages does not reorder Traffic by
+  // channel underneath it. The date range and compare mode are carried, or
+  // a sort click would silently reset the window.
+  const dashboardPath = clientHref(selectedClient.slug, "dashboard");
+  const keep = ["from", "to", "range", "compare"];
+  const leadsTable = tableControls(query, dashboardPath, "leads", { keep });
+  const channelsTable = tableControls(query, dashboardPath, "channels", { keep });
+  const pagesTable = tableControls(query, dashboardPath, "pages", { keep });
 
   let data: DashboardResponse | null = null;
   let error: string | null = null;
@@ -233,6 +243,7 @@ export default async function DashboardPage({
                     {
                       key: "leads",
                       header: "Leads",
+                      sortValue: (row) => row.leads,
                       align: "right",
                       render: (row) => (
                         <span className="font-[family-name:var(--font-display)] font-extrabold">
@@ -243,6 +254,7 @@ export default async function DashboardPage({
                     {
                       key: "lead_rate",
                       header: "Lead rate",
+                      sortValue: (row) => row.lead_rate,
                       align: "right",
                       render: (row) =>
                         row.lead_rate === null ? (
@@ -254,6 +266,7 @@ export default async function DashboardPage({
                     {
                       key: "goal_contribution_pct",
                       header: "Of goal",
+                      sortValue: (row) => row.goal_contribution_pct,
                       align: "right",
                       render: (row) =>
                         row.goal_contribution_pct === null ? (
@@ -264,6 +277,8 @@ export default async function DashboardPage({
                     },
                   ]}
                   rows={data.conversions.leads_by_channel}
+                  sort={leadsTable.sort}
+                  sortHref={leadsTable.sortHref}
                   getRowKey={(row) => row.channel}
                 />
               </div>
@@ -461,12 +476,14 @@ export default async function DashboardPage({
                     {
                       key: "sessions",
                       header: "Sessions",
+                      sortValue: (row) => row.sessions,
                       align: "right",
                       render: (row) => formatNum(row.sessions),
                     },
                     {
                       key: "views",
                       header: "Views",
+                      sortValue: (row) => row.views,
                       align: "right",
                       render: (row) => formatNum(row.views),
                     },
@@ -491,6 +508,8 @@ export default async function DashboardPage({
                     },
                   ]}
                   rows={data.traffic.by_channel}
+                  sort={channelsTable.sort}
+                  sortHref={channelsTable.sortHref}
                   getRowKey={(row) => row.channel}
                 />
               </div>
@@ -518,12 +537,14 @@ export default async function DashboardPage({
                     {
                       key: "ga4_sessions",
                       header: "Sessions",
+                      sortValue: (row) => row.ga4_sessions,
                       align: "right",
                       render: (row) => formatNum(row.ga4_sessions),
                     },
                     {
                       key: "ga4_key_events",
                       header: "Key events",
+                      sortValue: (row) => row.ga4_key_events,
                       align: "right",
                       render: (row) =>
                         row.ga4_key_events > 0 ? (
@@ -537,6 +558,7 @@ export default async function DashboardPage({
                     {
                       key: "session_key_event_rate",
                       header: "Session → key event",
+                      sortValue: (row) => row.session_key_event_rate,
                       align: "right",
                       render: (row) =>
                         row.session_key_event_rate === null ? (
@@ -564,7 +586,16 @@ export default async function DashboardPage({
                       render: (row) => formatNum(row.gsc_clicks),
                     },
                   ]}
-                  rows={data.traffic.top_pages}
+                  rows={filterRows(data.traffic.top_pages, pagesTable.searchValue, (row) => [
+                    row.page,
+                  ])}
+                  sort={pagesTable.sort}
+                  sortHref={pagesTable.sortHref}
+                  searchAction={pagesTable.searchAction}
+                  searchParam={pagesTable.searchParam}
+                  searchValue={pagesTable.searchValue}
+                  searchKeep={pagesTable.searchKeep}
+                  searchPlaceholder="Search pages…"
                   getRowKey={(row) => row.page}
                 />
                 <p className="mt-2 text-xs text-[var(--text-tertiary)]">

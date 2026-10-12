@@ -11,6 +11,7 @@ import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch, type Client, type PlatformOverviewRow, type Tier } from "@/lib/api";
+import { tableControls, filterRows } from "@/lib/table-sort";
 
 type ClientRow = Client & { overview?: PlatformOverviewRow };
 
@@ -59,6 +60,7 @@ export default async function ClientsIndexPage({
     portfolio = null;
   }
 
+  const clientsTable = tableControls(params, "/clients", "c");
   const overviewById = new Map(overview.map((row) => [row.client_id, row]));
   const rows: ClientRow[] = clients.map((client) => ({
     ...client,
@@ -100,6 +102,8 @@ export default async function ClientsIndexPage({
           {
             key: "client",
             header: "Client",
+            sortValue: (row: ClientRow) => row.client_name,
+            sortInitial: "asc" as const,
             render: (row) => (
               <Link
                 href={`/clients/${row.slug}`}
@@ -115,6 +119,7 @@ export default async function ClientsIndexPage({
           {
             key: "lead_goal",
             header: "Monthly lead goal",
+            sortValue: (row: ClientRow) => row.monthly_lead_goal,
             align: "right",
             render: (row) =>
               row.monthly_lead_goal != null ? row.monthly_lead_goal.toLocaleString() : "—",
@@ -122,6 +127,8 @@ export default async function ClientsIndexPage({
           {
             key: "status",
             header: "Status",
+            sortValue: (row: ClientRow) => row.status,
+            sortInitial: "asc" as const,
             render: (row) => (
               <StatusBadge
                 available={row.status === "active"}
@@ -133,6 +140,7 @@ export default async function ClientsIndexPage({
           {
             key: "health",
             header: "Data health",
+            sortValue: (row: ClientRow) => row.overview ? row.overview.sources_healthy : null,
             render: (row) =>
               row.overview ? (
                 <StatusBadge
@@ -158,7 +166,16 @@ export default async function ClientsIndexPage({
             ),
           },
         ]}
-        rows={rows}
+        rows={filterRows(rows, clientsTable.searchValue, (row) => [
+          row.client_name,
+          row.domain,
+        ])}
+        sort={clientsTable.sort}
+        sortHref={clientsTable.sortHref}
+        searchAction={clientsTable.searchAction}
+        searchParam={clientsTable.searchParam}
+        searchValue={clientsTable.searchValue}
+        searchPlaceholder="Search clients…"
         getRowKey={(row) => row.id}
         emptyMessage="No clients yet."
       />

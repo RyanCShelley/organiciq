@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import { accountToolHref } from "@/lib/account-routes";
+import { tableControls, filterRows } from "@/lib/table-sort";
 import { clientHref } from "@/lib/client-path";
 
 type CrawlTab = "pages" | "schema";
@@ -208,6 +209,7 @@ export default async function SiteCrawlPage({
   // Sort and search live in the URL: the table renders on the server, so a
   // header that needed client state could not sort at all — and a URL can
   // be refreshed, bookmarked and sent to somebody.
+  const schemaTable = tableControls(query, base, "schema", { keep: ["tab"] });
   const sortKey = typeof query.sort === "string" ? query.sort : null;
   const sortDir = query.dir === "asc" ? "asc" : "desc";
   const sort = sortKey ? { key: sortKey, dir: sortDir as "asc" | "desc" } : null;
@@ -554,6 +556,8 @@ export default async function SiteCrawlPage({
                     {
                       key: "url",
                       header: "Page",
+                      sortValue: (row) => row.url,
+                      sortInitial: "asc" as const,
                       render: (row) => (
                         <a
                           href={row.url}
@@ -569,6 +573,8 @@ export default async function SiteCrawlPage({
                     {
                       key: "issue",
                       header: "Issue",
+                      sortValue: (row) => row.issue,
+                      sortInitial: "asc" as const,
                       render: (row) => (
                         <span
                           className={
@@ -595,7 +601,17 @@ export default async function SiteCrawlPage({
                         ),
                     },
                   ]}
-                  rows={schema.gaps}
+                  rows={filterRows(schema.gaps, schemaTable.searchValue, (row) => [
+                    row.url,
+                    row.issue,
+                  ])}
+                  sort={schemaTable.sort}
+                  sortHref={schemaTable.sortHref}
+                  searchAction={schemaTable.searchAction}
+                  searchParam={schemaTable.searchParam}
+                  searchValue={schemaTable.searchValue}
+                  searchKeep={schemaTable.searchKeep}
+                  searchPlaceholder="Search pages or issues…"
                   getRowKey={(row) => row.url}
                   emptyMessage="Nothing to fix."
                 />
