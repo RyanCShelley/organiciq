@@ -171,3 +171,127 @@ def create_task(
         "id": str(task_id),
         "url": f"{config.base_url}/app/tasks/{task_id}",
     }
+
+
+@dataclass(frozen=True)
+class TaskList:
+    """One tasklist, with the project it belongs to.
+
+    The project is what makes the list choosable: "Content" means nothing on
+    its own when nine clients each have one.
+    """
+
+    id: str
+    name: str
+    project_id: str | None = None
+    project_name: str | None = None
+
+
+#: Teamwork pages these, and an agency has more lists than one page holds.
+TASKLIST_PAGE_SIZE = 250
+MAX_TASKLIST_PAGES = 8
+
+
+def _as_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def parse_tasklists(body: dict) -> list[TaskList]:
+    """Tasklists from a v3 response, with project names where they came.
+
+    v3 returns related records in a sidecar `included` object keyed by id
+    rather than nested in each row, so the project name has to be looked up
+    rather than read off the tasklist.
+    """
+    projects = {}
+    included = body.get("included")
+    if isinstance(included, dict):
+        for key, value in (included.get("projects") or {}).items():
+            if isinstance(value, dict):
+                projects[str(key)] = _as_text(value.get("name"))
+
+    out: list[TaskList] = []
+    for row in body.get("tasklists") or []:
+        if not isinstance(row, dict):
+            continue
+        list_id = _as_text(row.get("id"))
+        if not list_id:
+            continue
+        # The project arrives as an id, or as a small object, depending on
+        # what was asked for.
+        project = row.get("project")
+        project_id = _as_text(row.get("projectId"))
+        if isinstance(project, dict):
+            project_id = _as_text(project.get("id")) or project_id
+        elif project is not None and project_id is None:
+            project_id = _as_text(project)
+        out.append(
+            TaskList(
+                id=list_id,
+                name=_as_text(row.get("name")) or f"Tasklist {list_id}",
+                project_id=project_id,
+                project_name=projects.get(project_id or ""),
+            )
+        )
+    return out
+
+
+def list_tasklists(
+    *,
+    config: TeamworkConfig | None = None,
+    client: httpx.Client | None = None,
+) -> list[TaskList]:
+    """Every tasklist the token can see, newest project first."""
+    config = config or load_config()
+    if config is None:
+        raise TeamworkError(
+            "Teamwork is not configured. Set TEAMWORK_SITE and TEAMWORK_API_TOKEN."
+        )
+
+    owns_client = client is None
+    client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
+    found: list[TaskList] = []
+    try:
+        for page in range(1, MAX_TASKLIST_PAGES + 1):
+            try:
+                response = client.get(
+                    f"{config.base_url}/projects/api/v3/tasklists.json",
+                    params={
+                        "page": page,
+                        "pageSize": TASKLIST_PAGE_SIZE,
+                        "include": "projects",
+                        "showCompleted": "false",
+                    },
+                    headers={"Authorization": config.auth_header},
+                )
+            except httpx.HTTPError as exc:
+                raise TeamworkError(f"Teamwork did not answer: {exc}") from exc
+
+            if response.status_code in (401, 403):
+                raise TeamworkError(
+                    "Teamwork rejected the credentials. The API token is in your "
+                    "profile under API & Mobile, and is not the account password."
+                )
+            if response.status_code >= 400:
+                raise TeamworkError(
+                    f"Teamwork refused the request ({response.status_code}): "
+                    f"{response.text[:200]}"
+                )
+            try:
+                body = response.json()
+            except ValueError as exc:
+                raise TeamworkError("Teamwork returned something that was not JSON.") from exc
+
+            batch = parse_tasklists(body)
+            found.extend(batch)
+            if len(batch) < TASKLIST_PAGE_SIZE:
+                break
+    finally:
+        if owns_client:
+            client.close()
+
+    found.sort(key=lambda t: ((t.project_name or "~").lower(), t.name.lower()))
+    return found

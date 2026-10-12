@@ -159,3 +159,89 @@ def test_a_second_send_links_the_existing_task(
 
     rows = db.query(EngineAction).filter(EngineAction.uid == uid).all()
     assert len(rows) == 1
+
+
+# ── Choosing a tasklist ─────────────────────────────────────────────────────
+
+
+def test_tasklists_carry_the_project_they_belong_to():
+    """"Content" means nothing on its own when nine clients each have one.
+
+    v3 returns related records in a sidecar `included` object keyed by id
+    rather than nested in each row, so the project name has to be looked up.
+    """
+    found = teamwork.parse_tasklists(
+        {
+            "tasklists": [
+                {"id": 11, "name": "Content", "projectId": 7},
+                {"id": 12, "name": "Content", "projectId": 8},
+            ],
+            "included": {
+                "projects": {"7": {"name": "SMA Marketing"}, "8": {"name": "ACCTek"}}
+            },
+        }
+    )
+    assert [(t.id, t.project_name) for t in found] == [
+        ("11", "SMA Marketing"),
+        ("12", "ACCTek"),
+    ]
+
+
+def test_a_tasklist_with_no_project_still_lists():
+    found = teamwork.parse_tasklists({"tasklists": [{"id": 11, "name": "Loose"}]})
+    assert found[0].project_name is None
+    assert found[0].name == "Loose"
+
+
+def test_listing_pages_until_teamwork_runs_out():
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params["page"])
+        pages.append(page)
+        size = teamwork.TASKLIST_PAGE_SIZE
+        rows = (
+            [{"id": i, "name": f"L{i}", "projectId": 1} for i in range(size)]
+            if page == 1
+            else [{"id": 9000, "name": "Last", "projectId": 1}]
+        )
+        return httpx.Response(200, json={"tasklists": rows})
+
+    found = teamwork.list_tasklists(
+        config=teamwork.TeamworkConfig(site="acme", token="t"),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert pages == [1, 2]
+    assert len(found) == teamwork.TASKLIST_PAGE_SIZE + 1
+
+
+def test_listing_says_where_the_token_comes_from_when_refused():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="Unauthorized")
+
+    with pytest.raises(teamwork.TeamworkError, match="API & Mobile"):
+        teamwork.list_tasklists(
+            config=teamwork.TeamworkConfig(site="acme", token="t"),
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+
+def test_the_endpoint_reports_a_failure_rather_than_erroring(
+    client, client_a, admin_user, monkeypatch
+):
+    """The field falls back to the id box, so it needs the reason, not a 500."""
+
+    def explode(**kwargs):
+        raise teamwork.TeamworkError("Teamwork rejected the credentials.")
+
+    monkeypatch.setattr(
+        teamwork, "load_config", lambda: teamwork.TeamworkConfig(site="a", token="t")
+    )
+    monkeypatch.setattr(teamwork, "list_tasklists", explode)
+    response = client.get(
+        "/decisions/teamwork/tasklists",
+        headers=client_header(client_a.id, admin_user.email),
+    )
+    assert response.status_code == 200
+    assert response.json()["configured"] is True
+    assert "rejected the credentials" in response.json()["error"]

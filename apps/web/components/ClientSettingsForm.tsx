@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import { updateClientSettingsAction } from "@/app/(app)/actions";
 import { LeadGoalSchedule } from "@/components/LeadGoalSchedule";
 import { BaselineSnapshotPanel } from "@/components/BaselineSnapshotPanel";
+import { TeamworkTasklistField } from "@/components/TeamworkTasklistField";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { FieldLabel, Input, Select } from "@/components/ui/Input";
@@ -187,23 +188,10 @@ export function ClientSettingsForm({
         ) : null}
       </div>
 
-      {/* The only per-client part of the Teamwork link: the site and token
-          are install-wide. Without it a slot card offers Copy rather than
-          Send, because there is nowhere for a task to land. */}
-      <div className="flex flex-col gap-1">
-        <FieldLabel label="Teamwork tasklist ID">
-          <Input
-            name="teamwork_tasklist_id"
-            inputMode="numeric"
-            defaultValue={client.teamwork_tasklist_id ?? ""}
-            placeholder="e.g. 2859633"
-          />
-        </FieldLabel>
-        <p className="text-xs text-[var(--text-tertiary)]">
-          Where sent growth actions land. It is the number in the tasklist&rsquo;s
-          own Teamwork URL. Leave it empty and slot cards offer Copy instead.
-        </p>
-      </div>
+      {/* A list rather than a box to type an id into: an id read off a URL
+          is how a task ends up in the wrong client's list, and nothing
+          downstream would catch it. */}
+      <TeamworkTasklistField value={client.teamwork_tasklist_id ?? null} />
 
       <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-4">
         <div>

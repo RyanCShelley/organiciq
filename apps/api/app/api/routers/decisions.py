@@ -667,6 +667,36 @@ def confirm_page_stages(
 # record. Boys Electrical's only traffic action was on /careers.
 
 
+@router.get("/teamwork/tasklists")
+def list_teamwork_tasklists(
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+) -> dict:
+    """The tasklists this token can see, so a client can be pointed at one.
+
+    Typing an id read off a URL is how a task ends up in the wrong client's
+    list, and nothing downstream would catch it.
+    """
+    if not teamwork.configured():
+        return {"configured": False, "tasklists": [], "error": None}
+    try:
+        found = teamwork.list_tasklists()
+    except teamwork.TeamworkError as exc:
+        return {"configured": True, "tasklists": [], "error": str(exc)}
+    return {
+        "configured": True,
+        "error": None,
+        "tasklists": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "project_id": row.project_id,
+                "project_name": row.project_name,
+            }
+            for row in found
+        ],
+    }
+
+
 @router.get("/excluded-pages")
 def list_excluded_pages(
     client: Annotated[Client, Depends(require_client)],
