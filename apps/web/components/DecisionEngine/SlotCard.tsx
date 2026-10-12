@@ -24,15 +24,43 @@ function path(url: string): string {
  * things that decide whether an action can be handed to somebody: how long
  * it takes, what it is measured on, and when it gets checked.
  */
+/**
+ * The card's edge carries the state, so a plan can be read at arm's length.
+ *
+ * Only two things are worth colouring: somebody owns it, and nobody is doing
+ * it. A separate colour for sent and shipped would make five states compete
+ * for the same glance and tell you less than the chip beside the buttons
+ * already does.
+ */
+const EDGE: Record<string, string> = {
+  assigned: "border-l-[3px] border-l-[#15784F] bg-[#FAFDFB]",
+  done: "border-l-[3px] border-l-[#15784F] bg-[#FAFDFB]",
+  skipped: "border-l-[3px] border-l-[var(--border-strong,#C9D1D8)] opacity-70",
+};
+
+const STATE_CHIP: Record<string, { label: string; className: string }> = {
+  assigned: { label: "Assigned", className: "bg-[#E5F4EC] text-[#15784F]" },
+  done: { label: "Done", className: "bg-[#E5F4EC] text-[#15784F]" },
+  skipped: { label: "Skipped", className: "bg-[#EEF1F3] text-[#3E4954]" },
+};
+
 export function SlotCard({
   action,
+  status,
   children,
 }: {
   action: RecordAction;
+  /** What the team has done about it: planned, assigned, done or skipped. */
+  status?: string;
   children?: React.ReactNode;
 }) {
+  const chip = status ? STATE_CHIP[status] : undefined;
   return (
-    <article className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] px-6 py-5">
+    <article
+      className={`rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] px-6 py-5 ${
+        (status && EDGE[status]) || ""
+      }`}
+    >
       <div className="flex flex-wrap justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1 basis-[420px]">
           <div className="flex flex-wrap items-center gap-2">
@@ -51,6 +79,13 @@ export function SlotCard({
             {action.spillover ? (
               <span className="rounded-full bg-[#FDF1E3] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#8A4B08]">
                 Spillover
+              </span>
+            ) : null}
+            {chip ? (
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${chip.className}`}
+              >
+                {chip.label}
               </span>
             ) : null}
             {(action.flags ?? []).map((flag) => (

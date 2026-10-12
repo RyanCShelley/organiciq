@@ -1,6 +1,9 @@
 import Link from "next/link";
 
-import { ConstraintCard } from "@/components/DecisionEngine/ConstraintCard";
+import {
+  ConstraintCard,
+  type SlotProgress,
+} from "@/components/DecisionEngine/ConstraintCard";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
@@ -156,6 +159,16 @@ export default async function DecisionEnginePage({
     );
   }
 
+  // Counted from what the team did, not from what the engine prescribed:
+  // five filled slots nobody owns is not five slots of progress.
+  const states = record.actions.map((a) => slotStates.get(a.action_uid)?.status);
+  const progress: SlotProgress = {
+    total: record.action_slots,
+    filled: record.actions.length,
+    assigned: states.filter((s) => s === "assigned" || s === "done").length,
+    skipped: states.filter((s) => s === "skipped").length,
+  };
+
   const withheld = record.constraint === "withheld";
   const assignable = record.actions.length + record.incidents.length;
 
@@ -206,7 +219,7 @@ export default async function DecisionEnginePage({
         </div>
       </div>
 
-      <ConstraintCard record={record} />
+      <ConstraintCard record={record} progress={progress} />
 
       {/* Above the plan, because a plan read as if the site were working is
           worse than no plan. An incident takes no slot and does not change
@@ -283,7 +296,11 @@ export default async function DecisionEnginePage({
             </div>
 
             {record.actions.map((action) => (
-              <SlotCard key={action.action_uid} action={action}>
+              <SlotCard
+                key={action.action_uid}
+                action={action}
+                status={slotStates.get(action.action_uid)?.status}
+              >
                 <SlotActionBar
                   action={action}
                   state={slotStates.get(action.action_uid)}

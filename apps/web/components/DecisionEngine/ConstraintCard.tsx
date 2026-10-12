@@ -90,13 +90,76 @@ function BranchTile({
   );
 }
 
+export type SlotProgress = {
+  /** Slots the plan allows. */
+  total: number;
+  /** Slots the engine filled with an action. */
+  filled: number;
+  /** Of those, how many somebody owns. */
+  assigned: number;
+  skipped: number;
+};
+
+/**
+ * One pip per slot the plan allows, so the month reads at a glance.
+ *
+ * Three states and no more: taken on, set aside, and nobody has touched it.
+ * An empty slot — one the engine could not fill — is drawn hollow rather
+ * than hidden, because "we only found three things worth doing" is part of
+ * what the month looks like.
+ */
+function SlotPips({ progress }: { progress: SlotProgress }) {
+  const { total, filled, assigned, skipped } = progress;
+  const untouched = Math.max(0, filled - assigned - skipped);
+  const empty = Math.max(0, total - filled);
+  const pips = [
+    ...Array(assigned).fill("assigned"),
+    ...Array(skipped).fill("skipped"),
+    ...Array(untouched).fill("open"),
+    ...Array(empty).fill("none"),
+  ];
+  const style: Record<string, string> = {
+    assigned: "bg-[#15784F]",
+    skipped: "bg-[var(--border-strong,#C9D1D8)]",
+    open: "bg-[#F3D9B5]",
+    none: "border border-dashed border-[var(--border-strong,#C9D1D8)]",
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex gap-1" aria-hidden>
+        {pips.map((kind, index) => (
+          <span
+            key={index}
+            className={`h-2.5 w-5 rounded-full ${style[kind]}`}
+          />
+        ))}
+      </div>
+      <span className="text-[13px] text-[var(--text-secondary)]">
+        <span className="font-semibold text-[var(--text-primary)]">
+          {assigned} of {total}
+        </span>{" "}
+        assigned
+        {skipped ? `, ${skipped} skipped` : ""}
+        {empty ? `, ${empty} unfilled` : ""}
+      </span>
+    </div>
+  );
+}
+
 /**
  * What this month is about, why, and whether to trust it.
  *
  * Answers the reader's three questions in order: which constraint, can I
  * trust it, and what do I do. The third is the slot cards below.
  */
-export function ConstraintCard({ record }: { record: MonthlyRecord }) {
+export function ConstraintCard({
+  record,
+  progress,
+}: {
+  record: MonthlyRecord;
+  progress?: SlotProgress;
+}) {
   const label = CONSTRAINT_LABEL[record.constraint] ?? record.constraint;
   const held = monthsHeld(record.held_since, record.month);
   const overridden = record.override === "manual";
@@ -149,6 +212,14 @@ export function ConstraintCard({ record }: { record: MonthlyRecord }) {
             <span className="capitalize">{record.plan}</span> ·{" "}
             {record.action_slots} {record.action_slots === 1 ? "slot" : "slots"}
           </dd>
+          {progress ? (
+            <>
+              <dt className="text-[var(--text-tertiary)]">Slots</dt>
+              <dd>
+                <SlotPips progress={progress} />
+              </dd>
+            </>
+          ) : null}
           <dt className="text-[var(--text-tertiary)]">Held since</dt>
           <dd className="font-semibold">
             {record.held_since} (month {held})
