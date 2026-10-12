@@ -112,6 +112,11 @@ def pull(
             continue
         try:
             features = dataforseo.fetch(term, client=client_http)
+        except dataforseo.DataForSeoAuthError:
+            # Will not come right on the next keyword. Stop rather than
+            # collect the same failure once per term.
+            db.commit()
+            raise
         except dataforseo.DataForSeoError as exc:
             failures.append(f"{term}: {exc}")
             continue

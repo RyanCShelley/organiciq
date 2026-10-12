@@ -55,7 +55,12 @@ def main() -> None:
         return
 
     for client in rows:
-        pulled, failures = pull(db, client, limit=args.limit)
+        try:
+            pulled, failures = pull(db, client, limit=args.limit)
+        except dataforseo.DataForSeoAuthError as exc:
+            # One message, not one per client per keyword.
+            print(f"\n{exc}")
+            return
         print(f"{client.slug}: pulled {pulled}, {len(failures)} failed")
         for failure in failures[:5]:
             print(f"    {failure}")

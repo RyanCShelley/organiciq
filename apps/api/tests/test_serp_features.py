@@ -213,3 +213,66 @@ def test_t2_ignores_features_a_page_cannot_win_by_being_rewritten():
 
 def test_t2_does_not_fire_on_a_navigational_query():
     assert _t(_page(top_query_is_navigational=True)) is None
+
+
+# ── Bad credentials ─────────────────────────────────────────────────────────
+
+
+def _auth_handler(status: int = 401, task_code: int | None = None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if task_code is not None:
+            return httpx.Response(
+                200,
+                json={"tasks": [{"status_code": task_code, "status_message": "Auth error"}]},
+            )
+        return httpx.Response(status, text="Unauthorized")
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"status": 401}, {"status": 403}, {"task_code": 40101}]
+)
+def test_rejected_credentials_are_their_own_failure(kwargs):
+    """However they arrive — as an HTTP status or inside a 200."""
+    with pytest.raises(dataforseo.DataForSeoAuthError):
+        dataforseo.fetch(
+            "x",
+            config=dataforseo.DataForSeoConfig(login="l", password="p"),
+            client=httpx.Client(transport=httpx.MockTransport(_auth_handler(**kwargs))),
+        )
+
+
+def test_a_pull_stops_on_bad_credentials_rather_than_failing_once_per_term(
+    db: Session, client_a: Client
+):
+    """Setting the variables to the placeholders out of a README reads as
+    configured. It failed 425 times, which is how this was found."""
+    for i in range(5):
+        db.add(
+            KeywordTarget(client_id=client_a.id, keyword=f"term {i}", target_url="/a")
+        )
+    db.commit()
+
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401, text="Unauthorized")
+
+    import app.integrations.dataforseo as dfs
+
+    original = dfs.load_config
+    dfs.load_config = lambda: dataforseo.DataForSeoConfig(login="l", password="p")  # type: ignore[assignment]
+    try:
+        with pytest.raises(dataforseo.DataForSeoAuthError):
+            pull(
+                db,
+                client_a,
+                today=TODAY,
+                client_http=httpx.Client(transport=httpx.MockTransport(handler)),
+            )
+    finally:
+        dfs.load_config = original  # type: ignore[assignment]
+
+    assert len(calls) == 1, "kept going after the credentials were rejected"

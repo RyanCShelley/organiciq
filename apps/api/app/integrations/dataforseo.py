@@ -46,6 +46,16 @@ class DataForSeoError(RuntimeError):
     """A pull that did not land, in words somebody can act on."""
 
 
+class DataForSeoAuthError(DataForSeoError):
+    """The credentials were rejected.
+
+    Its own type because it is the one failure that will not come right on
+    the next keyword: every remaining call in the run would fail the same
+    way. Setting the variables to the placeholders out of a README reads as
+    configured and fails 425 times, which is how it was found.
+    """
+
+
 @dataclass(frozen=True)
 class DataForSeoConfig:
     login: str
@@ -169,6 +179,12 @@ def fetch(
         if owns_client:
             client.close()
 
+    if response.status_code in (401, 403):
+        raise DataForSeoAuthError(
+            "DataForSEO rejected the credentials. Check DATAFORSEO_LOGIN and "
+            "DATAFORSEO_PASSWORD — the API password is generated in the API "
+            "Access tab and is not the account password."
+        )
     if response.status_code >= 400:
         raise DataForSeoError(
             f"DataForSEO refused the pull ({response.status_code}): "
@@ -186,6 +202,13 @@ def fetch(
         raise DataForSeoError("DataForSEO returned no task.")
     task = tasks[0]
     code = task.get("status_code")
+    # 401xx is their authentication range, and it arrives inside a 200 as
+    # readily as it does as an HTTP status.
+    if isinstance(code, int) and 40100 <= code < 40200:
+        raise DataForSeoAuthError(
+            f"DataForSEO rejected the credentials ({code}): "
+            f"{task.get('status_message')}"
+        )
     if code != 20000:
         raise DataForSeoError(
             f"DataForSEO task failed ({code}): {task.get('status_message')}"
