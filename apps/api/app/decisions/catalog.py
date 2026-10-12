@@ -29,6 +29,20 @@ from app.decisions.triage import Branch
 
 
 @dataclass(frozen=True)
+class SectionFacts:
+    """One heading, and whether an engine could lift anything under it."""
+
+    heading: str
+    has_table: bool = False
+    has_list: bool = False
+    has_stat: bool = False
+
+    @property
+    def extractable(self) -> bool:
+        return self.has_table or self.has_list or self.has_stat
+
+
+@dataclass(frozen=True)
 class PageFacts:
     """What the crawl knows about the page a target is mapped to."""
 
@@ -39,6 +53,10 @@ class PageFacts:
     faq_questions: tuple[str, ...] = ()
     #: Entity markup present on the page: `about`, `mentions`, `sameAs`.
     entity_properties: frozenset[str] = frozenset()
+    #: Headings with their format flags, for V-5. Empty where the crawl
+    #: predates the capture — which is why V-5 says nothing rather than
+    #: reporting every page as unstructured.
+    sections: tuple[SectionFacts, ...] = ()
     inbound_editorial_links: int = 0
     #: The site's median, so "under-linked" is relative to this site.
     site_median_links: float = 0.0
@@ -256,29 +274,93 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
     )
 
 
+def v5_add_an_extractable_structure(
+    target: ScoredCandidate, page: PageFacts
+) -> Prescription | None:
+    """The SERP lifts an answer, and this page offers nothing liftable.
+
+    Both halves are required. Without the SERP there is nothing saying an
+    answer is being lifted at all; without the crawl's format flags every
+    page looks unstructured, which would prescribe a table for the whole
+    site.
+    """
+    candidate = target.candidate
+    if not candidate.serp_pulled:
+        return None
+    lifted = {f for f in candidate.serp_features if f in EXTRACTIVE_FEATURES}
+    if not lifted:
+        return None
+    if not page.sections:
+        return None
+
+    term = candidate.keyword
+    matching = [s for s in page.sections if _mentions(term, s.heading)]
+    # No heading asks the query: that is V-2's finding, not this one.
+    if not matching:
+        return None
+    if any(s.extractable for s in matching):
+        return None
+
+    feature = sorted(lifted)[0]
+    return Prescription(
+        action_id="V-5",
+        title=f"Add something liftable under the heading for “{term}”",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=term,
+        score=target.score,
+        effort_min=45,
+        why=(
+            f"The results for “{term}” carry {EXTRACTIVE_FEATURES[feature]}, "
+            "so an engine is lifting an answer from somewhere. The heading "
+            "that asks it on this page is followed by prose and nothing "
+            "else — no table, no list, no figure to quote."
+        ),
+        done_when=(
+            "A table, a bullet summary or a stat block sits directly under "
+            "that heading, answering the question on its own without the "
+            "paragraph around it."
+        ),
+        metric="Term position and AI citation",
+        metric_key="term_position",
+        evidence=(
+            f"facts_serp_features: {feature} present",
+            f"facts_crawl_page_snapshots: no table, list or figure under "
+            f"{len(matching)} matching heading(s)",
+        ),
+        check_after_days=30,
+    )
+
+
+#: Features that quote a passage off the page. These are the ones a liftable
+#: structure can win; an image pack or a video result cannot be won with a
+#: table.
+EXTRACTIVE_FEATURES = {
+    "ai_overview": "an AI Overview",
+    "featured_snippet": "a featured snippet",
+}
+
+
 #: In order. The first whose trigger fires is the one prescribed: putting the
 #: term on the page comes before pointing links at it.
 VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | None], ...] = (
     v6_rehoming,
     v1_term_in_high_value_spots,
     v2_answer_block,
+    # Before V-3 and V-4: when an engine is visibly lifting an answer,
+    # giving it something to lift beats marking up or linking to a page it
+    # cannot quote.
+    v5_add_an_extractable_structure,
     v3_entity_markup,
     v4_internal_links,
 )
 
-#: Defined, and unable to fire. Kept here so the gap is visible rather than
-#: being an action that silently never appears.
-BLOCKED_ACTIONS: tuple[SkippedAction, ...] = (
-    # V-5 needs two things: the SERP (now pulled) and per-section table,
-    # list and number flags from the crawl, which the crawler does not
-    # capture. Half unblocked is still blocked, and the reason says which
-    # half rather than repeating the old one.
-    SkippedAction(
-        "V-5",
-        "needs per-section table, list and number flags from the crawl, which "
-        "are not captured — the SERP half of this is now pulled",
-    ),
-)
+#: Nothing is blocked. V-5 was the last, and needed two things: the full
+#: SERP feature list, now pulled from DataForSEO, and per-section table,
+#: list and figure flags, now captured by the crawler. Kept as an empty
+#: tuple rather than deleted, because the next action that cannot fire
+#: should say so here rather than silently never appearing.
+BLOCKED_ACTIONS: tuple[SkippedAction, ...] = ()
 
 
 def prescribe(

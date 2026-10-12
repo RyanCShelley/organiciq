@@ -122,6 +122,18 @@ class PageSection:
     level: int
     heading: str
     first_paragraph: str
+    #: Whether the passage under this heading holds something an engine can
+    #: lift whole. V-5 asks for a table, a bullet summary or a stat block
+    #: under the heading that matches the query — a paragraph of prose is
+    #: what it is prescribing a way out of, so "there is text here" does not
+    #: answer it.
+    has_table: bool = False
+    has_list: bool = False
+    has_stat: bool = False
+
+    @property
+    def extractable(self) -> bool:
+        return self.has_table or self.has_list or self.has_stat
 
 
 @dataclass
@@ -174,6 +186,26 @@ def _looks_like_a_question(text: str) -> bool:
     return first in _QUESTION_OPENERS
 
 
+#: A quantity somebody could quote: a percent, a measurement, a count with a
+#: unit, or a figure with a separator. A bare four-digit year is excluded —
+#: every copyright footer and blog date would otherwise read as a statistic.
+_STAT = re.compile(
+    r"(?<!\d)(?:"
+    r"\d{1,3}(?:,\d{3})+"          # 1,200
+    r"|\d+(?:\.\d+)?\s?%"          # 40%, 12.5 %
+    r"|[$£€]\s?\d+(?:\.\d+)?"      # $40
+    r"|\d+(?:\.\d+)?\s?"
+    r"(?:x|×|mm|cm|m|km|in|ft|kg|lb|lbs|g|oz|hrs?|hours?|mins?|minutes?|days?|"
+    r"weeks?|months?|years?|psi|gpa|mpa|ksi|°[cf])\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_a_stat(text: str) -> bool:
+    return bool(_STAT.search(text or ""))
+
+
 def extract_sections(doc: Any) -> list[PageSection]:
     """Every heading with the first paragraph under it, in document order.
 
@@ -191,12 +223,18 @@ def extract_sections(doc: Any) -> list[PageSection]:
                 sections.append(pending)
             heading = " ".join((node.text_content() or "").split())
             pending = PageSection(level=int(tag[1]), heading=heading, first_paragraph="")
-        elif tag == "p" and pending is not None and not pending.first_paragraph:
+        elif pending is None:
+            continue
+        elif tag == "table":
+            pending.has_table = True
+        elif tag in {"ul", "ol", "dl"}:
+            pending.has_list = True
+        elif tag == "p":
             text = " ".join((node.text_content() or "").split())
-            if text:
-                pending = PageSection(
-                    level=pending.level, heading=pending.heading, first_paragraph=text
-                )
+            if text and not pending.first_paragraph:
+                pending.first_paragraph = text
+            if text and _looks_like_a_stat(text):
+                pending.has_stat = True
     if pending is not None:
         sections.append(pending)
     return [s for s in sections if s.heading]

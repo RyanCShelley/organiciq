@@ -20,7 +20,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.catalog import PageFacts
+from app.decisions.catalog import PageFacts, SectionFacts
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.targets import Candidate
 from app.models.client import Client
@@ -94,6 +94,10 @@ def load_target_inputs(
     db: Session, client: Client, *, exclusions: list[Exclusion] | None = None
 ) -> TargetInputs:
     exclusions = exclusions or []
+    # Read, never pulled — the monthly job does the spending.
+    from app.services.serp_features import load as load_serp_features
+
+    serp = load_serp_features(db, client)
 
     targets = (
         db.query(KeywordTarget)
@@ -179,24 +183,47 @@ def load_target_inputs(
                     classify_page_url(url).page_type.value if url else None
                 ),
                 group_name=target.group_name,
+                serp_features=frozenset(
+                    serp[target.keyword.strip().lower()].item_types
+                )
+                if target.keyword.strip().lower() in serp
+                else frozenset(),
+                serp_pulled=target.keyword.strip().lower() in serp,
             )
         )
 
         if url and url not in pages:
             headings = ()
             faqs = ()
+            sections: tuple[SectionFacts, ...] = ()
             if snapshot is not None:
+                raw_sections = [
+                    sec for sec in (snapshot.sections or []) if isinstance(sec, dict)
+                ]
                 headings = tuple(
-                    str(section.get("heading") or "")
-                    for section in (snapshot.sections or [])
-                    if isinstance(section, dict)
+                    str(sec.get("heading") or "") for sec in raw_sections
                 )
+                # Only where the crawl captured the flags. A crawl that
+                # predates them would otherwise read as a page with no
+                # structure anywhere, and V-5 would prescribe a table for
+                # the whole site.
+                if any("has_table" in sec for sec in raw_sections):
+                    sections = tuple(
+                        SectionFacts(
+                            heading=str(sec.get("heading") or ""),
+                            has_table=bool(sec.get("has_table")),
+                            has_list=bool(sec.get("has_list")),
+                            has_stat=bool(sec.get("has_stat")),
+                        )
+                        for sec in raw_sections
+                    )
                 faqs = tuple(str(q) for q in (snapshot.faq_questions or []))
             pages[url] = PageFacts(
                 url=url,
                 title=getattr(snapshot, "title", None),
                 description=getattr(snapshot, "description", None),
                 headings=headings,
+                sections=sections,
                 faq_questions=faqs,
                 entity_properties=frozenset(schema_by_url.get(url, set())),
                 inbound_editorial_links=int(

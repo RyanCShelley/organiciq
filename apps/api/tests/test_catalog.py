@@ -145,14 +145,13 @@ def test_nothing_fires_on_a_healthy_page():
 def test_the_actions_that_cannot_fire_say_why():
     """Rather than being an action that silently never appears.
 
-    T-2 was here until the SERP feature list was pulled. V-5 needs that *and*
-    per-section table, list and number flags from the crawl, so it stays —
-    with a reason naming the half that is still missing rather than the one
-    that is now answered.
+    T-2 was here until the SERP feature list was pulled, and V-5 until the
+    crawler captured per-section table, list and figure flags. Nothing is
+    blocked now — but the list stays, and anything added to it has to carry
+    a reason rather than silently never appearing.
     """
     blocked = {a.action_id: a.reason for a in BLOCKED_ACTIONS}
-    assert set(blocked) == {"V-5"}
-    assert "per-section table" in blocked["V-5"]
+    assert blocked == {}
     assert all(reason.strip() for reason in blocked.values())
 
 

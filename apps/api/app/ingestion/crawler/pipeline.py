@@ -150,6 +150,9 @@ def _snapshot_rows(
                             "level": section.level,
                             "heading": section.heading,
                             "first_paragraph": section.first_paragraph,
+                            "has_table": section.has_table,
+                            "has_list": section.has_list,
+                            "has_stat": section.has_stat,
                         }
                         for section in parsed.sections
                     ]

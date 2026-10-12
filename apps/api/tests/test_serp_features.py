@@ -188,10 +188,9 @@ def test_the_newest_reading_wins(db: Session, client_a: Client):
 
 
 def test_t2_is_no_longer_blocked():
-    assert "T-2" not in {b.action_id for b in BLOCKED_ACTIONS}
-    # V-5 still is, and for the half that is still missing.
-    v5 = next(b for b in BLOCKED_ACTIONS if b.action_id == "V-5")
-    assert "per-section table" in v5.reason
+    # V-5 was the only one left after this, and the crawler's format flags
+    # have since freed it too.
+    assert {b.action_id for b in BLOCKED_ACTIONS} == set()
 
 
 def test_t2_fires_on_a_feature_the_client_does_not_hold():

@@ -49,6 +49,11 @@ class Candidate:
     #: page's classification.
     target_page_type: str | None = None
     group_name: str | None = None
+    #: What the SERP for this term carries, from the DataForSEO pull. V-5
+    #: needs it to know an answer is being lifted at all; `serp_pulled`
+    #: distinguishes "nothing on the SERP" from "nobody looked".
+    serp_features: frozenset[str] = frozenset()
+    serp_pulled: bool = False
 
 
 @dataclass(frozen=True)
