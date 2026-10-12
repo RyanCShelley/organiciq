@@ -112,7 +112,15 @@ def _mentions(term: str, text: str | None) -> bool:
 def v1_term_in_high_value_spots(
     target: ScoredCandidate, page: PageFacts
 ) -> Prescription | None:
-    """The term is missing from the title, the meta, or every heading."""
+    """A primary term missing from the title, the meta, or every heading.
+
+    Primary only. A page has one title and it belongs to the term the page
+    is *for*: telling somebody to put a secondary term in it is telling them
+    to take the primary term out, and the engine would then find that
+    missing next month and ask for it back.
+    """
+    if target.candidate.term_role == "secondary":
+        return None
     term = target.candidate.keyword
     in_title = _mentions(term, page.title)
     in_description = _mentions(term, page.description)
@@ -158,6 +166,50 @@ def v1_term_in_high_value_spots(
         evidence=(
             f"keyword_targets: {term} -> {page.url}",
             f"crawl: missing from {missing_text}",
+        ),
+    )
+
+
+def v8_secondary_term_section(
+    target: ScoredCandidate, page: PageFacts
+) -> Prescription | None:
+    """A secondary term the page never gives a heading to.
+
+    The counterpart to V-1. A secondary term does not earn the title — that
+    is the primary term's — but it does earn a passage of its own, because
+    a term mentioned nowhere in the structure is a term the page is not
+    really about.
+    """
+    candidate = target.candidate
+    if candidate.term_role != "secondary":
+        return None
+    term = candidate.keyword
+    if any(_mentions(term, heading) for heading in page.headings):
+        return None
+    return Prescription(
+        action_id="V-8",
+        title=f"Give “{term}” a section of its own",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=term,
+        score=target.score,
+        effort_min=45,
+        why=(
+            f"“{term}” is a secondary term for this page and no heading on it "
+            "says so. The title belongs to the page's primary term, so this "
+            "one earns a passage rather than a rewrite — and right now it has "
+            "neither."
+        ),
+        done_when=(
+            f"An H2 carrying “{term}”, with two or three paragraphs under it "
+            "that answer what somebody searching that phrase came for. The "
+            "title and H1 are left alone."
+        ),
+        metric="Term position",
+        metric_key="term_position",
+        evidence=(
+            f"keyword_targets: {term} is secondary on {page.url}",
+            f"crawl: none of {len(page.headings)} headings use it",
         ),
     )
 
@@ -400,6 +452,9 @@ EXTRACTIVE_FEATURES = {
 VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | None], ...] = (
     v6_rehoming,
     v1_term_in_high_value_spots,
+    # Beside V-1, not after it: the two never both fire, because a term is
+    # either the page's primary or one of its secondaries.
+    v8_secondary_term_section,
     v2_answer_block,
     # Before the rest: the answers are already written, so this is fifteen
     # minutes of markup against a page rewrite. Cheapest first where the

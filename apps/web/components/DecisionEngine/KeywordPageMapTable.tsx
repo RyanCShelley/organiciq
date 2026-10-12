@@ -230,9 +230,11 @@ function Row({
           aria-label={`Role for ${row.keyword}`}
           className="min-h-[36px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm"
         >
-          <option value="">Not set</option>
-          <option value="primary">Primary</option>
-          <option value="secondary">Secondary</option>
+          {/* It decides what the engine asks for: the title for a primary
+              term, a section of its own for a secondary one. */}
+          <option value="">Not set — treated as primary</option>
+          <option value="primary">Primary — owns the title</option>
+          <option value="secondary">Secondary — earns a section</option>
         </select>
       </td>
       <td className="min-w-[30rem]">
