@@ -45,6 +45,10 @@ class Prescription:
     metric: str
     evidence: tuple[str, ...] = field(default_factory=tuple)
     flags: tuple[str, ...] = field(default_factory=tuple)
+    #: When this action is judged, where the default 28 days is too soon. A
+    #: lead rate needs more time to say anything than a position does, and
+    #: checking it early produces a verdict on noise.
+    check_after_days: int | None = None
 
 
 @dataclass(frozen=True)

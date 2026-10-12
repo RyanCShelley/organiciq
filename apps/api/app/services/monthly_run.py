@@ -33,14 +33,22 @@ from app.decisions.triage import (
 from app.decisions.thresholds import merge_thresholds
 from app.models.annotation import Annotation
 from app.models.client import Client
-from app.decisions.catalog import BLOCKED_ACTIONS, prescribe
-from app.decisions.overrides import Exclusion
+from app.decisions.catalog import (
+    BLOCKED_ACTIONS,
+    LEAD_ACTIONS,
+    TRAFFIC_ACTIONS,
+    prescribe,
+    prescribe_page,
+)
+from app.decisions.page_targets import rank_for_leads, rank_for_traffic
+from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.slots import fill_slots
 from app.decisions.targets import rank_candidates
 from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
+from app.services.page_signals import load_page_candidates
 from app.services.target_signals import load_target_inputs
 from app.services.triage_signals import lead_signals, traffic_signals, visibility_signals
 
@@ -276,6 +284,22 @@ def build_record(
         if found is not None:
             prescriptions.append(found)
 
+    # Traffic and Leads ask about the page, not the term, so they come from
+    # their own candidates. Until these existed, a client constrained on
+    # Traffic got a plan of Visibility spillover or an empty one — the engine
+    # named the problem and then prescribed for a different branch.
+    page_candidates = load_page_candidates(db, client, today=today)
+    for ranked_pages, actions in (
+        (rank_for_traffic(page_candidates), TRAFFIC_ACTIONS),
+        (rank_for_leads(page_candidates), LEAD_ACTIONS),
+    ):
+        for candidate in ranked_pages:
+            if is_excluded(candidate.url, exclusions):
+                continue
+            found = prescribe_page(candidate, actions=actions)
+            if found is not None:
+                prescriptions.append(found)
+
     constraint_branch = next(
         (b for b in Branch if b.value == triage.constraint), None
     )
@@ -357,7 +381,12 @@ def build_record(
                 "evidence": list(slot.prescription.evidence),
                 "done_when": slot.prescription.done_when,
                 "metric": slot.prescription.metric,
-                "check_on": (today + timedelta(days=CHECK_AFTER_DAYS)).isoformat(),
+                "check_on": (
+                    today
+                    + timedelta(
+                        days=slot.prescription.check_after_days or CHECK_AFTER_DAYS
+                    )
+                ).isoformat(),
                 "flags": list(slot.prescription.flags),
             }
             for slot in plan.filled

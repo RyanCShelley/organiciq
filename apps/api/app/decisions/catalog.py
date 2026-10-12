@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from app.decisions.page_targets import PageCandidate
 from app.decisions.slots import Prescription
 from app.decisions.targets import ScoredCandidate
 from app.decisions.triage import Branch
@@ -294,3 +295,258 @@ def prescribe_all(
         if found is not None:
             out.append(found)
     return out
+
+
+# ── Traffic ─────────────────────────────────────────────────────────────────
+#
+# These take a page rather than a term. A traffic problem is a property of a
+# page — the clicks it did not earn, the readers who left — and squeezing it
+# through a keyword candidate would name a term in an action that is not
+# about one.
+
+#: Where a missed click is the snippet's fault rather than the position's.
+#: Below the top three, a CTR under the curve is mostly explained by rank, so
+#: a title rewrite would be sold on a number it cannot move. Held at three
+#: because the spec says three, not because three makes it fire.
+SNIPPET_MAX_POSITION = 3.0
+
+#: Under this many impressions a CTR gap is a handful of searches, and the
+#: curve is noise at that size.
+MIN_IMPRESSIONS = 100.0
+
+#: Enough sessions for an engagement rate to mean anything.
+MIN_SESSIONS_FOR_ENGAGEMENT = 50.0
+
+
+def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
+    """Top-three page earning fewer clicks than its position should."""
+    missed = page.missed_clicks
+    if (
+        missed is None
+        or page.position is None
+        or page.position > SNIPPET_MAX_POSITION
+        or page.impressions < MIN_IMPRESSIONS
+        or missed < 1
+    ):
+        return None
+    return Prescription(
+        action_id="T-1",
+        title="Rewrite the title and meta description",
+        branch=Branch.TRAFFIC,
+        target_url=page.url,
+        term=page.top_query,
+        score=missed,
+        effort_min=30,
+        why=(
+            f"The page averages position {page.position:.1f} and earned "
+            f"{page.clicks:.0f} clicks from {page.impressions:.0f} "
+            f"impressions. The measured curve puts a page at that position on "
+            f"{page.expected_clicks:.0f}. At the top of the page one, what is "
+            "left to explain the gap is the snippet."
+        ),
+        done_when=(
+            "The title is 60 characters or fewer, carries the term and a "
+            "reason to click that the page delivers, and the old version is "
+            "logged so the check has something to compare."
+        ),
+        metric="Clicks against the curve's expectation",
+        evidence=(
+            f"facts_gsc_pages: {page.clicks:.0f} clicks, "
+            f"{page.impressions:.0f} impressions, position {page.position:.1f}",
+            f"ctr_curve: {page.expected_clicks:.0f} clicks expected at that position",
+        ),
+    )
+
+
+def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
+    """People arrive and leave: engagement under the site's own median."""
+    rate = page.engagement_rate
+    if (
+        rate is None
+        or page.site_median_engagement is None
+        or page.sessions < MIN_SESSIONS_FOR_ENGAGEMENT
+        or rate >= page.site_median_engagement
+    ):
+        return None
+    return Prescription(
+        action_id="T-3",
+        title="Rewrite the opening for the reader the page actually draws",
+        branch=Branch.TRAFFIC,
+        target_url=page.url,
+        term=page.top_query,
+        score=page.sessions * (page.site_median_engagement - rate),
+        effort_min=60,
+        why=(
+            f"{page.sessions:.0f} sessions landed here and "
+            f"{rate * 100:.0f}% engaged, against a site median of "
+            f"{page.site_median_engagement * 100:.0f}%. The page is winning "
+            "the click and losing the reader, which is a mismatch between "
+            "what the search promised and what the opening delivers."
+        ),
+        done_when=(
+            "The H1 and the first two paragraphs answer the query the page "
+            "draws, in the words of the customer it is for, with the old "
+            "opening logged."
+        ),
+        metric="Engaged session rate",
+        evidence=(
+            f"facts_ga4_traffic: {page.sessions:.0f} sessions, "
+            f"{rate * 100:.0f}% engaged",
+            f"site median engagement {page.site_median_engagement * 100:.0f}%",
+        ),
+    )
+
+
+TRAFFIC_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
+    t1_rewrite_snippet,
+    t3_realign_to_the_audience,
+)
+
+
+# ── Leads ───────────────────────────────────────────────────────────────────
+#
+# Every one of these needs a confirmed funnel stage. A lead action on a page
+# whose stage was guessed from its URL is the mistake `client_conversion_pages`
+# was built to stop, so a page with no confirmed stage gets none of them.
+
+#: Which offers suit a reader at each stage. A reader still learning is not
+#: sent to a quote form; one ready to buy is not sent to another guide.
+STAGE_FIT = {
+    "tofu": ("tofu", "mofu"),
+    "mofu": ("mofu", "bofu"),
+    "bofu": ("bofu",),
+}
+
+
+#: How each stage reads in a sentence, so the reason is English rather than
+#: an acronym the reader has to decode.
+STAGE_WORDS = {
+    "tofu": "still learning",
+    "mofu": "comparing options",
+    "bofu": "ready to buy",
+}
+
+
+def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
+    """A page people land on with no in-content way forward."""
+    if page.stage is None or page.stage == "bofu" or page.routes_onward:
+        return None
+    if not page.matched_offers:
+        return None
+    return Prescription(
+        action_id="L-1",
+        title="Add an in-content route to the next step",
+        branch=Branch.LEADS,
+        target_url=page.url,
+        term=None,
+        score=page.sessions,
+        effort_min=30,
+        why=(
+            f"{page.sessions:.0f} sessions land here and the page carries no "
+            "in-content link to any declared conversion page. Navigation and "
+            "the footer do not count: they are on every page and say nothing "
+            "about this one, so the reader is left to go looking."
+        ),
+        done_when=(
+            f"An in-content link to {page.matched_offers[0]}, with a sentence "
+            "saying what the reader gets by following it, placed where the "
+            "page has finished answering what they came for."
+        ),
+        metric="Leads from sessions starting on this page",
+        evidence=(
+            f"facts_crawl_internal_links: no in-content link to a conversion page",
+            f"facts_ga4_traffic: {page.sessions:.0f} sessions",
+            f"client_page_stages: {page.stage}",
+        ),
+        check_after_days=30,
+    )
+
+
+def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
+    """The page routes onward and never asks."""
+    if page.stage is None or page.conversion_elements is None:
+        return None
+    if page.conversion_elements > 0:
+        return None
+    return Prescription(
+        action_id="L-2",
+        title="Add a call to action the page is missing",
+        branch=Branch.LEADS,
+        target_url=page.url,
+        term=None,
+        score=page.sessions,
+        effort_min=30,
+        why=(
+            f"The crawl found no form or call to action on a page taking "
+            f"{page.sessions:.0f} sessions. Whatever the reader decides here, "
+            "the page gives them no way to act on it."
+        ),
+        done_when=(
+            "One call to action on the first screen, worded for what this "
+            "page is about rather than the site's standard line."
+        ),
+        metric="Lead rate for sessions landing on this page",
+        evidence=(
+            "facts_crawl_page_snapshots: conversion_elements = 0",
+            f"facts_ga4_traffic: {page.sessions:.0f} sessions",
+        ),
+        check_after_days=30,
+        # The crawl counts these and does not say where they sit, so "none in
+        # the first screen" cannot be judged — only "none at all".
+        flags=("cta_position_unknown",),
+    )
+
+
+def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None:
+    """Every route out goes somewhere the reader is not ready for."""
+    if page.stage is None or not page.routes_onward or not page.matched_offers:
+        return None
+    fits = STAGE_FIT.get(page.stage, ())
+    if page.linked_offer_stages & set(fits):
+        return None
+    linked = ", ".join(sorted(page.linked_offer_stages)) or "none"
+    return Prescription(
+        action_id="L-3",
+        title="Point the page at an offer its reader is ready for",
+        branch=Branch.LEADS,
+        target_url=page.url,
+        term=None,
+        score=page.sessions,
+        effort_min=30,
+        why=(
+            f"The reader here is {STAGE_WORDS[page.stage]}, and every "
+            f"in-content route out goes to a {linked} offer. A declared offer "
+            "that suits them exists and nothing links to it."
+        ),
+        done_when=(
+            f"The in-content route points at {page.matched_offers[0]}, with "
+            "the link text rewritten for what that offer gives this reader."
+        ),
+        metric="Lead rate for sessions landing on this page",
+        evidence=(
+            f"client_page_stages: {page.stage}",
+            f"linked offer stages: {linked}",
+            f"a matching offer exists: {page.matched_offers[0]}",
+        ),
+        check_after_days=45,
+    )
+
+
+LEAD_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
+    l1_route_to_the_next_step,
+    l2_add_a_call_to_action,
+    l3_match_the_offer_to_the_reader,
+)
+
+
+def prescribe_page(
+    page: PageCandidate,
+    *,
+    actions: tuple[Callable[[PageCandidate], Prescription | None], ...],
+) -> Prescription | None:
+    """The first action whose trigger fires for this page."""
+    for action in actions:
+        found = action(page)
+        if found is not None:
+            return found
+    return None
