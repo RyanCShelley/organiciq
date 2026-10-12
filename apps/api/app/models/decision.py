@@ -389,3 +389,36 @@ class ConstraintOverride(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class KeywordPageSuggestion(Base):
+    """Where a term belongs, proposed by subject rather than by ranking.
+
+    The Search Console suggester can only ever offer a page that already
+    ranks, so after a relaunch it offers the homepage for everything. This
+    one reads what a page is about.
+
+    `margin` — how far the best page beat the runner-up — is the confidence
+    signal, and it is what decides whether a row is shown at all.
+    """
+
+    __tablename__ = "keyword_page_suggestions"
+    __table_args__ = (
+        UniqueConstraint("client_id", "keyword", name="uq_keyword_page_suggestion"),
+        Index("ix_keyword_page_suggestions_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    page_url: Mapped[str] = mapped_column(Text, nullable=False)
+    score: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    margin: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    runner_up_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    computed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

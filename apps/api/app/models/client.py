@@ -53,6 +53,11 @@ class Client(Base):
     #: The Teamwork tasklist a sent growth action lands in. The site and token
     #: are install-wide; this is the only per-client part of the mapping.
     teamwork_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The margin a keyword→page match must clear to be proposed, calibrated
+    #: against this client's own Search Console pairs. One global number
+    #: would be too loose for a site of near-identical pages and too tight
+    #: for a varied one.
+    keyword_match_margin: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     #: Fallback goal, used only when there is no projection to read a
     #: checkpoint from. The dashboard's goal comes from the curve.
     monthly_lead_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)

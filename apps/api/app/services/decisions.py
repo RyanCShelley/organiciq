@@ -368,6 +368,13 @@ def keyword_page_map_view(db, client_id, *, period=None):
         .all()
     }
     suggestions = _pages_for_queries(db, client_id, period=period)
+    # Where Search Console shows a page, that wins: it is an observation.
+    # The model fills the gap — a term that ranks nowhere has no observation
+    # to offer, and after a relaunch the only page that ranks is the
+    # homepage, so every observation points there.
+    from app.services.keyword_matcher import suggestions_for
+
+    by_subject = suggestions_for(db, client_id)
 
     # Where each page points its canonical. Search Console happily reports a
     # retired URL — smamarketing.com/services/local-seo still draws
@@ -402,7 +409,12 @@ def keyword_page_map_view(db, client_id, *, period=None):
         row = mapped.get(key)
         metric = metrics.get(key)
         suggested = suggestions.get(key)
+        proposed = by_subject.get(key)
         suggested_url = suggested.page_url if suggested else None
+        suggested_from = "search_console" if suggested else None
+        if suggested_url is None and proposed is not None:
+            suggested_url = proposed.page_url
+            suggested_from = "subject"
         redirected_from = None
         if suggested_url and suggested_url in canonical_of:
             redirected_from, suggested_url = suggested_url, canonical_of[suggested_url]
@@ -426,6 +438,15 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 ),
                 "current_position": _rank_position(tracked.current_position),
                 "suggested_target_url": suggested_url,
+                #: Which read it came from. They mean different things: one
+                #: is where the site ranks, the other is what the page is
+                #: about, and a person deciding should know which.
+                "suggested_from": suggested_from,
+                "suggested_margin": (
+                    float(proposed.margin)
+                    if proposed is not None and suggested_from == "subject"
+                    else None
+                ),
                 "suggested_impressions": (
                     round(suggested.impressions) if suggested else None
                 ),

@@ -21,6 +21,9 @@ export type KeywordMapRow = {
   difficulty: number | null;
   current_position: number | null;
   suggested_target_url: string | null;
+  /** Which read it came from: where the site ranks, or what a page is about. */
+  suggested_from?: "search_console" | "subject" | null;
+  suggested_margin?: number | null;
   suggested_impressions: number | null;
   suggested_instead_of: string | null;
 };
@@ -272,7 +275,15 @@ function Row({
               setSaved("idle");
             }}
           >
-            {row.suggested_instead_of ? (
+            {/* The two reads mean different things and a person deciding
+                should know which they are looking at: one is where the site
+                ranks today, the other is what a page is about. */}
+            {row.suggested_from === "subject" ? (
+              <>
+                Closest page by subject: {forDisplay(row.suggested_target_url ?? "", origin)}
+                {" "}— use this. Nothing ranks for this term yet.
+              </>
+            ) : row.suggested_instead_of ? (
               <>
                 Search Console shows {row.suggested_instead_of} (
                 {formatNum(row.suggested_impressions)} impressions), which
