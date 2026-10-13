@@ -332,6 +332,17 @@ def upsert_keyword_page_map(db, client_id, entries):
     )
 
 
+def _first_number(*values):
+    """The first of these that is a real number, as a float."""
+    for value in values:
+        if value is None:
+            continue
+        number = float(value)
+        if number:
+            return number
+    return None
+
+
 def keyword_page_map_view(db, client_id, *, period=None):
     """Every tracked keyword with its mapping and the best guesses at one.
 
@@ -432,7 +443,14 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 "priority": bool(row.priority) if row else False,
                 #: confirmed | suggested. The engine reads confirmed only.
                 "source": row.source if row else None,
-                "volume": float(metric.volume) if metric and metric.volume else None,
+                #: The paid lookup prices every term, ranked or not, but it
+                #: is only run monthly and the rank tracker already carries
+                #: a volume for each term it tracks. Reading only the first
+                #: left the column empty for every client the lookup had
+                #: not been run for.
+                "volume": _first_number(
+                    metric.volume if metric else None, tracked.volume
+                ),
                 "difficulty": (
                     float(metric.difficulty) if metric and metric.difficulty else None
                 ),

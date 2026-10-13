@@ -53,3 +53,78 @@ def test_maybe_run_daily_sync_enqueues_mapped_sources(db, client_a: Client, monk
     assert "ga4" in sources
 
     assert daily_sync.maybe_run_daily_sync(db) is False
+
+
+def _track(db, client_id, keyword: str) -> None:
+    from app.models.seranking import FactSerKeyword
+
+    db.add(
+        FactSerKeyword(
+            client_id=client_id,
+            keyword=keyword,
+            site_engine_id="1",
+            keyword_id=keyword,
+            current_position=0,
+        )
+    )
+    db.commit()
+
+
+def _price(db, client_id, keyword: str, fetched_at: date) -> None:
+    from app.models.seranking import FactSerKeywordMetric
+
+    db.add(
+        FactSerKeywordMetric(
+            client_id=client_id,
+            keyword=keyword,
+            source="us",
+            volume=100,
+            difficulty=20,
+            fetched_at=fetched_at,
+        )
+    )
+    db.commit()
+
+
+def test_keyword_metrics_due_when_nothing_priced(db, client_a: Client):
+    _track(db, client_a.id, "managed it services")
+    stats = daily_sync.enqueue_due_keyword_metrics(db)
+    assert stats["due"] == 1
+    assert stats["enqueued"] == 1
+    job = (
+        db.query(SyncJob)
+        .filter(SyncJob.source == "se_ranking_keyword_metrics")
+        .one()
+    )
+    assert job.client_id == client_a.id
+
+
+def test_keyword_metrics_not_due_when_priced_this_month(db, client_a: Client):
+    _track(db, client_a.id, "managed it services")
+    _price(db, client_a.id, "managed it services", date.today())
+    assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 0
+
+
+def test_keyword_metrics_due_again_when_the_pull_is_old(db, client_a: Client):
+    from datetime import timedelta
+
+    _track(db, client_a.id, "managed it services")
+    _price(
+        db,
+        client_a.id,
+        "managed it services",
+        date.today() - timedelta(days=daily_sync.KEYWORD_METRICS_INTERVAL_DAYS),
+    )
+    assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 1
+
+
+def test_keyword_metrics_due_for_a_term_added_since(db, client_a: Client):
+    """A new keyword is unpriced however fresh the last pull was."""
+    _track(db, client_a.id, "managed it services")
+    _price(db, client_a.id, "managed it services", date.today())
+    _track(db, client_a.id, "cybersecurity services")
+    assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 1
+
+
+def test_keyword_metrics_skips_a_client_tracking_nothing(db, client_a: Client):
+    assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 0

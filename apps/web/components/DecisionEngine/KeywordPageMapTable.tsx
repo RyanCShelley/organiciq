@@ -388,13 +388,23 @@ export function KeywordPageMapTable({
       const right = read(b);
       // A term with no volume or no position is never the answer to "show
       // me the biggest" or "show me the closest", so it sinks either way.
-      if (left === null && right === null) return 0;
-      if (left === null) return 1;
-      if (right === null) return -1;
-      if (typeof left === "number" && typeof right === "number") {
-        return (left - right) * direction;
+      // Two of them are a tie, and a tie is broken below rather than left
+      // to the order they arrived in.
+      if (left !== null || right !== null) {
+        if (left === null) return 1;
+        if (right === null) return -1;
+        const by =
+          typeof left === "number" && typeof right === "number"
+            ? (left - right) * direction
+            : String(left).localeCompare(String(right)) * direction;
+        if (by !== 0) return by;
       }
-      return String(left).localeCompare(String(right)) * direction;
+      // Every tie ends A–Z, so the order does not depend on anything that
+      // changes when a row is saved. The server sends mapped terms last:
+      // without this, saving a term on a client with no search volume —
+      // where every row ties — dropped it to the bottom of the table the
+      // moment it was saved, which reads as the save doing nothing.
+      return a.keyword.localeCompare(b.keyword);
     });
   }, [visible, sortKey, sortDir]);
 

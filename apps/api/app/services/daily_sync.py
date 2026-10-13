@@ -32,6 +32,11 @@ SITE_CRAWL_INTERVAL_DAYS = 7
 #: of its slot, so a worker outage cannot cost a client its turn.
 SITE_CRAWL_STALE_DAYS = 14
 
+#: How long a keyword's market data is treated as current. SE Ranking bills
+#: per keyword looked up and volume and difficulty move slowly, so this is
+#: asked once a month rather than on the daily cycle.
+KEYWORD_METRICS_INTERVAL_DAYS = 30
+
 # Job sources per mapped integration provider.
 _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
     IntegrationProvider.GSC: ("gsc_pages", "gsc_queries"),
@@ -235,6 +240,76 @@ def enqueue_due_site_crawls(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
+def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
+    """Price every client's tracked keywords, monthly.
+
+    This job was registered and runnable but never scheduled, so the only
+    client with volume and difficulty was the one it had been run for by
+    hand. Everywhere else the keyword map showed "—" in both columns, and
+    the rules that weigh a term by what winning it is worth were estimating
+    without the one input that says how hard it is.
+
+    Due when a client has tracked keywords and either nothing priced, a
+    term added since the last pull, or a pull older than a month.
+    """
+    from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
+
+    today = date.today()
+    tracked = dict(
+        db.query(FactSerKeyword.client_id, func.count(func.distinct(FactSerKeyword.keyword)))
+        .group_by(FactSerKeyword.client_id)
+        .all()
+    )
+    priced = {
+        client_id: (count, newest)
+        for client_id, count, newest in db.query(
+            FactSerKeywordMetric.client_id,
+            func.count(func.distinct(FactSerKeywordMetric.keyword)),
+            func.max(FactSerKeywordMetric.fetched_at),
+        ).group_by(FactSerKeywordMetric.client_id)
+    }
+
+    clients = (
+        db.query(Client)
+        .filter(Client.status == ClientStatus.ACTIVE)
+        .filter(Client.id.in_(tracked.keys()))
+        .all()
+        if tracked
+        else []
+    )
+
+    enqueued = skipped = errors = due = 0
+    for client in clients:
+        count, newest = priced.get(client.id, (0, None))
+        # A term priced is a term paid for: asking again for the ones we
+        # already have is the cost this guard exists to avoid.
+        fresh = newest is not None and (today - newest).days < KEYWORD_METRICS_INTERVAL_DAYS
+        if fresh and count >= tracked[client.id]:
+            continue
+        due += 1
+        try:
+            from app.ingestion.seranking.pipeline_domain import resolve_source
+
+            enqueue_sync_job(
+                db,
+                client.id,
+                SyncJobCreate(
+                    source="se_ranking_keyword_metrics",
+                    start_date=today,
+                    end_date=today,
+                    params={"source": resolve_source(client)},
+                ),
+            )
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("Keyword metrics enqueue failed client=%s", client.id)
+
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
 def maybe_run_daily_sync(db: Session) -> bool:
     """
     If daily sync is due (UTC hour reached and not yet run today), enqueue jobs.
@@ -275,6 +350,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
 
     stats = enqueue_daily_syncs(db)
     crawl_stats = enqueue_due_site_crawls(db)
+    metric_stats = enqueue_due_keyword_metrics(db)
     checkpoint.last_run_date = today
     checkpoint.updated_at = now
     db.commit()
@@ -295,5 +371,13 @@ def maybe_run_daily_sync(db: Session) -> bool:
             crawl_stats["enqueued"],
             crawl_stats["skipped"],
             crawl_stats["errors"],
+        )
+    if metric_stats["due"]:
+        logger.info(
+            "Keyword metrics due=%s enqueued=%s skipped=%s errors=%s",
+            metric_stats["due"],
+            metric_stats["enqueued"],
+            metric_stats["skipped"],
+            metric_stats["errors"],
         )
     return True
