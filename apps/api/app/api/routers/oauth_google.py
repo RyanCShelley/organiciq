@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 from app.core.client_scope import require_client, user_can_access_client
 from app.core.crypto import decrypt_json
 from app.core.db import get_db
-from app.core.security import AuthUser, require_sma_staff
+from app.core.security import AuthUser, require_sma_admin, require_sma_staff
+from app.models.user import UserRole
 from app.core.settings import get_settings
 from app.ingestion.ga4.client import list_ga4_properties
 from app.ingestion.google_auth import DATA_OAUTH_SCOPES
@@ -88,6 +89,42 @@ def _upsert_google_credentials(db: Session, client_id: UUID, cred_payload: dict)
     propagate_google_credentials(db, cred_payload)
 
 
+def _claimed_by_another_client(
+    db: Session, client: Client, provider: IntegrationProvider, value: str
+) -> bool:
+    """Whether a different client already has this property connected.
+
+    One Google grant sees every property in the workspace, so the property
+    picker offers all of them. A staff member assigned to client A could pick
+    client Y's, and the daily sync would then pull Y's data into A. A property
+    already connected elsewhere needs an admin to move or share it.
+    """
+    for row in db.query(Integration).filter(
+        Integration.provider == provider, Integration.client_id != client.id
+    ):
+        if (row.external_property_id or "").strip() == value:
+            return True
+        if value in _normalize_secondary_urls(row.gsc_secondary_site_urls):
+            return True
+    return False
+
+
+def _refuse_if_claimed(
+    db: Session, user: AuthUser, client: Client, provider: IntegrationProvider, value: str
+) -> None:
+    if user.role == UserRole.SMA_ADMIN:
+        return
+    # A client that lives in a folder of a larger site shares that site's
+    # property by design (see Client.path_prefix).
+    if client.path_prefix:
+        return
+    if _claimed_by_another_client(db, client, provider, value):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That property is already connected to another client. Ask an admin to move or share it.",
+        )
+
+
 def _integration_for(
     db: Session, client_id: UUID, provider: IntegrationProvider
 ) -> Integration | None:
@@ -120,7 +157,11 @@ def _access_token_for_google(db: Session, client_id: UUID, preferred: Integratio
 
 @router.get("/oauth/google/start")
 def start_google_data_oauth(
-    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    # Admin only. The grant this flow produces is workspace-wide: the callback
+    # copies it onto every client, replacing the one in place. Any staff member
+    # could connect their own Google account here and swap the credential that
+    # every client's sync runs on.
+    user: Annotated[AuthUser, Depends(require_sma_admin)],
     db: Annotated[Session, Depends(get_db)],
     client_id: UUID = Query(...),
 ) -> dict:
@@ -259,7 +300,7 @@ def gsc_sites(
 def save_gsc_property(
     payload: SaveGscPropertyRequest,
     client: Annotated[Client, Depends(require_client)],
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> IntegrationOut:
     integration = _integration_for(db, client.id, IntegrationProvider.GSC)
@@ -269,6 +310,7 @@ def save_gsc_property(
     site_url = payload.site_url.strip()
     if not site_url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="site_url required")
+    _refuse_if_claimed(db, user, client, IntegrationProvider.GSC, site_url)
 
     secondaries = _normalize_secondary_urls(integration.gsc_secondary_site_urls)
     primary = (integration.external_property_id or "").strip() or None
@@ -359,7 +401,7 @@ def ga4_properties(
 def save_ga4_property(
     payload: SaveGa4PropertyRequest,
     client: Annotated[Client, Depends(require_client)],
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> IntegrationOut:
     integration = _integration_for(db, client.id, IntegrationProvider.GA4)
@@ -374,6 +416,7 @@ def save_ga4_property(
         property_id = f"properties/{property_id}"
     if not property_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="property_id required")
+    _refuse_if_claimed(db, user, client, IntegrationProvider.GA4, property_id)
 
     integration.external_property_id = property_id
     integration.connection_status = ConnectionStatus.CONNECTED

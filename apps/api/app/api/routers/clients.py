@@ -9,6 +9,7 @@ from app.core.client_scope import require_client, user_can_access_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
+from app.models.user import UserRole
 from app.schemas import (
     BaselineSnapshotApplyRequest,
     BaselineSnapshotPreviewOut,
@@ -74,6 +75,34 @@ def get_client(
     return client_out(client)
 
 
+#: What a client is sold and what it may spend. Any staff member assigned to a
+#: client could change these, including their own spend ceilings: the plan tier,
+#: the custom allowances, and the crawl and AI-search limits that decide how
+#: many pages are fetched and how many billed prompts are run. The settings
+#: form sends every field on every save, so only a *change* is refused — saving
+#: the other fields with these untouched still works.
+ADMIN_ONLY_FIELDS = (
+    "tier_id",
+    "custom_tracked_keyword_limit",
+    "custom_tracked_prompt_limit",
+    "custom_content_allowance",
+    "custom_update_allowance",
+    "custom_growth_action_allowance",
+    "custom_watchlist_cadence",
+    "ai_search_prompt_limit",
+    "crawl_page_limit",
+)
+
+
+def changed_admin_only_fields(client, payload: ClientUpdate) -> list[str]:
+    sent = payload.model_dump(exclude_unset=True)
+    return [
+        name
+        for name in ADMIN_ONLY_FIELDS
+        if name in sent and sent[name] != getattr(client, name, None)
+    ]
+
+
 @router.patch("/{client_id}", response_model=ClientOut)
 def update_client(
     client_id: UUID,
@@ -86,6 +115,13 @@ def update_client(
     client = client_service.get_client(db, client_id)
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    if user.role != UserRole.SMA_ADMIN:
+        changed = changed_admin_only_fields(client, payload)
+        if changed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Only an SMA admin can change: {', '.join(changed)}",
+            )
     updated = client_service.update_client(db, client, payload)
     return client_out(updated)
 

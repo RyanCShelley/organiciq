@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.client_scope import require_client
+from app.core.client_scope import list_accessible_client_ids, require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client, Tier
@@ -269,18 +269,38 @@ def replace_conversion_definitions(
     return [ConversionDefinitionOut.model_validate(r) for r in rows]
 
 
+def _visible_clients(db: Session, user: AuthUser):
+    """Clients this person is assigned to; every client for an admin.
+
+    The three platform views below used to list everyone's clients to any
+    staff account. A newly added team member with no assignments could read
+    every client's name, domain, integration status, data-health detail and
+    job error text. They follow the same rule as the portfolio: you see what
+    you are assigned.
+    """
+    query = db.query(Client)
+    ids = list_accessible_client_ids(db, user)
+    if ids is not None:
+        query = query.filter(Client.id.in_(ids))
+    return query
+
+
 @router.get("/platform/overview")
 def platform_overview(
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict]:
-    clients = db.query(Client).order_by(Client.client_name.asc()).all()
+    clients = _visible_clients(db, user).order_by(Client.client_name.asc()).all()
+    # One query for every client's integrations, not one per client.
+    by_client: dict[UUID, dict[str, Integration]] = {}
+    if clients:
+        for row in db.query(Integration).filter(
+            Integration.client_id.in_([c.id for c in clients])
+        ):
+            by_client.setdefault(row.client_id, {})[row.provider.value] = row
     overview: list[dict] = []
     for client in clients:
-        integrations = {
-            i.provider.value: i
-            for i in db.query(Integration).filter(Integration.client_id == client.id).all()
-        }
+        integrations = by_client.get(client.id, {})
         health = load_client_data_health(db, client.id)
         healthy = sum(1 for row in health if row["status"] == "Healthy")
         overview.append(
@@ -304,10 +324,10 @@ def platform_overview(
 
 @router.get("/platform/data-health")
 def platform_data_health(
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[dict]:
-    clients = db.query(Client).order_by(Client.client_name.asc()).all()
+    clients = _visible_clients(db, user).order_by(Client.client_name.asc()).all()
     rows: list[dict] = []
     for client in clients:
         for health in load_client_data_health(db, client.id):
@@ -324,18 +344,16 @@ def platform_data_health(
 
 @router.get("/platform/jobs")
 def platform_jobs(
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = 100,
 ) -> list[dict]:
     capped = max(1, min(limit, 200))
-    jobs = (
-        db.query(SyncJob, Client)
-        .join(Client, Client.id == SyncJob.client_id)
-        .order_by(SyncJob.created_at.desc())
-        .limit(capped)
-        .all()
-    )
+    query = db.query(SyncJob, Client).join(Client, Client.id == SyncJob.client_id)
+    ids = list_accessible_client_ids(db, user)
+    if ids is not None:
+        query = query.filter(SyncJob.client_id.in_(ids))
+    jobs = query.order_by(SyncJob.created_at.desc()).limit(capped).all()
     return [
         {
             "id": str(job.id),

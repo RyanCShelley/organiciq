@@ -64,3 +64,222 @@ def test_an_onboarding_client_is_synced(db, client_a):
     client_a.status = ClientStatus.ONBOARDING
     db.commit()
     assert client_a.id in _mapped_sources_by_client(db)
+
+
+# ── Platform views follow assignments ──
+
+
+def _job(db, client, source="gsc_pages"):
+    from app.models.job import SyncJob, SyncJobStatus
+
+    db.add(
+        SyncJob(
+            id=uuid4(), client_id=client.id, source=source,
+            start_date=date(2026, 10, 1), end_date=date(2026, 10, 2),
+            status=SyncJobStatus.FAILED, error_message=f"boom for {client.client_name}",
+        )
+    )
+    db.commit()
+
+
+def _names(rows):
+    return {row["client_name"] for row in rows}
+
+
+def test_a_team_member_sees_only_their_clients_on_the_platform_views(
+    db, client, client_a, client_b, team_user
+):
+    """They listed every client — name, domain, integration status and job error
+    text — to any staff account, including one with no assignments."""
+    from tests.conftest import auth_header
+
+    _job(db, client_a)
+    _job(db, client_b)
+    headers = auth_header(team_user.email)
+    for path in ("/admin/platform/overview", "/admin/platform/data-health", "/admin/platform/jobs"):
+        res = client.get(path, headers=headers)
+        assert res.status_code == 200, path
+        assert _names(res.json()) == {client_a.client_name}, path
+
+
+def test_an_admin_still_sees_every_client(db, client, client_a, client_b, admin_user):
+    from tests.conftest import auth_header
+
+    _job(db, client_a)
+    _job(db, client_b)
+    headers = auth_header(admin_user.email)
+    for path in ("/admin/platform/overview", "/admin/platform/data-health", "/admin/platform/jobs"):
+        res = client.get(path, headers=headers)
+        assert {client_a.client_name, client_b.client_name} <= _names(res.json()), path
+
+
+def test_a_team_member_with_no_assignments_sees_nothing(db, client, client_a):
+    from app.models.user import User, UserRole
+    from tests.conftest import auth_header
+
+    loner = User(id=uuid4(), email="loner@smamarketing.com", name="Loner", role=UserRole.SMA_TEAM)
+    db.add(loner)
+    db.commit()
+    _job(db, client_a)
+    for path in ("/admin/platform/overview", "/admin/platform/data-health", "/admin/platform/jobs"):
+        assert client.get(path, headers=auth_header(loner.email)).json() == [], path
+
+
+# ── Plan and spend limits are an admin's ──
+
+
+def _patch(client, who, client_obj, **body):
+    from tests.conftest import client_header
+
+    return client.patch(
+        f"/clients/{client_obj.id}", json=body, headers=client_header(client_obj.id, who.email)
+    )
+
+
+def test_a_team_member_cannot_raise_their_own_spend_limits(client, client_a, team_user):
+    """Plan tier, allowances and the crawl and AI-search ceilings decide how much
+    is fetched and how many billed prompts run."""
+    for body in (
+        {"ai_search_prompt_limit": 500},
+        {"crawl_page_limit": 100000},
+        {"custom_update_allowance": 99},
+        {"custom_watchlist_cadence": "daily"},
+    ):
+        res = _patch(client, team_user, client_a, **body)
+        assert res.status_code == 403, body
+        assert "Only an SMA admin" in res.json()["detail"]
+
+
+def test_a_team_member_cannot_move_a_client_to_another_tier(client, db, client_a, client_b, team_user):
+    res = _patch(client, team_user, client_a, tier_id=str(uuid4()))
+    assert res.status_code == 403
+
+
+def test_saving_the_form_with_limits_untouched_still_works_for_a_team_member(
+    client, client_a, team_user
+):
+    """The settings form sends every field on every save. Only a change is refused."""
+    res = _patch(
+        client, team_user, client_a,
+        tier_id=str(client_a.tier_id),
+        ai_search_prompt_limit=client_a.ai_search_prompt_limit,
+        crawl_page_limit=client_a.crawl_page_limit,
+        custom_update_allowance=client_a.custom_update_allowance,
+        timezone="America/Chicago",
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["timezone"] == "America/Chicago"
+
+
+def test_a_team_member_can_still_change_operational_fields(client, client_a, team_user):
+    res = _patch(client, team_user, client_a, teamwork_tasklist_id="12345", primary_market="Canada")
+    assert res.status_code == 200
+    assert res.json()["teamwork_tasklist_id"] == "12345"
+
+
+def test_an_admin_can_change_the_limits(client, client_a, admin_user):
+    res = _patch(client, admin_user, client_a, ai_search_prompt_limit=7, crawl_page_limit=250)
+    assert res.status_code == 200, res.text
+    assert res.json()["ai_search_prompt_limit"] == 7
+    assert res.json()["crawl_page_limit"] == 250
+
+
+# ── One Google grant sees every property ──
+
+
+def _connected(db, client, provider, *, primary, secondaries=None):
+    from app.core.crypto import encrypt_json
+
+    row = (
+        db.query(Integration)
+        .filter(Integration.client_id == client.id, Integration.provider == provider)
+        .one()
+    )
+    row.connection_status = ConnectionStatus.CONNECTED
+    row.external_property_id = primary
+    row.gsc_secondary_site_urls = list(secondaries or [])
+    row.credentials = encrypt_json({"refresh_token": "rt-test", "token": "at-test"})
+    db.commit()
+    return row
+
+
+def _save_gsc(client, who, client_obj, site, role="primary"):
+    from tests.conftest import client_header
+
+    return client.post(
+        "/integrations/gsc/property",
+        json={"site_url": site, "role": role},
+        headers=client_header(client_obj.id, who.email),
+    )
+
+
+def test_a_team_member_cannot_map_a_property_another_client_already_has(
+    db, client, client_a, client_b, team_user
+):
+    """One Google grant sees every property in the workspace. Picking client B's
+    for client A would pull B's data into A's tenant."""
+    _connected(db, client_a, IntegrationProvider.GSC, primary="sc-domain:a.example")
+    _connected(db, client_b, IntegrationProvider.GSC, primary="sc-domain:b.example")
+    res = _save_gsc(client, team_user, client_a, "sc-domain:b.example")
+    assert res.status_code == 409
+    assert "Ask an admin" in res.json()["detail"]
+    row = db.query(Integration).filter(
+        Integration.client_id == client_a.id, Integration.provider == IntegrationProvider.GSC
+    ).one()
+    db.refresh(row)
+    assert row.external_property_id == "sc-domain:a.example"
+
+
+def test_a_property_listed_as_another_clients_secondary_is_claimed_too(
+    db, client, client_a, client_b, team_user
+):
+    _connected(db, client_a, IntegrationProvider.GSC, primary="sc-domain:a.example")
+    _connected(
+        db, client_b, IntegrationProvider.GSC, primary="sc-domain:b.example",
+        secondaries=["sc-domain:old-b.example"],
+    )
+    assert _save_gsc(client, team_user, client_a, "sc-domain:old-b.example").status_code == 409
+
+
+def test_a_team_member_can_connect_a_property_nobody_has(db, client, client_a, client_b, team_user):
+    _connected(db, client_a, IntegrationProvider.GSC, primary="sc-domain:a.example")
+    _connected(db, client_b, IntegrationProvider.GSC, primary="sc-domain:b.example")
+    res = _save_gsc(client, team_user, client_a, "sc-domain:brand-new.example")
+    assert res.status_code == 200, res.text
+
+
+def test_an_admin_can_share_a_property_across_clients(db, client, client_a, client_b, admin_user):
+    _connected(db, client_a, IntegrationProvider.GSC, primary="sc-domain:a.example")
+    _connected(db, client_b, IntegrationProvider.GSC, primary="sc-domain:b.example")
+    assert _save_gsc(client, admin_user, client_a, "sc-domain:b.example").status_code == 200
+
+
+def test_a_folder_scoped_client_shares_its_parents_property_by_design(
+    db, client, client_a, client_b, team_user
+):
+    _connected(db, client_a, IntegrationProvider.GSC, primary="sc-domain:a.example")
+    _connected(db, client_b, IntegrationProvider.GSC, primary="sc-domain:b.example")
+    client_a.path_prefix = "/unmanned"
+    db.commit()
+    assert _save_gsc(client, team_user, client_a, "sc-domain:b.example").status_code == 200
+
+
+def test_ga4_properties_are_protected_the_same_way(db, client, client_a, client_b, team_user):
+    from tests.conftest import client_header
+
+    _connected(db, client_a, IntegrationProvider.GA4, primary="properties/1")
+    _connected(db, client_b, IntegrationProvider.GA4, primary="properties/222")
+    headers = client_header(client_a.id, team_user.email)
+    blocked = client.post("/integrations/ga4/property", json={"property_id": "222"}, headers=headers)
+    assert blocked.status_code == 409
+    free = client.post("/integrations/ga4/property", json={"property_id": "333"}, headers=headers)
+    assert free.status_code == 200, free.text
+
+
+def test_only_an_admin_can_replace_the_workspace_wide_google_grant(client, client_a, team_user, admin_user):
+    from tests.conftest import auth_header
+
+    path = f"/oauth/google/start?client_id={client_a.id}"
+    res = client.get(path, headers=auth_header(team_user.email))
+    assert res.status_code == 403
+    assert "admin" in res.json()["detail"].lower()
