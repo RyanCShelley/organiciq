@@ -390,6 +390,17 @@ def load_page_candidates(
         db, client.id, period=(start, today), targets=under_linked
     )
 
+    # A query the homepage owns is navigation. The client record carries no
+    # alias for a brand's long-form name — ACCTek is searched as "acc
+    # technical services" and `brand_terms` only knows "acctek" — but the
+    # homepage turning up as a donor for a query is the same evidence.
+    homepage_queries = {
+        gap.shared_query
+        for gaps in donors_by_url.values()
+        for gap in gaps
+        if (urlsplit(gap.source_url).path or "/").rstrip("/") == ""
+    }
+
     # GA4 reports a landing page it could not resolve as "(not set)", and it
     # arrives with real sessions attached. It reached the candidate list and
     # drew a T-3 telling somebody to rewrite the opening of "(not set)".
@@ -486,6 +497,7 @@ def load_page_candidates(
                     # take links from three pages anchored "acc technical
                     # services".
                     if not is_navigational(gap.shared_query, brand)
+                    and gap.shared_query not in homepage_queries
                 ),
             )
         )

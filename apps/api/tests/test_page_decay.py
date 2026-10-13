@@ -262,3 +262,29 @@ def test_a_donor_found_only_through_the_brand_name_is_dropped(db, client_a):
 
     found = next(p for p in load_page_candidates(db, client_a, today=today) if p.url == page)
     assert found.link_donors == ()
+
+
+def test_a_query_the_homepage_owns_is_navigation_even_without_the_brand_name(db, client_a):
+    """ACCTek is searched as "acc technical services"; the record only knows "acctek"."""
+    from uuid import uuid4
+
+    from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    page, home = "https://example.com/contact", "https://example.com/"
+    _gsc(db, client_a.id, page, day, impressions=400, clicks=5, position=9.0)
+    _query(db, client_a.id, page, day, "long form company name", impressions=400, position=9.0, clicks=5)
+    _query(db, client_a.id, home, day, "long form company name", impressions=2000, position=1.0, clicks=300)
+    db.add(
+        FactCrawlPageSnapshot(
+            id=uuid4(), client_id=client_a.id, source=CRAWL_SOURCE_FIRST_PARTY,
+            snapshot_date=day, raw_url=page, normalized_url=page, status_code=200,
+            indexable=True, word_count=900, inbound_internal_links=40,
+            inbound_editorial_links=0, redirect_count=0,
+        )
+    )
+    db.commit()
+
+    found = next(p for p in load_page_candidates(db, client_a, today=today) if p.url == page)
+    assert found.link_donors == ()
