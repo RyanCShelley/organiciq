@@ -111,8 +111,23 @@ def get_client(db: Session, client_id: UUID) -> Client | None:
     )
 
 
+def clean_brand_aliases(values: list[str] | None) -> list[str]:
+    """Lowercase, single-spaced, deduplicated, and long enough to mean something.
+
+    Matched as a phrase inside a query, so a two-letter alias would turn
+    every query containing those letters into navigation.
+    """
+    seen: dict[str, None] = {}
+    for value in values or []:
+        text = " ".join(str(value).lower().split())
+        if len(text) >= 3:
+            seen[text] = None
+    return list(seen)
+
+
 def create_client(db: Session, payload: ClientCreate) -> Client:
     data = payload.model_dump()
+    data["brand_aliases"] = clean_brand_aliases(data.get("brand_aliases"))
     desired_slug = data.pop("slug", None) or data["client_name"]
     data["slug"] = allocate_client_slug(db, desired=desired_slug)
     client = Client(**data)
@@ -180,6 +195,8 @@ def update_client(db: Session, client: Client, payload: ClientUpdate) -> Client:
     data = payload.model_dump(exclude_unset=True)
     if "lead_goal_overrides" in data:
         data["lead_goal_overrides"] = _clean_lead_goal_overrides(data["lead_goal_overrides"])
+    if "brand_aliases" in data:
+        data["brand_aliases"] = clean_brand_aliases(data["brand_aliases"])
     if "slug" in data and data["slug"]:
         data["slug"] = allocate_client_slug(
             db, desired=str(data["slug"]), exclude_client_id=client.id

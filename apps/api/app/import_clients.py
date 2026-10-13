@@ -29,7 +29,8 @@ perfectly good way to work, and the lookups below only save that labour.
 
 Optional: lead_events (semicolon-separated GA4 event names), slug, start_date,
           timezone, primary_market, monthly_lead_goal, crawl_page_limit,
-          sitemap_url, ai_search_prompt_limit, status
+          sitemap_url, ai_search_prompt_limit, status,
+          brand_aliases (semicolon-separated other names the brand is searched by)
 Overrides: ga4_property_id, gsc_site_url, seranking_project_id
            — supplied values always win over a lookup.
 
@@ -79,6 +80,7 @@ from app.ingestion.seranking.client import list_sites as list_seranking_sites
 from app.models.client import Client, ClientStatus, Tier
 from app.models.config import ConversionDefinition
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
+from app.services.clients import clean_brand_aliases
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("organiciq.import_clients")
@@ -465,6 +467,9 @@ def import_clients(
         )
         client.sitemap_url = (row.get("sitemap_url") or "").strip() or client.sitemap_url
         client.primary_market = (row.get("primary_market") or "").strip() or client.primary_market
+        aliases = clean_brand_aliases((row.get("brand_aliases") or "").split(";"))
+        if aliases:
+            client.brand_aliases = aliases
         status = (row.get("status") or "").strip().lower()
         if existing is None:
             client.status = ClientStatus(status) if status else ClientStatus.ONBOARDING

@@ -137,6 +137,8 @@ export type Client = {
   ai_search_prompt_limit?: number | null;
   /** Max pages one monthly site crawl may fetch. Null = default (500). */
   crawl_page_limit?: number | null;
+  /** Other names the brand is searched by; a query naming one is navigation. */
+  brand_aliases?: string[] | null;
   /** Declared sitemap, for sites where discovery cannot find one. */
   sitemap_url?: string | null;
   /** Folder this client's site occupies on `domain`; null is the whole domain. */

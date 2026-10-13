@@ -64,6 +64,7 @@ class ClientCreate(BaseModel):
     timezone: str = "America/New_York"
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
+    brand_aliases: list[str] = []
     account_sheet_url: str | None = None
     #: Where this client's sent growth actions land in Teamwork. The site and
     #: token are install-wide; this is the only per-client part, and without
@@ -108,6 +109,7 @@ class ClientUpdate(BaseModel):
     timezone: str | None = None
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
+    brand_aliases: list[str] | None = None
     account_sheet_url: str | None = None
     #: Where this client's sent growth actions land in Teamwork. The site
     #: and token are install-wide; this is the only per-client part, and
@@ -152,6 +154,7 @@ class ClientOut(ORMModel):
     primary_market: str | None
     timezone: str
     monthly_lead_goal: int | None
+    brand_aliases: list[str] = []
     account_sheet_url: str | None
     teamwork_tasklist_id: str | None = None
     custom_tracked_keyword_limit: int | None = None

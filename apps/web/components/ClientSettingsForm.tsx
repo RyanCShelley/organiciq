@@ -375,6 +375,22 @@ export function ClientSettingsForm({
           </p>
         </div>
         <div className="flex flex-col gap-1">
+          <FieldLabel label="Other names the brand is searched by (optional)">
+            <textarea
+              name="brand_aliases"
+              rows={3}
+              defaultValue={(client.brand_aliases ?? []).join("\n")}
+              placeholder="One per line, e.g. acc technical services"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            The name and domain are already covered. Add the spellings people really
+            type — a query that names the business is navigation, and no page change
+            or link moves it, so the plan will not prescribe one.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1">
           <FieldLabel label="Sitemap URL (optional)">
             <Input
               name="sitemap_url"

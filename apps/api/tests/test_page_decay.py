@@ -264,8 +264,8 @@ def test_a_donor_found_only_through_the_brand_name_is_dropped(db, client_a):
     assert found.link_donors == ()
 
 
-def test_a_query_the_homepage_owns_is_navigation_even_without_the_brand_name(db, client_a):
-    """ACCTek is searched as "acc technical services"; the record only knows "acctek"."""
+def test_a_brand_alias_makes_its_query_navigation(db, client_a):
+    """ACCTek is searched as "acc technical services"; its name and domain say "acctek"."""
     from uuid import uuid4
 
     from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
@@ -273,6 +273,14 @@ def test_a_query_the_homepage_owns_is_navigation_even_without_the_brand_name(db,
     today = date(2026, 10, 13)
     day = today - timedelta(days=3)
     page, home = "https://example.com/contact", "https://example.com/"
+
+    def donors(aliases):
+        client_a.brand_aliases = aliases
+        db.commit()
+        return next(
+            p for p in load_page_candidates(db, client_a, today=today) if p.url == page
+        ).link_donors
+
     _gsc(db, client_a.id, page, day, impressions=400, clicks=5, position=9.0)
     _query(db, client_a.id, page, day, "long form company name", impressions=400, position=9.0, clicks=5)
     _query(db, client_a.id, home, day, "long form company name", impressions=2000, position=1.0, clicks=300)
@@ -286,5 +294,15 @@ def test_a_query_the_homepage_owns_is_navigation_even_without_the_brand_name(db,
     )
     db.commit()
 
-    found = next(p for p in load_page_candidates(db, client_a, today=today) if p.url == page)
-    assert found.link_donors == ()
+    # Without the alias it reads as a topic — the fault this field exists for.
+    assert [d.url for d in donors([])] == [home]
+    assert donors(["long form company name"]) == ()
+
+
+def test_aliases_are_cleaned_before_they_are_stored():
+    from app.services.clients import clean_brand_aliases
+
+    assert clean_brand_aliases(["  ACC  Technical Services ", "acc technical services", "ab", ""]) == [
+        "acc technical services"
+    ]
+    assert clean_brand_aliases(None) == []

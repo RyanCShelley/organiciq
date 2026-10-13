@@ -79,6 +79,13 @@ class Client(Base):
         JSONB, nullable=False, default=dict, server_default="{}"
     )
     account_sheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Other names people search this brand by — "acc technical services" for
+    #: ACCTek. The name and the domain are not enough: a query that names the
+    #: business is navigation whatever it is spelled as, and no rewrite or
+    #: link moves it. Stored lowercase; matched as a phrase.
+    brand_aliases: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     # Enterprise (and optional overrides): agreement-specific plan amounts
     custom_tracked_keyword_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     custom_tracked_prompt_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)

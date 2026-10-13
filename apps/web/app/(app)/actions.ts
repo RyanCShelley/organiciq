@@ -56,6 +56,12 @@ export async function updateClientSettingsAction(formData: FormData) {
   const crawlPageLimit = parseOptionalInt("crawl_page_limit");
   const sitemapUrl = String(formData.get("sitemap_url") || "").trim() || null;
   const pathPrefix = String(formData.get("path_prefix") || "").trim() || null;
+  // One name per line. The API lowercases, dedupes and drops anything too
+  // short to be a name.
+  const brandAliases = String(formData.get("brand_aliases") || "")
+    .split(/[\n;]/)
+    .map((name) => name.trim())
+    .filter(Boolean);
 
   // One input per checkpoint, named lead_goal_<month>. A blank box means "use
   // the projection", so it is left out rather than sent as zero.
@@ -142,6 +148,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     crawl_page_limit: crawlPageLimit,
     sitemap_url: sitemapUrl,
     path_prefix: pathPrefix,
+    brand_aliases: brandAliases,
     lead_goal_overrides: leadGoalOverrides,
   };
 
