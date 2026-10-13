@@ -152,12 +152,11 @@ def test_each_step_links_to_where_it_is_actually_done(db: Session, client_a: Cli
     The client workspace lives under /clients/<slug> and the account tools
     under /<slug>. Sending everything to the workspace put "Keyword targets"
     on the conversions page, which is neither where it is done nor anything
-    to do with it.
+    to do with it. The keyword map has since moved into the workspace
+    itself; the Decision Engine is the one step that is still a tool.
     """
     steps = {s["key"]: s for s in setup_state(db, client_a)["steps"]}
 
-    assert steps["keyword_targets"]["scope"] == "tool"
-    assert steps["keyword_targets"]["link"] == "keyword-map"
     assert steps["first_run"]["scope"] == "tool"
     assert steps["first_run"]["link"] == "decision-engine"
 
@@ -166,6 +165,7 @@ def test_each_step_links_to_where_it_is_actually_done(db: Session, client_a: Cli
         ("leads", "conversions"),
         ("conversion_pages", "conversions"),
         ("page_stages", "conversions"),
+        ("keyword_targets", "keyword-map"),
     ):
         assert steps[key]["scope"] == "workspace", key
         assert steps[key]["link"] == link, key

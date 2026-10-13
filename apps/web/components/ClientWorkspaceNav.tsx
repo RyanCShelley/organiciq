@@ -17,6 +17,7 @@ const WORKSPACE_LINKS = [
   { segment: "jobs", label: "Sync jobs" },
   { segment: "data-health", label: "Data health" },
   { segment: "conversions", label: "Conversions" },
+  { segment: "keyword-map", label: "Keyword map" },
 ];
 
 export function ClientWorkspaceNav({

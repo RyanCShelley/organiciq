@@ -3,7 +3,6 @@ export const ACCOUNT_TOOLS = [
   "watch-list",
   "content-opp",
   "decision-engine",
-  "keyword-map",
   "site-crawl",
   "annotations",
 ] as const;
@@ -13,6 +12,8 @@ export type AccountTool = (typeof ACCOUNT_TOOLS)[number];
 /** Path segments that must not be treated as client slugs. */
 export const RESERVED_ROOT_SLUGS = new Set<string>([
   ...ACCOUNT_TOOLS,
+  // Moved to the client workspace; the old path still redirects.
+  "keyword-map",
   "clients",
   "platform",
   "admin",

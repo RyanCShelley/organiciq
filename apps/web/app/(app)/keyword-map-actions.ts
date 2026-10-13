@@ -56,6 +56,6 @@ export async function saveKeywordPageMapAction(formData: FormData) {
     };
   }
 
-  if (clientSlug) revalidatePath(`/${clientSlug}/keyword-map`);
+  if (clientSlug) revalidatePath(`/clients/${clientSlug}/keyword-map`);
   return { ok: true as const };
 }

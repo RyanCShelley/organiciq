@@ -45,9 +45,10 @@ from app.models.seranking import FactSerKeyword
 #: Where each step is done, as `(scope, segment)`.
 #:
 #: Two route trees: the client workspace under /clients/<slug>, and the
-#: account tools under /<slug>. Sending every step to the workspace put
-#: "Keyword targets" on the conversions page, which is neither where it is
-#: done nor anything to do with it.
+#: account tools under /<slug>. Every setup step is workspace work — the
+#: keyword map moved there too, being a record of what a client's terms
+#: mean rather than a tool you open to read a number — but the scope stays
+#: because `first_run` ends on the Decision Engine, which is a tool.
 LINKS = {
     "account": ("workspace", ""),
     "sources": ("workspace", "integrations"),
@@ -56,7 +57,7 @@ LINKS = {
     "baseline": ("workspace", ""),
     "conversion_pages": ("workspace", "conversions"),
     "page_stages": ("workspace", "conversions"),
-    "keyword_targets": ("tool", "keyword-map"),
+    "keyword_targets": ("workspace", "keyword-map"),
     "first_run": ("tool", "decision-engine"),
 }
 

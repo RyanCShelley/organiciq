@@ -1,45 +1,18 @@
-import {
-  KeywordPageMapTable,
-  type KeywordMapRow,
-} from "@/components/DecisionEngine/KeywordPageMapTable";
-import { Alert } from "@/components/ui/Alert";
-import { apiFetch } from "@/lib/api";
-import { requireAccountClient } from "@/lib/account-routes.server";
+import { redirect } from "next/navigation";
 
-type MapPayload = {
-  keywords: KeywordMapRow[];
-  pages: string[];
-};
-
-const EMPTY: MapPayload = { keywords: [], pages: [] };
-
-export default async function KeywordMapPage({
+/**
+ * The map moved to the client workspace.
+ *
+ * It is a record of what a client's terms mean — set up once and revisited
+ * when the watchlist changes — not a tool you open to read a number, so it
+ * belongs beside conversions and integrations. This redirect stays for the
+ * links and bookmarks that point at the old place.
+ */
+export default async function LegacyKeywordMapPage({
   params,
 }: {
   params: Promise<{ clientSlug: string }>;
 }) {
   const { clientSlug } = await params;
-  const client = await requireAccountClient(clientSlug, "keyword-map");
-
-  let payload: MapPayload = EMPTY;
-  let error: string | null = null;
-  try {
-    payload = await apiFetch<MapPayload>("/decisions/keyword-page-map", {
-      clientId: client.id,
-    });
-  } catch (caught) {
-    error = caught instanceof Error ? caught.message : "Could not load the map.";
-  }
-
-  return (
-    <section>
-      {error ? <Alert variant="danger">{error}</Alert> : null}
-      <KeywordPageMapTable
-        rows={payload.keywords ?? []}
-        pages={payload.pages ?? []}
-        clientId={client.id}
-        clientSlug={client.slug}
-      />
-    </section>
-  );
+  redirect(`/clients/${clientSlug}/keyword-map`);
 }
