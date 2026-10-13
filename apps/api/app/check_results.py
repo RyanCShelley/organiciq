@@ -21,6 +21,7 @@ from app.core.db import SessionLocal
 from app.models.client import Client
 from app.models.decision import MonthlyRecord
 from app.services.results import (
+    _slotted,
     capture_before,
     check_due,
     measure,
@@ -70,14 +71,14 @@ def main() -> None:
             due = sum(
                 1
                 for record in records
-                for action in (record.record or {}).get("actions") or []
+                for _kind, action in _slotted(record.record or {})
                 if action.get("check_on")
                 and date.fromisoformat(action["check_on"]) <= today
             )
             readable = sum(
                 1
                 for record in records
-                for action in (record.record or {}).get("actions") or []
+                for _kind, action in _slotted(record.record or {})
                 if measure(
                     db,
                     client,

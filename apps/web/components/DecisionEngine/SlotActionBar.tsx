@@ -85,7 +85,7 @@ export function SlotActionBar({
     const lines = [
       action.title,
       "",
-      `Page: ${action.target_url}`,
+      action.target_url ? `Page: ${action.target_url}` : `New page for: ${action.term ?? action.title}`,
       "",
       "Why this page",
       action.why,

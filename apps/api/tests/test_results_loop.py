@@ -444,3 +444,78 @@ def test_page_impressions_and_position_are_read_for_the_refresh_actions(
     # Impression-weighted: (300*10 + 100*14) / 400
     assert measure(db, client_a, "page_position", url=url, as_of=CHECK_ON).value == 11.0
     assert verdict("page_position", 14.0, 9.0) == "improved"
+
+
+def _pool_record(db: Session, client: Client, pool: str, **over) -> MonthlyRecord:
+    """A record whose only slotted work sits in `pool`, not in `actions`."""
+    action = {
+        "action_uid": f"{client.slug}-{SEPT}-{pool}",
+        "slot": 1,
+        "id": "U-2",
+        "title": "Win back the position",
+        "target_url": "https://x.test/seo",
+        "term": "seo agency",
+        "metric": "Term position",
+        "metric_key": "term_position",
+        "check_on": CHECK_ON.isoformat(),
+    }
+    action.update(over)
+    row = MonthlyRecord(
+        client_id=client.id, month=SEPT, run_saved_at=datetime.now(timezone.utc),
+        data_through=PRESCRIBED, constraint_name="visibility", held_since=SEPT,
+        confidence="medium", record={"actions": [], "incidents": [], pool: [action]},
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+@pytest.mark.parametrize(
+    "pool,kind", [("updates", "update"), ("new_content", "content")]
+)
+def test_retainer_work_is_measured_and_judged_like_a_growth_action(
+    db: Session, client_a: Client, pool: str, kind: str
+):
+    """The loop read `actions` alone, so a refresh was prescribed, assigned,
+    sent to Teamwork and then never judged."""
+    record = _pool_record(db, client_a, pool)
+    _rank(db, client_a, PRESCRIBED, 18.0)
+    assert capture_before(db, client_a, record) == 1
+    _rank(db, client_a, CHECK_ON, 6.0)
+
+    judged = check_due(db, client_a, today=CHECK_ON)
+
+    assert len(judged) == 1
+    row = db.query(EngineAction).one()
+    assert row.kind == kind
+    assert row.result == "improved"
+
+
+def test_a_new_page_for_a_term_nobody_ranks_for_is_judged_when_it_starts_ranking(
+    db: Session, client_a: Client
+):
+    """C-1's starting state is 'off the rankings', which is a real reading."""
+    _pool_record(
+        db, client_a, "new_content", id="C-1", target_url="", term="aeo agency"
+    )
+    # The tracker writes 0 for "not in the results checked" — tracked, and
+    # off the rankings, which is how a gap term really starts.
+    for day, position in ((PRESCRIBED, "0"), (CHECK_ON, "9")):
+        db.add(
+            FactSerRanking(
+                client_id=client_a.id, date=day, site_engine_id="1",
+                keyword_id=f"k-new-{day}", keyword="aeo agency",
+                position=Decimal(position),
+            )
+        )
+    db.commit()
+
+    judged = check_due(db, client_a, today=CHECK_ON)
+
+    assert [row.result for row in judged] == ["improved"]
+
+
+def test_last_months_results_name_the_pool_each_belongs_to(db: Session, client_a: Client):
+    _pool_record(db, client_a, "updates")
+    rows = previous_results(db, client_a, "2026-10", previous=SEPT)
+    assert [r["kind"] for r in rows] == ["update"]

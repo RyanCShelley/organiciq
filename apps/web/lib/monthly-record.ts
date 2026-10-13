@@ -104,8 +104,29 @@ export type MonthlyRecord = {
   update_slots?: number;
   empty_update_slots?: { slot: number; reason: string }[];
   update_candidates?: Candidate[];
+  /** New pages, against content_allowance. No URL yet: a term is the identity. */
+  new_content?: RecordAction[];
+  content_slots?: number;
+  empty_content_slots?: { slot: number; reason: string }[];
+  content_candidates?: Candidate[];
+  /** What the gap scan checked, so an empty pool can say what it looked at. */
+  content_scan?: {
+    tracked?: number;
+    mapped?: number;
+    covered?: number;
+    ranking?: number;
+    brand?: number;
+    no_metrics?: number;
+    small?: number;
+    gaps?: number;
+    pages_searched?: number;
+    blocked?: string;
+  };
   data_gaps: { input: string; status: string }[];
   previous_results: {
+    /** Which pool the action came from. Absent on records saved before the
+     *  retainer pools existed, which were all growth actions. */
+    kind?: "action" | "update" | "content";
     action_uid?: string;
     title?: string;
     target_url?: string;

@@ -41,7 +41,9 @@ from app.decisions.catalog import (
     prescribe_page,
 )
 from app.decisions.page_targets import rank_for_leads, rank_for_traffic
+from app.decisions.content_gaps import prescribe_term, rank_for_content
 from app.decisions.update_catalog import UPDATE_ACTIONS, rank_for_updates
+from app.services.content_gap_signals import scan_term_gaps
 from app.decisions.incidents import check as check_incidents
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.slots import fill_pool, fill_slots
@@ -469,6 +471,20 @@ def build_record(
         if slot.prescription.target_url
     }
 
+    # New pages, against the content allowance. They have no URL to reserve,
+    # so the one-page-one-job rule cannot reach them; a term is their
+    # identity, and `fold_variants` has already made it one page per subject.
+    gap_scan = scan_term_gaps(db, client)
+    content_plan = fill_pool(
+        slots=allowances.content_allowance if open_this_month else 0,
+        prescriptions=[
+            found
+            for gap in rank_for_content(gap_scan.gaps)
+            if (found := prescribe_term(gap)) is not None
+        ],
+        empty_reason=gap_scan.explain_empty() if open_this_month else closed_reason,
+    )
+
     return {
         "client": client.slug,
         "client_name": client.client_name,
@@ -549,6 +565,17 @@ def build_record(
         "update_candidates": [
             _candidate_row(client, month, c, today) for c in update_plan.considered
         ],
+        # New pages, against the content allowance.
+        "new_content": [_slot_row(client, month, slot, today) for slot in content_plan.filled],
+        "content_slots": allowances.content_allowance if open_this_month else 0,
+        "empty_content_slots": [
+            {"slot": empty.slot, "reason": empty.reason} for empty in content_plan.empty
+        ],
+        "content_candidates": [
+            _candidate_row(client, month, c, today) for c in content_plan.considered
+        ],
+        # What the scan checked, so an empty pool can say what it looked at.
+        "content_scan": {**gap_scan.summary, **({"blocked": gap_scan.blocked} if gap_scan.blocked else {})},
         "not_this_month": list(plan.not_this_month),
         # Everything the engine weighed, so a plan can be argued with. The
         # slotted ones are in here too, marked — one list to read rather

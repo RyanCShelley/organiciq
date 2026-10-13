@@ -59,8 +59,10 @@ def slots_in_record(record: dict) -> dict[str, RecordSlot]:
         # Retainer work. A separate kind because it is inside the monthly
         # fee and a growth action is not, and the two are reported apart.
         ("update", "updates"),
+        ("content", "new_content"),
         ("action", "candidates"),
         ("update", "update_candidates"),
+        ("content", "content_candidates"),
     ):
         for row in record.get(key) or []:
             uid = row.get("action_uid")

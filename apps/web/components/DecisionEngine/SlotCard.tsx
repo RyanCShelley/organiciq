@@ -13,6 +13,8 @@ const FLAG_LABEL: Record<string, string> = {
 };
 
 function path(url: string): string {
+  // A new-page action has no URL yet; its identity is the term.
+  if (!url) return "New page";
   return url.replace(/^https?:\/\/[^/]+/, "") || "/";
 }
 

@@ -356,6 +356,19 @@ def _row_for(db: Session, client: Client, uid: str, month: str, kind: str) -> En
     return row
 
 
+#: The pools of a record that hold slotted work, and the kind each is stored
+#: under. The loop used to read `actions` alone, so a refresh or a new page
+#: was prescribed, assigned and sent to Teamwork and then never measured:
+#: no starting reading, no verdict. Retainer work is judged like any other.
+SLOTTED_POOLS = (("action", "actions"), ("update", "updates"), ("content", "new_content"))
+
+
+def _slotted(data: dict[str, Any]):
+    for kind, key in SLOTTED_POOLS:
+        for action in data.get(key) or []:
+            yield kind, action
+
+
 def capture_before(
     db: Session, client: Client, record: MonthlyRecord, *, force: bool = False
 ) -> int:
@@ -368,7 +381,7 @@ def capture_before(
     data = record.record or {}
     as_of = record.data_through or date.fromisoformat(f"{record.month}-01")
     written = 0
-    for action in data.get("actions") or []:
+    for kind, action in _slotted(data):
         uid = action.get("action_uid")
         if not uid:
             continue
@@ -391,7 +404,7 @@ def capture_before(
         # row behind for every action whose metric could not be read.
         if reading.value is None:
             continue
-        row = existing or _row_for(db, client, uid, record.month, "action")
+        row = existing or _row_for(db, client, uid, record.month, kind)
         row.before_value = reading.value
         row.action_id = action.get("id")
         row.target_url = action.get("target_url")
@@ -415,7 +428,7 @@ def check_due(
     for record in (
         db.query(MonthlyRecord).filter(MonthlyRecord.client_id == client.id).all()
     ):
-        for action in (record.record or {}).get("actions") or []:
+        for kind, action in _slotted(record.record or {}):
             uid, check_on = action.get("action_uid"), action.get("check_on")
             if not uid or not check_on or date.fromisoformat(check_on) > today:
                 continue
@@ -465,7 +478,7 @@ def check_due(
                 )
                 if not started.unranked:
                     continue
-                row = row or _row_for(db, client, uid, record.month, "action")
+                row = row or _row_for(db, client, uid, record.month, kind)
                 row.action_id = action.get("id")
                 row.target_url = action.get("target_url")
                 row.after_value = reading.value
@@ -510,11 +523,12 @@ def previous_results(
         )
     }
     out: list[dict[str, Any]] = []
-    for action in (record.record or {}).get("actions") or []:
+    for kind, action in _slotted(record.record or {}):
         uid = action.get("action_uid")
         row = rows.get(uid) if uid else None
         out.append(
             {
+                "kind": kind,
                 "action_uid": uid,
                 "title": action.get("title"),
                 "target_url": action.get("target_url"),

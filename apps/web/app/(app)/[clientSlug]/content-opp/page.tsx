@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
+import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
@@ -21,7 +22,8 @@ type RunSummary = { month: string };
  *
  * The Decision Engine plans growth actions, which sit outside the monthly
  * fee. This plans the work that is inside it: refreshing content that is
- * losing ground. Two allowances, two pools, one machine — the cards,
+ * losing ground, and writing the pages a tracked term has none for. Two
+ * allowances, two pools, one machine — the cards,
  * assignment, the Teamwork send and the results loop are the same ones,
  * so a refresh is handed over exactly as a growth action is.
  */
@@ -88,6 +90,50 @@ export default async function ContentOppPage({
     (row) => row.slot === null,
   );
 
+  // New pages. Same absence-of-key rule as above: an older record has no
+  // `new_content` at all, which is not a plan that found nothing to write.
+  const contentPlanned = record != null && record.new_content !== undefined;
+  const newContent = record?.new_content ?? [];
+  const emptyContent = record?.empty_content_slots ?? [];
+  const contentSlots = record?.content_slots ?? 0;
+  const scan = record?.content_scan;
+  const contentAlsoFound = (record?.content_candidates ?? []).filter(
+    (row) => row.slot === null,
+  );
+  const retainerResults = (record?.previous_results ?? []).filter(
+    (row) => row.kind === "update" || row.kind === "content",
+  );
+
+  function renderPool(
+    actions: NonNullable<MonthlyRecord["updates"]>,
+    empty: { slot: number; reason: string }[],
+  ) {
+    return (
+      <div className="space-y-3">
+        {actions.map((action) => (
+          <SlotCard
+            key={action.action_uid}
+            action={action}
+            status={slotStates.get(action.action_uid)?.status}
+          >
+            <SlotActionBar
+              action={action}
+              state={slotStates.get(action.action_uid)}
+              assignees={assignees}
+              clientId={clientId}
+              slug={client.slug}
+              month={record!.month}
+              teamworkReady={teamworkReady}
+            />
+          </SlotCard>
+        ))}
+        {empty.map((slot) => (
+          <EmptySlotCard key={slot.slot} slot={slot.slot} reason={slot.reason} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <section>
       {recordError ? <Alert variant="danger">{recordError}</Alert> : null}
@@ -140,29 +186,90 @@ export default async function ContentOppPage({
           </Alert>
         ) : null}
 
-        <div className="space-y-3">
-          {updates.map((action) => (
-            <SlotCard
-              key={action.action_uid}
-              action={action}
-              status={slotStates.get(action.action_uid)?.status}
-            >
-              <SlotActionBar
-                action={action}
-                state={slotStates.get(action.action_uid)}
-                assignees={assignees}
-                clientId={clientId}
-                slug={client.slug}
-                month={record!.month}
-                teamworkReady={teamworkReady}
-              />
-            </SlotCard>
-          ))}
-          {emptyUpdates.map((slot) => (
-            <EmptySlotCard key={slot.slot} slot={slot.slot} reason={slot.reason} />
-          ))}
-        </div>
+        {renderPool(updates, emptyUpdates)}
       </section>
+
+      <section className="workspace-section">
+        <SectionHeader
+          title="New content"
+          description="Pages for tracked terms the site has no page about. A term only counts when the crawl shows no page carrying its words in the title, URL or headings, so a page that exists but is not ranking is never told to be written again."
+          actions={
+            record ? (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {record.month} · {newContent.length} of {contentSlots}{" "}
+                {contentSlots === 1 ? "slot" : "slots"}
+              </span>
+            ) : null
+          }
+        />
+
+        {record && !contentPlanned ? (
+          <Alert variant="warning">
+            This run was saved before new content was planned. Re-run{" "}
+            {record.month} on the{" "}
+            <Link
+              href={accountToolHref(client.slug, "decision-engine")}
+              className="underline"
+            >
+              Decision Engine
+            </Link>{" "}
+            to build it.
+          </Alert>
+        ) : null}
+
+        {contentPlanned && contentSlots === 0 && newContent.length === 0 ? (
+          <Alert variant="info">
+            {emptyContent[0]?.reason ??
+              `The ${record!.plan} plan includes no new pages.`}
+          </Alert>
+        ) : null}
+
+        {contentPlanned ? renderPool(newContent, emptyContent) : null}
+
+        {contentPlanned && scan && !scan.blocked && (scan.tracked ?? 0) > 0 ? (
+          <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+            Checked {scan.tracked} tracked terms against {scan.pages_searched} crawled
+            pages: {scan.mapped ?? 0} mapped to a page, {scan.covered ?? 0} already
+            covered by one, {scan.ranking ?? 0} already ranking, {scan.brand ?? 0} brand
+            queries, {scan.no_metrics ?? 0} without volume and difficulty,{" "}
+            {scan.small ?? 0} under the volume floor.
+          </p>
+        ) : null}
+      </section>
+
+      {contentAlsoFound.length > 0 ? (
+        <section className="workspace-section">
+          <SectionHeader
+            title="Also missing a page"
+            description="Terms the engine found no page for and the plan had no room for."
+            actions={
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {contentAlsoFound.length} more
+              </span>
+            }
+          />
+          <div className="table-shell overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Term</th>
+                  <th className="text-right">Opportunity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contentAlsoFound.slice(0, 25).map((row) => (
+                  <tr key={row.action_uid}>
+                    <td className="text-[13px]">{row.term ?? row.title}</td>
+                    <td className="whitespace-nowrap text-right tabular-nums">
+                      {Math.round(row.score).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {alsoFound.length > 0 ? (
         <section className="workspace-section">
@@ -181,7 +288,7 @@ export default async function ContentOppPage({
                 <tr>
                   <th>Page</th>
                   <th>What it needs</th>
-                  <th className="text-right">Impressions lost</th>
+                  <th className="text-right">Impressions at stake</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,6 +306,16 @@ export default async function ContentOppPage({
               </tbody>
             </table>
           </div>
+        </section>
+      ) : null}
+
+      {retainerResults.length > 0 ? (
+        <section className="workspace-section">
+          <SectionHeader
+            title="Last month's results"
+            description="Each refresh and new page is checked on the metric it was meant to move."
+          />
+          <PreviousResults rows={retainerResults} empty="" />
         </section>
       ) : null}
 
