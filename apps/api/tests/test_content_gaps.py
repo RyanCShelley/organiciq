@@ -215,3 +215,15 @@ def test_an_empty_scan_says_what_it_checked(db, client_a):
     _term(db, client_a.id, "vciso")
     db.commit()
     assert "1 already covered" in scan_term_gaps(db, client_a).explain_empty()
+
+
+def test_an_inflected_form_still_meets_the_page_that_covers_it():
+    """Aquaman's "leaking hot tub" beside /blog/find-a-hot-tub-leak-quickly."""
+    assert content_words("leaking hot tub") <= content_words(
+        "Find A Hot Tub Leak Quickly https://x.test/blog/find-a-hot-tub-leak-quickly"
+    )
+    assert content_words("washing") == content_words("washer")
+
+
+def test_intent_codes_are_spelled_out():
+    assert "local / commercial" in c1_write_the_page(_gap(intents=("L", "C"))).steps[0]

@@ -41,8 +41,19 @@ _STOP = frozenset(
 )
 
 
+#: Longest first, so "plumbers" loses "ers" and not just "s". Applied to
+#: both sides of every comparison, so what matters is that the two agree
+#: rather than that the result is a real word: "leaking" and "leak" meet at
+#: "leak", and "leaking hot tub" is no longer a gap beside a post called
+#: "find a hot tub leak quickly".
+_SUFFIXES = ("ing", "ers", "er", "ed", "es", "s")
+
+
 def _stem(word: str) -> str:
-    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+    for suffix in _SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
 
 
 def content_words(text: str) -> frozenset[str]:
@@ -100,8 +111,21 @@ class TermGap:
         return max(0.0, self.volume * (1.0 - min(self.difficulty, 100.0) / 100.0))
 
 
+#: SE Ranking's one-letter intent codes, spelled out.
+_INTENT = {
+    "I": "informational",
+    "N": "navigational",
+    "C": "commercial",
+    "T": "transactional",
+    "L": "local",
+}
+
+
 def _intent(gap: TermGap) -> str:
-    return f" SE Ranking reads the intent as {' / '.join(gap.intents)}." if gap.intents else ""
+    if not gap.intents:
+        return ""
+    named = " / ".join(_INTENT.get(i.strip().upper(), i) for i in gap.intents)
+    return f" SE Ranking reads the intent as {named}."
 
 
 def c1_write_the_page(gap: TermGap) -> Prescription | None:
