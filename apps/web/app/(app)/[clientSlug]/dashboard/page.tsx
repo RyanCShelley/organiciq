@@ -10,6 +10,7 @@ import { SectionHeader, SubsectionTitle } from "@/components/ui/SectionHeader";
 import { tableControls, filterRows } from "@/lib/table-sort";
 import { apiFetch } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
+import { accountToolHref } from "@/lib/account-routes";
 import { clientHref } from "@/lib/client-path";
 import { resolveDateRange } from "@/lib/context";
 import {
@@ -72,7 +73,7 @@ export default async function DashboardPage({
   // One set per table, so ordering Top pages does not reorder Traffic by
   // channel underneath it. The date range and compare mode are carried, or
   // a sort click would silently reset the window.
-  const dashboardPath = clientHref(selectedClient.slug, "dashboard");
+  const dashboardPath = accountToolHref(selectedClient.slug, "dashboard");
   const keep = ["from", "to", "range", "compare"];
   const leadsTable = tableControls(query, dashboardPath, "leads", { keep });
   const channelsTable = tableControls(query, dashboardPath, "channels", { keep });
