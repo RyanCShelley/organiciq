@@ -138,6 +138,7 @@ export default async function ClientIntegrationsPage({
         hasGscProperty={Boolean(gsc?.external_property_id)}
         hasGa4Property={Boolean(ga4?.external_property_id)}
         hasSerankingProject={Boolean(ser?.external_property_id)}
+        hasDomain={Boolean(client.domain)}
       />
     </section>
   );

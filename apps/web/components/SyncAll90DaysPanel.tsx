@@ -12,9 +12,10 @@ type SyncSource =
   | "ga4"
   | "se_ranking_search"
   | "se_ranking_ai"
-  | "se_ranking_audit";
+  | "se_ranking_audit"
+  | "site_crawl";
 
-type SyncProvider = "gsc" | "ga4" | "se_ranking";
+type SyncProvider = "gsc" | "ga4" | "se_ranking" | "site_crawl";
 
 const ACTIVE_STATUSES = new Set([
   "queued",
@@ -31,12 +32,14 @@ const SOURCE_LABELS: Record<SyncSource, string> = {
   se_ranking_search: "SE Ranking search",
   se_ranking_ai: "SE Ranking AI",
   se_ranking_audit: "SE Ranking audit",
+  site_crawl: "Site crawl",
 };
 
 const PROVIDER_LABELS: Record<SyncProvider, string> = {
   gsc: "GSC",
   ga4: "GA4",
   se_ranking: "SE Ranking",
+  site_crawl: "Site crawl",
 };
 
 type SourceProgress = {
@@ -64,10 +67,15 @@ async function enqueueJob(
   source: SyncSource,
   window: { start_date: string; end_date: string },
 ): Promise<"created" | "already_active" | string> {
+  // A crawl reads the site as it is today. A ninety-day window would be a
+  // lie about what it fetched.
+  const today = new Date().toISOString().slice(0, 10);
+  const dates =
+    source === "site_crawl" ? { start_date: today, end_date: today } : window;
   const res = await fetch("/api/proxy/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId, source, ...window }),
+    body: JSON.stringify({ clientId, source, ...dates }),
   });
   if (res.ok) return "created";
   const text = await res.text();
@@ -108,11 +116,14 @@ export function SyncAll90DaysPanel({
   hasGscProperty,
   hasGa4Property,
   hasSerankingProject,
+  hasDomain,
 }: {
   clientId: string;
   hasGscProperty: boolean;
   hasGa4Property: boolean;
   hasSerankingProject: boolean;
+  /** The crawl needs no integration — only somewhere to start. */
+  hasDomain: boolean;
 }) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
@@ -127,7 +138,7 @@ export function SyncAll90DaysPanel({
     trackingRef.current = tracking;
   }, [tracking]);
 
-  const canSync = hasGscProperty || hasGa4Property || hasSerankingProject;
+  const canSync = hasGscProperty || hasGa4Property || hasSerankingProject || hasDomain;
   const mapped: string[] = [];
   if (hasGscProperty) mapped.push("GSC");
   if (hasGa4Property) mapped.push("GA4");
@@ -140,8 +151,13 @@ export function SyncAll90DaysPanel({
     if (hasSerankingProject) {
       sources.push("se_ranking_search", "se_ranking_ai", "se_ranking_audit");
     }
+    // Last, and in every run: the engine reads our own crawl for titles,
+    // headings, schema and the page list, so a client whose first sync did
+    // not include it has no pages to map a keyword to, no candidates for a
+    // conversion page and nothing for the stage reader to read.
+    if (hasDomain) sources.push("site_crawl");
     return sources;
-  }, [hasGscProperty, hasGa4Property, hasSerankingProject]);
+  }, [hasGscProperty, hasGa4Property, hasSerankingProject, hasDomain]);
 
   const providerSources = useMemo(() => {
     const map: Record<SyncProvider, SyncSource[]> = {
@@ -150,9 +166,10 @@ export function SyncAll90DaysPanel({
       se_ranking: hasSerankingProject
         ? ["se_ranking_search", "se_ranking_ai", "se_ranking_audit"]
         : [],
+      site_crawl: hasDomain ? ["site_crawl"] : [],
     };
     return map;
-  }, [hasGscProperty, hasGa4Property, hasSerankingProject]);
+  }, [hasGscProperty, hasGa4Property, hasSerankingProject, hasDomain]);
 
   const trackedSources = runSources.length ? runSources : allSources;
 
@@ -267,16 +284,18 @@ export function SyncAll90DaysPanel({
     { provider: "gsc", enabled: hasGscProperty },
     { provider: "ga4", enabled: hasGa4Property },
     { provider: "se_ranking", enabled: hasSerankingProject },
+    { provider: "site_crawl", enabled: hasDomain },
   ];
 
   return (
     <div className="mt-6 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-4">
       <h2 className="text-lg font-medium">Sync data</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Pull the last <strong>90 days</strong> for all mapped sources, or sync one provider so you
-        do not call Google when you only need SE Ranking
-        {mapped.length ? ` (mapped: ${mapped.join(", ")})` : ""}. After the first backfill, the
-        platform auto-syncs the last few days every morning.
+        Pull the last <strong>90 days</strong> for all mapped sources and crawl the site, or sync
+        one provider so you do not call Google when you only need SE Ranking
+        {mapped.length ? ` (mapped: ${mapped.join(", ")})` : ""}. The crawl reads the site as it is
+        today, not ninety days of it. After the first backfill, the platform auto-syncs the last
+        few days every morning and re-crawls weekly.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <button
@@ -315,7 +334,8 @@ export function SyncAll90DaysPanel({
       </div>
       {!canSync ? (
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Map at least one GSC, GA4, or SE Ranking property above before syncing.
+          Map at least one GSC, GA4, or SE Ranking property above, or set a domain on the client,
+          before syncing.
         </p>
       ) : null}
 

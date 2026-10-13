@@ -190,7 +190,12 @@ def _crawl_slot(client_id) -> int:
 
 def _site_crawl_due(client_id, last_crawl: date | None, today: date) -> bool:
     if last_crawl is None:
-        return today.toordinal() % SITE_CRAWL_INTERVAL_DAYS == _crawl_slot(client_id)
+        # Never crawled: go now. The slot spreads a recurring load across the
+        # week, and there is nothing recurring to spread yet — waiting for it
+        # left a client just connected with no pages for up to six days, and
+        # the crawl is what conversion pages, page stages and the keyword map
+        # all read.
+        return True
     age = (today - last_crawl).days
     if age >= SITE_CRAWL_STALE_DAYS:
         return True

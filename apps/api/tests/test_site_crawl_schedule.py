@@ -26,19 +26,20 @@ def test_clients_are_spread_rather_than_bunched():
     assert len(set(slots)) > SITE_CRAWL_INTERVAL_DAYS / 2
 
 
-def test_a_never_crawled_client_waits_for_its_slot():
-    """Otherwise every client crawls at once the first time this ships."""
+def test_a_never_crawled_client_crawls_on_the_next_tick():
+    """No slot to wait for.
+
+    This used to wait, so that shipping the crawl did not put all 35
+    clients on one morning. That was a one-off: every client has been
+    crawled since, so "never crawled" now means "connected this week",
+    which arrives one or two at a time. Waiting cost a new client up to
+    six days with no pages — and conversion pages, page stages and the
+    keyword map all read the crawl. The spread still applies to every
+    repeat crawl, which is where the load actually is.
+    """
     client_id = uuid.uuid4()
-    slot = _crawl_slot(client_id)
-    due_days = [
-        day
-        for day in range(SITE_CRAWL_INTERVAL_DAYS)
-        if _site_crawl_due(client_id, None, date(2026, 1, 1) + timedelta(days=day))
-    ]
-    assert len(due_days) == 1
-    assert (date(2026, 1, 1) + timedelta(days=due_days[0])).toordinal() % (
-        SITE_CRAWL_INTERVAL_DAYS
-    ) == slot
+    for day in range(SITE_CRAWL_INTERVAL_DAYS * 2):
+        assert _site_crawl_due(client_id, None, date(2026, 1, 1) + timedelta(days=day))
 
 
 def test_a_recent_crawl_is_not_repeated():
