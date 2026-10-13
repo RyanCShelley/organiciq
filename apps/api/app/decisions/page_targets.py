@@ -15,6 +15,7 @@ would earn, because nothing can.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,42 @@ class PageCandidate:
     #: so "route the reader onward" has nowhere left to send them.
     is_conversion_page: bool = False
 
+    # ── The period before ──
+    #
+    # The same three figures over the 28 days before the window above. An
+    # update is prescribed for a page that is losing something, and one
+    # period cannot say that. `prior_position` is None where the page drew
+    # no impressions then, which is also how `has_prior` tells a decaying
+    # page from one that did not exist yet.
+    prior_impressions: float = 0.0
+    prior_clicks: float = 0.0
+    prior_position: float | None = None
+    #: The query whose impressions fell most on this page, so the brief can
+    #: name what was lost rather than saying the page is down.
+    top_lost_query: str | None = None
+    #: That query's position then and now. Null where it drew nothing in one
+    #: of the two windows.
+    top_lost_query_prior_position: float | None = None
+    top_lost_query_position: float | None = None
+
+    # ── The page itself ──
+    #: When the page was last updated, and which source said so. Null where
+    #: the crawl found no date, which is not the same as a page never
+    #: updated — the column says "unknown" and no rule guesses.
+    content_updated_on: date | None = None
+    content_updated_source: str | None = None
+    word_count: int | None = None
+    #: In-content, non-template links pointing at this page.
+    inbound_editorial_links: int | None = None
+    #: Section headings in document order, and the questions the page
+    #: already answers. Null where the crawl predates the capture.
+    sections: tuple[dict, ...] = ()
+    faq_questions: tuple[str, ...] = ()
+    #: Schema blocks on the page that failed to parse, by type where known.
+    #: Invalid markup is indistinguishable from absent to every consumer.
+    broken_schema: tuple[str, ...] = ()
+    has_schema: bool = False
+
     @property
     def missed_clicks(self) -> float | None:
         """Clicks the curve expected and the page did not get.
@@ -93,6 +130,48 @@ class PageCandidate:
     @property
     def routes_onward(self) -> bool:
         return bool(self.linked_offer_stages)
+
+    @property
+    def has_prior(self) -> bool:
+        """Whether this page drew anything in the period before.
+
+        A page published last month has no earlier figures, and a page with
+        nothing to compare against is not a page that lost something.
+        """
+        return self.prior_impressions > 0
+
+    @property
+    def impressions_lost(self) -> float:
+        """Impressions the page used to draw and no longer does."""
+        if not self.has_prior:
+            return 0.0
+        return max(0.0, self.prior_impressions - self.impressions)
+
+    @property
+    def impressions_change(self) -> float | None:
+        """As a share of what it drew before. -0.25 is a quarter gone."""
+        if not self.has_prior:
+            return None
+        return (self.impressions - self.prior_impressions) / self.prior_impressions
+
+    @property
+    def position_change(self) -> float | None:
+        """Positive means it moved down the page. None where either is absent."""
+        if self.position is None or self.prior_position is None:
+            return None
+        return self.position - self.prior_position
+
+    @property
+    def held_or_improved_position(self) -> bool:
+        """Whether the ranking is no worse than it was.
+
+        ACCTek's /managed-it-services-syracuse-ny lost 7,524 impressions
+        and *improved* from 32.7 to 21.5 over the same weeks. Impressions
+        alone would call that a decaying page; it is a SERP that changed
+        shape. Nothing is prescribed as decay unless the ranking slipped.
+        """
+        change = self.position_change
+        return change is not None and change <= 0
 
 
 def rank_for_traffic(pages: list[PageCandidate]) -> list[PageCandidate]:

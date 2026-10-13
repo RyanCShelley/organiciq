@@ -112,3 +112,35 @@ def test_the_client_payload_carries_the_resolved_allowance(db, client_a, tier):
     out = client_out(client_a)
     assert out.growth_action_allowance == 1
     assert out.plan_label == f"{tier.tier_name} plan"
+
+
+# ── How often the allowance is spent ──
+
+
+def test_a_monthly_plan_opens_every_month(db, client_a):
+    tier = _tier(db, tier_name="Lift-monthly")
+    allowances = resolve_plan_allowances(client_a, tier)
+    assert allowances.plan_cadence == "monthly"
+    assert all(allowances.slots_open_in(f"2026-{m:02d}") for m in range(1, 13))
+
+
+def test_a_quarterly_plan_opens_in_the_first_month_of_each_quarter(db, client_a):
+    """Legacy clients buy one of each per quarter.
+
+    An integer allowance cannot say that: at 1 the engine plans one every
+    month, which is three times what was sold, and at 0 it plans nothing.
+    """
+    tier = _tier(db, tier_name="Legacy-quarterly", plan_cadence="quarterly")
+    allowances = resolve_plan_allowances(client_a, tier)
+    open_months = [
+        f"2026-{m:02d}" for m in range(1, 13)
+        if allowances.slots_open_in(f"2026-{m:02d}")
+    ]
+    assert open_months == ["2026-01", "2026-04", "2026-07", "2026-10"]
+
+
+def test_cadence_comes_from_the_tier_not_the_client(db, client_a):
+    """A client buys a different plan, not a different cadence."""
+    tier = _tier(db, tier_name="Legacy-fixed", plan_cadence="quarterly")
+    client_a.custom_content_allowance = 9
+    assert resolve_plan_allowances(client_a, tier).plan_cadence == "quarterly"

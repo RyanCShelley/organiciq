@@ -24,7 +24,11 @@ from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.page_targets import PageCandidate
 from app.models.client import Client
 from app.models.config import ClientConversionPage
-from app.models.crawl import FactCrawlInternalLink, FactCrawlPageSnapshot
+from app.models.crawl import (
+    FactCrawlInternalLink,
+    FactCrawlPageSchema,
+    FactCrawlPageSnapshot,
+)
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.services.page_stage import confirmed_stages
@@ -153,6 +157,103 @@ def _top_queries(db: Session, client_id: UUID, start: date, end: date) -> dict[s
     return best
 
 
+def _query_shifts(
+    db: Session,
+    client_id: UUID,
+    *,
+    window: tuple[date, date],
+    prior: tuple[date, date],
+) -> dict[str, tuple[str, float | None, float | None]]:
+    """Per page, the query that lost the most impressions.
+
+    "This page is down" is not a brief. "It is down on *this* term, which
+    was averaging 4 and is now 11" is one, and the query grain is the only
+    place that answer exists.
+
+    Returns `{url: (query, position_then, position_now)}` for pages where a
+    query lost ground. A query that appeared since is not a loss, so only
+    terms present in the earlier window are considered.
+    """
+    def read(start: date, end: date) -> dict[tuple[str, str], tuple[float, float | None]]:
+        rows = (
+            db.query(
+                FactGscQueryPage.normalized_url,
+                FactGscQueryPage.query,
+                func.coalesce(func.sum(FactGscQueryPage.impressions), 0),
+                func.coalesce(
+                    func.sum(
+                        FactGscQueryPage.average_position * FactGscQueryPage.impressions
+                    ),
+                    0,
+                ),
+            )
+            .filter(
+                FactGscQueryPage.client_id == client_id,
+                FactGscQueryPage.date >= start,
+                FactGscQueryPage.date <= end,
+            )
+            .group_by(FactGscQueryPage.normalized_url, FactGscQueryPage.query)
+            .all()
+        )
+        out: dict[tuple[str, str], tuple[float, float | None]] = {}
+        for url, query, impressions, weighted in rows:
+            impressions = float(impressions or 0)
+            if impressions <= 0:
+                continue
+            out[(url, query)] = (impressions, float(weighted or 0) / impressions)
+        return out
+
+    now = read(*window)
+    then = read(*prior)
+
+    worst: dict[str, tuple[float, str, float | None, float | None]] = {}
+    for (url, query), (prior_impressions, prior_position) in then.items():
+        current_impressions, current_position = now.get((url, query), (0.0, None))
+        lost = prior_impressions - current_impressions
+        if lost <= 0:
+            continue
+        best = worst.get(url)
+        if best is None or lost > best[0]:
+            worst[url] = (lost, query, prior_position, current_position)
+    return {url: (q, before, after) for url, (_, q, before, after) in worst.items()}
+
+
+def _broken_schema(db: Session, client_id: UUID) -> dict[str, tuple[str, ...]]:
+    """Schema blocks that did not parse, per page.
+
+    Markup that is present and invalid is indistinguishable from absent to
+    anything reading the page, and is invisible in every report we have.
+    """
+    out: dict[str, set[str]] = {}
+    for url, schema_type, error in (
+        db.query(
+            FactCrawlPageSchema.normalized_url,
+            FactCrawlPageSchema.schema_type,
+            FactCrawlPageSchema.parse_error,
+        ).filter(
+            FactCrawlPageSchema.client_id == client_id,
+            FactCrawlPageSchema.parse_error.isnot(None),
+        )
+    ):
+        if not url or not error:
+            continue
+        out.setdefault(url, set()).add(schema_type or "unnamed block")
+    return {url: tuple(sorted(types)) for url, types in out.items()}
+
+
+def _pages_with_schema(db: Session, client_id: UUID) -> set[str]:
+    return {
+        url
+        for (url,) in db.query(FactCrawlPageSchema.normalized_url)
+        .filter(
+            FactCrawlPageSchema.client_id == client_id,
+            FactCrawlPageSchema.parse_error.is_(None),
+        )
+        .distinct()
+        if url
+    }
+
+
 def _sessions(
     db: Session, client_id: UUID, start: date, end: date
 ) -> dict[str, tuple[float, float | None]]:
@@ -185,9 +286,17 @@ def load_page_candidates(
 ) -> list[PageCandidate]:
     today = today or date.today()
     start = today - timedelta(days=WINDOW_DAYS - 1)
+    # The same length of window immediately before, so "down a quarter"
+    # compares like with like rather than a month against a fortnight.
+    prior_end = start - timedelta(days=1)
+    prior_start = prior_end - timedelta(days=WINDOW_DAYS - 1)
 
     gsc = _gsc_pages(db, client.id, start, today)
+    prior = _gsc_pages(db, client.id, prior_start, prior_end)
     queries = _top_queries(db, client.id, start, today)
+    shifts = _query_shifts(
+        db, client.id, window=(start, today), prior=(prior_start, prior_end)
+    )
     sessions = _sessions(db, client.id, start, today)
     stages = confirmed_stages(db, client.id)
     brand = brand_terms(client)
@@ -216,6 +325,11 @@ def load_page_candidates(
     # falls back to the primary offer. Treating a null stage as "matches
     # nothing" meant that for every client in the warehouse, all of whose
     # conversion pages have a null stage, no lead action could ever fire.
+    broken_schema = _broken_schema(db, client.id)
+    with_schema = _pages_with_schema(db, client.id)
+
+    # Links in from a body, not from a menu. The count on the snapshot is
+    # the same figure, but a page missing from the newest crawl has none.
     offers = {
         (row.normalized_url or "").strip(): (row.stage or "").strip().lower() or None
         for row in db.query(ClientConversionPage).filter(
@@ -262,12 +376,19 @@ def load_page_candidates(
     # arrives with real sessions attached. It reached the candidate list and
     # drew a T-3 telling somebody to rewrite the opening of "(not set)".
     # Anything that is not an address cannot be acted on.
-    urls = {u for u in (set(gsc) | set(sessions)) if is_addressable(u)}
+    #
+    # The prior window is in the union too: a page that drew nothing this
+    # period but drew something last period has not left the site, it has
+    # lost all of its demand — the strongest decay signal there is, and the
+    # one reading only the current window drops.
+    urls = {u for u in (set(gsc) | set(sessions) | set(prior)) if is_addressable(u)}
     out: list[PageCandidate] = []
     for url in sorted(urls):
         page = gsc.get(url, {})
+        was = prior.get(url, {})
         position = page.get("position")
         impressions = page.get("impressions", 0.0)
+        lost_query, lost_before, lost_after = shifts.get(url, (None, None, None))
         expected = (
             expected_ctr_percent(position) / 100.0 * impressions
             if position and impressions
@@ -311,6 +432,28 @@ def load_page_candidates(
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None
                 ),
+                prior_impressions=was.get("impressions", 0.0),
+                prior_clicks=was.get("clicks", 0.0),
+                prior_position=was.get("position"),
+                top_lost_query=lost_query,
+                top_lost_query_prior_position=lost_before,
+                top_lost_query_position=lost_after,
+                content_updated_on=(
+                    snapshot.content_updated_on if snapshot else None
+                ),
+                content_updated_source=(
+                    snapshot.content_updated_source if snapshot else None
+                ),
+                word_count=snapshot.word_count if snapshot else None,
+                inbound_editorial_links=(
+                    snapshot.inbound_editorial_links if snapshot else None
+                ),
+                sections=tuple(snapshot.sections or ()) if snapshot else (),
+                faq_questions=(
+                    tuple(snapshot.faq_questions or ()) if snapshot else ()
+                ),
+                broken_schema=broken_schema.get(url, ()),
+                has_schema=url in with_schema,
             )
         )
     return out

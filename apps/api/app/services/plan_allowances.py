@@ -30,6 +30,20 @@ class PlanAllowances:
     growth_action_allowance: int
     watchlist_cadence: str
     conversion_limit: int
+    #: monthly | quarterly — how often the three allowances above are spent.
+    plan_cadence: str = "monthly"
+
+    def slots_open_in(self, month: str) -> bool:
+        """Whether this month spends the allowance.
+
+        A quarterly plan opens in the first month of each calendar quarter.
+        Calendar rather than rolling from the client's start date: the
+        allowance is what an invoice says, and a quarter somebody can point
+        at on a calendar is the one both sides mean.
+        """
+        if self.plan_cadence != "quarterly":
+            return True
+        return int(month.split("-")[1]) % 3 == 1
 
 
 def is_enterprise_tier(tier: Tier | None) -> bool:
@@ -78,4 +92,7 @@ def resolve_plan_allowances(client: Client, tier: Tier | None = None) -> PlanAll
             client.custom_watchlist_cadence, active_tier.watchlist_cadence
         ),
         conversion_limit=active_tier.conversion_limit,
+        # Straight from the tier. A client does not buy their way onto a
+        # different cadence; they buy a different plan.
+        plan_cadence=active_tier.plan_cadence or "monthly",
     )

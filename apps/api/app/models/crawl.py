@@ -103,6 +103,13 @@ class FactCrawlPageSnapshot(Base):
     #: Questions the page already answers, from FAQPage schema and from
     #: headings that read as questions. Null as above.
     faq_questions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    #: When the page itself says it was last updated, and which of the
+    #: sources said so — `schema`, `meta` or `sitemap`. Null where none of
+    #: them carried a date, which is "unknown", not "never updated": a
+    #: refresh queue that treats a missing date as ancient would put every
+    #: page without markup at the top.
+    content_updated_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    content_updated_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

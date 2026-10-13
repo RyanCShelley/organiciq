@@ -31,6 +31,10 @@ class Tier(Base):
     reporting_level: Mapped[str] = mapped_column(String(50), nullable=False, default="standard")
     # monthly | bi_weekly | weekly — Watch List keyword/prompt check frequency
     watchlist_cadence: Mapped[str] = mapped_column(String(32), nullable=False, default="monthly")
+    # monthly | quarterly — how often the allowances above are spent. Legacy
+    # clients buy one of each per quarter, which no integer can say: at 1 the
+    # engine plans one every month, and at 0 it plans nothing ever.
+    plan_cadence: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
