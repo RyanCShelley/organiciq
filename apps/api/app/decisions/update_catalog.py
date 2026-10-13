@@ -1,0 +1,327 @@
+"""What to do about a page that is losing ground.
+
+The growth catalog asks what would win something new. This asks what is
+being lost, which is a different question with a different allowance
+behind it: refreshing existing content is retainer work a client buys
+every month, and growth actions are deliberately outside it.
+
+Same shape as `catalog.py` — plain functions taking a `PageCandidate` and
+returning a `Prescription` or None, dispatched by `prescribe_page`, first
+one to fire wins. The order of `UPDATE_ACTIONS` is therefore precedence,
+and it runs most specific first: a page that fell out of the top three has
+a sharper brief than one that is simply down, and both are better than
+"refresh it".
+
+Nothing here fires on impressions alone. ACCTek's
+/managed-it-services-syracuse-ny lost 2,817 impressions over the weeks its
+position improved from 32.7 to 21.5 — a SERP that changed shape, not a
+page that decayed, and a refresh prescribed for it spends a month of a
+client's allowance on a page that is winning.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import date
+
+from app.decisions.page_targets import PageCandidate
+from app.decisions.slots import Prescription
+from app.decisions.triage import Branch
+
+#: Impressions a page must have drawn in the earlier window before its
+#: decline means anything. Below this a halving is four impressions.
+MIN_PRIOR_IMPRESSIONS = 100.0
+
+#: How much of its demand a page has to have lost. A quarter is a real
+#: fall and not a seasonal wobble; anything tighter and the queue fills
+#: with pages that moved by noise.
+MIN_DECLINE = 0.25
+
+#: Positions worth winning back. A page that was averaging in the top
+#: three and is not any more has lost the clicks that come with them,
+#: which is the steepest part of the curve.
+TOP_POSITIONS = 3.0
+
+#: How long before a refresh is judged. A position moves inside a month;
+#: the impressions that follow it do not.
+REFRESH_CHECK_DAYS = 56
+
+#: Words below which a page is a stub, and "refresh it" is the wrong
+#: instruction — there is nothing to refresh.
+STUB_WORDS = 250
+
+
+def _age(page: PageCandidate, today: date | None = None) -> str:
+    """How long since the page said it was updated, in words.
+
+    Silent where no source carried a date. A brief that says "last updated
+    unknown" is noise; one that says nothing about the date is honest.
+    """
+    if page.content_updated_on is None:
+        return ""
+    months = ((today or date.today()) - page.content_updated_on).days // 30
+    if months < 1:
+        return " It was updated this month."
+    if months == 1:
+        return " It was last updated a month ago."
+    if months < 24:
+        return f" It was last updated {months} months ago."
+    return f" It was last updated {months // 12} years ago."
+
+
+def _is_decaying(page: PageCandidate) -> bool:
+    """Lost a real share of real demand, and did not climb while doing it."""
+    if page.prior_impressions < MIN_PRIOR_IMPRESSIONS:
+        return False
+    change = page.impressions_change
+    if change is None or change > -MIN_DECLINE:
+        return False
+    # The ACCTek guard. A page whose ranking improved is not decaying
+    # however its impressions moved — the SERP changed, not the page.
+    return not page.held_or_improved_position
+
+
+def _lost_query(page: PageCandidate) -> str:
+    """The term the brief is about: the biggest loser, else the biggest."""
+    return page.top_lost_query or page.top_query or ""
+
+
+# ── U-2 ─────────────────────────────────────────────────────────────────
+
+
+def u2_win_back_the_position(page: PageCandidate) -> Prescription | None:
+    """It was in the top three on its main term and is not any more."""
+    before = page.top_lost_query_prior_position
+    after = page.top_lost_query_position
+    term = page.top_lost_query
+    if not term or before is None or before > TOP_POSITIONS:
+        return None
+    # Still there, or gone from the results entirely — the second is a
+    # different problem and "win it back" is the wrong instruction.
+    if after is None or after <= TOP_POSITIONS:
+        return None
+    if page.prior_impressions < MIN_PRIOR_IMPRESSIONS:
+        return None
+
+    return Prescription(
+        action_id="U-2",
+        title="Win back the position this page lost",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=term,
+        score=page.impressions_lost,
+        effort_min=90,
+        why=(
+            f"“{term}” was averaging position {before:.1f} on this page and "
+            f"now averages {after:.1f}. The page has lost "
+            f"{page.impressions_lost:.0f} impressions since the period "
+            f"before.{_age(page)}"
+        ),
+        done_when=(
+            f"The page answers “{term}” more completely than whatever now "
+            "outranks it — read the results that passed it and cover what "
+            "they cover that this does not."
+        ),
+        metric="Average position on the term",
+        metric_key="term_position",
+        evidence=(
+            f"facts_gsc_query_pages: “{term}” {before:.1f} → {after:.1f}",
+            f"facts_gsc_pages: {page.prior_impressions:.0f} → "
+            f"{page.impressions:.0f} impressions",
+        ),
+    )
+
+
+# ── U-3 ─────────────────────────────────────────────────────────────────
+
+#: A query that reads as a question. The same openers the crawler uses to
+#: find a page's own questions, so "answered" and "asked" are judged by one
+#: definition.
+_QUESTION_OPENERS = (
+    "what", "how", "why", "when", "where", "which", "who", "can", "does",
+    "do", "is", "are", "should",
+)
+
+
+def _is_question(text: str) -> bool:
+    words = (text or "").strip().lower().split()
+    if not words:
+        return False
+    return text.strip().endswith("?") or words[0] in _QUESTION_OPENERS
+
+
+def _answers(page: PageCandidate, term: str) -> bool:
+    """Whether a heading or an FAQ entry already asks what the term asks.
+
+    Matched on the content words, not the whole string: "how to track AI
+    overviews" and "How do I track AI Overviews?" are the same question and
+    a string compare says they are not.
+    """
+    wanted = {w for w in term.lower().split() if w not in _QUESTION_OPENERS and len(w) > 2}
+    if not wanted:
+        return True
+    candidates = [str(q) for q in page.faq_questions]
+    candidates += [str(s.get("heading") or "") for s in page.sections]
+    for text in candidates:
+        words = set(text.lower().replace("?", "").split())
+        if wanted and wanted <= words:
+            return True
+    return False
+
+
+def u3_answer_the_question_it_draws(page: PageCandidate) -> Prescription | None:
+    """People arrive asking something the page never asks back."""
+    term = _lost_query(page)
+    if not term or not _is_question(term):
+        return None
+    if not _is_decaying(page):
+        return None
+    # Null sections means the crawl predates the capture, which is not the
+    # same as a page with no headings. Nothing is prescribed on a guess.
+    if not page.sections:
+        return None
+    if _answers(page, term):
+        return None
+
+    return Prescription(
+        action_id="U-3",
+        title="Answer the question this page draws",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=term,
+        score=page.impressions_lost,
+        effort_min=45,
+        why=(
+            f"People reach this page asking “{term}”, and none of its "
+            f"{len(page.sections)} headings asks that question. It has lost "
+            f"{page.impressions_lost:.0f} impressions since the period "
+            f"before.{_age(page)}"
+        ),
+        done_when=(
+            f"A heading on the page asks “{term}” in the words it is "
+            "searched in, with the answer in the paragraph directly under "
+            "it."
+        ),
+        metric="Average position on the term",
+        metric_key="term_position",
+        evidence=(
+            f"facts_gsc_query_pages: “{term}” is the biggest loser on this page",
+            f"facts_crawl_page_snapshots: {len(page.sections)} headings, "
+            f"{len(page.faq_questions)} questions answered",
+        ),
+    )
+
+
+# ── U-6 ─────────────────────────────────────────────────────────────────
+
+
+def u6_fix_the_markup(page: PageCandidate) -> Prescription | None:
+    """Structured data that is present and broken.
+
+    Invalid markup is indistinguishable from absent to anything reading the
+    page, and is invisible in every report we have — the schema summary
+    counts blocks, and a block that did not parse still counts as one.
+    """
+    if not page.broken_schema:
+        return None
+    if page.impressions < MIN_PRIOR_IMPRESSIONS:
+        return None
+
+    broken = ", ".join(page.broken_schema)
+    return Prescription(
+        action_id="U-6",
+        title="Fix the structured data on this page",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=page.top_query,
+        score=page.impressions,
+        effort_min=30,
+        why=(
+            f"The page carries structured data that does not parse "
+            f"({broken}), which to anything reading the page is the same as "
+            f"carrying none. It draws {page.impressions:.0f} impressions."
+        ),
+        done_when=(
+            "Every block on the page parses and validates, and the Rich "
+            "Results test reports the type the page is meant to be."
+        ),
+        metric="Average position on the term",
+        metric_key="term_position",
+        evidence=(f"facts_crawl_page_schema: {broken} failed to parse",),
+        check_after_days=REFRESH_CHECK_DAYS,
+    )
+
+
+# ── U-1 ─────────────────────────────────────────────────────────────────
+
+
+def u1_refresh_the_page(page: PageCandidate) -> Prescription | None:
+    """It is losing demand and nothing more specific explains it.
+
+    Last in the order on purpose: every action above gives a sharper brief
+    than "refresh it", and this one picks up what they leave.
+    """
+    if not _is_decaying(page):
+        return None
+    # A stub has nothing to refresh. Whatever is wrong with a 90-word page,
+    # updating it is not the instruction.
+    if page.word_count is not None and page.word_count < STUB_WORDS:
+        return None
+
+    term = _lost_query(page)
+    about = f" It is losing most on “{term}”." if term else ""
+    change = page.impressions_change or 0.0
+    return Prescription(
+        action_id="U-1",
+        title="Refresh this page",
+        branch=Branch.TRAFFIC,
+        target_url=page.url,
+        term=term or None,
+        score=page.impressions_lost,
+        effort_min=90,
+        why=(
+            f"Impressions are down {abs(change) * 100:.0f}% on the period "
+            f"before, from {page.prior_impressions:.0f} to "
+            f"{page.impressions:.0f}, and the ranking has not improved."
+            f"{about}{_age(page)}"
+        ),
+        done_when=(
+            "The page is current: claims and figures checked, anything "
+            "dated replaced, and the opening answers what people are "
+            "actually searching for. Republished with the date updated."
+        ),
+        metric="Impressions",
+        metric_key="page_impressions",
+        evidence=(
+            f"facts_gsc_pages: {page.prior_impressions:.0f} → "
+            f"{page.impressions:.0f} impressions",
+            (
+                f"position {page.prior_position:.1f} → {page.position:.1f}"
+                if page.prior_position is not None and page.position is not None
+                else "no position in one of the two periods"
+            ),
+        ),
+        check_after_days=REFRESH_CHECK_DAYS,
+    )
+
+
+#: Most specific first — `prescribe_page` takes the first that fires, so
+#: this order is what decides which brief a page gets.
+UPDATE_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
+    u2_win_back_the_position,
+    u3_answer_the_question_it_draws,
+    u6_fix_the_markup,
+    u1_refresh_the_page,
+)
+
+
+def rank_for_updates(pages: list[PageCandidate]) -> list[PageCandidate]:
+    """Biggest loss first — impressions the site used to have and does not.
+
+    Not a forecast of what a refresh would earn. Nothing can say that; this
+    says what is already gone, which is measured.
+    """
+    return sorted(
+        [p for p in pages if p.impressions_lost > 0 or p.broken_schema],
+        key=lambda p: (-p.impressions_lost, p.url),
+    )
