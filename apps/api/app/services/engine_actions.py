@@ -47,12 +47,20 @@ def slots_in_record(record: dict) -> dict[str, RecordSlot]:
     `candidates` is in here as well as `actions`: an action the engine left
     out can be put into the plan, and from that moment it is assigned, sent
     and measured like any other. Only the slotted ones carry a slot number.
+
+    The retainer pools are read the same way under their own kind, so
+    assignment, the Teamwork send, skipping and the results loop all work
+    on a refresh without knowing it is one.
     """
     out: dict[str, RecordSlot] = {}
     for kind, key in (
         ("action", "actions"),
         ("incident", "incidents"),
+        # Retainer work. A separate kind because it is inside the monthly
+        # fee and a growth action is not, and the two are reported apart.
+        ("update", "updates"),
         ("action", "candidates"),
+        ("update", "update_candidates"),
     ):
         for row in record.get(key) or []:
             uid = row.get("action_uid")

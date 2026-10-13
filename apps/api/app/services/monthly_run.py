@@ -41,9 +41,10 @@ from app.decisions.catalog import (
     prescribe_page,
 )
 from app.decisions.page_targets import rank_for_leads, rank_for_traffic
+from app.decisions.update_catalog import UPDATE_ACTIONS, rank_for_updates
 from app.decisions.incidents import check as check_incidents
 from app.decisions.overrides import Exclusion, is_excluded
-from app.decisions.slots import fill_slots
+from app.decisions.slots import fill_pool, fill_slots
 from app.decisions.targets import rank_candidates
 from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
@@ -70,6 +71,63 @@ RELAUNCH_WINDOW_DAYS = 180
 
 #: Words in an annotation that mean the site changed underneath its rankings.
 RELAUNCH_WORDS = ("relaunch", "migration", "migrated", "redesign", "domain change")
+
+
+def _slot_row(client, month: str, slot, today: date) -> dict:
+    """One filled slot, as the record stores it.
+
+    Written once because the growth plan and the retainer pools must look
+    identical to everything downstream: `slots_in_record` reads them with
+    one loop, and the page renders them with one card.
+    """
+    return {
+        "action_uid": action_uid(client.slug, month, slot.prescription),
+        "slot": slot.slot,
+        "id": slot.prescription.action_id,
+        "title": slot.prescription.title,
+        "branch": slot.prescription.branch.value,
+        "spillover": slot.spillover,
+        "target_url": slot.prescription.target_url,
+        "term": slot.prescription.term,
+        "score": round(slot.prescription.score, 1),
+        "effort_min": slot.prescription.effort_min,
+        "why": slot.prescription.why,
+        "evidence": list(slot.prescription.evidence),
+        "done_when": slot.prescription.done_when,
+        "metric": slot.prescription.metric,
+        # What the results loop reads to judge it. Stored on the record so a
+        # check months later uses the key the action was prescribed with,
+        # not whatever the catalog says by then.
+        "metric_key": slot.prescription.metric_key,
+        "check_on": (
+            today
+            + timedelta(days=slot.prescription.check_after_days or CHECK_AFTER_DAYS)
+        ).isoformat(),
+        "flags": list(slot.prescription.flags),
+    }
+
+
+def _candidate_row(client, month: str, considered) -> dict:
+    """One thing the engine weighed, slotted or not."""
+    return {
+        "action_uid": action_uid(client.slug, month, considered.prescription),
+        "slot": considered.slot,
+        "spillover": considered.spillover,
+        "not_slotted_because": considered.reason,
+        "id": considered.prescription.action_id,
+        "title": considered.prescription.title,
+        "branch": considered.prescription.branch.value,
+        "target_url": considered.prescription.target_url,
+        "term": considered.prescription.term,
+        "score": round(considered.prescription.score, 1),
+        "effort_min": considered.prescription.effort_min,
+        "why": considered.prescription.why,
+        "evidence": list(considered.prescription.evidence),
+        "done_when": considered.prescription.done_when,
+        "metric": considered.prescription.metric,
+        "metric_key": considered.prescription.metric_key,
+        "flags": list(considered.prescription.flags),
+    }
 
 
 def action_uid(slug: str, month: str, prescription) -> str:
@@ -358,6 +416,46 @@ def build_record(
         prescriptions_by_branch=by_branch,
     )
 
+    # ── The retainer pools ───────────────────────────────────────────────
+    #
+    # Updating existing content and writing new pages are bought every
+    # month, whatever the constraint says, so they are their own pools
+    # against their own allowances rather than competing for the growth
+    # slots. The growth plan fills first and its pages are reserved: one
+    # page prescribed both a growth action and a refresh in the same month
+    # is two briefs, two Teamwork tasks and one confused writer.
+    taken = {
+        slot.prescription.target_url
+        for slot in plan.filled
+        if slot.prescription.target_url
+    }
+    open_this_month = allowances.slots_open_in(month)
+    closed_reason = (
+        f"{allowances.tier_name} buys this quarterly, and this is not the "
+        "first month of the quarter."
+    )
+
+    update_plan = fill_pool(
+        slots=allowances.update_allowance if open_this_month else 0,
+        prescriptions=[
+            found
+            for candidate in rank_for_updates(page_candidates)
+            if not is_excluded(candidate.url, exclusions)
+            and (found := prescribe_page(candidate, actions=UPDATE_ACTIONS)) is not None
+        ],
+        reserved_urls=taken,
+        empty_reason=(
+            "No page has lost enough ground to be worth a refresh this month."
+            if open_this_month
+            else closed_reason
+        ),
+    )
+    taken |= {
+        slot.prescription.target_url
+        for slot in update_plan.filled
+        if slot.prescription.target_url
+    }
+
     return {
         "client": client.slug,
         "client_name": client.client_name,
@@ -410,33 +508,7 @@ def build_record(
             for branch in triage.branches
         ],
         "actions": [
-            {
-                "action_uid": action_uid(client.slug, month, slot.prescription),
-                "slot": slot.slot,
-                "id": slot.prescription.action_id,
-                "title": slot.prescription.title,
-                "branch": slot.prescription.branch.value,
-                "spillover": slot.spillover,
-                "target_url": slot.prescription.target_url,
-                "term": slot.prescription.term,
-                "score": round(slot.prescription.score, 1),
-                "effort_min": slot.prescription.effort_min,
-                "why": slot.prescription.why,
-                "evidence": list(slot.prescription.evidence),
-                "done_when": slot.prescription.done_when,
-                "metric": slot.prescription.metric,
-                # What the results loop reads to judge it. Stored on the
-                # record so a check months later uses the key the action was
-                # prescribed with, not whatever the catalog says by then.
-                "metric_key": slot.prescription.metric_key,
-                "check_on": (
-                    today
-                    + timedelta(
-                        days=slot.prescription.check_after_days or CHECK_AFTER_DAYS
-                    )
-                ).isoformat(),
-                "flags": list(slot.prescription.flags),
-            }
+            _slot_row(client, month, slot, today)
             for slot in plan.filled
         ],
         "empty_slots": [
@@ -454,37 +526,22 @@ def build_record(
                 slug=client.slug,
             )
         ],
+        # Retainer work, kept apart from the growth slots because it is
+        # inside the monthly fee and they are not.
+        "updates": [_slot_row(client, month, slot, today) for slot in update_plan.filled],
+        "update_slots": allowances.update_allowance if open_this_month else 0,
+        "empty_update_slots": [
+            {"slot": empty.slot, "reason": empty.reason} for empty in update_plan.empty
+        ],
+        "update_candidates": [
+            _candidate_row(client, month, c) for c in update_plan.considered
+        ],
         "not_this_month": list(plan.not_this_month),
         # Everything the engine weighed, so a plan can be argued with. The
         # slotted ones are in here too, marked — one list to read rather
         # than two to reconcile.
         "candidates": [
-            {
-                "action_uid": action_uid(client.slug, month, c.prescription),
-                "slot": c.slot,
-                "spillover": c.spillover,
-                "not_slotted_because": c.reason,
-                "id": c.prescription.action_id,
-                "title": c.prescription.title,
-                "branch": c.prescription.branch.value,
-                "target_url": c.prescription.target_url,
-                "term": c.prescription.term,
-                "score": round(c.prescription.score, 1),
-                "effort_min": c.prescription.effort_min,
-                "why": c.prescription.why,
-                "evidence": list(c.prescription.evidence),
-                "done_when": c.prescription.done_when,
-                "metric": c.prescription.metric,
-                "metric_key": c.prescription.metric_key,
-                "check_on": (
-                    today
-                    + timedelta(
-                        days=c.prescription.check_after_days or CHECK_AFTER_DAYS
-                    )
-                ).isoformat(),
-                "flags": list(c.prescription.flags),
-            }
-            for c in plan.considered
+            _candidate_row(client, month, c) for c in plan.considered
         ],
         "data_gaps": [
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))

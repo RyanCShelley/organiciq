@@ -268,3 +268,81 @@ def _empty_reason(branches: list[BranchResult], order: list[Branch]) -> str:
         f"No qualifying target left in a failing branch ({names}). "
         "The slot stays empty rather than being filled with weaker work." + tail
     )
+
+
+def fill_pool(
+    *,
+    slots: int,
+    prescriptions: list[Prescription],
+    reserved_urls: set[str] | None = None,
+    empty_reason: str = "Nothing qualified for this slot.",
+) -> Plan:
+    """Fill a flat pool of slots — no branches, no constraint, no spillover.
+
+    The retainer pools work differently from the growth plan. Updating
+    existing content is bought every month whatever the constraint says, so
+    there is no ladder to walk and no branch that can be "passing" and
+    therefore barred from a slot. What is left is the part that matters
+    either way: take them in score order, one job per page, never exceed
+    the allowance, never pad it, and record everything that did not fit.
+
+    Deliberately not a refactor of `fill_slots`. Nearly all of that
+    function is the ladder — the constraint first, then the other failing
+    branches, spillover flags, and a per-branch reason for every empty
+    slot. Sharing a middle with it would mean carrying branch arguments
+    that mean nothing here.
+
+    `reserved_urls` are pages another pool has already taken this month.
+    One page is one job across the whole plan: a page prescribed a growth
+    action and a refresh in the same month is two briefs, two Teamwork
+    tasks and one confused writer.
+    """
+    reserved = {u.rstrip("/").lower() for u in (reserved_urls or set())}
+    filled: list[FilledSlot] = []
+    considered: list[Considered] = []
+
+    for prescription in prescriptions:
+        url = (prescription.target_url or "").rstrip("/").lower()
+        if url and url in reserved:
+            considered.append(
+                Considered(
+                    prescription=prescription,
+                    reason=(
+                        "Another action this month already takes this page, "
+                        "and one page is one job."
+                    ),
+                )
+            )
+            continue
+        if len(filled) >= slots:
+            # Out of slots, not out of work. Carried on the record rather
+            # than dropped: this is the bulk of what the engine found.
+            #
+            # A pool with no slots at all was not outbid — nothing could
+            # have fitted — so it is told the real reason, which on a
+            # quarterly plan is that this is not the month.
+            considered.append(
+                Considered(
+                    prescription=prescription,
+                    reason=(
+                        empty_reason
+                        if slots <= 0
+                        else "The pool's slots were taken by higher-scoring work."
+                    ),
+                )
+            )
+            continue
+        reserved.add(url)
+        filled.append(
+            FilledSlot(slot=len(filled) + 1, prescription=prescription, spillover=False)
+        )
+        considered.append(Considered(prescription=prescription, slot=len(filled)))
+
+    return Plan(
+        filled=tuple(filled),
+        empty=tuple(
+            EmptySlot(slot=n, reason=empty_reason)
+            for n in range(len(filled) + 1, slots + 1)
+        ),
+        considered=tuple(considered),
+    )
