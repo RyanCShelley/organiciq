@@ -272,3 +272,58 @@ def test_the_biggest_loss_sorts_first():
 def test_a_page_that_lost_nothing_is_not_in_the_queue():
     steady = PageCandidate(url="https://example.com/fine", impressions=900.0, prior_impressions=800.0)
     assert rank_for_updates([steady]) == []
+
+
+# ── What the first dry run against production found ──
+
+
+def test_u2_refuses_a_query_that_names_the_site():
+    """Boys Electrical's /commercial, from the first real dry run.
+
+    It was prescribed "win back the position" for "boyselectrical.com
+    leadership team". A brand query is answered by whichever of your own
+    pages sits top, and no rewrite moves it — the same trap T-1 fell into
+    on the same site.
+    """
+    page = _decaying(
+        top_lost_query="boyselectrical.com leadership team",
+        top_lost_query_is_navigational=True,
+        top_lost_query_prior_position=2.9,
+        top_lost_query_position=6.0,
+    )
+    assert u2_win_back_the_position(page) is None
+
+
+def test_u2_ignores_an_average_breathing():
+    """2.9 to 3.5 crosses the line and is not a position lost.
+
+    An average position is a weighted mean over four weeks; half a place
+    of movement is what it does when nothing happens.
+    """
+    page = _decaying(
+        top_lost_query="commercial electrician",
+        top_lost_query_prior_position=2.9,
+        top_lost_query_position=3.5,
+    )
+    assert u2_win_back_the_position(page) is None
+
+
+def test_u2_still_fires_on_a_real_fall():
+    page = _decaying(
+        top_lost_query="commercial electrician",
+        top_lost_query_prior_position=2.0,
+        top_lost_query_position=8.0,
+    )
+    assert u2_win_back_the_position(page).action_id == "U-2"
+
+
+def test_a_brand_query_is_never_what_a_page_is_losing_most_on():
+    """U-1 named it in the brief, which sends somebody to rewrite a page
+    for a query the homepage was always going to answer."""
+    found = u1_refresh_the_page(
+        _decaying(
+            top_lost_query="boyselectrical.com leadership team",
+            top_lost_query_is_navigational=True,
+        )
+    )
+    assert "boyselectrical.com" not in found.why

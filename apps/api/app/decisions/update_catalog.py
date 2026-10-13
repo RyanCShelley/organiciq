@@ -42,6 +42,12 @@ MIN_DECLINE = 0.25
 #: which is the steepest part of the curve.
 TOP_POSITIONS = 3.0
 
+#: How far it has to have fallen as well as crossing the line. Boys
+#: Electrical's /commercial went from 2.9 to 3.5 and was prescribed a
+#: rewrite: an average position is a weighted mean over four weeks and it
+#: breathes by half a place without anything happening.
+MIN_POSITION_DROP = 2.0
+
 #: How long before a refresh is judged. A position moves inside a month;
 #: the impressions that follow it do not.
 REFRESH_CHECK_DAYS = 56
@@ -82,8 +88,17 @@ def _is_decaying(page: PageCandidate) -> bool:
 
 
 def _lost_query(page: PageCandidate) -> str:
-    """The term the brief is about: the biggest loser, else the biggest."""
-    return page.top_lost_query or page.top_query or ""
+    """The term the brief is about: the biggest loser, else the biggest.
+
+    Navigational either way is no term at all. "Losing most on
+    boyselectrical.com leadership team" sends somebody to rewrite a page
+    for a query that was always going to be answered by the homepage.
+    """
+    if page.top_lost_query and not page.top_lost_query_is_navigational:
+        return page.top_lost_query
+    if page.top_query and not page.top_query_is_navigational:
+        return page.top_query
+    return ""
 
 
 # ── U-2 ─────────────────────────────────────────────────────────────────
@@ -96,9 +111,19 @@ def u2_win_back_the_position(page: PageCandidate) -> Prescription | None:
     term = page.top_lost_query
     if not term or before is None or before > TOP_POSITIONS:
         return None
+    # A query that names the site is answered by whichever of your own
+    # pages sits top, and no rewrite moves it. Boys Electrical's
+    # /commercial was prescribed one for "boyselectrical.com leadership
+    # team" — the same trap T-1 fell into on the same site.
+    if page.top_lost_query_is_navigational:
+        return None
     # Still there, or gone from the results entirely — the second is a
     # different problem and "win it back" is the wrong instruction.
     if after is None or after <= TOP_POSITIONS:
+        return None
+    # Crossing the line is not the same as losing the position. 2.9 to 3.5
+    # is an average breathing, not a result that was overtaken.
+    if after - before < MIN_POSITION_DROP:
         return None
     if page.prior_impressions < MIN_PRIOR_IMPRESSIONS:
         return None

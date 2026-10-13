@@ -87,6 +87,10 @@ class PageCandidate:
     #: The query whose impressions fell most on this page, so the brief can
     #: name what was lost rather than saying the page is down.
     top_lost_query: str | None = None
+    #: Whether that query names the site itself. A brand query's position
+    #: is decided by which of your own results sits top, and no rewrite
+    #: moves it — the same trap T-1 fell into on Boys Electrical.
+    top_lost_query_is_navigational: bool = False
     #: That query's position then and now. Null where it drew nothing in one
     #: of the two windows.
     top_lost_query_prior_position: float | None = None

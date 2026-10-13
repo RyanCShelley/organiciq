@@ -436,6 +436,7 @@ def load_page_candidates(
                 prior_clicks=was.get("clicks", 0.0),
                 prior_position=was.get("position"),
                 top_lost_query=lost_query,
+                top_lost_query_is_navigational=is_navigational(lost_query, brand),
                 top_lost_query_prior_position=lost_before,
                 top_lost_query_position=lost_after,
                 content_updated_on=(
