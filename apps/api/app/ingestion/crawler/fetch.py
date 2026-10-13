@@ -9,7 +9,6 @@ already a dependency and already carries the timeout conventions used elsewhere.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -18,10 +17,13 @@ from urllib import robotparser
 from urllib.parse import urldefrag, urljoin, urlsplit
 from xml.etree import ElementTree
 
+import zlib
+
 import httpx
 
 from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
 from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
+from app.ingestion.crawler.safe_http import PublicOnlyTransport
 
 logger = logging.getLogger("organiciq.crawler")
 
@@ -324,21 +326,57 @@ def blocked_ai_crawlers(
     return [agent for agent in AI_CRAWLERS if not parser.can_fetch(agent, root)]
 
 
+#: What a robots file or a sitemap may weigh. The sitemap protocol allows 50 MB
+#: uncompressed; a robots file past 1 MB is not one. Without a ceiling a client
+#: site, or a link in its sitemap, could hand the worker a gzip bomb or a
+#: download that never ends and take its memory.
+MAX_ROBOTS_BYTES = 1_000_000
+MAX_SITEMAP_BYTES = 50_000_000
+
+
+class ResponseTooLarge(httpx.TransportError):
+    pass
+
+
+async def _get_capped(client: httpx.AsyncClient, url: str, cap: int) -> tuple[int, dict, bytes]:
+    """GET, reading no more than `cap` bytes (after any transfer decoding)."""
+    async with client.stream("GET", url, follow_redirects=True) as response:
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > cap:
+                raise ResponseTooLarge(f"{url} is larger than {cap:,} bytes")
+            chunks.append(chunk)
+        return response.status_code, dict(response.headers), b"".join(chunks)
+
+
+def _gunzip_capped(body: bytes, cap: int) -> bytes:
+    """Decompress a .gz sitemap without letting it expand past `cap`."""
+    inflater = zlib.decompressobj(wbits=31)
+    out = inflater.decompress(body, cap + 1)
+    if len(out) > cap or inflater.unconsumed_tail:
+        raise ResponseTooLarge(f"decompressed sitemap is larger than {cap:,} bytes")
+    return out
+
+
 async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparser.RobotFileParser | None, list[str]]:
     """Return (parser, sitemap urls). A missing robots.txt means crawl freely."""
     parser = robotparser.RobotFileParser()
     try:
-        response = await client.get(urljoin(root, "/robots.txt"), follow_redirects=True)
+        status_code, headers, body = await _get_capped(
+            client, urljoin(root, "/robots.txt"), MAX_ROBOTS_BYTES
+        )
     except httpx.HTTPError as exc:
         logger.info("robots.txt unreachable for %s: %s", root, exc)
         raise RobotsUnreachable(str(exc)) from exc
-    if response.status_code >= 400:
+    if status_code >= 400:
         return None, []
 
     # Some servers answer every unknown path with the site's HTML. Parsing that
     # as robots.txt is garbage in, and reports a robots file that is not there.
-    content_type = response.headers.get("content-type", "").lower()
-    text = response.text
+    content_type = headers.get("content-type", "").lower()
+    text = body.decode("utf-8", errors="replace")
     looks_like_robots = any(
         line.strip().lower().startswith(("user-agent:", "disallow:", "allow:", "sitemap:"))
         for line in text.splitlines()
@@ -396,27 +434,26 @@ async def _load_sitemap_urls(
             continue
         seen.add(url)
         try:
-            response = await client.get(url, follow_redirects=True)
-            if response.status_code >= 400:
+            status_code, _headers, body = await _get_capped(client, url, MAX_SITEMAP_BYTES)
+            if status_code >= 400:
                 # A declared sitemap that 404s is not the same as no
                 # sitemap: something is sending crawlers to a dead address.
                 if failures is not None:
-                    failures.append((url, f"returns {response.status_code}"))
+                    failures.append((url, f"returns {status_code}"))
                 continue
-            body = response.content
             # WordPress and Yoast both serve .xml.gz, and httpx only
             # decompresses what the server declares in Content-Encoding. A
             # gzipped sitemap arrives as bytes that fail to parse, and the
             # site reads as having no sitemap at all.
             if body[:2] == b"\x1f\x8b":
-                body = gzip.decompress(body)
+                body = _gunzip_capped(body, MAX_SITEMAP_BYTES)
             root = ElementTree.fromstring(body)
         except ElementTree.ParseError as exc:
             if failures is not None:
                 failures.append((url, "is not valid XML"))
             logger.info("sitemap %s unreadable: %s", url, exc)
             continue
-        except (httpx.HTTPError, OSError, EOFError) as exc:
+        except (httpx.HTTPError, OSError, EOFError, zlib.error) as exc:
             if failures is not None:
                 failures.append((url, f"could not be fetched: {exc}"))
             logger.info("sitemap %s unreadable: %s", url, exc)
@@ -487,11 +524,14 @@ async def crawl_site(
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
     limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
 
+    # Public addresses only, on every request and every redirect hop. See
+    # safe_http: the crawler fetches whatever a person typed as a domain or
+    # sitemap, from a process that holds the database URL and every key.
     async with httpx.AsyncClient(
         headers=headers,
         timeout=REQUEST_TIMEOUT,
         follow_redirects=False,
-        limits=limits,
+        transport=PublicOnlyTransport(limits=limits),
     ) as client:
         try:
             robots, sitemap_locations = await _load_robots(client, root)

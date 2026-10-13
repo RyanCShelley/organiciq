@@ -131,3 +131,40 @@ def url_in_scope(normalized_url: str, prefix: str | None) -> bool:
         return False
     path = urlsplit(normalized_url).path.lower().rstrip("/") or "/"
     return path == prefix or path.startswith(f"{prefix}/")
+
+
+#: Names that only mean something inside a network. A crawl of one of these
+#: would be a request from the worker to its own neighbours.
+_INTERNAL_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".intranet")
+
+
+def public_host_or_error(value: str | None) -> str | None:
+    """None when `value` names a public site, otherwise why it does not.
+
+    A domain or sitemap URL is something a person typed and the crawler then
+    fetches from a process that holds every key. This is the early, readable
+    refusal; the crawler's transport makes the same decision again on every
+    request, because a name can resolve somewhere else later.
+    """
+    import ipaddress
+
+    text = (value or "").strip()
+    if not text:
+        return None
+    parts = urlsplit(text if "://" in text else f"https://{text}")
+    if parts.scheme not in ("http", "https"):
+        return f"“{parts.scheme}” is not a web address"
+    if parts.username or parts.password:
+        return "must not contain a username or password"
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host:
+        return "has no host"
+    if host == "localhost" or host.endswith(_INTERNAL_SUFFIXES) or "." not in host and ":" not in host:
+        return f"“{host}” is not a public site"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if not ip.is_global:
+        return f"{host} is a private or reserved address"
+    return None

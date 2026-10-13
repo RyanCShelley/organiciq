@@ -2,7 +2,9 @@ from typing import Literal
 from datetime import date as Date, datetime as DateTime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.core.urls import public_host_or_error
 
 from app.models.client import ClientStatus
 from app.models.config import OrganicChannel, TopicStatus
@@ -98,6 +100,14 @@ class ClientCreate(BaseModel):
     baseline_projection_json: dict | None = None
     status: ClientStatus = ClientStatus.ONBOARDING
 
+    @field_validator("domain", "sitemap_url", check_fields=False)
+    @classmethod
+    def _must_be_a_public_site(cls, value: str | None, info) -> str | None:
+        problem = public_host_or_error(value)
+        if problem:
+            raise ValueError(f"{info.field_name} {problem}")
+        return value
+
 
 class ClientUpdate(BaseModel):
     client_name: str | None = None
@@ -142,6 +152,14 @@ class ClientUpdate(BaseModel):
     baseline_notes: str | None = None
     baseline_projection_json: dict | None = None
     status: ClientStatus | None = None
+
+    @field_validator("domain", "sitemap_url", check_fields=False)
+    @classmethod
+    def _must_be_a_public_site(cls, value: str | None, info) -> str | None:
+        problem = public_host_or_error(value)
+        if problem:
+            raise ValueError(f"{info.field_name} {problem}")
+        return value
 
 
 class ClientOut(ORMModel):
