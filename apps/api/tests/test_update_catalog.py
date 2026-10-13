@@ -373,6 +373,22 @@ def test_a_step_is_only_offered_when_there_is_a_fact_behind_it():
     assert "first thing on the page" in found.steps[0]
 
 
+def test_a_recent_date_is_not_repeated_back():
+    """Some platforms restamp every page on every deploy.
+
+    SMA's whole site says it was updated this month. "The page has said
+    2026-09-28 since it was last touched" reads as a mistake, because on
+    that site it is one.
+    """
+    found = u1_refresh_the_page(_decaying(content_updated_on=date.today()))
+    assert any(s == "Check every claim, figure and date in the copy." for s in found.steps)
+
+
+def test_one_question_is_not_1_questions():
+    found = u1_refresh_the_page(_decaying(faq_questions=("What is it?",)))
+    assert any("answers 1 question." in s for s in found.steps)
+
+
 def test_broken_markup_is_named_in_the_steps():
     found = u1_refresh_the_page(_decaying(broken_schema=("Article", "FAQPage")))
     assert any("Article, FAQPage" in step for step in found.steps)

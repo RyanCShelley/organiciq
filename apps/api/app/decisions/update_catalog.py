@@ -84,6 +84,11 @@ THIN_LINKS = 3
 #: the job rather than a matter of taste.
 THIN_WORDS = 600
 
+#: How old the page's own date has to be before the brief names it. Some
+#: platforms restamp every page on every deploy, so a recent date says
+#: nothing and repeating it back makes the brief look broken.
+STALE_MONTHS = 6
+
 
 def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[str, ...]:
     """The job as a checklist, built only from facts about this page.
@@ -107,11 +112,21 @@ def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[s
             "above anything else."
         )
 
-    if page.content_updated_on is not None:
+    # Only worth naming the date when it is old enough to be the point.
+    # On a site whose CMS restamps every page, "the copy has said last
+    # week since it was last touched" is a sentence that reads as a
+    # mistake, because it is one.
+    stale_since = page.content_updated_on
+    months_old = (
+        ((today or date.today()) - stale_since).days // 30
+        if stale_since is not None
+        else 0
+    )
+    if stale_since is not None and months_old >= STALE_MONTHS:
         steps.append(
             f"Check every claim, figure and date in the copy — the page has "
-            f"said {page.content_updated_on.isoformat()} since it was last "
-            "touched, and anything time-bound in it is that old."
+            f"said {stale_since.isoformat()} for {months_old} months, and "
+            "anything time-bound in it is that old."
         )
     else:
         steps.append("Check every claim, figure and date in the copy.")
@@ -127,9 +142,11 @@ def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[s
         )
 
     if page.faq_questions:
+        count = len(page.faq_questions)
         steps.append(
-            f"The page already answers {len(page.faq_questions)} questions. "
-            "Mark them up as FAQPage if they are not already."
+            f"The page already answers {count} "
+            f"question{'' if count == 1 else 's'}. Mark "
+            f"{'it' if count == 1 else 'them'} up as FAQPage if not already."
         )
 
     if page.inbound_editorial_links is not None and page.inbound_editorial_links < THIN_LINKS:
