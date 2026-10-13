@@ -546,3 +546,17 @@ def test_a_sharper_decay_action_still_beats_u5():
 
 def test_a_contested_page_is_ranked():
     assert [p.url for p in rank_for_updates([_contested()])] == [_contested().url]
+
+
+def test_u5_why_agrees_with_the_number_of_rivals():
+    two = _contested(
+        contested_terms=(
+            ContestedTerm(
+                term="it services", total_impressions=2377.0, own_impressions=816.0,
+                own_position=32.0,
+                rivals=(RIVAL, Rival(url="https://example.com/other", impressions=720.0)),
+            ),
+        )
+    )
+    assert " and https://example.com/other hold the rest" in u5_settle_which_page_owns_the_term(two).why
+    assert "holds the rest" in u5_settle_which_page_owns_the_term(_contested()).why

@@ -461,7 +461,8 @@ def u5_settle_which_page_owns_the_term(page: PageCandidate) -> Prescription | No
             f"“{lead.term}” is split across {len(lead.rivals) + 1} pages of this "
             f"site: this one holds {lead.own_impressions:.0f} of "
             f"{lead.total_impressions:.0f} impressions and "
-            f"{', '.join(r.url for r in lead.rivals)} holds the rest. A search "
+            f"{' and '.join(r.url for r in lead.rivals)} "
+            f"{'holds' if len(lead.rivals) == 1 else 'hold'} the rest. A search "
             "engine shown two near-answers from one site tends to rank neither well."
         ),
         done_when=(
