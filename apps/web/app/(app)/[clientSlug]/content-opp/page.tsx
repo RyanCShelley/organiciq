@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { SearchOpportunitiesTable } from "@/components/DecisionEngine/SearchOpportunitiesTable";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
@@ -8,12 +7,6 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
-import { resolveDateRange } from "@/lib/context";
-import {
-  normalizeDiagnoseResponse,
-  type DiagnoseResponse,
-  type SearchOpportunity,
-} from "@/lib/decision-engine";
 import type {
   Assignee,
   MonthlyRecord,
@@ -43,7 +36,6 @@ export default async function ContentOppPage({
   const query = await searchParams;
   const client = await requireAccountClient(clientSlug, "content-opp");
   const clientId = client.id;
-  const { from, to } = await resolveDateRange(query);
 
   let record: MonthlyRecord | null = null;
   let recordError: string | null = null;
@@ -83,20 +75,10 @@ export default async function ContentOppPage({
     }
   }
 
-  let contentOpps: SearchOpportunity[] = [];
-  try {
-    const diagnose = normalizeDiagnoseResponse(
-      await apiFetch<DiagnoseResponse>(
-        `/decisions/diagnose?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-        { clientId },
-      ),
-    );
-    contentOpps = diagnose.search_opportunities ?? [];
-  } catch {
-    // The striking-distance list is a secondary read. Losing it must not
-    // take the plan down with it.
-  }
-
+  // A record saved before the refresh plan existed carries no `updates`
+  // key at all. That is not the same as a plan with no refreshes in it,
+  // and saying so sent somebody to check an allowance that was fine.
+  const planned = record != null && record.updates !== undefined;
   const updates = record?.updates ?? [];
   const emptyUpdates = record?.empty_update_slots ?? [];
   const slots = record?.update_slots ?? 0;
@@ -137,10 +119,24 @@ export default async function ContentOppPage({
           </Alert>
         ) : null}
 
-        {record && slots === 0 && updates.length === 0 ? (
+        {record && !planned ? (
+          <Alert variant="warning">
+            This run was saved before the refresh plan existed, so it has
+            none in it. Re-run {record.month} on the{" "}
+            <Link
+              href={accountToolHref(client.slug, "decision-engine")}
+              className="underline"
+            >
+              Decision Engine
+            </Link>{" "}
+            to build one.
+          </Alert>
+        ) : null}
+
+        {planned && slots === 0 && updates.length === 0 ? (
           <Alert variant="info">
             {emptyUpdates[0]?.reason ??
-              `The ${record.plan} plan includes no content refreshes.`}
+              `The ${record!.plan} plan includes no content refreshes.`}
           </Alert>
         ) : null}
 
@@ -206,13 +202,6 @@ export default async function ContentOppPage({
         </section>
       ) : null}
 
-      {contentOpps.length > 0 ? (
-        <SearchOpportunitiesTable
-          items={contentOpps}
-          title="Close to page one"
-          description="Pages averaging positions 8 to 20 with real demand — not decay, but the shortest distance to a result. Ranked by impressions."
-        />
-      ) : null}
     </section>
   );
 }

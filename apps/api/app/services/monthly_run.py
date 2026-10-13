@@ -94,6 +94,7 @@ def _slot_row(client, month: str, slot, today: date) -> dict:
         "why": slot.prescription.why,
         "evidence": list(slot.prescription.evidence),
         "done_when": slot.prescription.done_when,
+        "steps": list(slot.prescription.steps),
         "metric": slot.prescription.metric,
         # What the results loop reads to judge it. Stored on the record so a
         # check months later uses the key the action was prescribed with,
@@ -129,6 +130,7 @@ def _candidate_row(client, month: str, considered, today: date) -> dict:
         "why": considered.prescription.why,
         "evidence": list(considered.prescription.evidence),
         "done_when": considered.prescription.done_when,
+        "steps": list(considered.prescription.steps),
         "metric": considered.prescription.metric,
         "metric_key": considered.prescription.metric_key,
         "check_on": (

@@ -327,3 +327,52 @@ def test_a_brand_query_is_never_what_a_page_is_losing_most_on():
         )
     )
     assert "boyselectrical.com" not in found.why
+
+
+# ── The brief ──
+
+
+def test_a_brief_is_a_checklist_of_things_found_on_the_page():
+    """"Refresh it" asks somebody to do the diagnosis again."""
+    found = u1_refresh_the_page(
+        _decaying(
+            top_lost_query="syracuse it outsourcing",
+            sections=({"heading": "Industries we serve", "level": 2},),
+            inbound_editorial_links=1,
+            has_schema=False,
+            content_updated_on=date(2025, 4, 2),
+        )
+    )
+    steps = "\n".join(found.steps)
+    assert "syracuse it outsourcing" in steps      # the term it is losing
+    assert "2025-04-02" in steps                   # how stale the copy is
+    assert "structured data" in steps              # it carries none
+    assert "only 1 page links" in steps            # the link graph
+    assert found.steps[-1].startswith("Republish")
+
+
+def test_a_step_is_only_offered_when_there_is_a_fact_behind_it():
+    """A page with nothing wrong beyond its numbers gets a short list,
+    honestly, rather than a padded one."""
+    found = u1_refresh_the_page(
+        _decaying(
+            top_lost_query="seo audit",
+            sections=({"heading": "What is an seo audit?", "level": 2},),
+            faq_questions=(),
+            inbound_editorial_links=12,
+            has_schema=True,
+            word_count=2400,
+            content_updated_on=None,
+        )
+    )
+    steps = "\n".join(found.steps)
+    assert "structured data" not in steps
+    assert "links to this one" not in steps
+    assert "Expand it" not in steps
+    # It already answers the term, so the step is about placement.
+    assert "first thing on the page" in found.steps[0]
+
+
+def test_broken_markup_is_named_in_the_steps():
+    found = u1_refresh_the_page(_decaying(broken_schema=("Article", "FAQPage")))
+    assert any("Article, FAQPage" in step for step in found.steps)

@@ -309,7 +309,6 @@ TRACKING_EXPECTED_LEADS = 3.0
 #: is all that is left — set high, because this is the weaker signal.
 TRACKING_NO_HISTORY_SESSIONS = 500.0
 
-SEARCH_OPPORTUNITY_LEVER = "search_opportunity"
 SEARCH_OPPORTUNITY_LABEL = "Search Opportunity"
 
 
@@ -2271,118 +2270,6 @@ def _per_page_cascade(
 # decorative. These split the same band into the three shapes that call for
 # different work: a page that already ranks well but is under-clicked, a page
 # on the cusp of page one, and the broad middle.
-CTR_GAP_RATIO = 0.5
-NEAR_WIN_MAX_POSITION = 5.0
-
-
-def _classify_opportunity(*, average_position: float, ctr_percent: float) -> str:
-    expected = expected_ctr_percent(average_position)
-    if expected > 0 and ctr_percent < expected * CTR_GAP_RATIO:
-        # Ranking is fine; the listing is not earning the clicks it should.
-        return "CTR gap"
-    if average_position <= NEAR_WIN_MAX_POSITION:
-        return "Near win"
-    return "Striking distance"
-
-
-def _tracked_keywords_by_url(db: Session, client_id: UUID) -> dict[str, int]:
-    """
-    Tracked SE Ranking keywords per ranking URL.
-
-    Content opportunities are page-level — they carry no query — so a
-    query-to-keyword text match is not possible. Joining on the ranking URL is
-    exact instead of fuzzy, and answers the more useful question: does this page
-    already rank for keywords we track?
-    """
-    rows = (
-        db.query(FactSerKeyword.ranking_url, func.count())
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.ranking_url.isnot(None),
-        )
-        .group_by(FactSerKeyword.ranking_url)
-        .all()
-    )
-    counts: dict[str, int] = {}
-    for raw_url, count in rows:
-        if not raw_url:
-            continue
-        key = normalize_url(raw_url)
-        counts[key] = counts.get(key, 0) + int(count)
-    return counts
-
-
-def _search_opportunities(
-    pages: list[PageDemand],
-    *,
-    actioned_urls: set[str],
-    classifications: dict[str, PageClassification],
-    thresholds: dict[str, float | int],
-    tracked_by_url: dict[str, int] | None = None,
-) -> list[LeverFinding]:
-    # GEO Grader / structured-data enrichment for Content Opportunities is deferred.
-    min_pos = int(thresholds["gsc_striking_distance_min_pos"])
-    max_pos = int(thresholds["gsc_striking_distance_max_pos"])
-    min_impressions = max(
-        int(thresholds["gsc_striking_distance_min_impressions"]),
-        int(thresholds.get("content_planning_min_impressions", 200)),
-    )
-    top_n = int(thresholds.get("content_planning_top_n", 50))
-    candidates: list[tuple[float, LeverFinding]] = []
-
-    for page in pages:
-        if page.normalized_url in actioned_urls:
-            continue
-        if page.average_position < min_pos or page.average_position > max_pos:
-            continue
-        if page.impressions < min_impressions:
-            continue
-
-        classification = classifications.get(page.normalized_url)
-        if classification is None or not classification.eligible_for_growth_action:
-            continue
-        if classification.page_type in {PageType.COMMERCIAL, PageType.CONVERSION, PageType.UTILITY}:
-            continue
-        if classification.page_type not in {PageType.INFORMATIONAL, PageType.CONSIDERATION}:
-            continue
-        if not classification.priority_topic and page.impressions < 500:
-            continue
-
-        finding = LeverFinding(
-            rule_key=_rule_key("search_opportunity", page.normalized_url),
-            lever=SEARCH_OPPORTUNITY_LEVER,
-            stage=DiagnosticLayer.VISIBILITY,
-            diagnosis=f"Striking-distance ranking opportunity: {page.normalized_url}",
-            recommended_action="",
-            success_metric="",
-            evidence_json={
-                "opportunity_type": _classify_opportunity(
-                    average_position=page.average_position,
-                    ctr_percent=page.ctr_percent,
-                ),
-                "impressions": int(page.impressions),
-                "average_position": round(page.average_position, 1),
-                "clicks": int(page.clicks),
-                "ctr_percent": round(page.ctr_percent, 2),
-                "page_type": classification.page_type.value,
-                "priority_topic": classification.priority_topic,
-                "tracked_keywords": (tracked_by_url or {}).get(page.normalized_url, 0),
-            },
-            baseline_metrics_json={
-                "impressions": page.impressions,
-                "average_position": round(page.average_position, 1),
-            },
-            impact=0.0,
-            confidence=0.0,
-            urgency=0.0,
-            effort=0.0,
-            priority_score=0.0,
-            page_url=page.normalized_url,
-        )
-        candidates.append((page.impressions, finding))
-
-    candidates.sort(key=lambda row: row[0], reverse=True)
-    return [finding for _, finding in candidates[:top_n]]
 
 
 def _rank_position(value: Any) -> float | None:
@@ -5939,14 +5826,6 @@ def diagnose(
             finding.evidence_json["lead_value"] = site.lead_value
 
     all_findings = annotate_why_not_an_action(findings)
-    actioned_urls = {finding.page_url for finding in all_findings if finding.page_url}
-    search_opportunities = _search_opportunities(
-        pages,
-        actioned_urls=actioned_urls,
-        classifications=classifications,
-        thresholds=thresholds,
-        tracked_by_url=_tracked_keywords_by_url(db, client.id),
-    )
 
     constraint = _constraint_for(
         db,
@@ -5974,7 +5853,6 @@ def diagnose(
         constraint=constraint,
         growth_actions=month_actions,
         blocking_findings=blocking_findings(all_findings),
-        search_opportunities=search_opportunities,
         coverage=coverage.as_list(),
         **base_result,
     )

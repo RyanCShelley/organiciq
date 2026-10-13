@@ -131,6 +131,33 @@ export function SlotCard({
         </div>
       </div>
 
+      {/* The job, in order. Every line is built from something found on
+          this page, so a brief is a checklist rather than an instruction
+          to go and work out what is wrong. */}
+      {action.steps && action.steps.length > 0 ? (
+        <div className="mt-4">
+          <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+            Steps
+          </p>
+          <ol className="mt-2 space-y-1.5">
+            {action.steps.map((step, index) => (
+              <li
+                key={step}
+                className="flex gap-2.5 text-[13px] leading-relaxed text-[var(--text-secondary)]"
+              >
+                <span
+                  aria-hidden
+                  className="mt-[2px] flex h-[18px] w-[18px] flex-none items-center justify-center rounded-full bg-[var(--surface-muted)] text-[10.5px] font-bold text-[var(--text-tertiary)]"
+                >
+                  {index + 1}
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
       {children ? (
         <div className="mt-4 border-t border-[var(--border)] pt-4">{children}</div>
       ) : null}

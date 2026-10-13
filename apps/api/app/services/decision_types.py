@@ -79,7 +79,6 @@ class DiagnoseResult:
     #: suppresses everything under it, and an empty plan with no reason
     #: given reads as a broken tool rather than a broken tag.
     blocking_findings: list[LeverFinding] = field(default_factory=list)
-    search_opportunities: list[LeverFinding] = field(default_factory=list)
     #: Which rules ran this period and why the rest did not. "No findings"
     #: and "never looked" are different answers and must not share a row.
     coverage: list[dict[str, Any]] = field(default_factory=list)

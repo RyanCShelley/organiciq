@@ -582,22 +582,6 @@ class FindingOut(BaseModel):
     override_count: int = 0
 
 
-class SearchOpportunityOut(BaseModel):
-    rule_key: str
-    page_url: str | None = None
-    query: str | None = None
-    topic: str | None = None
-    impressions: int | None = None
-    clicks: int | None = None
-    ctr_percent: float | None = None
-    average_position: float | None = None
-    page_type: str | None = None
-    opportunity_type: str
-    # Tracked SE Ranking keywords already ranking on this page.
-    tracked_keywords: int = 0
-    diagnosis: str
-
-
 class RecommendationOut(FindingOut):
     pass
 
@@ -647,7 +631,6 @@ class DiagnoseResponse(BaseModel):
     constraint: ConstraintOut | None = None
     #: Fix these first: they suppress everything below them.
     blocking_findings: list[FindingOut] = []
-    search_opportunities: list[SearchOpportunityOut] = []
     recommendations: list[FindingOut] = []
 
 

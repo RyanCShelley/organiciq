@@ -50,6 +50,11 @@ class Prescription:
     #: nothing. `decision` means there is no number — V-6 settles an argument.
     metric_key: str = "decision"
     evidence: tuple[str, ...] = field(default_factory=tuple)
+    #: The job, broken into things somebody can actually do, in order.
+    #: Every one of them is built from a fact about this page — a heading
+    #: that is missing, a block that does not parse, a date in the copy —
+    #: so a brief is a checklist and not an instruction to go and think.
+    steps: tuple[str, ...] = field(default_factory=tuple)
     flags: tuple[str, ...] = field(default_factory=tuple)
     #: When this action is judged, where the default 28 days is too soon. A
     #: lead rate needs more time to say anything than a position does, and

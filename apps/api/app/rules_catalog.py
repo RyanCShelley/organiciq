@@ -399,7 +399,6 @@ def _signals_in_code() -> set[str]:
         "technical",
         "technical_sitemap",
         "technical_robots",
-        "search_opportunity",
         "conversion_path",
         "page_dropped",
         "tracking_silent",

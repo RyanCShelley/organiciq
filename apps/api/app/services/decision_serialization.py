@@ -7,7 +7,6 @@ from app.schemas import (
     FindingOut,
     LayerAssessmentOut,
     LeverSummaryOut,
-    SearchOpportunityOut,
 )
 from app.services.lever_engine import LEVER_LABELS, SEARCH_OPPORTUNITY_LABEL
 
@@ -47,34 +46,6 @@ def _serialize_finding(row) -> FindingOut:
     )
 
 
-def _serialize_search_opportunity(row) -> SearchOpportunityOut:
-    evidence = row.evidence_json
-    topic = evidence.get("priority_topic")
-    return SearchOpportunityOut(
-        rule_key=row.rule_key,
-        page_url=row.page_url,
-        query=row.query,
-        topic=str(topic) if topic else None,
-        impressions=int(evidence["impressions"]) if evidence.get("impressions") is not None else None,
-        clicks=int(evidence["clicks"]) if evidence.get("clicks") is not None else None,
-        ctr_percent=(
-            float(evidence["ctr_percent"]) if evidence.get("ctr_percent") is not None else None
-        ),
-        average_position=(
-            float(evidence["average_position"])
-            if evidence.get("average_position") is not None
-            else None
-        ),
-        page_type=str(evidence["page_type"]) if evidence.get("page_type") else None,
-        opportunity_type=str(
-            evidence.get("opportunity_type") or "Striking-Distance Opportunity"
-        ),
-        tracked_keywords=int(evidence.get("tracked_keywords") or 0),
-        diagnosis=row.diagnosis,
-    )
-
-
-
 def _serialize_constraint(constraint, action_counts: dict[str, int]) -> ConstraintOut | None:
     if constraint is None:
         return None
@@ -104,9 +75,6 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         result.constraint, action_counts_by_layer(result.growth_actions)
     )
     blocking_findings = [_serialize_finding(row) for row in result.blocking_findings]
-    search_opportunities = [
-        _serialize_search_opportunity(row) for row in result.search_opportunities
-    ]
     return DiagnoseResponse(
         ready=result.ready,
         message=result.message,
@@ -134,6 +102,5 @@ def serialize_diagnose(result) -> DiagnoseResponse:
         growth_actions=growth_actions,
         constraint=constraint,
         blocking_findings=blocking_findings,
-        search_opportunities=search_opportunities,
         recommendations=growth_actions,
     )

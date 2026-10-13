@@ -75,6 +75,85 @@ def _age(page: PageCandidate, today: date | None = None) -> str:
     return f" It was last updated {months // 12} years ago."
 
 
+#: Inbound editorial links below which a page is not being supported by
+#: the rest of the site. Template links do not count — a menu link is not
+#: a recommendation.
+THIN_LINKS = 3
+
+#: Words below which a page is short enough that "expand it" is part of
+#: the job rather than a matter of taste.
+THIN_WORDS = 600
+
+
+def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[str, ...]:
+    """The job as a checklist, built only from facts about this page.
+
+    A brief that says "refresh it" asks somebody to do the diagnosis
+    again. Everything here is something the crawl or Search Console
+    actually found, so each line is a thing to go and do — and a page
+    with nothing wrong beyond its numbers gets a short list, honestly,
+    rather than a padded one.
+    """
+    steps: list[str] = []
+
+    if term and not _answers(page, term):
+        steps.append(
+            f"Add a heading that asks “{term}” in the words it is searched "
+            "in, and answer it in the paragraph directly under it."
+        )
+    elif term:
+        steps.append(
+            f"Make the answer to “{term}” the first thing on the page, "
+            "above anything else."
+        )
+
+    if page.content_updated_on is not None:
+        steps.append(
+            f"Check every claim, figure and date in the copy — the page has "
+            f"said {page.content_updated_on.isoformat()} since it was last "
+            "touched, and anything time-bound in it is that old."
+        )
+    else:
+        steps.append("Check every claim, figure and date in the copy.")
+
+    if page.broken_schema:
+        steps.append(
+            f"Fix the structured data: {', '.join(page.broken_schema)} is on "
+            "the page and does not parse, which reads as no markup at all."
+        )
+    elif not page.has_schema:
+        steps.append(
+            "Add structured data for what this page is — there is none on it."
+        )
+
+    if page.faq_questions:
+        steps.append(
+            f"The page already answers {len(page.faq_questions)} questions. "
+            "Mark them up as FAQPage if they are not already."
+        )
+
+    if page.inbound_editorial_links is not None and page.inbound_editorial_links < THIN_LINKS:
+        steps.append(
+            f"Link to it from related pages — only "
+            f"{page.inbound_editorial_links} page"
+            f"{'' if page.inbound_editorial_links == 1 else 's'} links to "
+            "this one from body copy, which is not enough for the site to "
+            "be pointing at it."
+        )
+
+    if page.word_count is not None and page.word_count < THIN_WORDS:
+        steps.append(
+            f"Expand it. At {page.word_count} words it is shorter than "
+            "anything likely to be outranking it."
+        )
+
+    steps.append(
+        "Republish with the modified date updated, so the change is "
+        "something a crawler can see."
+    )
+    return tuple(steps)
+
+
 def _is_decaying(page: PageCandidate) -> bool:
     """Lost a real share of real demand, and did not climb while doing it."""
     if page.prior_impressions < MIN_PRIOR_IMPRESSIONS:
@@ -154,6 +233,7 @@ def u2_win_back_the_position(page: PageCandidate) -> Prescription | None:
             f"facts_gsc_pages: {page.prior_impressions:.0f} → "
             f"{page.impressions:.0f} impressions",
         ),
+        steps=_steps(page, term),
     )
 
 
@@ -234,6 +314,7 @@ def u3_answer_the_question_it_draws(page: PageCandidate) -> Prescription | None:
             f"facts_crawl_page_snapshots: {len(page.sections)} headings, "
             f"{len(page.faq_questions)} questions answered",
         ),
+        steps=_steps(page, term),
     )
 
 
@@ -273,6 +354,7 @@ def u6_fix_the_markup(page: PageCandidate) -> Prescription | None:
         metric="Average position on the term",
         metric_key="term_position",
         evidence=(f"facts_crawl_page_schema: {broken} failed to parse",),
+        steps=_steps(page, _lost_query(page)),
         check_after_days=REFRESH_CHECK_DAYS,
     )
 
@@ -326,6 +408,7 @@ def u1_refresh_the_page(page: PageCandidate) -> Prescription | None:
                 else "no position in one of the two periods"
             ),
         ),
+        steps=_steps(page, term),
         check_after_days=REFRESH_CHECK_DAYS,
     )
 

@@ -4,9 +4,6 @@ from copy import deepcopy
 from typing import Any
 
 DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
-    "gsc_striking_distance_min_pos": 8,
-    "gsc_striking_distance_max_pos": 20,
-    "gsc_striking_distance_min_impressions": 50,
     "conversion_sessions_growth_min_pct": 5.0,
     "conversion_lead_rate_decline_min_pct": 10.0,
     "ai_visibility_min_keyword_volume": 50,
@@ -162,8 +159,6 @@ DEFAULT_DECISION_THRESHOLDS: dict[str, Any] = {
     "score_impact_relevance_scale": 20,
     "high_priority_threshold": 70,
     "medium_priority_threshold": 50,
-    "content_planning_min_impressions": 200,
-    "content_planning_top_n": 50,
 }
 
 

@@ -45,6 +45,8 @@ export type RecordAction = {
   why: string;
   evidence?: string[];
   done_when: string;
+  /** The job as a checklist, each line built from a fact about this page. */
+  steps?: string[];
   metric: string;
   check_on: string;
   flags?: string[];
