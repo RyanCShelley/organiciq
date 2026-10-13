@@ -168,7 +168,7 @@ export function SlotCard({
 }
 
 /** A slot the engine would not fill, and the reason it gave. */
-export function EmptySlotCard({ slot, reason }: { slot: number; reason: string }) {
+export function EmptySlotCard({ slot, reason }: { slot: number | string; reason: string }) {
   return (
     <article className="rounded-[var(--radius-lg,14px)] border border-dashed border-[var(--border)] px-6 py-5">
       <p className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">

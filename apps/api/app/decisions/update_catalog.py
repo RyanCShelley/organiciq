@@ -60,16 +60,16 @@ STUB_WORDS = 250
 def _age(page: PageCandidate, today: date | None = None) -> str:
     """How long since the page said it was updated, in words.
 
-    Silent where no source carried a date. A brief that says "last updated
-    unknown" is noise; one that says nothing about the date is honest.
+    Silent unless the date is old enough to be the point. Some platforms
+    restamp every page on every deploy — all 273 of SMA's dates fall in the
+    last six weeks — so "it was updated this month" beside a page that lost
+    three quarters of its impressions reads as a mistake, and is one.
     """
     if page.content_updated_on is None:
         return ""
     months = ((today or date.today()) - page.content_updated_on).days // 30
-    if months < 1:
-        return " It was updated this month."
-    if months == 1:
-        return " It was last updated a month ago."
+    if months < STALE_MONTHS:
+        return ""
     if months < 24:
         return f" It was last updated {months} months ago."
     return f" It was last updated {months // 12} years ago."

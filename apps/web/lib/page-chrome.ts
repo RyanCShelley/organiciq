@@ -76,7 +76,7 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
     case "content-opp":
       return {
         title: "Content Opp",
-        description: "Striking-distance content opportunities from Search Console.",
+        description: "The month's content plan: pages to refresh and pages to write.",
       };
     case "decision-engine":
       return {

@@ -560,3 +560,13 @@ def test_u5_why_agrees_with_the_number_of_rivals():
     )
     assert " and https://example.com/other hold the rest" in u5_settle_which_page_owns_the_term(two).why
     assert "holds the rest" in u5_settle_which_page_owns_the_term(_contested()).why
+
+
+def test_a_recent_date_is_not_named_in_the_why():
+    """A site that restamps every deploy makes 'updated this month' a lie."""
+    from datetime import timedelta
+
+    recent = _decaying(content_updated_on=date.today() - timedelta(days=5))
+    assert "updated" not in u1_refresh_the_page(recent).why
+    five_months = _decaying(content_updated_on=date.today() - timedelta(days=150))
+    assert "updated" not in u1_refresh_the_page(five_months).why

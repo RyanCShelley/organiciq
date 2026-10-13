@@ -86,9 +86,12 @@ export default async function ContentOppPage({
   const slots = record?.update_slots ?? 0;
   // Everything the engine weighed and could not fit. The bulk of what it
   // found lives here, and a plan you cannot argue with is not a plan.
-  const alsoFound = (record?.update_candidates ?? []).filter(
-    (row) => row.slot === null,
-  );
+  const alsoFound = (record?.update_candidates ?? [])
+    .filter((row) => row.slot === null)
+    // The column shows the score, so the table is ordered by it. The plan is
+    // filled by loss, and the two differ for a page whose action is not a
+    // refresh.
+    .sort((a, b) => b.score - a.score);
 
   // New pages. Same absence-of-key rule as above: an older record has no
   // `new_content` at all, which is not a plan that found nothing to write.
@@ -127,9 +130,17 @@ export default async function ContentOppPage({
             />
           </SlotCard>
         ))}
-        {empty.map((slot) => (
-          <EmptySlotCard key={slot.slot} slot={slot.slot} reason={slot.reason} />
-        ))}
+        {/* Slots empty for the same reason are one fact, not eight. */}
+        {empty.length > 1 && empty.every((slot) => slot.reason === empty[0].reason) ? (
+          <EmptySlotCard
+            slot={`${empty[0].slot}–${empty[empty.length - 1].slot}`}
+            reason={empty[0].reason}
+          />
+        ) : (
+          empty.map((slot) => (
+            <EmptySlotCard key={slot.slot} slot={slot.slot} reason={slot.reason} />
+          ))
+        )}
       </div>
     );
   }
