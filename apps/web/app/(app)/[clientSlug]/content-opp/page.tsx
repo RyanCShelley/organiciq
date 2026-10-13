@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
+import { PoolSummary } from "@/components/DecisionEngine/PoolSummary";
 import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -110,12 +111,13 @@ export default async function ContentOppPage({
   function renderPool(
     actions: NonNullable<MonthlyRecord["updates"]>,
     empty: { slot: number; reason: string }[],
+    anchorPrefix: string,
   ) {
     return (
       <div className="space-y-3">
         {actions.map((action) => (
+          <div key={action.action_uid} id={`${anchorPrefix}-${action.slot}`} className="scroll-mt-24">
           <SlotCard
-            key={action.action_uid}
             action={action}
             status={slotStates.get(action.action_uid)?.status}
           >
@@ -129,6 +131,7 @@ export default async function ContentOppPage({
               teamworkReady={teamworkReady}
             />
           </SlotCard>
+          </div>
         ))}
         {/* Slots empty for the same reason are one fact, not eight. */}
         {empty.length > 1 && empty.every((slot) => slot.reason === empty[0].reason) ? (
@@ -155,10 +158,7 @@ export default async function ContentOppPage({
           description="Pages losing ground, ranked by the impressions they used to draw and no longer do. This is retainer work — it is inside the monthly fee, which is why it has its own allowance and does not compete with growth actions."
           actions={
             record ? (
-              <span className="text-xs text-[var(--text-tertiary)]">
-                {record.month} · {updates.length} of {slots}{" "}
-                {slots === 1 ? "slot" : "slots"}
-              </span>
+              <span className="text-xs text-[var(--text-tertiary)]">{record.month}</span>
             ) : null
           }
         />
@@ -197,9 +197,28 @@ export default async function ContentOppPage({
           </Alert>
         ) : null}
 
-        {renderPool(updates, emptyUpdates)}
+        {planned ? (
+          <div className="mb-4">
+            <PoolSummary
+              filled={updates}
+              slots={slots}
+              weighed={(record?.update_candidates ?? []).length || updates.length + alsoFound.length}
+              statusOf={(uid) => slotStates.get(uid)?.status}
+              anchorPrefix="refresh-slot"
+              noun="refresh"
+            />
+          </div>
+        ) : null}
+
+        {renderPool(updates, emptyUpdates, "refresh-slot")}
       </section>
 
+      {/* Parked for now: new pages for tracked terms only cover terms somebody
+          already tracks, which is not the gap analysis this is meant to be.
+          The record still carries the pool; the page shows it once it has
+          something in it. */}
+      {newContent.length > 0 || contentAlsoFound.length > 0 ? (
+        <>
       <section className="workspace-section">
         <SectionHeader
           title="New content"
@@ -235,7 +254,7 @@ export default async function ContentOppPage({
           </Alert>
         ) : null}
 
-        {contentPlanned ? renderPool(newContent, emptyContent) : null}
+        {contentPlanned ? renderPool(newContent, emptyContent, "content-slot") : null}
 
         {contentPlanned && scan && !scan.blocked && (scan.tracked ?? 0) > 0 ? (
           <p className="mt-3 text-xs text-[var(--text-tertiary)]">
@@ -280,6 +299,9 @@ export default async function ContentOppPage({
             </table>
           </div>
         </section>
+      ) : null}
+
+        </>
       ) : null}
 
       {alsoFound.length > 0 ? (
