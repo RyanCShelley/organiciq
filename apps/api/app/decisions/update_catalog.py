@@ -401,6 +401,90 @@ def u6_fix_the_markup(page: PageCandidate) -> Prescription | None:
     )
 
 
+# ── U-5 ─────────────────────────────────────────────────────────────────
+
+#: Terms named in the brief. More than this and it reads as a list of
+#: everything the site ranks for twice rather than a job.
+MAX_CONTESTED_NAMED = 3
+
+
+def u5_settle_which_page_owns_the_term(page: PageCandidate) -> Prescription | None:
+    """Two of the site's own pages are splitting a query.
+
+    Neither page is failing in itself, so no refresh fixes it: the engine
+    is choosing between two answers and ranking neither well. The work is a
+    decision — which page is the answer — and then making the other stop
+    competing with it.
+    """
+    if not page.contested_terms:
+        return None
+
+    named = page.contested_terms[:MAX_CONTESTED_NAMED]
+    lead = named[0]
+    rivals = sorted({r.url for t in named for r in t.rivals})
+    shared = sum(t.rival_impressions for t in page.contested_terms)
+
+    def position(value: float | None) -> str:
+        return f", averaging position {value:.1f}" if value is not None else ""
+
+    steps: list[str] = []
+    for t in named:
+        steps.append(
+            f"“{t.term}” ({t.total_impressions:.0f} impressions): this page draws "
+            f"{t.own_impressions:.0f}{position(t.own_position)}; "
+            + "; ".join(
+                f"{r.url} draws {r.impressions:.0f}{position(r.position)}"
+                for r in t.rivals
+            )
+            + "."
+        )
+    steps.append(
+        f"Decide which page answers “{lead.term}”. If the two say the same thing, "
+        "merge the weaker one into the stronger and redirect it. If they answer "
+        "different questions, rewrite the weaker one's title and opening for the "
+        "one it should be about, and stop it matching the term."
+    )
+    steps.append(
+        f"Point every internal link that uses “{lead.term}” as its anchor at the page "
+        "that owns it, so the site is not recommending both."
+    )
+
+    return Prescription(
+        action_id="U-5",
+        title="Settle which page owns this term",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=lead.term,
+        score=shared,
+        effort_min=60,
+        why=(
+            f"“{lead.term}” is split across {len(lead.rivals) + 1} pages of this "
+            f"site: this one holds {lead.own_impressions:.0f} of "
+            f"{lead.total_impressions:.0f} impressions and "
+            f"{', '.join(r.url for r in lead.rivals)} holds the rest. A search "
+            "engine shown two near-answers from one site tends to rank neither well."
+        ),
+        done_when=(
+            f"One page on the site answers “{lead.term}”; the other has been "
+            "merged and redirected, or retargeted so it no longer draws it."
+        ),
+        metric="Average position on the term",
+        metric_key="term_position",
+        evidence=tuple(
+            f"facts_gsc_query_pages: “{t.term}” — "
+            + ", ".join(
+                f"{u} {i:.0f}"
+                for u, i in [(page.url, t.own_impressions)]
+                + [(r.url, r.impressions) for r in t.rivals]
+            )
+            for t in named
+        )
+        + ((f"also shared with: {', '.join(rivals)}",) if len(rivals) > 1 else ()),
+        steps=tuple(steps),
+        check_after_days=REFRESH_CHECK_DAYS,
+    )
+
+
 # ── U-1 ─────────────────────────────────────────────────────────────────
 
 
@@ -527,6 +611,7 @@ UPDATE_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
     u2_win_back_the_position,
     u3_answer_the_question_it_draws,
     u6_fix_the_markup,
+    u5_settle_which_page_owns_the_term,
     u1_refresh_the_page,
     u4_link_it_from_the_pages_that_should,
 )
@@ -542,7 +627,10 @@ def rank_for_updates(pages: list[PageCandidate]) -> list[PageCandidate]:
         [
             p
             for p in pages
-            if p.impressions_lost > 0 or p.broken_schema or p.link_donors
+            if p.impressions_lost > 0
+            or p.broken_schema
+            or p.link_donors
+            or p.contested_terms
         ],
         key=lambda p: (-p.impressions_lost, -p.impressions, p.url),
     )

@@ -306,3 +306,61 @@ def test_aliases_are_cleaned_before_they_are_stored():
         "acc technical services"
     ]
     assert clean_brand_aliases(None) == []
+
+
+# ── Two pages, one query ──
+
+
+def _contest(db, client_id, query, shares, day):
+    """`shares` maps url → impressions on one query."""
+    for url, impressions in shares.items():
+        _gsc(db, client_id, url, day, impressions=impressions, clicks=0, position=30.0)
+        _query(db, client_id, url, day, query, impressions=impressions, position=30.0)
+
+
+def _candidate(candidates, url):
+    return next(p for p in candidates if p.url == url)
+
+
+def test_a_query_two_pages_split_is_found_on_the_page_leading_it(db, client_a):
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    a, b = "https://example.com/a", "https://example.com/b"
+    _contest(db, client_a.id, "it services", {a: 800, b: 700}, day)
+    db.commit()
+
+    found = load_page_candidates(db, client_a, today=today)
+    lead = _candidate(found, a).contested_terms
+    assert [t.term for t in lead] == ["it services"]
+    assert lead[0].total_impressions == 1500
+    assert [r.url for r in lead[0].rivals] == [b]
+    assert _candidate(found, b).contested_terms == ()
+
+
+def test_a_stray_second_page_is_not_a_split(db, client_a):
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    a, b = "https://example.com/a", "https://example.com/b"
+    _contest(db, client_a.id, "it services", {a: 1000, b: 20}, day)
+    db.commit()
+    assert _candidate(load_page_candidates(db, client_a, today=today), a).contested_terms == ()
+
+
+def test_a_small_query_is_not_worth_a_decision(db, client_a):
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    a, b = "https://example.com/a", "https://example.com/b"
+    _contest(db, client_a.id, "it services", {a: 40, b: 30}, day)
+    db.commit()
+    assert _candidate(load_page_candidates(db, client_a, today=today), a).contested_terms == ()
+
+
+def test_two_pages_answering_the_brand_name_is_not_a_split(db, client_a):
+    from app.services.page_signals import brand_terms
+
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    a, b = "https://example.com/a", "https://example.com/b"
+    _contest(db, client_a.id, sorted(brand_terms(client_a))[0], {a: 800, b: 700}, day)
+    db.commit()
+    assert _candidate(load_page_candidates(db, client_a, today=today), a).contested_terms == ()

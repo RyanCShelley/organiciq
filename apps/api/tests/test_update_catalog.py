@@ -483,3 +483,66 @@ def test_a_link_gap_page_is_ranked_after_the_ones_losing_ground():
     steady = _supported_badly(url="https://example.com/steady")
     ranked = rank_for_updates([steady, losing])
     assert [p.url for p in ranked] == [losing.url, steady.url]
+
+
+# ── U-5 ──
+
+from app.decisions.page_targets import ContestedTerm, Rival  # noqa: E402
+from app.decisions.update_catalog import u5_settle_which_page_owns_the_term  # noqa: E402
+
+RIVAL = Rival(url="https://example.com/it-support", impressions=439.0, position=44.4)
+
+
+def _contested(**overrides) -> PageCandidate:
+    fields = {
+        "url": "https://example.com/helpdesk",
+        "impressions": 900.0,
+        "contested_terms": (
+            ContestedTerm(
+                term="it support services",
+                total_impressions=929.0,
+                own_impressions=490.0,
+                own_position=62.1,
+                rivals=(RIVAL,),
+            ),
+        ),
+    }
+    fields.update(overrides)
+    return PageCandidate(**fields)
+
+
+def test_u5_names_both_pages_and_what_each_draws():
+    found = u5_settle_which_page_owns_the_term(_contested())
+    assert found is not None
+    assert found.action_id == "U-5"
+    assert found.term == "it support services"
+    assert found.metric_key == "term_position"
+    text = " ".join(found.steps)
+    assert RIVAL.url in text and "490" in text and "439" in text
+    assert found.score == 439.0
+
+
+def test_u5_needs_a_contested_term():
+    assert u5_settle_which_page_owns_the_term(_contested(contested_terms=())) is None
+
+
+def test_u5_beats_the_generic_refresh_on_a_decaying_page():
+    page = _contested(
+        impressions=300.0, prior_impressions=1200.0, position=14.0,
+        prior_position=9.0, word_count=1500,
+    )
+    assert prescribe_page(page, actions=UPDATE_ACTIONS).action_id == "U-5"
+
+
+def test_a_sharper_decay_action_still_beats_u5():
+    page = _contested(
+        impressions=300.0, prior_impressions=1200.0, position=14.0,
+        prior_position=9.0, word_count=1500,
+        top_lost_query="seo audit", top_lost_query_prior_position=2.0,
+        top_lost_query_position=9.0,
+    )
+    assert prescribe_page(page, actions=UPDATE_ACTIONS).action_id == "U-2"
+
+
+def test_a_contested_page_is_ranked():
+    assert [p.url for p in rank_for_updates([_contested()])] == [_contested().url]

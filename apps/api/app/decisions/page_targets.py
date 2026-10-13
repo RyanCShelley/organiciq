@@ -30,6 +30,40 @@ class LinkDonor:
     refdomains: int = 0
 
 
+#: Impressions a query must draw across all the site's pages before a split
+#: between two of them is worth a month's work. Below it, a "split" is a
+#: handful of stray impressions.
+CONTESTED_MIN_IMPRESSIONS = 100.0
+
+#: The share of a query's impressions the second page must hold. Not a
+#: tuned number: at 20% SMA has 4 contested queries and ACCTek 4, at 30% 2
+#: and 3 — the set barely moves, so the line is not what decides it.
+CONTESTED_MIN_RIVAL_SHARE = 0.3
+
+
+@dataclass(frozen=True)
+class Rival:
+    url: str
+    impressions: float
+    position: float | None = None
+
+
+@dataclass(frozen=True)
+class ContestedTerm:
+    """A query two or more of the site's own pages are both drawing."""
+
+    term: str
+    #: Impressions across every page of the site, and the candidate's share.
+    total_impressions: float
+    own_impressions: float
+    own_position: float | None
+    rivals: tuple[Rival, ...]
+
+    @property
+    def rival_impressions(self) -> float:
+        return sum(r.impressions for r in self.rivals)
+
+
 @dataclass(frozen=True)
 class PageCandidate:
     """One page, with what the Traffic and Leads triggers need to judge it."""
@@ -130,6 +164,9 @@ class PageCandidate:
     #: Only searched for under-linked pages, so empty means "not looked for"
     #: as often as "none found" — U-4 needs the under-linked test as well.
     link_donors: tuple[LinkDonor, ...] = ()
+    #: Non-brand queries this page draws the most of while another page of
+    #: the same site also draws a real share. Biggest first.
+    contested_terms: tuple[ContestedTerm, ...] = ()
 
     @property
     def missed_clicks(self) -> float | None:

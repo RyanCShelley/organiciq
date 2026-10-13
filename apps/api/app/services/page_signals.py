@@ -21,7 +21,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.ctr_curve import expected_ctr_percent
-from app.decisions.page_targets import LinkDonor, PageCandidate
+from app.decisions.page_targets import (
+    CONTESTED_MIN_IMPRESSIONS,
+    CONTESTED_MIN_RIVAL_SHARE,
+    ContestedTerm,
+    LinkDonor,
+    PageCandidate,
+    Rival,
+)
 from app.models.client import Client
 from app.models.config import ClientConversionPage
 from app.models.crawl import (
@@ -222,6 +229,82 @@ def _query_shifts(
     return {url: (q, before, after) for url, (_, q, before, after) in worst.items()}
 
 
+def _contested_terms(
+    db: Session,
+    client_id: UUID,
+    start: date,
+    end: date,
+    brand: set[str],
+) -> dict[str, tuple[ContestedTerm, ...]]:
+    """Per page, the queries it leads on and shares with another page.
+
+    Cannibalisation is read from Search Console alone: one query, two URLs
+    of the same site, both drawing it. The keyword matcher cannot say it —
+    it stores only matches that clear the client's margin, so every row it
+    keeps is by construction an unambiguous one.
+
+    The page leading the query is the candidate, and its rivals ride along.
+    A query that names the brand is skipped: two pages answering the
+    company's own name is not a split anyone should resolve.
+    """
+    rows = (
+        db.query(
+            FactGscQueryPage.query,
+            FactGscQueryPage.normalized_url,
+            func.coalesce(func.sum(FactGscQueryPage.impressions), 0),
+            func.coalesce(
+                func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+                0,
+            ),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
+        .all()
+    )
+    by_query: dict[str, list[tuple[str, float, float | None]]] = {}
+    for query, url, impressions, weighted in rows:
+        impressions = float(impressions or 0)
+        if impressions <= 0 or not is_addressable(url):
+            continue
+        by_query.setdefault(query, []).append(
+            (url, impressions, float(weighted or 0) / impressions)
+        )
+
+    found: dict[str, list[ContestedTerm]] = {}
+    for query, pages in by_query.items():
+        if len(pages) < 2 or is_navigational(query, brand):
+            continue
+        pages.sort(key=lambda p: (-p[1], p[0]))
+        total = sum(p[1] for p in pages)
+        if total < CONTESTED_MIN_IMPRESSIONS:
+            continue
+        lead = pages[0]
+        rivals = tuple(
+            Rival(url=u, impressions=i, position=pos)
+            for u, i, pos in pages[1:]
+            if i / total >= CONTESTED_MIN_RIVAL_SHARE
+        )
+        if not rivals:
+            continue
+        found.setdefault(lead[0], []).append(
+            ContestedTerm(
+                term=query,
+                total_impressions=total,
+                own_impressions=lead[1],
+                own_position=lead[2],
+                rivals=rivals,
+            )
+        )
+    return {
+        url: tuple(sorted(terms, key=lambda t: (-t.total_impressions, t.term)))
+        for url, terms in found.items()
+    }
+
+
 def _broken_schema(db: Session, client_id: UUID) -> dict[str, tuple[str, ...]]:
     """Schema blocks that did not parse, per page.
 
@@ -302,6 +385,7 @@ def load_page_candidates(
         db, client.id, window=(start, today), prior=(prior_start, prior_end)
     )
     sessions = _sessions(db, client.id, start, today)
+    contested = _contested_terms(db, client.id, start, today, brand_terms(client))
     stages = confirmed_stages(db, client.id)
     brand = brand_terms(client)
     # Read, never pulled: a page view that spends credits is one somebody
@@ -476,6 +560,7 @@ def load_page_candidates(
                 ),
                 broken_schema=broken_schema.get(url, ()),
                 has_schema=url in with_schema,
+                contested_terms=contested.get(url, ()),
                 link_donors=tuple(
                     LinkDonor(
                         url=gap.source_url,
