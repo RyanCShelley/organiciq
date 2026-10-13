@@ -235,3 +235,30 @@ def test_the_loader_names_the_donors_for_an_under_linked_page(db, client_a):
     found = next(p for p in load_page_candidates(db, client_a, today=today) if p.url == page)
     assert [d.url for d in found.link_donors] == [pillar]
     assert found.link_donors[0].anchor == "metal roof cost"
+
+
+def test_a_donor_found_only_through_the_brand_name_is_dropped(db, client_a):
+    from uuid import uuid4
+
+    from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+    from app.services.page_signals import brand_terms
+
+    today = date(2026, 10, 13)
+    day = today - timedelta(days=3)
+    page, home = "https://example.com/contact", "https://example.com/"
+    name = sorted(brand_terms(client_a))[0]
+    _gsc(db, client_a.id, page, day, impressions=400, clicks=5, position=9.0)
+    _query(db, client_a.id, page, day, name, impressions=400, position=9.0, clicks=5)
+    _query(db, client_a.id, home, day, name, impressions=2000, position=1.0, clicks=300)
+    db.add(
+        FactCrawlPageSnapshot(
+            id=uuid4(), client_id=client_a.id, source=CRAWL_SOURCE_FIRST_PARTY,
+            snapshot_date=day, raw_url=page, normalized_url=page, status_code=200,
+            indexable=True, word_count=900, inbound_internal_links=40,
+            inbound_editorial_links=0, redirect_count=0,
+        )
+    )
+    db.commit()
+
+    found = next(p for p in load_page_candidates(db, client_a, today=today) if p.url == page)
+    assert found.link_donors == ()

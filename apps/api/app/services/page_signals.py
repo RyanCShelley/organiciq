@@ -481,6 +481,11 @@ def load_page_candidates(
                         refdomains=gap.source_refdomains,
                     )
                     for gap in donors_by_url.get(url, ())
+                    # Two pages that both rank for the site's own name share
+                    # a site, not a subject. ACCTek's /contact-us was told to
+                    # take links from three pages anchored "acc technical
+                    # services".
+                    if not is_navigational(gap.shared_query, brand)
                 ),
             )
         )
