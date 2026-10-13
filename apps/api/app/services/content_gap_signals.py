@@ -8,11 +8,13 @@ why travels with the result, because a short plan has to show its shortfall:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.decisions.content_gaps import (
+    COVERED_SHARE,
     MIN_VOLUME,
     NearPage,
     TermGap,
@@ -94,7 +96,11 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
             for s in (row.sections or [])
             if isinstance(s, dict)
         ]
-        page_words[url] = content_words(" ".join([row.title or "", url, *headings]))
+        # The path only: the scheme and host are on every page and would make
+        # "com" or the client's own name look covered everywhere.
+        page_words[url] = content_words(
+            " ".join([row.title or "", urlsplit(url).path, *headings])
+        )
 
     tracked: dict[str, FactSerKeyword] = {}
     for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id):
@@ -147,7 +153,13 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
             continue
 
         words = content_words(term)
-        if not recorded_no_page and words and any(words <= pw for pw in page_words.values()):
+        everywhere = frozenset().union(*page_words.values()) if page_words else frozenset()
+        absent = tuple(sorted(words - everywhere))
+        best = max((len(words & pw) / len(words) for pw in page_words.values()), default=0.0) if words else 0.0
+        # A word the site never uses settles it: whatever else matches, the
+        # page the term needs is the one that says it. Otherwise the term is
+        # covered when a single page carries most of its words.
+        if not recorded_no_page and not absent and best >= COVERED_SHARE:
             summary["covered"] += 1
             continue
 
@@ -177,6 +189,8 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
                 serp_features=features,
                 recorded_no_page=recorded_no_page,
                 pages_searched=len(pages),
+                absent_words=absent,
+                best_overlap=best,
             )
         )
 

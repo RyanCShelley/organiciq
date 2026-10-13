@@ -26,7 +26,10 @@ from app.services.content_gap_signals import MIN_CRAWLED_PAGES, scan_term_gaps
 
 
 def _gap(**overrides) -> TermGap:
-    fields = {"term": "aeo agency", "volume": 480.0, "difficulty": 12.0, "pages_searched": 300}
+    fields = {
+        "term": "aeo agency", "volume": 480.0, "difficulty": 12.0,
+        "pages_searched": 300, "best_overlap": 0.5,
+    }
     fields.update(overrides)
     return TermGap(**fields)
 
@@ -45,7 +48,9 @@ def test_c1_fires_on_a_term_with_volume_and_a_known_difficulty():
 
 
 def test_c1_states_what_its_claim_of_absence_rests_on():
-    assert "None of the 300 indexable pages" in c1_write_the_page(_gap()).why
+    assert "the closest carries 50% of its words" in c1_write_the_page(_gap()).why
+    never = c1_write_the_page(_gap(absent_words=("orlando",)))
+    assert "mentions “orlando”" in never.why
     recorded = c1_write_the_page(_gap(recorded_no_page=True))
     assert "recorded in the keyword map as having no page" in recorded.why
 
@@ -225,5 +230,37 @@ def test_an_inflected_form_still_meets_the_page_that_covers_it():
     assert content_words("washing") == content_words("washer")
 
 
+def test_a_url_contributes_its_path_not_its_host():
+    from urllib.parse import urlsplit
+
+    assert "com" not in content_words(urlsplit("https://example.com/blog/x").path)
+
+
+def test_it_is_a_pronoun_in_a_question_and_an_industry_otherwise():
+    assert "it" not in content_words("is it safe to swim")
+    assert "it" in content_words("it support syracuse")
+
+
 def test_intent_codes_are_spelled_out():
     assert "local / commercial" in c1_write_the_page(_gap(intents=("L", "C"))).steps[0]
+
+
+def test_a_topic_a_page_mostly_answers_is_covered(db, client_a):
+    """Aquaman's "is it safe to swim in cloudy pool water" beside /blog/are-cloudy-pools-safe."""
+    _filler(db, client_a.id)
+    _page(db, client_a.id, "blog/are-cloudy-pools-safe", title="Are Cloudy Pools Safe?")
+    _page(db, client_a.id, "water", title="Swim water")
+    _term(db, client_a.id, "is it safe to swim in cloudy pool water")
+    db.commit()
+    assert scan_term_gaps(db, client_a).gaps == []
+
+
+def test_a_word_the_site_never_uses_is_a_gap_whatever_else_matches(db, client_a):
+    """Aquaman's "pool leak detection orlando": three of four words are everywhere."""
+    _filler(db, client_a.id)
+    _page(db, client_a.id, "pool-leak-detection", title="Pool Leak Detection")
+    _term(db, client_a.id, "pool leak detection orlando")
+    db.commit()
+    scan = scan_term_gaps(db, client_a)
+    assert [g.term for g in scan.gaps] == ["pool leak detection orlando"]
+    assert scan.gaps[0].absent_words == ("orlando",)

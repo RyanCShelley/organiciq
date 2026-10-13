@@ -27,6 +27,14 @@ from app.decisions.triage import Branch
 #: keywords.
 MIN_VOLUME = 50.0
 
+#: The share of a term's words one page must carry for the site to count as
+#: already covering it. Set by reading Aquaman's seven candidate gaps against
+#: its crawl by hand: with "every word" five of seven were topics a page
+#: already answers ("is it safe to swim in cloudy pool water" beside
+#: /blog/are-cloudy-pools-safe). A duplicate page is the costly error —
+#: it competes with the one it repeats — so the line errs towards covered.
+COVERED_SHARE = 0.6
+
 #: How long before a new page is judged. A page published this month has
 #: not been crawled, indexed and ranked by the next; position is the first
 #: thing to move and it does so slowly.
@@ -56,13 +64,18 @@ def _stem(word: str) -> str:
     return word
 
 
+#: A phrase that opens with one of these is a question, and its "it" is a
+#: pronoun ("is it safe") rather than the industry ("it services").
+_QUESTION_OPENERS = frozenset(
+    "how what why when where which who is are can does do should will".split()
+)
+
+
 def content_words(text: str) -> frozenset[str]:
     """The words of a phrase that carry its meaning, lightly stemmed."""
-    return frozenset(
-        _stem(w)
-        for w in re.split(r"[^a-z0-9]+", (text or "").lower())
-        if w and w not in _STOP
-    )
+    words = [w for w in re.split(r"[^a-z0-9]+", (text or "").lower()) if w]
+    drop = _STOP | {"it"} if words and words[0] in _QUESTION_OPENERS else _STOP
+    return frozenset(_stem(w) for w in words if w not in drop)
 
 
 @dataclass(frozen=True)
@@ -96,6 +109,12 @@ class TermGap:
     #: How many indexable pages were searched, so the brief can say what the
     #: claim of absence rests on.
     pages_searched: int = 0
+    #: Words of the term that appear in no page's title, URL or headings.
+    #: "orlando" on a site that has never mentioned it is the cleanest
+    #: evidence of a missing page there is.
+    absent_words: tuple[str, ...] = ()
+    #: Of the term's words, the largest share any one page carries.
+    best_overlap: float = 0.0
 
     @property
     def opportunity(self) -> float:
@@ -133,12 +152,20 @@ def c1_write_the_page(gap: TermGap) -> Prescription | None:
     if gap.volume < MIN_VOLUME or gap.difficulty is None or gap.opportunity <= 0:
         return None
 
-    basis = (
-        "It is recorded in the keyword map as having no page."
-        if gap.recorded_no_page
-        else f"None of the {gap.pages_searched} indexable pages crawled carries "
-        "its words together in its title, URL or headings."
-    )
+    if gap.recorded_no_page:
+        basis = "It is recorded in the keyword map as having no page."
+    elif gap.absent_words:
+        words = ", ".join(f"“{w}”" for w in gap.absent_words)
+        basis = (
+            f"None of the {gap.pages_searched} indexable pages crawled mentions "
+            f"{words} in its title, URL or headings."
+        )
+    else:
+        basis = (
+            f"Of the {gap.pages_searched} indexable pages crawled, the closest "
+            f"carries {gap.best_overlap * 100:.0f}% of its words in its title, URL "
+            "or headings."
+        )
 
     steps: list[str] = [
         f"Write a page for “{gap.term}” — {gap.volume:,.0f} searches a month at "
@@ -195,7 +222,11 @@ def c1_write_the_page(gap: TermGap) -> Prescription | None:
                 "keyword_targets: recorded as having no page"
                 if gap.recorded_no_page
                 else f"facts_crawl_page_snapshots: no page of {gap.pages_searched} "
-                "matches the term's words"
+                + (
+                    f"mentions {', '.join(gap.absent_words)}"
+                    if gap.absent_words
+                    else f"carries more than {gap.best_overlap * 100:.0f}% of the words"
+                )
             ),
         ),
         steps=tuple(steps),
