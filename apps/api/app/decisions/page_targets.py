@@ -19,6 +19,18 @@ from datetime import date
 
 
 @dataclass(frozen=True)
+class LinkDonor:
+    """A page that should link to the candidate, and what to say when it does."""
+
+    url: str
+    #: A query both pages already rank for, so the anchor is one the search
+    #: engine has already tied to both.
+    anchor: str
+    clicks: float = 0.0
+    refdomains: int = 0
+
+
+@dataclass(frozen=True)
 class PageCandidate:
     """One page, with what the Traffic and Leads triggers need to judge it."""
 
@@ -113,6 +125,11 @@ class PageCandidate:
     #: Invalid markup is indistinguishable from absent to every consumer.
     broken_schema: tuple[str, ...] = ()
     has_schema: bool = False
+    #: Pages that share a query with this one, earn at least twice its
+    #: clicks on it, and do not link to it from body copy. Best donor first.
+    #: Only searched for under-linked pages, so empty means "not looked for"
+    #: as often as "none found" — U-4 needs the under-linked test as well.
+    link_donors: tuple[LinkDonor, ...] = ()
 
     @property
     def missed_clicks(self) -> float | None:

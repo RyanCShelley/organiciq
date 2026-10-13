@@ -90,6 +90,29 @@ THIN_WORDS = 600
 STALE_MONTHS = 6
 
 
+def _under_linked(page: PageCandidate) -> bool:
+    return (
+        page.inbound_editorial_links is not None
+        and page.inbound_editorial_links < THIN_LINKS
+    )
+
+
+def _donor_steps(page: PageCandidate) -> list[str]:
+    """One line per page that should link here, with the anchor to use.
+
+    The donors come from the lever engine's own finder: pages that rank for
+    the same query, earn at least twice this page's clicks on it, and have
+    no body link to it. The sentence to put the link in is the one thing the
+    data cannot choose, so the brief says so.
+    """
+    return [
+        f"Link to it from {donor.url} using “{donor.anchor}” as the anchor — "
+        "the query both pages already rank for. Put it in body copy, not the "
+        "navigation."
+        for donor in page.link_donors
+    ]
+
+
 def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[str, ...]:
     """The job as a checklist, built only from facts about this page.
 
@@ -149,7 +172,9 @@ def _steps(page: PageCandidate, term: str, today: date | None = None) -> tuple[s
             f"{'it' if count == 1 else 'them'} up as FAQPage if not already."
         )
 
-    if page.inbound_editorial_links is not None and page.inbound_editorial_links < THIN_LINKS:
+    if _under_linked(page) and page.link_donors:
+        steps.extend(_donor_steps(page))
+    elif _under_linked(page):
         steps.append(
             f"Link to it from related pages — only "
             f"{page.inbound_editorial_links} page"
@@ -430,6 +455,72 @@ def u1_refresh_the_page(page: PageCandidate) -> Prescription | None:
     )
 
 
+# ── U-4 ─────────────────────────────────────────────────────────────────
+
+#: The same band the lever engine's internal-linking finding uses. Above it
+#: the page is already where links would take it; below it links are not
+#: what is holding it back.
+U4_MIN_POSITION = 4.0
+U4_MAX_POSITION = 20.0
+
+
+def u4_link_it_from_the_pages_that_should(page: PageCandidate) -> Prescription | None:
+    """It draws demand, ranks within reach, and the site barely points at it.
+
+    Last but one in the order on purpose: a page that is also decaying gets
+    U-1 or sharper, and those briefs already carry these donors as steps.
+    This picks up the pages nothing else is looking at because they have not
+    lost anything — they have simply never been supported.
+    """
+    if not page.link_donors or not _under_linked(page):
+        return None
+    if page.impressions < MIN_PRIOR_IMPRESSIONS:
+        return None
+    if page.position is None or not (U4_MIN_POSITION <= page.position <= U4_MAX_POSITION):
+        return None
+
+    term = page.link_donors[0].anchor
+    inbound = page.inbound_editorial_links or 0
+    return Prescription(
+        action_id="U-4",
+        title="Link this page from the pages that should",
+        branch=Branch.VISIBILITY,
+        target_url=page.url,
+        term=term,
+        score=page.impressions,
+        effort_min=30,
+        why=(
+            f"Only {inbound} page{'' if inbound == 1 else 's'} link to this one "
+            f"from body copy, and it averages position {page.position:.1f} on "
+            f"{page.impressions:.0f} impressions. "
+            f"{len(page.link_donors)} stronger page"
+            f"{'' if len(page.link_donors) == 1 else 's'} rank for the same "
+            "query and do not link to it."
+        ),
+        done_when=(
+            "Each page named below links here from body copy with the anchor "
+            "given, and the crawl after publishing counts the new links."
+        ),
+        metric="Average position",
+        metric_key="page_position",
+        evidence=(
+            f"facts_crawl_internal_links: {inbound} editorial links in",
+            *(
+                f"facts_gsc_query_pages: {d.url} earns {d.clicks:.0f} clicks on "
+                f"“{d.anchor}”"
+                for d in page.link_donors
+            ),
+        ),
+        steps=tuple(_donor_steps(page))
+        + (
+            "Check the anchor reads naturally where you put it — the donor's "
+            "body text is not stored, so the sentence is the one thing this "
+            "brief cannot choose.",
+        ),
+        check_after_days=REFRESH_CHECK_DAYS,
+    )
+
+
 #: Most specific first — `prescribe_page` takes the first that fires, so
 #: this order is what decides which brief a page gets.
 UPDATE_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
@@ -437,6 +528,7 @@ UPDATE_ACTIONS: tuple[Callable[[PageCandidate], Prescription | None], ...] = (
     u3_answer_the_question_it_draws,
     u6_fix_the_markup,
     u1_refresh_the_page,
+    u4_link_it_from_the_pages_that_should,
 )
 
 
@@ -447,6 +539,10 @@ def rank_for_updates(pages: list[PageCandidate]) -> list[PageCandidate]:
     says what is already gone, which is measured.
     """
     return sorted(
-        [p for p in pages if p.impressions_lost > 0 or p.broken_schema],
-        key=lambda p: (-p.impressions_lost, p.url),
+        [
+            p
+            for p in pages
+            if p.impressions_lost > 0 or p.broken_schema or p.link_donors
+        ],
+        key=lambda p: (-p.impressions_lost, -p.impressions, p.url),
     )

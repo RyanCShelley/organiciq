@@ -21,7 +21,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.ctr_curve import expected_ctr_percent
-from app.decisions.page_targets import PageCandidate
+from app.decisions.page_targets import LinkDonor, PageCandidate
 from app.models.client import Client
 from app.models.config import ClientConversionPage
 from app.models.crawl import (
@@ -31,6 +31,7 @@ from app.models.crawl import (
 )
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
+from app.services.lever_engine import _link_gaps
 from app.services.page_stage import confirmed_stages
 from app.services.serp_features import load as load_serp_features
 from app.services.triage_signals import MANAGED_CHANNELS
@@ -372,6 +373,23 @@ def load_page_candidates(
         statistics.median(rates) if len(rates) >= MIN_PAGES_FOR_MEDIAN else None
     )
 
+    # Donors are only searched for pages the update catalog could act on:
+    # drawing demand and short of editorial links. `_link_gaps` is the
+    # lever engine's own donor finder — one definition of "should link to".
+    from app.decisions.update_catalog import MIN_PRIOR_IMPRESSIONS, THIN_LINKS
+
+    under_linked = {
+        url
+        for url, row in gsc.items()
+        if row["impressions"] >= MIN_PRIOR_IMPRESSIONS
+        and (snap := crawl.get(url)) is not None
+        and snap.inbound_editorial_links is not None
+        and snap.inbound_editorial_links < THIN_LINKS
+    }
+    donors_by_url = _link_gaps(
+        db, client.id, period=(start, today), targets=under_linked
+    )
+
     # GA4 reports a landing page it could not resolve as "(not set)", and it
     # arrives with real sessions attached. It reached the candidate list and
     # drew a T-3 telling somebody to rewrite the opening of "(not set)".
@@ -455,6 +473,15 @@ def load_page_candidates(
                 ),
                 broken_schema=broken_schema.get(url, ()),
                 has_schema=url in with_schema,
+                link_donors=tuple(
+                    LinkDonor(
+                        url=gap.source_url,
+                        anchor=gap.shared_query,
+                        clicks=gap.source_clicks,
+                        refdomains=gap.source_refdomains,
+                    )
+                    for gap in donors_by_url.get(url, ())
+                ),
             )
         )
     return out

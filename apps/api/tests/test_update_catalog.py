@@ -392,3 +392,94 @@ def test_one_question_is_not_1_questions():
 def test_broken_markup_is_named_in_the_steps():
     found = u1_refresh_the_page(_decaying(broken_schema=("Article", "FAQPage")))
     assert any("Article, FAQPage" in step for step in found.steps)
+
+
+# ── U-4 ──
+
+from app.decisions.page_targets import LinkDonor  # noqa: E402
+from app.decisions.update_catalog import (  # noqa: E402
+    u4_link_it_from_the_pages_that_should,
+)
+
+DONOR = LinkDonor(
+    url="https://example.com/pillar", anchor="metal roof cost", clicks=300.0
+)
+
+
+def _supported_badly(**overrides) -> PageCandidate:
+    """Holding its ground, ranking within reach, short of body links."""
+    fields = {
+        "url": "https://example.com/guide",
+        "impressions": 800.0,
+        "prior_impressions": 800.0,
+        "position": 9.0,
+        "prior_position": 9.0,
+        "word_count": 1500,
+        "inbound_editorial_links": 1,
+        "link_donors": (DONOR,),
+    }
+    fields.update(overrides)
+    return PageCandidate(**fields)
+
+
+def test_u4_names_the_page_to_link_from_and_the_anchor():
+    found = u4_link_it_from_the_pages_that_should(_supported_badly())
+    assert found is not None
+    assert found.action_id == "U-4"
+    assert found.metric_key == "page_position"
+    assert any(
+        DONOR.url in step and "metal roof cost" in step for step in found.steps
+    )
+
+
+def test_u4_needs_a_donor():
+    """No donor is a different problem — missing coverage, not missing links."""
+    assert u4_link_it_from_the_pages_that_should(_supported_badly(link_donors=())) is None
+
+
+def test_u4_leaves_a_well_linked_page_alone():
+    assert (
+        u4_link_it_from_the_pages_that_should(_supported_badly(inbound_editorial_links=5))
+        is None
+    )
+
+
+def test_u4_does_not_guess_when_the_crawl_has_no_link_count():
+    assert (
+        u4_link_it_from_the_pages_that_should(_supported_badly(inbound_editorial_links=None))
+        is None
+    )
+
+
+def test_u4_ignores_a_page_nobody_is_searching_for():
+    assert u4_link_it_from_the_pages_that_should(_supported_badly(impressions=40.0)) is None
+
+
+def test_u4_ignores_pages_outside_the_band_links_can_move():
+    assert u4_link_it_from_the_pages_that_should(_supported_badly(position=2.0)) is None
+    assert u4_link_it_from_the_pages_that_should(_supported_badly(position=35.0)) is None
+    assert u4_link_it_from_the_pages_that_should(_supported_badly(position=None)) is None
+
+
+def test_a_decaying_page_gets_the_sharper_brief_and_the_donors_ride_along():
+    page = _decaying(inbound_editorial_links=1, link_donors=(DONOR,))
+    found = prescribe_page(page, actions=UPDATE_ACTIONS)
+    assert found.action_id == "U-1"
+    assert any(DONOR.url in step for step in found.steps)
+
+
+def test_a_steady_page_reaches_u4_through_the_registry():
+    found = prescribe_page(_supported_badly(), actions=UPDATE_ACTIONS)
+    assert found is not None and found.action_id == "U-4"
+
+
+def test_a_page_with_no_donor_keeps_the_generic_link_step():
+    found = u1_refresh_the_page(_decaying(inbound_editorial_links=1))
+    assert any("Link to it from related pages" in step for step in found.steps)
+
+
+def test_a_link_gap_page_is_ranked_after_the_ones_losing_ground():
+    losing = _decaying(url="https://example.com/losing")
+    steady = _supported_badly(url="https://example.com/steady")
+    ranked = rank_for_updates([steady, losing])
+    assert [p.url for p in ranked] == [losing.url, steady.url]

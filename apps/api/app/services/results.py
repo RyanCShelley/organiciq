@@ -50,7 +50,7 @@ WINDOW_DAYS = 28
 MATERIAL_CHANGE = 0.05
 
 #: Which way is better. Position is the one metric where down is up.
-LOWER_IS_BETTER = frozenset({"term_position"})
+LOWER_IS_BETTER = frozenset({"term_position", "page_position"})
 
 #: Metrics that settle an argument rather than move a number.
 NOT_MEASURED = frozenset({"decision"})
@@ -152,6 +152,54 @@ def _page_clicks(db: Session, client_id: UUID, url: str | None, as_of: date) -> 
     if total is None:
         return Measurement(None, "no Search Console data for this page in the window")
     return Measurement(float(total))
+
+
+def _page_impressions(
+    db: Session, client_id: UUID, url: str | None, as_of: date
+) -> Measurement:
+    if not url:
+        return Measurement(None, "the action names no page")
+    start, end = _window(as_of)
+    total = (
+        db.query(func.sum(FactGscPage.impressions))
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.normalized_url == url,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .scalar()
+    )
+    if total is None:
+        return Measurement(None, "no Search Console data for this page in the window")
+    return Measurement(float(total))
+
+
+def _page_position(
+    db: Session, client_id: UUID, url: str | None, as_of: date
+) -> Measurement:
+    """Impression-weighted, as the candidate loader reads it."""
+    if not url:
+        return Measurement(None, "the action names no page")
+    start, end = _window(as_of)
+    impressions, weighted = (
+        db.query(
+            func.coalesce(func.sum(FactGscPage.impressions), 0),
+            func.coalesce(
+                func.sum(FactGscPage.average_position * FactGscPage.impressions), 0
+            ),
+        )
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.normalized_url == url,
+            FactGscPage.date >= start,
+            FactGscPage.date <= end,
+        )
+        .one()
+    )
+    if not impressions:
+        return Measurement(None, "no Search Console data for this page in the window")
+    return Measurement(float(weighted) / float(impressions))
 
 
 def _engagement_rate(
@@ -265,6 +313,10 @@ def measure(
         return _term_position(db, client.id, term, as_of)
     if metric_key == "page_clicks":
         return _page_clicks(db, client.id, url, as_of)
+    if metric_key == "page_impressions":
+        return _page_impressions(db, client.id, url, as_of)
+    if metric_key == "page_position":
+        return _page_position(db, client.id, url, as_of)
     if metric_key == "engagement_rate":
         return _engagement_rate(db, client.id, url, as_of)
     if metric_key == "page_lead_rate":

@@ -417,3 +417,30 @@ def test_the_daily_check_runs_once_and_only_after_its_hour(
 
     monkeypatch.setattr(settings, "results_check_enabled", False, raising=False)
     assert maybe_check_results(db) is False
+
+
+def _gsc_page(db: Session, client: Client, day: date, *, impressions: int, position: float):
+    from app.models.gsc import FactGscPage
+
+    db.add(
+        FactGscPage(
+            client_id=client.id, date=day, raw_url="https://x.test/p",
+            normalized_url="https://x.test/p", country="", device="",
+            impressions=impressions, clicks=0, ctr=0, average_position=position,
+        )
+    )
+
+
+def test_page_impressions_and_position_are_read_for_the_refresh_actions(
+    db: Session, client_a: Client
+):
+    """U-1 and U-4 name these keys; an unread key judges nothing, silently."""
+    _gsc_page(db, client_a, CHECK_ON, impressions=300, position=10.0)
+    _gsc_page(db, client_a, CHECK_ON - timedelta(days=1), impressions=100, position=14.0)
+    db.commit()
+    url = "https://x.test/p"
+
+    assert measure(db, client_a, "page_impressions", url=url, as_of=CHECK_ON).value == 400.0
+    # Impression-weighted: (300*10 + 100*14) / 400
+    assert measure(db, client_a, "page_position", url=url, as_of=CHECK_ON).value == 11.0
+    assert verdict("page_position", 14.0, 9.0) == "improved"
