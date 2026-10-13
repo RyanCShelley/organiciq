@@ -34,6 +34,15 @@ export function tableControls(
     const value = query[name];
     if (typeof value === "string" && value) carried.set(name, value);
   }
+  // Other tables' sort and search ride along too. Only the date range used to,
+  // so sorting Top pages quietly reset the ordering of Traffic by channel
+  // above it — and searching reset your own sort.
+  for (const [param, value] of Object.entries(query)) {
+    if (typeof value !== "string" || !value) continue;
+    if (!/^[a-z0-9]+_(sort|dir|q)$/.test(param)) continue;
+    if (param.startsWith(`${name}_`)) continue;
+    carried.set(param, value);
+  }
 
   const sort: SortState | null = key ? { key, dir: dir as "asc" | "desc" } : null;
 
@@ -49,7 +58,12 @@ export function tableControls(
     searchAction: base,
     searchParam,
     searchValue: search,
-    searchKeep: Object.fromEntries(carried),
+    // What the search form submits besides the box: the date range, the other
+    // tables, and this table's own ordering — searching used to reset it.
+    searchKeep: {
+      ...Object.fromEntries(carried),
+      ...(key ? { [sortParam]: key, [dirParam]: dir } : {}),
+    },
   };
 }
 

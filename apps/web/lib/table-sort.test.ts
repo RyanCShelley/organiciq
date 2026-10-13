@@ -41,4 +41,34 @@ import { filterRows, tableControls } from "./table-sort";
   assert.equal(filterRows(rows, "", (r) => [r.a]).length, 2);
 }
 
+// Searching keeps this table's own sort. It used to reset it.
+{
+  const query = { from: "2026-10-01", pages_sort: "ga4_sessions", pages_dir: "desc" };
+  const t = tableControls(query, "/d", "pages", { keep: ["from"] });
+  assert.equal(t.searchKeep.pages_sort, "ga4_sessions");
+  assert.equal(t.searchKeep.pages_dir, "desc");
+  assert.equal(t.searchKeep.from, "2026-10-01");
+  // No sort chosen, so none is invented.
+  assert.equal(tableControls({}, "/d", "pages").searchKeep.pages_sort, undefined);
+}
+
+// Sorting one table keeps the others' ordering and searches.
+{
+  const query = { channels_sort: "views", channels_dir: "asc", leads_q: "direct", pages_sort: "x" };
+  const href = tableControls(query, "/d", "pages").sortHref("sessions", "desc");
+  assert.ok(href.includes("channels_sort=views"));
+  assert.ok(href.includes("channels_dir=asc"));
+  assert.ok(href.includes("leads_q=direct"));
+  // Its own old sort is replaced, not duplicated.
+  assert.equal(href.split("pages_sort=").length, 2);
+  assert.ok(href.includes("pages_sort=sessions"));
+}
+
+// Another table's search does not leak into this one's own box.
+{
+  const t = tableControls({ leads_q: "direct" }, "/d", "pages");
+  assert.equal(t.searchValue, "");
+  assert.equal(t.searchKeep.leads_q, "direct");
+}
+
 console.log("table-sort: all assertions passed");

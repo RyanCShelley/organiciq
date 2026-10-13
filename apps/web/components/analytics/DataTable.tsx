@@ -131,7 +131,14 @@ export function DataTable<T>({
         Search
       </button>
       {searchValue ? (
-        <a href={searchAction} className="text-xs text-[var(--text-secondary)]">
+        <a
+          href={
+            Object.keys(searchKeep ?? {}).length
+              ? `${searchAction}?${new URLSearchParams(searchKeep)}`
+              : searchAction
+          }
+          className="text-xs text-[var(--text-secondary)]"
+        >
           Clear
         </a>
       ) : null}
