@@ -107,8 +107,13 @@ def _slot_row(client, month: str, slot, today: date) -> dict:
     }
 
 
-def _candidate_row(client, month: str, considered) -> dict:
-    """One thing the engine weighed, slotted or not."""
+def _candidate_row(client, month: str, considered, today: date) -> dict:
+    """One thing the engine weighed, slotted or not.
+
+    Carries `check_on` like a slotted action does: a candidate can be put
+    into the plan by hand, and from that moment the results loop has to
+    know when to judge it.
+    """
     return {
         "action_uid": action_uid(client.slug, month, considered.prescription),
         "slot": considered.slot,
@@ -126,6 +131,12 @@ def _candidate_row(client, month: str, considered) -> dict:
         "done_when": considered.prescription.done_when,
         "metric": considered.prescription.metric,
         "metric_key": considered.prescription.metric_key,
+        "check_on": (
+            today
+            + timedelta(
+                days=considered.prescription.check_after_days or CHECK_AFTER_DAYS
+            )
+        ).isoformat(),
         "flags": list(considered.prescription.flags),
     }
 
@@ -534,14 +545,14 @@ def build_record(
             {"slot": empty.slot, "reason": empty.reason} for empty in update_plan.empty
         ],
         "update_candidates": [
-            _candidate_row(client, month, c) for c in update_plan.considered
+            _candidate_row(client, month, c, today) for c in update_plan.considered
         ],
         "not_this_month": list(plan.not_this_month),
         # Everything the engine weighed, so a plan can be argued with. The
         # slotted ones are in here too, marked — one list to read rather
         # than two to reconcile.
         "candidates": [
-            _candidate_row(client, month, c) for c in plan.considered
+            _candidate_row(client, month, c, today) for c in plan.considered
         ],
         "data_gaps": [
             {"input": text, "status": "missing"} for text in sorted(set(blocked_inputs))

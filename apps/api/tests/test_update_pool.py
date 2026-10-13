@@ -96,3 +96,24 @@ def test_a_closed_pool_fills_nothing_and_says_so():
     assert plan.empty == ()
     # Not outbid — nothing could have fitted, so it says the real reason.
     assert [c.reason for c in plan.considered] == ["Legacy buys this quarterly."]
+
+
+def test_a_candidate_carries_its_check_date():
+    """It can be put into the plan by hand, and from that moment the
+    results loop has to know when to judge it.
+
+    Extracting the row helper dropped this field from `candidates` — the
+    tests were all green, because nothing asserted on it.
+    """
+    from datetime import date
+
+    from app.services.monthly_run import _candidate_row
+    from app.decisions.slots import Considered
+
+    class _Client:
+        slug = "example"
+
+    row = _candidate_row(
+        _Client(), "2026-10", Considered(prescription=_p("U-1", "/a", 10)), date(2026, 10, 5)
+    )
+    assert row["check_on"] == "2026-11-02"
