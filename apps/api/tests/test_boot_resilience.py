@@ -48,7 +48,8 @@ def test_health_reports_a_failed_migration_without_failing(tmp_path, monkeypatch
     body = response.json()
     assert body["status"] == "degraded"
     assert body["migrations"] == "failed"
-    assert "KeyError" in body["detail"]
+    # The error line names tables and SQL, and /health is unauthenticated.
+    assert "detail" not in body
 
 
 def test_a_missing_state_file_is_not_treated_as_failure(tmp_path, monkeypatch):

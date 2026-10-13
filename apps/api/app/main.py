@@ -25,7 +25,15 @@ else:
         settings.app_env,
     )
 
-app = FastAPI(title="Organic IQ API", version="0.1.0")
+# The interactive docs list every route, parameter and schema to anyone who can
+# reach the API, so they are served outside production only.
+app = FastAPI(
+    title="Organic IQ API",
+    version="0.1.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,11 +76,9 @@ def health() -> dict[str, str]:
     state, detail = _migration_state()
     if state == "failed":
         logger.error("Serving with failed migrations: %s", detail or "see the boot log")
-        return {
-            "status": "degraded",
-            "migrations": "failed",
-            "detail": detail or "alembic upgrade head failed; see the deploy log",
-        }
+        # The last line of the Alembic error names tables and SQL, and this
+        # route is unauthenticated. It is in the log above.
+        return {"status": "degraded", "migrations": "failed"}
     return {"status": "ok", "migrations": state}
 
 

@@ -27,7 +27,15 @@ class AuthUser:
 def decode_token(token: str) -> dict:
     settings = get_settings()
     try:
-        return jwt.decode(token, settings.auth_secret, algorithms=["HS256"])
+        # `exp` and `email` are required, not merely checked when present: a
+        # token without an expiry used to be valid forever, and AUTH_SECRET is
+        # the only thing standing behind every one of them.
+        return jwt.decode(
+            token,
+            settings.auth_secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "email"]},
+        )
     except jwt.PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

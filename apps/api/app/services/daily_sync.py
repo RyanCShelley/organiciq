@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models.client import Client, ClientStatus
+from app.models.client import WORKED_STATUSES, Client, ClientStatus
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import DataWatermark
 from app.models.scheduler import SchedulerCheckpoint
@@ -129,6 +129,8 @@ def _lookback_window(lookback_days: int) -> tuple[date, date]:
 def _mapped_sources_by_client(db: Session) -> dict:
     rows = (
         db.query(Integration)
+        .join(Client, Client.id == Integration.client_id)
+        .filter(Client.status.in_(WORKED_STATUSES))
         .filter(Integration.external_property_id.isnot(None))
         .filter(Integration.external_property_id != "")
         .all()

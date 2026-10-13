@@ -17,7 +17,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.integrations import dataforseo
-from app.models.client import Client
+from app.models.client import WORKED_STATUSES, Client
 from app.models.decision import KeywordTarget
 from app.models.seranking import FactSerKeyword, FactSerpFeature
 
@@ -331,7 +331,7 @@ def maybe_pull_serp_features(db: Session) -> bool:
 
     pulled = 0
     skipped = 0
-    for client in db.query(Client).all():
+    for client in db.query(Client).filter(Client.status.in_(WORKED_STATUSES)).all():
         if not _worth_pulling_for(db, client):
             skipped += 1
             continue

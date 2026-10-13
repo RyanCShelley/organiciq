@@ -1,0 +1,10 @@
+# See api/.dockerignore: the build context ignores .gitignore.
+.env
+.env.*
+!.env.example
+node_modules
+.next
+.vercel
+.git
+.gitignore
+*.log

@@ -18,6 +18,15 @@ COPY . .
 
 RUN chmod +x scripts/start-api.sh scripts/start-worker.sh scripts/start.sh
 
+# Not root. The API and the embedded worker share this container, and the
+# worker holds the database URL and every integration key, so anything that
+# gets code execution through it — a crawler SSRF, a parser bug — should not
+# also own the filesystem. Nothing here writes outside /tmp, except the model
+# loader, which takes lock files in its cache — hence /opt/fastembed below.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && chown -R app:app /app /opt/fastembed
+USER app
+
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000

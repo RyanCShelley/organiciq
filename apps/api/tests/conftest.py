@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Generator
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import jwt
 import pytest
@@ -208,8 +208,13 @@ def team_user(db: Session, client_a: Client) -> User:
 
 
 def auth_header(email: str) -> dict[str, str]:
+    # Tokens expire, as the web app's do: the API now refuses one without `exp`.
     token = jwt.encode(
-        {"email": email, "sub": email},
+        {
+            "email": email,
+            "sub": email,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        },
         settings.auth_secret,
         algorithm="HS256",
     )

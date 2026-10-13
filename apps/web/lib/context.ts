@@ -46,28 +46,25 @@ export async function resolveDateRange(
   );
 }
 
+// The two loaders below let an API failure propagate. They used to catch it
+// and return null, which the callers turn into notFound() — so an outage or a
+// timeout read as "404, this page could not be found" on every client page,
+// and nobody looked at the API. "Not found" now means the client is not in the
+// list; anything else is an error and says so (app/(app)/error.tsx).
 export async function loadClientById(clientId: string): Promise<Client | null> {
-  try {
-    const clients = await apiFetch<Client[]>("/clients");
-    return clients.find((client) => client.id === clientId) ?? null;
-  } catch {
-    return null;
-  }
+  const clients = await apiFetch<Client[]>("/clients");
+  return clients.find((client) => client.id === clientId) ?? null;
 }
 
 /** Resolve a workspace path param that may be a slug or a legacy UUID. */
 export async function loadClientByParam(param: string): Promise<Client | null> {
-  try {
-    const clients = await apiFetch<Client[]>("/clients");
-    const bySlug = clients.find((client) => client.slug === param);
-    if (bySlug) return bySlug;
-    if (isClientUuid(param)) {
-      return clients.find((client) => client.id === param) ?? null;
-    }
-    return null;
-  } catch {
-    return null;
+  const clients = await apiFetch<Client[]>("/clients");
+  const bySlug = clients.find((client) => client.slug === param);
+  if (bySlug) return bySlug;
+  if (isClientUuid(param)) {
+    return clients.find((client) => client.id === param) ?? null;
   }
+  return null;
 }
 
 /** Load client for a workspace page; redirect UUID paths to the slug URL. */

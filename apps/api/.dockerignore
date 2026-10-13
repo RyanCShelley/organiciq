@@ -1,0 +1,15 @@
+# The build context ignores .gitignore, so anything not listed here is copied
+# into the image — including the local .env with live credentials.
+.env
+.env.*
+!.env.example
+.venv
+venv
+.git
+.gitignore
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+tests
+*.log

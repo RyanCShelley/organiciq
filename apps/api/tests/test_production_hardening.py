@@ -604,3 +604,80 @@ def test_hosted_domains_are_configurable():
     assert settings.hosted_domains == {"example.com", "other.org"}
     assert settings.is_workspace_email("a@other.org")
     assert not settings.is_workspace_email("a@smamarketing.com")
+
+
+# ── Tokens ──
+
+
+def _token(secret: str, **claims) -> str:
+    import jwt
+
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
+def test_a_token_without_an_expiry_is_refused():
+    """It used to be valid forever, and AUTH_SECRET is the only thing behind it."""
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.security import decode_token
+    from app.core.settings import get_settings
+
+    token = _token(get_settings().auth_secret, email="a@smamarketing.com")
+    with pytest.raises(HTTPException) as caught:
+        decode_token(token)
+    assert caught.value.status_code == 401
+
+
+def test_an_expired_token_is_refused():
+    import time
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.security import decode_token
+    from app.core.settings import get_settings
+
+    token = _token(
+        get_settings().auth_secret, email="a@smamarketing.com", exp=int(time.time()) - 60
+    )
+    with pytest.raises(HTTPException):
+        decode_token(token)
+
+
+def test_a_current_token_with_an_email_is_accepted():
+    import time
+
+    from app.core.security import decode_token
+    from app.core.settings import get_settings
+
+    token = _token(
+        get_settings().auth_secret, email="a@smamarketing.com", exp=int(time.time()) + 600
+    )
+    assert decode_token(token)["email"] == "a@smamarketing.com"
+
+
+def test_docs_are_not_served_in_production(monkeypatch):
+    """The docs list every route and schema to anyone who can reach the API."""
+    import importlib
+
+    from app.core import settings as settings_module
+
+    # Production refuses to boot on development defaults, so give it real ones.
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AUTH_SECRET", "a" * 16 + "B" * 16 + "7" * 16)
+    monkeypatch.setenv("INTEGRATION_TOKEN_KEY", "k" * 20 + "Z" * 20 + "3" * 8)
+    monkeypatch.setenv("INTERNAL_API_SECRET", "s" * 24 + "Q" * 24)
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.com")
+    settings_module.get_settings.cache_clear()
+    import app.main as main
+
+    try:
+
+        reloaded = importlib.reload(main)
+        assert reloaded.app.docs_url is None
+        assert reloaded.app.openapi_url is None
+    finally:
+        monkeypatch.undo()
+        settings_module.get_settings.cache_clear()
+        importlib.reload(main)

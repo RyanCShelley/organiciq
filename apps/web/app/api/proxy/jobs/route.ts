@@ -29,6 +29,19 @@ export async function GET(request: Request) {
   });
 }
 
+const JOB_PARAM_KEYS = ["engine", "limit", "source", "page_limit"] as const;
+
+function pickJobParams(raw: unknown): Record<string, string | number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, string | number> = {};
+  for (const key of JOB_PARAM_KEYS) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+    else if (typeof value === "string" && value.length <= 64) out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export async function POST(request: Request) {
   const authHeaders = await getProxyAuthHeaders();
   if (!authHeaders) {
@@ -52,6 +65,11 @@ export async function POST(request: Request) {
       source: body.source,
       start_date: body.start_date,
       end_date: body.end_date,
+      // Only the keys the job handlers read, and only plain strings and
+      // numbers. This used to be dropped entirely, so the AI-search job —
+      // which refuses to run without an engine — could never be started from
+      // the page. The handlers still enforce their own ceilings.
+      params: pickJobParams(body.params),
     }),
   });
 

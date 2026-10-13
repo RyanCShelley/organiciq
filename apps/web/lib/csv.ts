@@ -1,7 +1,16 @@
-/** Quote a CSV field: wrap when it contains a delimiter, quote, or newline. */
+/**
+ * Quote a CSV field: wrap when it contains a delimiter, quote, or newline.
+ *
+ * A string that starts with = + - @ (or a tab or carriage return) is read as
+ * a formula by Excel and Sheets. Keywords, page paths, prompts and group names
+ * all come from third parties, so such a cell would run on whoever opens the
+ * export. It is prefixed with an apostrophe, which spreadsheets treat as
+ * "this is text". Numbers are left alone, so -3 stays a number.
+ */
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  let text = String(value);
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   if (/[",\r\n]/.test(text)) {
     return `"${text.replaceAll('"', '""')}"`;
   }

@@ -275,7 +275,7 @@ def _window_metrics(
         FactGa4Traffic.date <= end,
     )
     if page_url:
-        traffic_q = traffic_q.filter(FactGa4Traffic.landing_page.contains(_path_hint(page_url)))
+        traffic_q = traffic_q.filter(FactGa4Traffic.normalized_url.contains(_path_hint(page_url)))
     sessions = float(traffic_q.scalar() or 0)
 
     leads: float | None = None
@@ -287,7 +287,7 @@ def _window_metrics(
             FactGa4Event.event_name.in_(lead_events),
         )
         if page_url:
-            leads_q = leads_q.filter(FactGa4Event.landing_page.contains(_path_hint(page_url)))
+            leads_q = leads_q.filter(FactGa4Event.normalized_url.contains(_path_hint(page_url)))
         leads = float(leads_q.scalar() or 0)
 
     gsc_q = db.query(

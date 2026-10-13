@@ -17,6 +17,12 @@ class ClientStatus(str, enum.Enum):
     ARCHIVED = "archived"
 
 
+#: Clients whose data is pulled, planned and paid for. A paused or archived
+#: client kept syncing GSC, GA4 and SE Ranking and kept being priced for SERP
+#: pulls, because only some of the loops asked.
+WORKED_STATUSES = (ClientStatus.ACTIVE, ClientStatus.ONBOARDING)
+
+
 class Tier(Base):
     __tablename__ = "tiers"
 

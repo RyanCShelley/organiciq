@@ -32,7 +32,7 @@ from app.decisions.triage import (
 )
 from app.decisions.thresholds import merge_thresholds
 from app.models.annotation import Annotation
-from app.models.client import Client
+from app.models.client import WORKED_STATUSES, Client
 from app.decisions.catalog import (
     BLOCKED_ACTIONS,
     LEAD_ACTIONS,
@@ -736,7 +736,7 @@ def maybe_run_month(db: Session, *, today: date | None = None) -> bool:
     month = _previous_month(month_key(today))
     ran = 0
     skipped = 0
-    for client in db.query(Client).all():
+    for client in db.query(Client).filter(Client.status.in_(WORKED_STATUSES)).all():
         if not _has_data(db, client):
             skipped += 1
             continue
