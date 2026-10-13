@@ -40,7 +40,7 @@ def test_a_declared_sitemap_that_404s_says_so():
         return httpx.Response(404, text="<!DOCTYPE html><html>Not found</html>")
 
     found, failures = _run(handler, ["https://x.test/sitemap_index.xml"])
-    assert found == set()
+    assert found == {}
     assert failures == [("https://x.test/sitemap_index.xml", "returns 404")]
     assert (
         _sitemap_failure_note(_Result(failures))
@@ -72,7 +72,7 @@ def test_a_soft_404_that_happens_to_parse_is_not_a_sitemap():
         return httpx.Response(200, text="<html><body>Not found</body></html>")
 
     found, failures = _run(handler, ["https://x.test/sitemap.xml"])
-    assert found == set()
+    assert found == {}
     assert failures == [
         ("https://x.test/sitemap.xml", "is a <html> document, not a sitemap")
     ]

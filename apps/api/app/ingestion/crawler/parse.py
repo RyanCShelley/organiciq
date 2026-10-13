@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urldefrag, urljoin, urlsplit
 
@@ -166,6 +168,10 @@ class ParsedPage:
     #: Questions a visitor can see as questions: FAQPage schema entries and
     #: headings that read as questions. 3b asks what is not covered.
     faq_questions: list[str] = field(default_factory=list)
+    #: When the page says it was last updated, and which of the sources said
+    #: so. None where none of them carried a date — "unknown", not "never".
+    content_updated_on: date | None = None
+    content_updated_source: str | None = None
 
 
 #: A heading that reads as a question. Matches the engine's `is_question`
@@ -409,6 +415,99 @@ def extract_rdfa(doc: Any) -> list[SchemaBlock]:
     return blocks
 
 
+#: Where a page says when it was last touched, best first.
+#:
+#: Schema is the publisher's own statement and is what Google reads. The
+#: OpenGraph meta is the same claim from the same plugins, and is present on
+#: sites whose schema carries no date at all — ACCTek has a date in neither
+#: its JSON-LD nor anywhere else we looked, and serves
+#: `article:modified_time` on every page.
+#:
+#: The HTTP `Last-Modified` header is deliberately absent. ACCTek's
+#: /managed-it-services-syracuse-ny returns 11 October while its own
+#: `article:modified_time` says 16 May: the header describes when the server
+#: last rendered the page, not when anybody changed it, and reading it would
+#: report an untouched site as entirely fresh.
+_DATE_META = ("article:modified_time", "og:updated_time", "article:published_time")
+
+_SCHEMA_DATE_KEYS = ("dateModified", "datePublished")
+
+
+def _as_date(value: object) -> date | None:
+    """A date out of whatever the page wrote.
+
+    ISO 8601 with an offset, with a `Z`, or a bare date — all three are in
+    the wild, often on the same site.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def newest_schema_date(raws: "Iterable[object]") -> date | None:
+    """The newest `dateModified`, else the newest `datePublished`.
+
+    Newest rather than first: a page carrying both an Article and a
+    BreadcrumbList gets one block per type, and a WordPress page often
+    repeats the site's own dates alongside the post's. SMA's homepage
+    carries 2025-03-18 and 2026-09-07 in one graph, and taking the first
+    would report the site as eighteen months stale.
+
+    Takes the raw payloads rather than blocks, so the backfill can read the
+    same answer out of `facts_crawl_page_schema` without re-crawling.
+    """
+    found: dict[str, list[date]] = {key: [] for key in _SCHEMA_DATE_KEYS}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in found:
+                    parsed = _as_date(value)
+                    if parsed is not None:
+                        found[key].append(parsed)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for raw in raws:
+        if raw is not None:
+            walk(raw)
+    for key in _SCHEMA_DATE_KEYS:
+        if found[key]:
+            return max(found[key])
+    return None
+
+
+def _schema_date(blocks: list["SchemaBlock"]) -> date | None:
+    return newest_schema_date(block.raw for block in blocks)
+
+
+def _meta_date(doc) -> date | None:
+    """`article:modified_time` and its neighbours, by @property.
+
+    `parse_page` queried meta by `@name` only, so every OpenGraph and
+    article tag on every page we have ever crawled was invisible.
+    """
+    for key in _DATE_META:
+        for node in doc.xpath(f'//meta[@property="{key}"]'):
+            parsed = _as_date(node.get("content"))
+            if parsed is not None:
+                return parsed
+    return None
+
+
 def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) -> ParsedPage:
     doc = lxml_html.fromstring(body)
 
@@ -433,6 +532,12 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
     # removes script and style text from the tree.
     sections = extract_sections(doc)
     faq_questions = extract_faq_questions(doc, schema_blocks)
+
+    content_updated_on = _schema_date(schema_blocks)
+    content_updated_source = "schema" if content_updated_on else None
+    if content_updated_on is None:
+        content_updated_on = _meta_date(doc)
+        content_updated_source = "meta" if content_updated_on else None
 
     canonical_raw = None
     for node in doc.xpath('//link[translate(@rel,"CANONICAL","canonical")="canonical"]'):
@@ -537,4 +642,6 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         resource_urls=sorted(set(resources)),
         conversion_elements=conversion_elements,
         says_not_found=bool(_NOT_FOUND.search(title) or _NOT_FOUND.search(h1)),
+        content_updated_on=content_updated_on,
+        content_updated_source=content_updated_source,
     )

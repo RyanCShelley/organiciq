@@ -12,7 +12,7 @@ import asyncio
 import gzip
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib import robotparser
 from urllib.parse import urldefrag, urljoin, urlsplit
@@ -241,7 +241,12 @@ class CrawledPage:
 @dataclass
 class CrawlResult:
     pages: list[CrawledPage] = field(default_factory=list)
-    sitemap_urls: set[str] = field(default_factory=set)
+    #: Every URL the sitemaps list, with the `<lastmod>` beside it where
+    #: one was given. A dict rather than a set because that date is the
+    #: third rung of the freshness ladder, and it was being read off the
+    #: wire and thrown away. Every use of this is set-like — `in`, `len`,
+    #: `sorted`, `|=` — and a dict answers all four.
+    sitemap_urls: dict[str, date | None] = field(default_factory=dict)
     robots_txt_found: bool = False
     #: Set when robots.txt could not be fetched at all, as opposed to absent.
     robots_txt_error: str | None = None
@@ -351,6 +356,21 @@ async def _load_robots(client: httpx.AsyncClient, root: str) -> tuple[robotparse
     return parser, sitemaps
 
 
+def _sitemap_date(value: str | None) -> date | None:
+    """A `<lastmod>` as a date. Sitemaps write it both ways."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
 async def _load_sitemap_urls(
     client: httpx.AsyncClient,
     sitemaps: list[str],
@@ -359,7 +379,7 @@ async def _load_sitemap_urls(
     budget: int,
     scope: str | None = None,
     failures: list[tuple[str, str]] | None = None,
-) -> set[str]:
+) -> dict[str, date | None]:
     """URLs listed in the sitemaps, following index files one level down.
 
     `scope` keeps a path-scoped client to its own folder. It was being read
@@ -367,7 +387,7 @@ async def _load_sitemap_urls(
     moment a sitemap listed a single page — so every crawl that found a
     sitemap failed, for every client, scoped or not.
     """
-    found: set[str] = set()
+    found: dict[str, date | None] = {}
     queue = list(sitemaps)
     seen: set[str] = set()
     while queue and len(found) < budget:
@@ -409,8 +429,12 @@ async def _load_sitemap_urls(
             if failures is not None:
                 failures.append((url, f"is a <{tag}> document, not a sitemap"))
             continue
-        for loc in root.iter():
-            if loc.tag.rsplit("}", 1)[-1] != "loc" or not (loc.text or "").strip():
+        # Walk the entries rather than every <loc> in the document, so a
+        # <lastmod> can be read beside the URL it belongs to.
+        for entry in root:
+            children = {child.tag.rsplit("}", 1)[-1]: child for child in entry}
+            loc = children.get("loc")
+            if loc is None or not (loc.text or "").strip():
                 continue
             value = loc.text.strip()
             if tag == "sitemapindex":
@@ -423,7 +447,10 @@ async def _load_sitemap_urls(
                     and is_page_url(value)
                     and url_in_scope(normalize_url(value), scope)
                 ):
-                    found.add(normalize_url(value))
+                    node = children.get("lastmod")
+                    found[normalize_url(value)] = _sitemap_date(
+                        node.text if node is not None else None
+                    )
             if len(found) >= budget:
                 break
     return found
@@ -640,6 +667,16 @@ async def crawl_site(
             page.inbound_internal_links = inbound.get(key, 0)
             page.inbound_editorial_links = editorial.get(key, 0)
             page.in_sitemap = key in result.sitemap_urls
+            # Third rung of the freshness ladder. The page's own statement
+            # wins; this only speaks where the page said nothing, which is
+            # most of a site built without an SEO plugin.
+            if (
+                page.parsed is not None
+                and page.parsed.content_updated_on is None
+                and result.sitemap_urls.get(key) is not None
+            ):
+                page.parsed.content_updated_on = result.sitemap_urls[key]
+                page.parsed.content_updated_source = "sitemap"
         result.pages = list(pages.values())
         # A condition of the run, reported once, rather than one finding per
         # page about a site that is answering us perfectly well when asked

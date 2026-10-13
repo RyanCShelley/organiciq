@@ -641,7 +641,8 @@ def test_a_first_crawl_with_nothing_indexable_is_still_published(db, client_a, m
 SITEMAP = (
     '<?xml version="1.0"?>'
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-    "<url><loc>https://example.com/unmanned/drones</loc></url>"
+    "<url><loc>https://example.com/unmanned/drones</loc>"
+    "<lastmod>2026-09-22T07:44:46+00:00</lastmod></url>"
     "<url><loc>https://example.com/helicopters/tours</loc></url>"
     "</urlset>"
 )
@@ -653,7 +654,7 @@ def _sitemap_handler(request: httpx.Request) -> httpx.Response:
     )
 
 
-def _load(scope=None) -> set[str]:
+def _load(scope=None) -> dict[str, object]:
     async def run():
         async with _client(_sitemap_handler) as client:
             return await _load_sitemap_urls(
@@ -677,14 +678,16 @@ def test_a_sitemap_listing_pages_does_not_raise():
     clients reporting no crawl data at all.
     """
     assert _load() == {
-        "https://example.com/unmanned/drones",
-        "https://example.com/helicopters/tours",
+        "https://example.com/unmanned/drones": date(2026, 9, 22),
+        "https://example.com/helicopters/tours": None,
     }
 
 
 def test_a_scoped_sitemap_keeps_only_its_own_folder():
     """What `scope` was there to do in the first place."""
-    assert _load(scope="/unmanned") == {"https://example.com/unmanned/drones"}
+    assert _load(scope="/unmanned") == {
+        "https://example.com/unmanned/drones": date(2026, 9, 22)
+    }
 
 
 # ── Subdomains and sitemap discovery ──
@@ -713,8 +716,8 @@ def test_a_gzipped_sitemap_is_read():
             )
 
     assert asyncio.run(run()) == {
-        "https://example.com/unmanned/drones",
-        "https://example.com/helicopters/tours",
+        "https://example.com/unmanned/drones": date(2026, 9, 22),
+        "https://example.com/helicopters/tours": None,
     }
 
 

@@ -181,6 +181,14 @@ def _snapshot_rows(
                     and 200 <= page.status_code < 300
                     else None
                 ),
+                # Already None where the page carried no date, so this one
+                # needs no 2xx guard of its own beyond having been parsed.
+                "content_updated_on": (
+                    parsed.content_updated_on if parsed is not None else None
+                ),
+                "content_updated_source": (
+                    parsed.content_updated_source if parsed is not None else None
+                ),
             }
         )
     return rows
