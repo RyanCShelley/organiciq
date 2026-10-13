@@ -26,9 +26,11 @@ class StagingSerAuditPage(Base):
     inbound_internal_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     in_sitemap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    #: Inbound links that are neither navigation nor site-wide — whether anyone
-    #: actually references this page, as opposed to it sitting in a menu.
-    inbound_editorial_links: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # No editorial-link count here: SE Ranking's audit does not report one.
+    # The field was copied onto this model with the fact table's, where the
+    # first-party crawl fills it in, and inserted a constant zero into a
+    # column no migration ever created — which failed every audit sync from
+    # the day it was added.
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     title_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
