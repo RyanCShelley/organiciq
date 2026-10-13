@@ -244,3 +244,39 @@ def test_the_client_schemas_apply_it():
         ClientCreate(client_name="x", domain="db.railway.internal", tier_id=uuid4())
     assert ClientUpdate(domain="example.com", sitemap_url="https://example.com/s.xml").domain == "example.com"
     assert ClientUpdate().domain is None
+
+
+async def test_an_unreachable_address_falls_through_to_the_next_checked_one(monkeypatch):
+    """Pinning to a single address would fail a good site from a host with no IPv6."""
+    tried: list[str] = []
+
+    class FlakyV6(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            tried.append(request.url.host)
+            if ":" in request.url.host:
+                raise httpx.ConnectError("no route to host", request=request)
+            return httpx.Response(200, text="ok", request=request)
+
+    async def fake_resolve(host, port):
+        return ["2606:2800:220:1:248:1893:25c8:1946", "93.184.216.34"]
+
+    monkeypatch.setattr(safe_http, "_resolve", fake_resolve)
+    client = httpx.AsyncClient(transport=PublicOnlyTransport(FlakyV6()))
+    response = await client.get("https://good.test/")
+    assert response.status_code == 200
+    # IPv4 is tried first, so the unreachable address is never the one we wait on.
+    assert tried[0] == "93.184.216.34"
+
+
+async def test_when_every_checked_address_is_unreachable_the_error_is_a_connect_error(monkeypatch):
+    class Down(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            raise httpx.ConnectError("refused", request=request)
+
+    async def fake_resolve(host, port):
+        return ["93.184.216.34", "93.184.216.35"]
+
+    monkeypatch.setattr(safe_http, "_resolve", fake_resolve)
+    client = httpx.AsyncClient(transport=PublicOnlyTransport(Down()))
+    with pytest.raises(httpx.ConnectError):
+        await client.get("https://good.test/")

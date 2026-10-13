@@ -93,25 +93,38 @@ class PublicOnlyTransport(httpx.AsyncBaseTransport):
             addresses = [host]
         except ValueError:
             addresses = await _resolve(host, port)
-        chosen = check_addresses(host, addresses)[0]
+        # IPv4 first: a container with no IPv6 route would otherwise be pinned
+        # to an address it cannot reach, for a site that is perfectly fine.
+        checked = sorted(
+            check_addresses(host, addresses), key=lambda a: ipaddress.ip_address(a).version
+        )
 
-        # Connect to the address that was checked. The Host header httpx already
+        # Connect to an address that was checked. The Host header httpx already
         # set carries the name, and `sni_hostname` makes TLS verify the
-        # certificate against the name rather than the number.
+        # certificate against the name rather than the number. Each checked
+        # address is tried in turn, as the stock connector would.
         #
         # A copy, never the caller's request: httpx resolves a relative
         # Location against that object and reports `response.url` from it, so
         # rewriting it in place would turn every redirect into one on the
         # bare IP.
-        if chosen != host:
-            request = httpx.Request(
-                request.method,
-                url.copy_with(host=chosen),
-                headers=request.headers,
-                stream=request.stream,
-                extensions={**request.extensions, "sni_hostname": host},
-            )
-        return await self._inner.handle_async_request(request)
+        last_error: Exception | None = None
+        for chosen in checked:
+            attempt = request
+            if chosen != host:
+                attempt = httpx.Request(
+                    request.method,
+                    url.copy_with(host=chosen),
+                    headers=request.headers,
+                    stream=request.stream,
+                    extensions={**request.extensions, "sni_hostname": host},
+                )
+            try:
+                return await self._inner.handle_async_request(attempt)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
 
     async def aclose(self) -> None:
         await self._inner.aclose()
