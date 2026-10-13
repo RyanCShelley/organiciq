@@ -95,6 +95,13 @@ export type MonthlyRecord = {
     reason?: string;
   }[];
   candidates?: Candidate[];
+  /** Retainer work: refreshing existing content, against update_allowance.
+   *  Kept apart from `actions` because growth actions are outside the
+   *  monthly fee and these are inside it. */
+  updates?: RecordAction[];
+  update_slots?: number;
+  empty_update_slots?: { slot: number; reason: string }[];
+  update_candidates?: Candidate[];
   data_gaps: { input: string; status: string }[];
   previous_results: {
     action_uid?: string;
