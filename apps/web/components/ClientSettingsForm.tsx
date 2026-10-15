@@ -239,8 +239,8 @@ export function ClientSettingsForm({
           Name the sites that really compete for this client&apos;s customers — one is
           fine, three is the most. Each month the content plan reads the terms they rank
           for in the top ten and suggests pages for the ones this site has none about.
-          Leave it empty and the plan skips competitors. Each one costs 100 SE Ranking
-          credits a month.
+          Leave it empty and the plan skips competitors. Each one is read once a month
+          (about 13¢ from DataForSEO).
         </p>
         <FieldLabel label="Competitor domains, one per line">
           <textarea

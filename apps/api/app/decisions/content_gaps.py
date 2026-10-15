@@ -121,7 +121,7 @@ class TermGap:
 
     term: str
     volume: float
-    #: SE Ranking's 0-100 keyword difficulty. A gap is not scored without
+    #: The 0-100 keyword difficulty. A gap is not scored without
     #: one: ranking by volume alone would put the term nobody can win first.
     difficulty: float | None
     intents: tuple[str, ...] = ()
@@ -163,7 +163,8 @@ class TermGap:
         return max(0.0, self.volume * (1.0 - min(self.difficulty, 100.0) / 100.0))
 
 
-#: SE Ranking's one-letter intent codes, spelled out.
+#: One-letter intent codes (SE Ranking's), spelled out. DataForSEO already
+#: spells them out, and an unknown value is shown as it came.
 _INTENT = {
     "I": "informational",
     "N": "navigational",
@@ -177,7 +178,7 @@ def _intent(gap: TermGap) -> str:
     if not gap.intents:
         return ""
     named = " / ".join(_INTENT.get(i.strip().upper(), i) for i in gap.intents)
-    return f" SE Ranking reads the intent as {named}."
+    return f" Keyword data reads the intent as {named}."
 
 
 def c1_write_the_page(gap: TermGap) -> Prescription | None:
@@ -298,7 +299,7 @@ class DemandGap:
     #: The page that shows most for it — the page doing the job a new page
     #: should do properly.
     stand_in_url: str | None = None
-    #: SE Ranking's figures, present only once the term has been priced.
+    #: Keyword data, present only once the term has been priced.
     volume: float | None = None
     difficulty: float | None = None
     intents: tuple[str, ...] = ()
@@ -395,13 +396,13 @@ def c2_write_the_page_for_demand(gap: DemandGap) -> Prescription | None:
     if gap.impressions:
         why = (
             f"People searched “{gap.term}” and the site's results were shown "
-            f"{gap.impressions:,.0f} times in {months:.0f} months{where}; SE Ranking "
+            f"{gap.impressions:,.0f} times in {months:.0f} months{where}; keyword data "
             f"counts {gap.volume:,.0f} searches a month. Nobody is tracking it and "
             f"no page is about it. {basis}{stand_in}"
         )
     else:
         why = (
-            f"SE Ranking counts {gap.volume:,.0f} searches a month for “{gap.term}”. "
+            f"Keyword data counts {gap.volume:,.0f} searches a month for “{gap.term}”. "
             f"{rivals} rank in the top ten for it; the site was never shown for it. "
             f"Nobody is tracking it and no page is about it. {basis}"
         )

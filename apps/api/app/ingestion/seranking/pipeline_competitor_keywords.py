@@ -1,7 +1,11 @@
 """Fetch the organic keywords the client's named competitors rank for.
 
-Each competitor is one /domain/keywords request at 100 credits, so the cost is
-bounded two ways: at most `MAX_COMPETITORS` competitors a client, named in
+Read from DataForSEO Labs (ranked keywords), not SE Ranking. The module keeps
+its place under `ingestion/seranking` and its job name so nothing that queues
+it, and no stored row, has to change.
+
+Each competitor is one request, billed per request plus per row (about $0.13 for
+a full 1,000 rows), so the cost is bounded two ways: at most `MAX_COMPETITORS` competitors a client, named in
 client settings, and a competitor is not asked for again until
 `COMPETITOR_REFRESH_DAYS` have passed. That is 300 credits a client a month at
 most, and nothing when the gap analysis has no crawl to compare against (see
@@ -21,8 +25,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
-from app.ingestion.seranking.client import list_domain_keywords
+from app.integrations import dataforseo
 from app.ingestion.seranking.pipeline_domain import resolve_source
 from app.models.client import Client
 from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
@@ -80,9 +83,10 @@ def competitors_to_pull(
 
 def run_seranking_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob:
     try:
-        api_key = get_settings().se_ranking_api_key
-        if not api_key:
-            raise RuntimeError("SE_RANKING_API_KEY is not configured")
+        if not dataforseo.configured():
+            raise RuntimeError(
+                "DataForSEO is not configured. Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD."
+            )
         client = db.query(Client).filter(Client.id == job.client_id).one()
         today = job.end_date or date.today()
 
@@ -93,7 +97,7 @@ def run_seranking_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob:
 
         fetched = written = 0
         for domain in domains:
-            rows = list_domain_keywords(api_key=api_key, domain=domain, source=source)
+            rows = dataforseo.ranked_keywords(domain, source=source, max_position=KEEP_POSITION)
             fetched += len(rows)
             payloads = []
             seen: set[str] = set()
