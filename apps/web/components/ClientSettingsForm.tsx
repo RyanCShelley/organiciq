@@ -478,6 +478,7 @@ export function ClientSettingsForm({
             <FieldLabel label="Watchlist (keywords + AI prompts)">
               <Input
                 name="custom_tracked_keyword_limit"
+                disabled={!canEditPlan}
                 type="number"
                 min={0}
                 required
@@ -490,6 +491,7 @@ export function ClientSettingsForm({
             <FieldLabel label="Watchlist cadence">
               <Select
                 name="custom_watchlist_cadence"
+                disabled={!canEditPlan}
                 defaultValue={client.custom_watchlist_cadence ?? allowances.watchlistCadence}
               >
                 {CADENCE_OPTIONS.map((option) => (
@@ -502,6 +504,7 @@ export function ClientSettingsForm({
             <FieldLabel label="New content per quarter">
               <Input
                 name="custom_content_allowance"
+                disabled={!canEditPlan}
                 type="number"
                 min={0}
                 required
@@ -513,6 +516,7 @@ export function ClientSettingsForm({
             <FieldLabel label="Content refresh per quarter">
               <Input
                 name="custom_update_allowance"
+                disabled={!canEditPlan}
                 type="number"
                 min={0}
                 required
@@ -524,6 +528,7 @@ export function ClientSettingsForm({
             <FieldLabel label="Growth Actions per month">
               <Input
                 name="custom_growth_action_allowance"
+                disabled={!canEditPlan}
                 type="number"
                 min={0}
                 required

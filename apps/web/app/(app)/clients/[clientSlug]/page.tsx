@@ -63,12 +63,17 @@ export default async function ClientSettingsPage({
     conversionsReadable = false;
   }
 
-  let canEditPlan = true;
+  // Who may change the plan is the API's call (admins only); asking it is
+  // the only reliable way to know, since staff can read tiers but not edit.
+  const canEditPlanPromise = apiFetch<{ role: string }>("/auth/me", { clientId })
+    .then((me) => me.role === "sma_admin")
+    .catch(() => false);
   try {
     tiers = await apiFetch<Tier[]>("/admin/tiers");
   } catch {
-    canEditPlan = false;
+    tiers = [];
   }
+  const canEditPlan = await canEditPlanPromise;
 
   try {
     excluded = await apiFetch<ExcludedPage[]>("/decisions/excluded-pages", { clientId });
