@@ -532,3 +532,42 @@ def test_asking_for_no_terms_reads_nothing(db, client_a):
     _gsc_query(db, client_a.id, "managed it services", "https://x.test/a", 300)
     db.commit()
     assert _pages_for_queries(db, client_a.id, period=(date(2026, 10, 1), date(2026, 10, 31)), only=set()) == {}
+
+
+# ── One Google account, two addresses ──
+
+
+def test_the_same_google_account_can_sign_in_under_two_addresses(client):
+    """Your .com and .net addresses are one Google account, so Google reports the
+    same id for both. The id is unique, so giving it to the second address was a
+    duplicate-key error — AccessDenied, once sign-in began failing closed."""
+    domain = _workspace_domain()
+    first = _upsert(client, f"person@{domain}", google_sub="g-same")
+    second = _upsert(client, f"person.alias@{domain}", google_sub="g-same")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+
+def test_the_first_row_to_claim_a_google_id_keeps_it(db, client):
+    from app.models.user import User
+
+    domain = _workspace_domain()
+    _upsert(client, f"one@{domain}", google_sub="g-keep")
+    _upsert(client, f"two@{domain}", google_sub="g-keep")
+
+    rows = {u.email: u.google_sub for u in db.query(User).filter(User.email.in_([f"one@{domain}", f"two@{domain}"]))}
+    assert rows[f"one@{domain}"] == "g-keep"
+    assert rows[f"two@{domain}"] is None  # matched by email, which is what everything reads
+
+
+def test_a_returning_user_is_not_blanked_by_a_taken_id(db, client):
+    from app.models.user import User
+
+    domain = _workspace_domain()
+    _upsert(client, f"stay@{domain}", google_sub="g-stay")
+    _upsert(client, f"other@{domain}", google_sub="g-other")
+    # `stay` signs in again, now reporting an id another row holds
+    _upsert(client, f"stay@{domain}", google_sub="g-other")
+
+    assert db.query(User).filter(User.email == f"stay@{domain}").one().google_sub == "g-stay"
