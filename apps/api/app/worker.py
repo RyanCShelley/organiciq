@@ -127,6 +127,19 @@ def _maybe_check_results() -> None:
         db.close()
 
 
+def _maybe_send_health_digest() -> None:
+    from app.services.health_digest import maybe_send_health_digest
+
+    db = SessionLocal()
+    try:
+        maybe_send_health_digest(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("Health digest scheduler failed")
+    finally:
+        db.close()
+
+
 def _maybe_pull_serp_features() -> None:
     from app.services.serp_features import maybe_pull_serp_features
 
@@ -170,6 +183,7 @@ def main() -> None:
     while True:
         _maybe_daily_sync()
         _maybe_check_results()
+        _maybe_send_health_digest()
         _maybe_pull_serp_features()
         _maybe_run_month()
         worked = run_once()

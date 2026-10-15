@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     monthly_run_enabled: bool = True
     monthly_run_day: int = 5
     monthly_run_hour_utc: int = 12
+    #: The daily health email: what failed, what went stale, what is stuck.
+    #: Needs recipients and an SMTP account (a Google Workspace app password,
+    #: Resend's SMTP, anything standard). With either missing the digest is
+    #: still built and logged, and nothing is sent.
+    health_digest_enabled: bool = True
+    health_digest_hour_utc: int = 13
+    health_digest_to: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))
