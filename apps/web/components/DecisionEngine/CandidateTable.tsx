@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
+import { PlanPick } from "@/components/DecisionEngine/PlanPick";
 import { formatDay, type Candidate } from "@/lib/monthly-record";
 
 function path(url: string): string {
@@ -26,16 +27,53 @@ export function CandidateTable({
   rows,
   kind,
   limit = 25,
+  pick,
 }: {
   rows: Candidate[];
   kind: Kind;
   limit?: number;
+  /** Where an override is saved. Without it the rows are read-only. */
+  pick?: { clientId: string; slug: string; month: string; overridden: string[] };
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [need, setNeed] = useState<string>("all");
   const columns = COLUMNS[kind];
+
+  // "What it needs" is one of a handful of actions, so it filters as chips with
+  // counts. Only the page table has the column.
+  const needs = useMemo(() => {
+    if (kind !== "page") return [];
+    const counts = new Map<string, number>();
+    for (const row of rows) counts.set(row.title, (counts.get(row.title) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rows, kind]);
+  const shown = need === "all" ? rows : rows.filter((row) => row.title === need);
   const width = columns.second ? 4 : 3;
 
   return (
+    <>
+      {needs.length > 1 ? (
+        <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Filter by what it needs">
+          {[["all", rows.length] as const, ...needs].map(([key, count]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={need === key}
+              onClick={() => {
+                setNeed(key);
+                setOpen(null);
+              }}
+              className={`min-h-[30px] rounded-full border px-3 text-[12.5px] font-semibold ${
+                need === key
+                  ? "border-[var(--brand-teal-deep)] text-[var(--text-primary)]"
+                  : "border-[var(--border)] text-[var(--text-secondary)]"
+              }`}
+            >
+              {key === "all" ? "All" : key} · {count}
+            </button>
+          ))}
+        </div>
+      ) : null}
     <div className="table-shell overflow-x-auto">
       <table>
         <thead>
@@ -47,7 +85,7 @@ export function CandidateTable({
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, limit).map((row) => {
+          {shown.slice(0, limit).map((row) => {
             const isOpen = open === row.action_uid;
             const panelId = `candidate-${row.action_uid}`;
             return (
@@ -84,6 +122,11 @@ export function CandidateTable({
                     <td className="text-[13px]">{row.term ?? row.title}</td>
                   )}
                   <td className="whitespace-nowrap text-right tabular-nums">
+                    {pick?.overridden.includes(row.action_uid) ? (
+                      <span className="mr-2 text-[11.5px] text-[var(--text-tertiary)]">
+                        your call
+                      </span>
+                    ) : null}
                     {Math.round(row.score).toLocaleString()}
                   </td>
                 </tr>
@@ -91,7 +134,7 @@ export function CandidateTable({
                   <tr id={panelId}>
                     <td />
                     <td colSpan={width - 1} className="pb-4 pt-1">
-                      <Detail row={row} />
+                      <Detail row={row} pick={pick} />
                     </td>
                   </tr>
                 ) : null}
@@ -101,13 +144,34 @@ export function CandidateTable({
         </tbody>
       </table>
     </div>
+    {shown.length > limit ? (
+      <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+        Showing the top {limit} of {shown.length}.
+      </p>
+    ) : null}
+    </>
   );
 }
 
-function Detail({ row }: { row: Candidate }) {
+function Detail({ row, pick }: { row: Candidate; pick: Parameters<typeof CandidateTable>[0]["pick"] }) {
   return (
     <div className="space-y-3 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-      {row.not_slotted_because ? (
+      {pick ? (
+        <PlanPick
+          uid={row.action_uid}
+          clientId={pick.clientId}
+          slug={pick.slug}
+          month={pick.month}
+          engineChose={row.slot !== null}
+          inPlan={false}
+        />
+      ) : null}
+      {pick?.overridden.includes(row.action_uid) && row.slot !== null ? (
+        <p>
+          <span className="font-semibold text-[var(--text-primary)]">Not in the plan: </span>
+          the engine put this in a slot and you took it out.
+        </p>
+      ) : row.not_slotted_because ? (
         <p>
           <span className="font-semibold text-[var(--text-primary)]">Not in the plan: </span>
           {row.not_slotted_because}

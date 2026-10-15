@@ -268,3 +268,37 @@ export type Workflow = {
   teamwork_ready: boolean;
   actions: SlotState[];
 };
+
+/**
+ * The plan after the team has had its say.
+ *
+ * The engine ranks and fills the slots; a person can put any candidate in or
+ * take any slotted action out. Nothing an override says changes the saved
+ * record, so this is computed at render. Slots are renumbered in display order,
+ * because a slot number belongs to the engine's ordering and the plan is no
+ * longer only that.
+ */
+export function effectivePlan<T extends Candidate>(
+  candidates: T[],
+  states: Map<string, { in_plan: boolean | null }>,
+): { planned: T[]; left: T[]; added: number; removed: number } {
+  const decided = (row: T) => states.get(row.action_uid)?.in_plan ?? null;
+  const chosenByEngine = (row: T) => row.slot !== null;
+  const inPlan = (row: T) => decided(row) ?? chosenByEngine(row);
+
+  const kept = candidates
+    .filter((row) => inPlan(row) && chosenByEngine(row))
+    .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
+  const added = candidates
+    .filter((row) => inPlan(row) && !chosenByEngine(row))
+    .sort((a, b) => b.score - a.score);
+  const planned = [...kept, ...added].map((row, index) => ({ ...row, slot: index + 1 }));
+  const left = candidates.filter((row) => !inPlan(row)).sort((a, b) => b.score - a.score);
+
+  return {
+    planned,
+    left,
+    added: added.length,
+    removed: candidates.filter((row) => chosenByEngine(row) && decided(row) === false).length,
+  };
+}

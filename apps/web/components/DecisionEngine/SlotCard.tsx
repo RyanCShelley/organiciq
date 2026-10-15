@@ -49,9 +49,12 @@ const STATE_CHIP: Record<string, { label: string; className: string }> = {
 export function SlotCard({
   action,
   status,
+  yours,
   children,
 }: {
   action: RecordAction;
+  /** Put in the plan by a person; the engine had left it out. */
+  yours?: boolean;
   /** What the team has done about it: planned, assigned, done or skipped. */
   status?: string;
   children?: React.ReactNode;
@@ -67,7 +70,7 @@ export function SlotCard({
         <div className="min-w-0 flex-1 basis-[420px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-              Slot {action.slot} · {action.id}
+              Slot {action.slot} · {action.id}{yours ? " · your pick" : ""}
             </span>
             <span
               className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${

@@ -83,6 +83,8 @@ async function slotPost(
       body,
     });
     revalidatePath(`/${slug}/decision-engine`);
+    // The retainer plan reads the same workflow rows.
+    revalidatePath(`/${slug}/content-opp`);
     return { ok: true as const, state };
   } catch (e) {
     return {
