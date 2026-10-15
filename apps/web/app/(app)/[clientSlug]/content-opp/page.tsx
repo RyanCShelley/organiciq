@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CandidateTable } from "@/components/DecisionEngine/CandidateTable";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
+import { PlanPick } from "@/components/DecisionEngine/PlanPick";
 import { PoolSummary } from "@/components/DecisionEngine/PoolSummary";
 import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
 import { Alert } from "@/components/ui/Alert";
@@ -10,11 +11,12 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
-import type {
-  Assignee,
-  MonthlyRecord,
-  SlotState,
-  Workflow,
+import {
+  effectivePlan,
+  type Assignee,
+  type MonthlyRecord,
+  type SlotState,
+  type Workflow,
 } from "@/lib/monthly-record";
 
 type RunSummary = { month: string };
@@ -91,31 +93,51 @@ export default async function ContentOppPage({
   // key at all. That is not the same as a plan with no refreshes in it,
   // and saying so sent somebody to check an allowance that was fine.
   const planned = record != null && record.updates !== undefined;
-  const updates = record?.updates ?? [];
-  const emptyUpdates = record?.empty_update_slots ?? [];
+  // The engine recommends; the team has the last word. An action somebody put
+  // in the plan joins it, one they took out drops to the list below, and the
+  // saved record underneath is not touched.
+  const updateCandidates = record?.update_candidates ?? [];
+  const refreshPlan = updateCandidates.length ? effectivePlan(updateCandidates, slotStates) : null;
+  const updates = refreshPlan ? refreshPlan.planned : (record?.updates ?? []);
   const slots = record?.update_slots ?? 0;
+  const emptyUpdates = (record?.empty_update_slots ?? []).slice(
+    0,
+    Math.max(0, slots - updates.length),
+  );
   // Everything the engine weighed and could not fit. The bulk of what it
   // found lives here, and a plan you cannot argue with is not a plan.
-  const alsoFound = (record?.update_candidates ?? [])
-    .filter((row) => row.slot === null)
-    // The column shows the score, so the table is ordered by it. The plan is
-    // filled by loss, and the two differ for a page whose action is not a
-    // refresh.
-    .sort((a, b) => b.score - a.score);
+  const alsoFound = refreshPlan?.left ?? [];
 
   // New pages. Same absence-of-key rule as above: an older record has no
   // `new_content` at all, which is not a plan that found nothing to write.
   const contentPlanned = record != null && record.new_content !== undefined;
-  const newContent = record?.new_content ?? [];
-  const emptyContent = record?.empty_content_slots ?? [];
+  const contentCandidates = record?.content_candidates ?? [];
+  const contentPlan = contentCandidates.length
+    ? effectivePlan(contentCandidates, slotStates)
+    : null;
+  const newContent = contentPlan ? contentPlan.planned : (record?.new_content ?? []);
   const contentSlots = record?.content_slots ?? 0;
-  const scan = record?.content_scan;
-  const contentAlsoFound = (record?.content_candidates ?? []).filter(
-    (row) => row.slot === null,
+  const emptyContent = (record?.empty_content_slots ?? []).slice(
+    0,
+    Math.max(0, contentSlots - newContent.length),
   );
+  const scan = record?.content_scan;
+  const contentAlsoFound = contentPlan?.left ?? [];
   const retainerResults = (record?.previous_results ?? []).filter(
     (row) => row.kind === "update" || row.kind === "content",
   );
+
+  function pickFor(candidates: { action_uid: string }[]) {
+    if (!record) return undefined;
+    return {
+      clientId,
+      slug: client.slug,
+      month: record.month,
+      overridden: candidates
+        .filter((row) => slotStates.get(row.action_uid)?.in_plan != null)
+        .map((row) => row.action_uid),
+    };
+  }
 
   function renderPool(
     actions: NonNullable<MonthlyRecord["updates"]>,
@@ -129,6 +151,7 @@ export default async function ContentOppPage({
           <SlotCard
             action={action}
             status={slotStates.get(action.action_uid)?.status}
+            yours={slotStates.get(action.action_uid)?.in_plan === true}
           >
             <SlotActionBar
               action={action}
@@ -139,6 +162,18 @@ export default async function ContentOppPage({
               month={record!.month}
               teamworkReady={teamworkReady}
             />
+            {record ? (
+              <div className="mt-3">
+                <PlanPick
+                  uid={action.action_uid}
+                  clientId={clientId}
+                  slug={client.slug}
+                  month={record.month}
+                  engineChose={slotStates.get(action.action_uid)?.in_plan !== true}
+                  inPlan
+                />
+              </div>
+            ) : null}
           </SlotCard>
           </div>
         ))}
@@ -310,7 +345,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <CandidateTable rows={contentAlsoFound} kind="term" />
+          <CandidateTable rows={contentAlsoFound} kind="term" pick={pickFor(contentCandidates)} />
         </section>
       ) : null}
 
@@ -328,7 +363,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <CandidateTable rows={alsoFound} kind="page" />
+          <CandidateTable rows={alsoFound} kind="page" pick={pickFor(updateCandidates)} />
         </section>
       ) : null}
 
