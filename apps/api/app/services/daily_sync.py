@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.models.client import WORKED_STATUSES, Client, ClientStatus
 from app.models.integration import Integration, IntegrationProvider
-from app.models.job import DataWatermark
+from app.models.job import DataWatermark, SyncJob
 from app.models.scheduler import SchedulerCheckpoint
 from app.schemas import SyncJobCreate
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
@@ -217,17 +217,33 @@ def enqueue_due_site_crawls(db: Session) -> dict[str, int]:
         for row in db.query(DataWatermark).filter(DataWatermark.source == "site_crawl")
     }
 
+    # Onboarding clients are crawled too: the engine reads the crawl, and
+    # this filtered on ACTIVE alone, so 17 of 24 clients were never crawled
+    # on schedule and two of them showed a stuck job from the last outage.
     clients = (
         db.query(Client)
-        .filter(Client.status == ClientStatus.ACTIVE, Client.domain.isnot(None))
+        .filter(Client.status.in_(WORKED_STATUSES), Client.domain.isnot(None))
         .all()
     )
+    # A client with no good crawl yet is "due" every day by the rule below. If
+    # the site turns the crawler away, that is a failed job a day for as long
+    # as it stays blocked. One attempt per interval is enough.
+    recently_tried = {
+        row[0]
+        for row in db.query(SyncJob.client_id).filter(
+            SyncJob.source == "site_crawl",
+            SyncJob.created_at >= datetime.now(timezone.utc) - timedelta(days=SITE_CRAWL_INTERVAL_DAYS),
+        )
+    }
 
     enqueued = skipped = errors = due = 0
     for client in clients:
         if not (client.domain or "").strip():
             continue
-        if not _site_crawl_due(client.id, last_by_client.get(client.id), today):
+        last_crawl = last_by_client.get(client.id)
+        if last_crawl is None and client.id in recently_tried:
+            continue
+        if not _site_crawl_due(client.id, last_crawl, today):
             continue
         due += 1
         try:
