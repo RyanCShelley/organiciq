@@ -16,6 +16,10 @@ os.environ["DATABASE_URL"] = "postgresql+psycopg://ryanshelley@localhost:5432/or
 os.environ["AUTH_SECRET"] = "test-auth-secret"
 os.environ["SMA_ADMIN_EMAILS"] = "admin@smamarketing.net"
 
+# Production is the default now, and it refuses development secrets. Tests
+# are not production.
+os.environ.setdefault("APP_ENV", "test")
+
 from app.core.db import Base, get_db  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.main import app  # noqa: E402

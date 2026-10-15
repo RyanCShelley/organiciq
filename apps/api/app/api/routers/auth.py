@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
+from app.models.user import User
 from app.schemas import AuthUpsertRequest, HealthOut, UserOut
 from app.services import auth as auth_service
 
@@ -52,6 +53,20 @@ def upsert_user(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_internal_caller)] = None,
 ) -> UserOut:
+    email = payload.email.lower()
+    # The token check already refuses an address outside the workspace; this
+    # is the other door into the same table. Anyone holding the internal secret
+    # could otherwise create a staff user for any address.
+    if not get_settings().is_workspace_email(email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not a workspace account"
+        )
+    # A deactivated user is refused at sign-in, not later. Their token would be
+    # rejected on every call anyway, and the web app would bounce them back to
+    # the login page in a loop that looks like a bug.
+    existing = db.query(User).filter(User.email == email).one_or_none()
+    if existing is not None and not existing.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
     user = auth_service.upsert_user(db, payload)
     return UserOut.model_validate(user)
 

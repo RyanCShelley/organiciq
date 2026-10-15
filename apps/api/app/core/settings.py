@@ -18,16 +18,21 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
+#: The only values that relax the production checks.
+DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "dev", "test", "local"})
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Whether APP_ENV came from the environment, so an explicit "development"
-    # can override Railway's signal but an absent value cannot.
-    app_env_was_set: bool = False
-
-    app_env: str = "development"
-    # Set by Railway itself; used to detect production when APP_ENV is missing.
-    railway_environment_name: str = ""
+    #: Production unless somebody says otherwise. This used to default to
+    #: "development" and detect production from Railway's environment name, so
+    #: the secret checks were on only because one environment happened to be
+    #: called "production". A "staging" or preview environment on real data
+    #: would have booted with the signing secret and encryption key published
+    #: in this repo. Now the safe state is the default, and relaxing it takes
+    #: an explicit APP_ENV=development (or dev / test / local).
+    app_env: str = "production"
     database_url: str = "postgresql+psycopg://organiciq:organiciq@localhost:5432/organiciq"
     auth_secret: str = INSECURE_AUTH_SECRET
     sma_admin_emails: str = ""
@@ -84,27 +89,19 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))
-        object.__setattr__(self, "app_env_was_set", "APP_ENV" in os.environ)
         if self.is_production:
             self._assert_production_secrets()
 
     @property
     def is_production(self) -> bool:
         """
-        True when this is a production deployment.
+        True unless APP_ENV explicitly names a development environment.
 
-        APP_ENV is authoritative when set, but the guard must not be silently
-        inert just because nobody remembered to set it — which is exactly what
-        happened on the first deploy. Railway populates
-        RAILWAY_ENVIRONMENT_NAME itself, so a production Railway environment
-        counts even with APP_ENV unset.
+        An unset value, "production", and anything unrecognised ("staging",
+        a typo) are all treated as production: the checks that refuse default
+        secrets are the thing to fail towards.
         """
-        explicit = self.app_env.strip().lower()
-        if explicit in {"production", "prod"}:
-            return True
-        if explicit in {"development", "dev", "test", "local"} and self.app_env_was_set:
-            return False
-        return self.railway_environment_name.strip().lower() in {"production", "prod"}
+        return self.app_env.strip().lower() not in DEVELOPMENT_ENVIRONMENTS
 
     def _assert_production_secrets(self) -> None:
         """

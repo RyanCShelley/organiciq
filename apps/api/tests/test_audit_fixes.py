@@ -283,3 +283,44 @@ def test_only_an_admin_can_replace_the_workspace_wide_google_grant(client, clien
     res = client.get(path, headers=auth_header(team_user.email))
     assert res.status_code == 403
     assert "admin" in res.json()["detail"].lower()
+
+
+# ── Sign-in registration ──
+
+
+def _upsert(client, email, **extra):
+    from app.core.settings import get_settings
+
+    secret = get_settings().internal_api_secret
+    headers = {"X-OrganicIQ-Internal-Secret": secret} if secret else {}
+    return client.post(
+        "/auth/upsert", json={"email": email, "name": "Someone", "google_sub": "g-1", **extra},
+        headers=headers,
+    )
+
+
+def _workspace_domain() -> str:
+    from app.core.settings import get_settings
+
+    return sorted(get_settings().hosted_domains)[0]
+
+
+def test_a_workspace_account_is_registered(client):
+    email = f"new.person@{_workspace_domain()}"
+    res = _upsert(client, email)
+    assert res.status_code == 200, res.text
+    assert res.json()["email"] == email
+
+
+def test_an_address_outside_the_workspace_is_refused(client):
+    """Anyone holding the internal secret could create a staff user for any address."""
+    res = _upsert(client, "someone@gmail.com")
+    assert res.status_code == 403
+
+
+def test_a_deactivated_account_is_refused_at_sign_in(db, client, team_user):
+    team_user.is_active = False
+    db.commit()
+    res = _upsert(client, team_user.email)
+    assert res.status_code == 403
+    assert "deactivated" in res.json()["detail"].lower()

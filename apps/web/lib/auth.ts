@@ -1,61 +1,36 @@
 import NextAuth from "next-auth";
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
 import type { Session } from "next-auth";
 
+import { HOSTED_DOMAINS, isSmaWorkspaceAccount } from "@/lib/workspace-account";
+
+// A short-lived credential, signed on the server for each request and never
+// stored in the session. It used to live in the session for seven days, which
+// the browser could read from /api/auth/session: anything running on the page
+// (an extension, a future XSS) could lift a week-long key to the whole API.
+const ACCESS_TOKEN_TTL = "15m";
+
 /**
- * SMA Workspace login domains — keep in sync with login page copy.
+ * Create or refresh the user in the API. Called once, at sign-in.
  *
- * Both are accepted through the .com migration: staff accounts and Workspace
- * aliases are still on .net. Override with SMA_GOOGLE_HOSTED_DOMAIN
- * (comma-separated) to change this without a deploy.
+ * Fails closed: if the user cannot be registered, nobody is signed in. It used
+ * to log a warning and mint a token anyway, so a misconfigured deploy
+ * authenticated people without the shared-secret gate that exists to stop that.
  */
-const HOSTED_DOMAINS = (
-  process.env.SMA_GOOGLE_HOSTED_DOMAIN || "smamarketing.com,smamarketing.net"
-)
-  .split(",")
-  .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
-  .filter(Boolean);
-const ACCESS_TOKEN_TTL = "7d";
-const ACCESS_TOKEN_REFRESH_SKEW_SEC = 5 * 60;
-
-function isSmaWorkspaceAccount(email: string, hd?: string | null): boolean {
-  const domain = email.trim().toLowerCase().split("@").pop() ?? "";
-  if (HOSTED_DOMAINS.includes(domain)) return true;
-  if (HOSTED_DOMAINS.includes((hd ?? "").toLowerCase())) return true;
-  return false;
-}
-
-async function accessTokenNeedsRefresh(token?: string): Promise<boolean> {
-  if (!token) return true;
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return true;
-
-  try {
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-    const exp = payload.exp;
-    if (!exp) return true;
-    const now = Math.floor(Date.now() / 1000);
-    return exp - now <= ACCESS_TOKEN_REFRESH_SKEW_SEC;
-  } catch {
-    return true;
-  }
-}
-
-async function mintApiToken(input: {
+async function registerUser(input: {
   email: string;
   name: string | null;
   googleSub: string;
-}): Promise<string | undefined> {
+}): Promise<boolean> {
   const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-  const secret = process.env.AUTH_SECRET;
-  if (!secret || !input.email) return undefined;
-
+  const internalSecret = process.env.INTERNAL_API_SECRET;
+  if (!internalSecret && process.env.NODE_ENV === "production") {
+    console.error("[auth] INTERNAL_API_SECRET is not set; refusing sign-in");
+    return false;
+  }
   try {
-    // Shared secret gating the upsert: it mints staff users, so the API must
-    // only accept it from this app. Required in production on both sides.
-    const internalSecret = process.env.INTERNAL_API_SECRET;
     const res = await fetch(`${apiUrl}/auth/upsert`, {
       method: "POST",
       headers: {
@@ -69,38 +44,31 @@ async function mintApiToken(input: {
       }),
     });
     if (!res.ok) {
-      console.warn("[auth] upsert failed", res.status, await res.text());
+      // Status only: the body and the address can name a real person.
+      console.warn("[auth] sign-in refused by the API", res.status);
     }
-  } catch (err) {
-    console.warn("[auth] upsert unreachable", err);
+    return res.ok;
+  } catch {
+    console.warn("[auth] the API was unreachable at sign-in");
+    return false;
   }
+}
 
-  const key = new TextEncoder().encode(secret);
-  return new SignJWT({
-    email: input.email.toLowerCase(),
-    name: input.name,
-    sub: input.googleSub,
-  })
+async function signApiToken(email: string, name: string | null): Promise<string | undefined> {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret || !email) return undefined;
+  return new SignJWT({ email: email.toLowerCase(), name, sub: email.toLowerCase() })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(ACCESS_TOKEN_TTL)
-    .sign(key);
+    .sign(new TextEncoder().encode(secret));
 }
 
+/** The bearer token for one server-side call, signed now from the verified session. */
 export async function ensureApiAccessToken(session: Session | null): Promise<string | undefined> {
   const email = session?.user?.email?.toLowerCase();
   if (!email) return undefined;
-
-  const existing = session?.accessToken;
-  if (existing && !(await accessTokenNeedsRefresh(existing))) {
-    return existing;
-  }
-
-  return mintApiToken({
-    email,
-    name: session?.user?.name ?? null,
-    googleSub: session?.googleSub || email,
-  });
+  return signApiToken(email, session?.user?.name ?? null);
 }
 
 /**
@@ -143,53 +111,51 @@ export const authConfig = {
   ],
   session: {
     strategy: "jwt",
-    // Keep SMA staff signed in; jwt callback still refreshes the API access token.
-    maxAge: 30 * 24 * 60 * 60,
-    // Re-run jwt callback periodically so stale API tokens get refreshed in the cookie.
-    updateAge: 5 * 60,
+    // A day, sliding with use. It was thirty days, so someone removed from the
+    // Workspace stayed signed in for a month unless the API had been told to
+    // deactivate them. Google sign-in is silent for anyone already signed in.
+    maxAge: 24 * 60 * 60,
+    updateAge: 60 * 60,
   },
   callbacks: {
     async signIn({ user, profile, account }) {
       if (account?.provider !== "google") return false;
 
       const email = (user?.email || profile?.email || "").toLowerCase();
-      const hd = (profile as { hd?: string } | undefined)?.hd;
+      const claims = profile as { hd?: string; email_verified?: boolean; sub?: string } | undefined;
 
-      if (!isSmaWorkspaceAccount(email, hd)) {
-        console.warn("[auth] denied non-SMA account", { email, hd });
+      // Google must say it checked the address belongs to this person.
+      if (claims?.email_verified !== true) {
+        console.warn("[auth] denied: email not verified by Google");
+        return false;
+      }
+      if (!isSmaWorkspaceAccount(email, claims?.hd)) {
+        // The domain and whether `hd` was present, never the address itself.
+        console.warn("[auth] denied non-SMA account", {
+          domain: email.split("@").pop(),
+          hasHd: Boolean(claims?.hd),
+        });
         return false;
       }
 
-      return true;
+      return registerUser({
+        email,
+        name: (profile?.name || user?.name || null) as string | null,
+        googleSub: claims?.sub || account?.providerAccountId || email,
+      });
     },
     async jwt({ token, account, profile, user }) {
-      const email = (profile?.email || user?.email || token.email || "").toLowerCase();
-      const name = profile?.name || user?.name || token.name || null;
-      const googleSub =
-        profile?.sub || account?.providerAccountId || (token.sub as string | undefined) || email;
-
-      if (account && email) {
+      if (account) {
+        const email = (profile?.email || user?.email || token.email || "").toLowerCase();
         token.email = email;
-        token.name = name;
-        token.sub = googleSub;
+        token.name = profile?.name || user?.name || token.name || null;
+        token.sub = profile?.sub || account.providerAccountId || email;
       }
-
-      if (
-        email &&
-        (await accessTokenNeedsRefresh(token.accessToken as string | undefined))
-      ) {
-        token.accessToken = await mintApiToken({
-          email,
-          name: name as string | null,
-          googleSub,
-        });
-      }
-
       return token;
     },
     async session({ session, token }) {
-      session.accessToken = token.accessToken as string | undefined;
-      session.googleSub = token.sub as string | undefined;
+      // Identity only. Nothing here can authenticate a request: this object is
+      // returned to the browser by /api/auth/session.
       if (session.user) {
         session.user.email = (token.email as string) ?? session.user.email;
         session.user.name = (token.name as string) ?? session.user.name;

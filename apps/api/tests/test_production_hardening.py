@@ -501,35 +501,50 @@ def test_baseline_period_end_falls_back_to_as_of(db, client_a):
 # --- The guard must not be silently inert -----------------------------------
 #
 # It shipped inert on the first production deploy: APP_ENV was never set, so
-# is_production was False, so nothing validated and nothing said so.
+# is_production was False, so nothing validated and nothing said so. Detecting
+# production from Railway's environment name fixed that for one environment
+# called "production" and nothing else, so the default is now production and
+# only an explicit development value relaxes it.
+
+_STRONG = dict(
+    auth_secret=STRONG,
+    integration_token_key=STRONG,
+    internal_api_secret=STRONG,
+    allowed_origins="https://app.example.com",
+)
 
 
-def test_railway_production_environment_engages_the_guard():
-    """Railway sets RAILWAY_ENVIRONMENT_NAME itself — APP_ENV is not required."""
-    settings = Settings(
-        railway_environment_name="production",
-        auth_secret=STRONG,
-        integration_token_key=STRONG,
-        internal_api_secret=STRONG,
-        allowed_origins="https://app.example.com",
-    )
-    assert settings.is_production is True
+def test_an_unset_environment_is_production(monkeypatch):
+    """Nobody has to remember to set it."""
+    monkeypatch.delenv("APP_ENV", raising=False)
+    assert Settings(_env_file=None, **_STRONG).is_production is True
 
 
-def test_railway_production_still_rejects_a_missing_internal_secret():
+def test_an_unset_environment_refuses_the_published_development_secrets(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    for name in ("AUTH_SECRET", "INTEGRATION_TOKEN_KEY", "INTERNAL_API_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="AUTH_SECRET"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("name", ["staging", "preview", "qa", "prod-eu", "Prod", ""])
+def test_an_unrecognised_environment_is_production_not_development(name):
+    """A staging environment on real data must not boot with the repo's secrets."""
+    with pytest.raises(RuntimeError, match="AUTH_SECRET"):
+        Settings(app_env=name)
+
+
+@pytest.mark.parametrize("name", ["development", "dev", "test", "local", "  Development "])
+def test_only_an_explicit_development_environment_relaxes_the_guard(name):
+    assert Settings(app_env=name).is_production is False
+
+
+def test_production_still_rejects_a_missing_internal_secret(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="INTERNAL_API_SECRET"):
-        Settings(
-            railway_environment_name="production",
-            auth_secret=STRONG,
-            integration_token_key=STRONG,
-            internal_api_secret="",
-            allowed_origins="https://app.example.com",
-        )
-
-
-def test_non_production_railway_environment_does_not_engage_the_guard():
-    settings = Settings(railway_environment_name="preview")
-    assert settings.is_production is False
+        Settings(_env_file=None, **{**_STRONG, "internal_api_secret": ""})
 
 
 def test_explicit_app_env_production_still_wins():

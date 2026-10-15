@@ -19,6 +19,8 @@ services:
     build:
       context: ./apps/api
     environment:
+      # Production is the default; these are development secrets.
+      APP_ENV: development
       DATABASE_URL: postgresql+psycopg://organiciq:organiciq@db:5432/organiciq
       AUTH_SECRET: dev-auth-secret-change-me
       SMA_ADMIN_EMAILS: admin@smamarketing.net
