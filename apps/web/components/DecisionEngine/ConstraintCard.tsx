@@ -50,11 +50,12 @@ function BranchTile({
 }) {
   const test = headline(branch);
   const failing = branch.status === "fail";
+  const focus = isConstraint && failing;
   return (
     <div
       className={`rounded-[10px] border px-4 py-3.5 ${
-        isConstraint && failing
-          ? "border-2 border-[#E3B25C] bg-[#FFFAF0]"
+        focus
+          ? "border-2 border-[#0F8F82] bg-[#EEF9F7]"
           : "border-[var(--border)]"
       }`}
     >
@@ -64,11 +65,11 @@ function BranchTile({
         </span>
         <span
           className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
-            STATUS_CHIP[branch.status]
+            focus ? "bg-[#0F8F82] text-white" : STATUS_CHIP[branch.status]
           }`}
         >
-          {branch.status === "fail" && isConstraint
-            ? "Opportunity · focus"
+          {focus
+            ? "Focus"
             : (STATUS_LABEL[branch.status] ?? branch.status)}
         </span>
       </div>
@@ -83,7 +84,11 @@ function BranchTile({
         <>
           <p
             className={`mt-1.5 font-[family-name:var(--font-display)] text-[24px] font-black tabular-nums leading-none ${
-              failing ? "text-[#8A4B08]" : "text-[var(--text-primary)]"
+              focus
+                ? "text-[#0B6F65]"
+                : failing
+                  ? "text-[#8A4B08]"
+                  : "text-[var(--text-primary)]"
             }`}
           >
             {test ? testValue(test) : "—"}
