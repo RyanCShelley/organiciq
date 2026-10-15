@@ -57,7 +57,33 @@ _STOP = frozenset(
 _SUFFIXES = ("ing", "ers", "er", "ed", "es", "s")
 
 
+#: British spellings that differ from the American in a way no suffix rule
+#: finds. Applied to both sides of every comparison, so a page written "fiber"
+#: and a query typed "fibre" are the same word. Without it every such query
+#: looked like demand for a page the site already has.
+_SPELLING = {
+    "fibre": "fiber", "centre": "center", "metre": "meter", "litre": "liter",
+    "theatre": "theater", "calibre": "caliber", "colour": "color",
+    "behaviour": "behavior", "favour": "favor", "neighbour": "neighbor",
+    "labour": "labor", "honour": "honor", "grey": "gray", "tyre": "tire",
+    "aluminium": "aluminum", "programme": "program", "cheque": "check",
+}
+
+_ISE = re.compile(r"^(.{3,})is(ation|ations|e|ed|es|ing)$")
+
+
+def _spelling(word: str) -> str:
+    if word in _SPELLING:
+        return _SPELLING[word]
+    match = _ISE.match(word)
+    # optimisation -> optimization, organise -> organize. Applied the same on
+    # both sides, so a word that merely ends this way ("promise" -> "promize")
+    # still meets itself.
+    return f"{match.group(1)}iz{match.group(2)}" if match else word
+
+
 def _stem(word: str) -> str:
+    word = _spelling(word)
     for suffix in _SUFFIXES:
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
             return word[: -len(suffix)]
@@ -75,7 +101,9 @@ def content_words(text: str) -> frozenset[str]:
     """The words of a phrase that carry its meaning, lightly stemmed."""
     words = [w for w in re.split(r"[^a-z0-9]+", (text or "").lower()) if w]
     drop = _STOP | {"it"} if words and words[0] in _QUESTION_OPENERS else _STOP
-    return frozenset(_stem(w) for w in words if w not in drop)
+    # A single letter ("i beam", "vitamin d") is not a word to match on; it
+    # showed up as the one word no page carried.
+    return frozenset(_stem(w) for w in words if w not in drop and not (len(w) == 1 and w.isalpha()))
 
 
 @dataclass(frozen=True)

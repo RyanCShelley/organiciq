@@ -120,6 +120,15 @@ export type MonthlyRecord = {
     small?: number;
     gaps?: number;
     pages_searched?: number;
+    /** Search Console demand the site has no page about, beyond tracked terms. */
+    demand_queries?: number;
+    demand_tracked?: number;
+    demand_brand?: number;
+    demand_small?: number;
+    demand_earning?: number;
+    demand_covered?: number;
+    demand_unpriced?: number;
+    demand_gaps?: number;
     blocked?: string;
   };
   data_gaps: { input: string; status: string }[];

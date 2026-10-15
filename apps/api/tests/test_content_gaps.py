@@ -264,3 +264,14 @@ def test_a_word_the_site_never_uses_is_a_gap_whatever_else_matches(db, client_a)
     scan = scan_term_gaps(db, client_a)
     assert [g.term for g in scan.gaps] == ["pool leak detection orlando"]
     assert scan.gaps[0].absent_words == ("orlando",)
+
+
+def test_british_and_american_spellings_are_one_word():
+    assert content_words("carbon fibre") == content_words("carbon fiber")
+    assert content_words("organic search optimisation") == content_words("organic search optimization")
+    assert content_words("colour options") == content_words("color options")
+
+
+def test_a_single_letter_is_not_a_word_to_match_on():
+    assert content_words("carbon fiber i beam") == content_words("carbon fiber beam")
+    assert "88" in content_words("helo 88")

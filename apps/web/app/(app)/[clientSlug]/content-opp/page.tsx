@@ -273,6 +273,18 @@ export default async function ContentOppPage({
             {scan.small ?? 0} under the volume floor.
           </p>
         ) : null}
+
+        {contentPlanned && scan && !scan.blocked && (scan.demand_queries ?? 0) > 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            Beyond tracked terms: Search Console showed {scan.demand_queries} queries in
+            the last 90 days. {scan.demand_small ?? 0} drew too few impressions,{" "}
+            {scan.demand_tracked ?? 0} are already tracked or mapped,{" "}
+            {scan.demand_brand ?? 0} are brand queries, {scan.demand_earning ?? 0} already
+            earn a top-10 position and {scan.demand_covered ?? 0} have a page about them.
+            That leaves {scan.demand_gaps ?? 0} with a price and{" "}
+            {scan.demand_unpriced ?? 0} waiting for one.
+          </p>
+        ) : null}
       </section>
 
       {contentAlsoFound.length > 0 ? (
