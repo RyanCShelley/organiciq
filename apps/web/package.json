@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx lib/client-path.test.ts && tsx lib/csv.test.ts && tsx lib/table-sort.test.ts && tsx lib/workspace-account.test.ts"
   },
   "dependencies": {
     "jose": "^6.0.10",
@@ -25,6 +26,7 @@
     "eslint": "^9.23.0",
     "eslint-config-next": "^15.2.4",
     "tailwindcss": "^4.0.17",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.2"
   }
 }

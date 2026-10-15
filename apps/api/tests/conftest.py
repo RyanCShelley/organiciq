@@ -12,7 +12,21 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 # Always isolate tests from the local/dev database.
-os.environ["DATABASE_URL"] = "postgresql+psycopg://ryanshelley@localhost:5432/organiciq_test"
+#
+# The suite DROPS every table in the database it connects to, so it never reads
+# the general DATABASE_URL (which could be production). The default is a local
+# database; CI points TEST_DATABASE_URL at its own. The name must say it is a
+# test database or the run is refused. The default was hardcoded to one
+# person's macOS username, so the suite could only ever run on their machine.
+_TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+psycopg://ryanshelley@localhost:5432/organiciq_test"
+)
+if "organiciq_test" not in _TEST_DATABASE_URL:
+    raise RuntimeError(
+        "TEST_DATABASE_URL must name an organiciq_test database: the suite drops "
+        "every table in the database it connects to."
+    )
+os.environ["DATABASE_URL"] = _TEST_DATABASE_URL
 os.environ["AUTH_SECRET"] = "test-auth-secret"
 os.environ["SMA_ADMIN_EMAILS"] = "admin@smamarketing.net"
 
