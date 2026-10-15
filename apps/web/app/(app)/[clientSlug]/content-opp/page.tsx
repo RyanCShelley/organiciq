@@ -322,9 +322,19 @@ export default async function ContentOppPage({
           </p>
         ) : null}
 
+        {contentPlanned && scan && !scan.blocked && (client.competitor_domains ?? []).length === 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            No competitors set, so the plan is not looking at what they rank for.{" "}
+            <Link href={`/clients/${client.slug}#competitors`} className="underline">
+              Add up to 3 in client settings
+            </Link>
+            .
+          </p>
+        ) : null}
+
         {contentPlanned && scan && !scan.blocked && (scan.competitor_keywords ?? 0) > 0 ? (
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-            Competitors: the closest ones rank in the top ten for {scan.competitor_keywords}{" "}
+            Competitors: yours rank in the top ten for {scan.competitor_keywords}{" "}
             terms. {scan.competitor_tracked ?? 0} are already tracked or mapped,{" "}
             {scan.competitor_brand ?? 0} name a brand, {scan.competitor_small ?? 0} are too
             small to chase, {scan.competitor_earning ?? 0} already earn a top-10 position

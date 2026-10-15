@@ -215,6 +215,44 @@ export function ClientSettingsForm({
         </FieldLabel>
       </div>
 
+      <div
+        id="competitors"
+        className="scroll-mt-24 rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-3"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
+            Competitors
+          </p>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
+              (client.competitor_domains ?? []).length > 0
+                ? "bg-[#E5F4EC] text-[#15784F]"
+                : "bg-[#FDF1E3] text-[#8A4B08]"
+            }`}
+          >
+            {(client.competitor_domains ?? []).length > 0
+              ? `${(client.competitor_domains ?? []).length} of 3 set`
+              : "None set"}
+          </span>
+        </div>
+        <p className="text-sm text-[var(--text-secondary)]">
+          Name the sites that really compete for this client&apos;s customers — one is
+          fine, three is the most. Each month the content plan reads the terms they rank
+          for in the top ten and suggests pages for the ones this site has none about.
+          Leave it empty and the plan skips competitors. Each one costs 100 SE Ranking
+          credits a month.
+        </p>
+        <FieldLabel label="Competitor domains, one per line">
+          <textarea
+            name="competitor_domains"
+            rows={3}
+            defaultValue={(client.competitor_domains ?? []).join("\n")}
+            placeholder={"rival-one.com\nrival-two.com\nrival-three.com"}
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+          />
+        </FieldLabel>
+      </div>
+
       <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-3">
         <div>
           <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
@@ -407,24 +445,6 @@ export function ClientSettingsForm({
             The name and domain are already covered. Add the spellings people really
             type — a query that names the business is navigation, and no page change
             or link moves it, so the plan will not prescribe one.
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Competitors (up to 3)">
-            <textarea
-              name="competitor_domains"
-              rows={3}
-              defaultValue={(client.competitor_domains ?? []).join("\n")}
-              placeholder="One domain per line, e.g. rival.com"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            />
-          </FieldLabel>
-          <p className="text-xs text-[var(--text-secondary)]">
-            The sites that really compete for this client&apos;s customers — one is
-            fine. Each month the content plan reads the terms they rank for in the top
-            ten and suggests pages for the ones this site has none about. Each competitor
-            costs 100 SE Ranking credits a month, so three is the limit. Leave blank to
-            skip it.
           </p>
         </div>
         <div className="flex flex-col gap-1">
