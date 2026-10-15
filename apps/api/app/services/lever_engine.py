@@ -921,30 +921,35 @@ def _pages_for_queries(
     client_id: UUID,
     *,
     period: tuple[date, date] | None,
+    only: set[str] | None = None,
 ) -> dict[str, ExistingPageForQuery]:
     """The page Search Console already shows for each query.
 
     Keyed on the lowercased query, because a watchlist entry and a Search
     Console query differ in case far more often than in substance.
+
+    `only` limits it to those (lowercased) queries. A caller that will look up
+    a few hundred terms should not summarise the thousands of queries a site
+    has ever shown and carry all of them into Python to use a handful.
     """
     if period is None:
         return {}
+    if only is not None and not only:
+        return {}
     start, end = period
-    rows = (
-        db.query(
-            FactGscQueryPage.query,
-            FactGscQueryPage.normalized_url,
-            func.sum(FactGscQueryPage.impressions).label("impressions"),
-            func.avg(FactGscQueryPage.average_position).label("position"),
-        )
-        .filter(
-            FactGscQueryPage.client_id == client_id,
-            FactGscQueryPage.date >= start,
-            FactGscQueryPage.date <= end,
-        )
-        .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
-        .all()
+    query = db.query(
+        FactGscQueryPage.query,
+        FactGscQueryPage.normalized_url,
+        func.sum(FactGscQueryPage.impressions).label("impressions"),
+        func.avg(FactGscQueryPage.average_position).label("position"),
+    ).filter(
+        FactGscQueryPage.client_id == client_id,
+        FactGscQueryPage.date >= start,
+        FactGscQueryPage.date <= end,
     )
+    if only is not None:
+        query = query.filter(func.lower(func.trim(FactGscQueryPage.query)).in_(sorted(only)))
+    rows = query.group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url).all()
     best: dict[str, ExistingPageForQuery] = {}
     for query, url, impressions, position in rows:
         key = (query or "").strip().lower()

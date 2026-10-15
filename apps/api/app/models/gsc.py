@@ -116,6 +116,10 @@ class FactGscPage(Base):
             name="uq_facts_gsc_pages_grain",
         ),
         Index("ix_facts_gsc_pages_client_date", "client_id", "date"),
+        # One page over a window — what the results loop asks for every action.
+        # The grain index leads with date, so a single URL cost 26 index
+        # searches and ~300 ms on SMA's 785,000 rows.
+        Index("ix_facts_gsc_pages_client_url_date", "client_id", "normalized_url", "date"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

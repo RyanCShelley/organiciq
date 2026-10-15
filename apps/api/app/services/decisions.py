@@ -378,7 +378,13 @@ def keyword_page_map_view(db, client_id, *, period=None):
         .filter(FactSerKeywordMetric.client_id == client_id)
         .all()
     }
-    suggestions = _pages_for_queries(db, client_id, period=period)
+    tracked_rows = (
+        db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
+    )
+    # Only the tracked terms are ever looked up below, so only those are asked
+    # for. This summarised every query the site has ever shown.
+    tracked_keys = {(row.keyword or "").strip().lower() for row in tracked_rows} - {""}
+    suggestions = _pages_for_queries(db, client_id, period=period, only=tracked_keys)
     # Where Search Console shows a page, that wins: it is an observation.
     # The model fills the gap — a term that ranks nowhere has no observation
     # to offer, and after a relaunch the only page that ranks is the
@@ -410,9 +416,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
             canonical_of[url] = canonical
 
     rows = []
-    for tracked in (
-        db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id).all()
-    ):
+    for tracked in tracked_rows:
         keyword = (tracked.keyword or "").strip()
         if not keyword:
             continue

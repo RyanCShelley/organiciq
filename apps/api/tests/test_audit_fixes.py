@@ -487,3 +487,48 @@ def test_the_crawl_list_query_count_does_not_grow_with_the_site(db, engine, clie
     small = count(3)
     large = count(40)
     assert large == small, (small, large)
+
+
+# ── The keyword map asks Search Console only about its own terms ──
+
+
+def _gsc_query(db, client_id, query, url, impressions):
+    from decimal import Decimal
+
+    from app.models.gsc import FactGscQueryPage
+
+    db.add(
+        FactGscQueryPage(
+            id=uuid4(), client_id=client_id, date=date(2026, 10, 10), query=query,
+            raw_url=url, normalized_url=url, country="", device="",
+            impressions=Decimal(impressions), clicks=Decimal(1), ctr=Decimal("0.01"),
+            average_position=Decimal("5"),
+        )
+    )
+
+
+def test_the_page_lookup_can_be_limited_to_the_terms_wanted(db, client_a):
+    from app.services.lever_engine import _pages_for_queries
+
+    _gsc_query(db, client_a.id, "managed it services", "https://x.test/a", 300)
+    _gsc_query(db, client_a.id, "Managed IT Services", "https://x.test/b", 100)
+    _gsc_query(db, client_a.id, "something else", "https://x.test/c", 900)
+    db.commit()
+    period = (date(2026, 10, 1), date(2026, 10, 31))
+
+    everything = _pages_for_queries(db, client_a.id, period=period)
+    only = _pages_for_queries(db, client_a.id, period=period, only={"managed it services"})
+
+    assert set(everything) == {"managed it services", "something else"}
+    assert set(only) == {"managed it services"}
+    # The winning page for the term is the same either way.
+    assert only["managed it services"] == everything["managed it services"]
+    assert only["managed it services"].page_url == "https://x.test/a"
+
+
+def test_asking_for_no_terms_reads_nothing(db, client_a):
+    from app.services.lever_engine import _pages_for_queries
+
+    _gsc_query(db, client_a.id, "managed it services", "https://x.test/a", 300)
+    db.commit()
+    assert _pages_for_queries(db, client_a.id, period=(date(2026, 10, 1), date(2026, 10, 31)), only=set()) == {}
