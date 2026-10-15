@@ -27,7 +27,8 @@ if "organiciq_test" not in _TEST_DATABASE_URL:
         "every table in the database it connects to."
     )
 os.environ["DATABASE_URL"] = _TEST_DATABASE_URL
-os.environ["AUTH_SECRET"] = "test-auth-secret"
+# 32+ characters: PyJWT warns about a shorter HMAC key, and production enforces the same floor.
+os.environ["AUTH_SECRET"] = "test-auth-secret-for-the-suite-only-0123456789"
 # Credentials are fixed, not inherited. A developer's .env holds real ones, and
 # two tests passed only on a machine that had a real SE Ranking key — they
 # failed the first time the suite ran anywhere else. External calls are mocked,

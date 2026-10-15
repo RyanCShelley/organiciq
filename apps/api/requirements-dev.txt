@@ -1,0 +1,5 @@
+# Everything the API runs, plus what the tests need. Production images install
+# requirements.txt alone: a test runner has no business in the runtime image.
+-r requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0

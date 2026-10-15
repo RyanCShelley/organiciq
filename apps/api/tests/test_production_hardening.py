@@ -529,10 +529,12 @@ def test_an_unset_environment_refuses_the_published_development_secrets(monkeypa
 
 
 @pytest.mark.parametrize("name", ["staging", "preview", "qa", "prod-eu", "Prod", ""])
-def test_an_unrecognised_environment_is_production_not_development(name):
+def test_an_unrecognised_environment_is_production_not_development(name, monkeypatch):
     """A staging environment on real data must not boot with the repo's secrets."""
-    with pytest.raises(RuntimeError, match="AUTH_SECRET"):
-        Settings(app_env=name)
+    for var in ("AUTH_SECRET", "INTEGRATION_TOKEN_KEY", "INTERNAL_API_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(RuntimeError, match="Refusing to start"):
+        Settings(_env_file=None, app_env=name)
 
 
 @pytest.mark.parametrize("name", ["development", "dev", "test", "local", "  Development "])
