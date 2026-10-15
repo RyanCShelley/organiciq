@@ -61,6 +61,8 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     "se_ranking_backlinks": (),
     # Writes straight to facts; no staging tables to purge.
     "se_ranking_keyword_metrics": (),
+    # Writes straight to facts; no staging tables to purge.
+    "se_ranking_competitor_keywords": (),
 }
 
 

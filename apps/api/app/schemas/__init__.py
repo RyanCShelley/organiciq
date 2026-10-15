@@ -11,6 +11,7 @@ from app.models.config import OrganicChannel, TopicStatus
 from app.models.integration import ConnectionStatus, IntegrationProvider
 from app.models.job import SyncJobStatus, ValidationStatus
 from app.models.user import UserRole
+from app.services.competitors import clean_competitor_domains
 
 
 class ORMModel(BaseModel):
@@ -67,6 +68,7 @@ class ClientCreate(BaseModel):
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
     brand_aliases: list[str] = []
+    competitor_domains: list[str] = []
     account_sheet_url: str | None = None
     #: Where this client's sent growth actions land in Teamwork. The site and
     #: token are install-wide; this is the only per-client part, and without
@@ -108,6 +110,11 @@ class ClientCreate(BaseModel):
             raise ValueError(f"{info.field_name} {problem}")
         return value
 
+    @field_validator("competitor_domains", check_fields=False)
+    @classmethod
+    def _at_most_three_competitors(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else clean_competitor_domains(value)
+
 
 class ClientUpdate(BaseModel):
     client_name: str | None = None
@@ -120,6 +127,7 @@ class ClientUpdate(BaseModel):
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
     brand_aliases: list[str] | None = None
+    competitor_domains: list[str] | None = None
     account_sheet_url: str | None = None
     #: Where this client's sent growth actions land in Teamwork. The site
     #: and token are install-wide; this is the only per-client part, and
@@ -161,6 +169,11 @@ class ClientUpdate(BaseModel):
             raise ValueError(f"{info.field_name} {problem}")
         return value
 
+    @field_validator("competitor_domains", check_fields=False)
+    @classmethod
+    def _at_most_three_competitors(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else clean_competitor_domains(value)
+
 
 class ClientOut(ORMModel):
     id: UUID
@@ -173,6 +186,7 @@ class ClientOut(ORMModel):
     timezone: str
     monthly_lead_goal: int | None
     brand_aliases: list[str] = []
+    competitor_domains: list[str] = []
     account_sheet_url: str | None
     teamwork_tasklist_id: str | None = None
     custom_tracked_keyword_limit: int | None = None

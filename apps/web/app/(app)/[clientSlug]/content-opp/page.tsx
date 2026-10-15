@@ -285,6 +285,17 @@ export default async function ContentOppPage({
             {scan.demand_unpriced ?? 0} waiting for one.
           </p>
         ) : null}
+
+        {contentPlanned && scan && !scan.blocked && (scan.competitor_keywords ?? 0) > 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            Competitors: the closest ones rank in the top ten for {scan.competitor_keywords}{" "}
+            terms. {scan.competitor_tracked ?? 0} are already tracked or mapped,{" "}
+            {scan.competitor_brand ?? 0} name a brand, {scan.competitor_small ?? 0} are too
+            small to chase, {scan.competitor_earning ?? 0} already earn a top-10 position
+            here and {scan.competitor_covered ?? 0} have a page about them. That leaves{" "}
+            {scan.competitor_gaps ?? 0} with no page on this site.
+          </p>
+        ) : null}
       </section>
 
       {contentAlsoFound.length > 0 ? (

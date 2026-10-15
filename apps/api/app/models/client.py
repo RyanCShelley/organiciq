@@ -92,6 +92,11 @@ class Client(Base):
     brand_aliases: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    #: Up to three competitor domains the team names. The gap analysis reads
+    #: their top-ranking terms; nothing is read for a client that names none.
+    competitor_domains: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     # Enterprise (and optional overrides): agreement-specific plan amounts
     custom_tracked_keyword_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     custom_tracked_prompt_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)

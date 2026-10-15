@@ -66,6 +66,13 @@ export async function updateClientSettingsAction(formData: FormData) {
     .map((name) => name.trim())
     .filter(Boolean);
 
+  // One domain per line, at most three: each is a 100-credit SE Ranking read a
+  // month. The API cleans them to bare domains and refuses a fourth.
+  const competitorDomains = String(formData.get("competitor_domains") || "")
+    .split(/[\n;,]/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+
   // One input per checkpoint, named lead_goal_<month>. A blank box means "use
   // the projection", so it is left out rather than sent as zero.
   const leadGoalOverrides: Record<string, number> = {};
@@ -156,6 +163,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     sitemap_url: sitemapUrl,
     path_prefix: pathPrefix,
     brand_aliases: brandAliases,
+    competitor_domains: competitorDomains,
     lead_goal_overrides: leadGoalOverrides,
   };
 

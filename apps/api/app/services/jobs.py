@@ -198,6 +198,9 @@ def _job_handlers() -> dict[str, object]:
     from app.ingestion.seranking.pipeline_keyword_metrics import (
         run_seranking_keyword_metrics_job,
     )
+    from app.ingestion.seranking.pipeline_competitor_keywords import (
+        run_seranking_competitor_keywords_job,
+    )
     from app.ingestion.seranking.pipeline_domain import run_seranking_domain_keywords_job
 
     return {
@@ -212,6 +215,9 @@ def _job_handlers() -> dict[str, object]:
         "se_ranking_domain_keywords": run_seranking_domain_keywords_job,
         # Billed per keyword looked up, so on-demand like its neighbours.
         "se_ranking_keyword_metrics": run_seranking_keyword_metrics_job,
+        # 100 credits per competitor, capped at three a client and bought at
+        # most monthly by daily_sync.enqueue_due_competitor_keywords.
+        "se_ranking_competitor_keywords": run_seranking_competitor_keywords_job,
         # Per-URL backlink counts. Not in daily_sync: a link profile moves
         # slowly, and it is read monthly alongside the crawl.
         "se_ranking_backlinks": run_seranking_backlinks_job,
