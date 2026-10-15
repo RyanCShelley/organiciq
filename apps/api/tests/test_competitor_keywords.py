@@ -96,7 +96,7 @@ def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
     _name(db, client_a, "a.com", "b.com", "c.com")
     asked: list[str] = []
 
-    def fake(domain, *, source, max_position):
+    def fake(domain, *, source, max_position, limit):
         asked.append(domain)
         return [
             {"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30},
@@ -277,3 +277,88 @@ def test_the_old_job_names_still_run_the_same_jobs():
     handlers = _job_handlers()
     assert handlers["se_ranking_competitor_keywords"] is handlers["dataforseo_competitor_keywords"]
     assert handlers["se_ranking_keyword_metrics"] is handlers["dataforseo_keyword_metrics"]
+
+
+# --- A slow competitor ------------------------------------------------------
+
+
+def test_one_competitor_timing_out_does_not_cost_the_others(db, client_a, monkeypatch):
+    _name(db, client_a, "slow.com", "b.com")
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+
+    def fake(domain, **kw):
+        if domain == "slow.com":
+            raise pipeline.dataforseo.DataForSeoError("DataForSEO did not answer: timed out")
+        return [{"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30}]
+
+    monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", fake)
+    job = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+
+    assert job.status is SyncJobStatus.PARTIAL
+    assert "slow.com" in job.error_message and "timed out" in job.error_message
+    assert {r.competitor_domain for r in db.query(FactSerCompetitorKeyword)} == {"b.com"}
+    # The one that failed is still due, so a later run picks it up.
+    assert pipeline.competitors_to_pull(db, client_a, today=TODAY) == ["slow.com"]
+
+
+def test_every_competitor_failing_fails_the_job_and_names_them(db, client_a, monkeypatch):
+    _name(db, client_a, "a.com", "b.com")
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+
+    def boom(domain, **kw):
+        raise pipeline.dataforseo.DataForSeoError("timed out")
+
+    monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", boom)
+    job = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    assert job.status is SyncJobStatus.FAILED
+    assert "a.com" in job.error_message and "b.com" in job.error_message
+
+
+def test_bad_credentials_stop_the_run_instead_of_failing_each_competitor(db, client_a, monkeypatch):
+    _name(db, client_a, "a.com", "b.com")
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    asked: list[str] = []
+
+    def rejected(domain, **kw):
+        asked.append(domain)
+        raise pipeline.dataforseo.DataForSeoAuthError("rejected")
+
+    monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", rejected)
+    job = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    assert job.status is SyncJobStatus.FAILED and asked == ["a.com"]
+
+
+def test_the_job_asks_for_five_hundred_rows_not_a_thousand(db, client_a, monkeypatch):
+    _name(db, client_a, "a.com")
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    seen: list[int] = []
+    monkeypatch.setattr(
+        pipeline.dataforseo, "ranked_keywords", lambda domain, **kw: seen.append(kw["limit"]) or []
+    )
+    pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    assert seen == [500]
+
+
+def test_labs_calls_wait_longer_than_the_default():
+    from app.integrations import dataforseo
+
+    assert dataforseo.LABS_TIMEOUT_SECONDS > dataforseo.TIMEOUT_SECONDS
+
+
+def test_a_failed_read_is_not_queued_again_for_a_few_days(db, client_a, monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.services import daily_sync
+
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    _site(db, client_a)
+    _name(db, client_a, "a.com")
+    db.add(
+        SyncJob(
+            id=uuid4(), client_id=client_a.id, source="dataforseo_competitor_keywords",
+            start_date=TODAY, end_date=TODAY, status=SyncJobStatus.FAILED,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+    assert daily_sync.enqueue_due_competitor_keywords(db)["due"] == 0

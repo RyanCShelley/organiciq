@@ -28,6 +28,11 @@ logger = logging.getLogger("organiciq.dataforseo")
 
 ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
 TIMEOUT_SECONDS = 90.0
+#: Labs answers a big domain slowly: a ranked-keywords request that filters and
+#: sorts a large site ran past 90 seconds in production. A request that times
+#: out may still be billed, so the answer is a longer wait and fewer rows, not
+#: a retry.
+LABS_TIMEOUT_SECONDS = 240.0
 
 #: Google's US location code, and the default market for these clients.
 DEFAULT_LOCATION_CODE = 2840
@@ -139,6 +144,7 @@ def _post_task(
     *,
     config: DataForSeoConfig | None = None,
     client: httpx.Client | None = None,
+    timeout: float = TIMEOUT_SECONDS,
 ) -> dict:
     """POST one task and return it once DataForSEO says it worked.
 
@@ -152,7 +158,7 @@ def _post_task(
             "DATAFORSEO_PASSWORD."
         )
     owns_client = client is None
-    client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
+    client = client or httpx.Client(timeout=timeout)
     try:
         response = client.post(
             url,
@@ -299,7 +305,9 @@ def ranked_keywords(
             "order_by": ["keyword_data.keyword_info.search_volume,desc"],
         }
     ]
-    task = _post_task(RANKED_KEYWORDS_ENDPOINT, payload, config=config, client=client)
+    task = _post_task(
+        RANKED_KEYWORDS_ENDPOINT, payload, config=config, client=client, timeout=LABS_TIMEOUT_SECONDS
+    )
     results = task.get("result") or []
     items = (results[0].get("items") if results else None) or []
     rows: list[dict] = []
@@ -353,6 +361,7 @@ def keyword_overview(
             [{"keywords": batch, "location_code": location_code, "language_code": language_code}],
             config=config,
             client=client,
+            timeout=LABS_TIMEOUT_SECONDS,
         )
         results = task.get("result") or []
         for item in (results[0].get("items") if results else None) or []:
