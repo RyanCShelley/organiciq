@@ -98,5 +98,8 @@ jobs:
         working-directory: apps/web
         run: npm audit --omit=dev
       - name: pip-audit
+        # Runs even when the npm step reported something: they are separate
+        # reports and the first one finding advisories must not hide the second.
+        if: always()
         working-directory: apps/api
         run: pip install pip-audit && pip-audit -r requirements.txt
