@@ -128,6 +128,10 @@ def run_seranking_audit_job(db: Session, job: SyncJob) -> SyncJob:
         )
         return job
     except Exception as exc:  # noqa: BLE001
+        # A failed statement leaves the session unusable until it is rolled
+        # back; without this the commit below raised and the job was recorded
+        # only as "Unhandled worker error".
+        db.rollback()
         job.status = SyncJobStatus.FAILED
         job.validation_status = ValidationStatus.FAILED
         job.error_message = str(exc)

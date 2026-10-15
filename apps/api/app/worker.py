@@ -90,12 +90,12 @@ def run_once() -> bool:
                     result.source,
                     result.client_id,
                 )
-        except Exception:  # noqa: BLE001 — worker must not crash on one bad job
+        except Exception as exc:  # noqa: BLE001 — worker must not crash on one bad job
             db.rollback()
             logger.exception("Job %s failed with unhandled exception", job_id)
             job = db.get(SyncJob, job_id)
             if job is not None:
-                jobs.mark_job_failed(db, job, "Unhandled worker error — see worker logs")
+                jobs.mark_job_failed(db, job, f"Unhandled worker error: {type(exc).__name__}: {str(exc)[:300]}")
         return True
     finally:
         db.close()

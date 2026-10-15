@@ -233,3 +233,46 @@ def test_ga4_pipeline_with_mocked_api(db, client_a):
     )
     assert wm.fact_through_date is not None
     assert wm.validation_status == ValidationStatus.PASSED
+
+
+def test_two_landing_pages_that_normalize_alike_are_added_not_rejected(db, client_a):
+    """
+    /pricing and /pricing?utm=x are two rows to GA4 and one fact row to us.
+    Sent as a single upsert, Postgres refuses it ("cannot affect row a
+    second time") and the client's GA4 sync failed every day.
+    """
+    _seed_channel_rules(db)
+    start, end = _window(2)
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="ga4",
+        start_date=start,
+        end_date=end,
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.flush()
+    for landing_page, sessions in (("/pricing", "10"), ("/pricing?ref=nav", "5")):
+        db.add(
+            StagingGa4Traffic(
+                job_id=job.id,
+                client_id=client_a.id,
+                raw={},
+                date=start,
+                landing_page=landing_page,
+                session_source="google",
+                session_medium="organic",
+                sessions=Decimal(sessions),
+                active_users=Decimal("1"),
+                views=Decimal("2"),
+            )
+        )
+    db.commit()
+
+    publish_ga4(db, job)
+
+    facts = db.query(FactGa4Traffic).filter(FactGa4Traffic.client_id == client_a.id).all()
+    assert len(facts) == 1
+    assert facts[0].sessions == Decimal("15")
+    assert facts[0].views == Decimal("4")

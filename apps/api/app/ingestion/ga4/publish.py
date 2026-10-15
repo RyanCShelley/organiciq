@@ -21,6 +21,36 @@ def _chunked(items: Sequence[dict[str, Any]], size: int) -> list[list[dict[str, 
     return [list(items[i : i + size]) for i in range(0, len(items), size)]
 
 
+TRAFFIC_GRAIN = ("client_id", "date", "normalized_url", "channel", "session_source", "session_medium")
+EVENT_GRAIN = TRAFFIC_GRAIN + ("event_name",)
+
+
+def _merge_on_grain(
+    payloads: list[dict[str, Any]], grain: tuple[str, ...], additive: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    """
+    Collapse rows that land on the same fact row, adding their measures.
+
+    GA4 reports a landing page with and without a query string as different
+    rows; normalizing the URL makes them one. Sent to Postgres as one upsert
+    that is "ON CONFLICT DO UPDATE command cannot affect row a second time",
+    which failed triple-m-outfitters' GA4 sync every day since the first such
+    pair appeared, with the cause hidden behind a generic worker error.
+    """
+    merged: dict[tuple, dict[str, Any]] = {}
+    for payload in payloads:
+        key = tuple(payload[column] for column in grain)
+        kept = merged.get(key)
+        if kept is None:
+            merged[key] = dict(payload)
+            continue
+        for column in additive:
+            if payload[column] is None:
+                continue
+            kept[column] = payload[column] if kept[column] is None else kept[column] + payload[column]
+    return list(merged.values())
+
+
 def _rules(db: Session) -> list[ChannelRule]:
     return db.query(ChannelRule).filter(ChannelRule.active.is_(True)).order_by(ChannelRule.priority.asc()).all()
 
@@ -88,6 +118,11 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 "event_count": row.event_count or 0,
             }
         )
+
+    traffic_payloads = _merge_on_grain(
+        traffic_payloads, TRAFFIC_GRAIN, ("sessions", "active_users", "views", "engaged_sessions")
+    )
+    event_payloads = _merge_on_grain(event_payloads, EVENT_GRAIN, ("event_count",))
 
     for batch in _chunked(traffic_payloads, UPSERT_BATCH_SIZE):
         if not batch:
