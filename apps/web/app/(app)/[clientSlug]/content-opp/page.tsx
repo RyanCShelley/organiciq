@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CandidateTable } from "@/components/DecisionEngine/CandidateTable";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { PoolSummary } from "@/components/DecisionEngine/PoolSummary";
@@ -309,26 +310,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <div className="table-shell overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Term</th>
-                  <th className="text-right">Opportunity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contentAlsoFound.slice(0, 25).map((row) => (
-                  <tr key={row.action_uid}>
-                    <td className="text-[13px]">{row.term ?? row.title}</td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      {Math.round(row.score).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CandidateTable rows={contentAlsoFound} kind="term" />
         </section>
       ) : null}
 
@@ -346,30 +328,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <div className="table-shell overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Page</th>
-                  <th>What it needs</th>
-                  <th className="text-right">Impressions at stake</th>
-                </tr>
-              </thead>
-              <tbody>
-                {alsoFound.slice(0, 25).map((row) => (
-                  <tr key={row.action_uid}>
-                    <td className="font-[family-name:var(--font-mono)] text-[12.5px]">
-                      {row.target_url.replace(/^https?:\/\/[^/]+/, "") || "/"}
-                    </td>
-                    <td className="text-[13px]">{row.title}</td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      {Math.round(row.score).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CandidateTable rows={alsoFound} kind="page" />
         </section>
       ) : null}
 
