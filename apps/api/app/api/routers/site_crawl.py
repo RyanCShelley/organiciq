@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.client_scope import require_client
 from app.core.db import get_db
@@ -51,10 +51,39 @@ def is_pagination_url(url: str) -> bool:
 
 
 def _schema_by_url(db: Session, client_id) -> dict[str, list[FactCrawlPageSchema]]:
+    # Three columns, not the row. `raw` is the whole JSON-LD document and none
+    # of the endpoints that call this reads it, so it was loaded for every block
+    # of every page only to be thrown away — most of the time on a slow filter
+    # click.
     rows: dict[str, list[FactCrawlPageSchema]] = {}
-    for row in db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client_id):
+    for row in (
+        db.query(FactCrawlPageSchema)
+        .options(
+            load_only(
+                FactCrawlPageSchema.normalized_url,
+                FactCrawlPageSchema.schema_type,
+                FactCrawlPageSchema.parse_error,
+            )
+        )
+        .filter(FactCrawlPageSchema.client_id == client_id)
+    ):
         rows.setdefault(row.normalized_url, []).append(row)
     return rows
+
+
+# What the list endpoints read from a snapshot. `sections`, `faq_questions` and
+# the descriptions are wide JSON and text the tables never show.
+_LIST_COLUMNS = (
+    FactCrawlPageSnapshot.normalized_url,
+    FactCrawlPageSnapshot.status_code,
+    FactCrawlPageSnapshot.indexable,
+    FactCrawlPageSnapshot.title,
+    FactCrawlPageSnapshot.word_count,
+    FactCrawlPageSnapshot.inbound_internal_links,
+    FactCrawlPageSnapshot.inbound_editorial_links,
+    FactCrawlPageSnapshot.in_sitemap,
+    FactCrawlPageSnapshot.redirect_count,
+)
 
 
 def _crawled_at(db: Session, client_id) -> str | None:
@@ -86,6 +115,7 @@ def crawled_pages(
     """Every page the crawl reached, worst first, with the filters applied."""
     rows = (
         db.query(FactCrawlPageSnapshot)
+        .options(load_only(*_LIST_COLUMNS))
         .filter(
             FactCrawlPageSnapshot.client_id == client.id,
             FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
@@ -212,6 +242,7 @@ def structured_data_pages(
     """
     pages = (
         db.query(FactCrawlPageSnapshot)
+        .options(load_only(*_LIST_COLUMNS))
         .filter(
             FactCrawlPageSnapshot.client_id == client.id,
             FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
@@ -258,6 +289,7 @@ def structured_data(
     """Structured-data coverage, and the pages that need attention."""
     pages = (
         db.query(FactCrawlPageSnapshot)
+        .options(load_only(*_LIST_COLUMNS))
         .filter(
             FactCrawlPageSnapshot.client_id == client.id,
             FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,

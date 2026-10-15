@@ -42,6 +42,12 @@ export default async function ContentOppPage({
 
   let record: MonthlyRecord | null = null;
   let recordError: string | null = null;
+  // Started now: the people list does not depend on the record, so it was
+  // waiting behind two round trips it had nothing to do with.
+  const assigneesPromise = apiFetch<Assignee[]>("/decisions/assignees", { clientId }).then(
+    (people) => ({ ok: true as const, people }),
+    () => ({ ok: false as const, people: [] as Assignee[] }),
+  );
   try {
     const runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
     const month = typeof query.run === "string" ? query.run : runs[0]?.month;
@@ -68,11 +74,13 @@ export default async function ContentOppPage({
           `/decisions/records/${encodeURIComponent(record.month)}/workflow`,
           { clientId },
         ),
-        apiFetch<Assignee[]>("/decisions/assignees", { clientId }),
+        assigneesPromise,
       ]);
+      // Both or neither, as before.
+      if (!people.ok) throw new Error("assignees unavailable");
       slotStates = new Map(workflow.actions.map((row) => [row.uid, row]));
       teamworkReady = workflow.teamwork_ready;
-      assignees = people;
+      assignees = people.people;
     } catch {
       // Leave the plan readable.
     }

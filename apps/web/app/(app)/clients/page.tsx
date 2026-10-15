@@ -10,6 +10,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
+import { getClients } from "@/lib/clients";
 import { apiFetch, type Client, type PlatformOverviewRow, type Tier } from "@/lib/api";
 import { tableControls, filterRows } from "@/lib/table-sort";
 
@@ -30,35 +31,31 @@ export default async function ClientsIndexPage({
   let portfolio: Portfolio | null = null;
   let error: string | null = null;
 
-  try {
-    clients = await apiFetch<Client[]>("/clients");
-  } catch (e) {
+  // Four independent calls, made together. They were awaited one after another,
+  // so the page waited for the sum. Each keeps its own failure rule: only the
+  // client list is allowed to fail the page.
+  const [clientsResult, overviewResult, tiersResult, portfolioResult] = await Promise.allSettled([
+    getClients(),
+    // Source health is a nice-to-have column — never fail the list over it.
+    apiFetch<PlatformOverviewRow[]>("/admin/platform/overview"),
+    // Tiers populate the Add client form; its own empty state covers a failure.
+    apiFetch<Tier[]>("/admin/tiers"),
+    // Its own call, so a failure costs the overview and not the client list.
+    apiFetch<Portfolio>("/decisions/portfolio"),
+  ]);
+
+  if (clientsResult.status === "fulfilled") {
+    clients = clientsResult.value;
+  } else {
+    const e = clientsResult.reason;
     const message = e instanceof Error ? e.message : "Failed to load clients";
     error = message.toLowerCase().includes("invalid or expired token")
       ? "Your API session expired. Refresh the page or sign in again."
       : message;
   }
-
-  // Source health is a nice-to-have column — never fail the list over it.
-  try {
-    overview = await apiFetch<PlatformOverviewRow[]>("/admin/platform/overview");
-  } catch {
-    overview = [];
-  }
-
-  // Tiers populate the Add client form; its own empty state covers a failure.
-  try {
-    tiers = await apiFetch<Tier[]>("/admin/tiers");
-  } catch {
-    tiers = [];
-  }
-
-  // Its own call, so a failure costs the overview and not the client list.
-  try {
-    portfolio = await apiFetch<Portfolio>("/decisions/portfolio");
-  } catch {
-    portfolio = null;
-  }
+  overview = overviewResult.status === "fulfilled" ? overviewResult.value : [];
+  tiers = tiersResult.status === "fulfilled" ? tiersResult.value : [];
+  portfolio = portfolioResult.status === "fulfilled" ? portfolioResult.value : null;
 
   const clientsTable = tableControls(params, "/clients", "c");
   const overviewById = new Map(overview.map((row) => [row.client_id, row]));

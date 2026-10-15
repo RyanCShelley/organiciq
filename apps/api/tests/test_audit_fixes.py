@@ -402,3 +402,88 @@ def test_suggesting_with_everything_confirmed_makes_no_model_call(db, client, cl
 
     assert res.json() == {"suggested": 0, "pages": 1, "already_confirmed": 1}
     assert classifier.read == []
+
+
+# ── The site-crawl lists do not load what they never show ──
+
+
+def _seed_crawl(db, client_a, pages: int, start: int = 0):
+    from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSchema, FactCrawlPageSnapshot
+
+    for i in range(start, start + pages):
+        url = f"https://example.com/p{i}"
+        db.add(
+            FactCrawlPageSnapshot(
+                id=uuid4(), client_id=client_a.id, source=CRAWL_SOURCE_FIRST_PARTY,
+                snapshot_date=date(2026, 10, 1), raw_url=url, normalized_url=url, status_code=200,
+                indexable=True, word_count=900, inbound_internal_links=3, inbound_editorial_links=1,
+                redirect_count=0, title=f"Page {i}", description="d" * 400,
+                sections=[{"heading": "h", "first_paragraph": "p" * 300}] * 8,
+                faq_questions=["why?"] * 5,
+            )
+        )
+        for t in ("Article", "FAQPage"):
+            db.add(
+                FactCrawlPageSchema(
+                    id=uuid4(), client_id=client_a.id, snapshot_date=date(2026, 10, 1),
+                    normalized_url=url, syntax="json-ld", schema_type=t,
+                    raw={"@type": t, "blob": "x" * 2000},
+                )
+            )
+    db.commit()
+
+
+def _record_sql(engine):
+    from sqlalchemy import event
+
+    seen: list[str] = []
+
+    def capture(conn, cursor, statement, *args):
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    return seen, lambda: event.remove(engine, "before_cursor_execute", capture)
+
+
+def test_the_crawl_lists_never_select_the_wide_columns(db, engine, client, client_a, team_user):
+    """`raw` (a whole JSON-LD document per block) and `sections` were loaded for
+    every page of every filter click and thrown away."""
+    from tests.conftest import client_header
+
+    _seed_crawl(db, client_a, pages=5)
+    headers = client_header(client_a.id, team_user.email)
+    seen, stop = _record_sql(engine)
+    try:
+        for path in ("/site-crawl/pages", "/site-crawl/schema", "/site-crawl/schema/pages?type=Article"):
+            assert client.get(path, headers=headers).status_code == 200, path
+    finally:
+        stop()
+    selects = [s for s in seen if s.lstrip().upper().startswith("SELECT")]
+    joined = "\n".join(selects)
+    assert "facts_crawl_page_schema.raw" not in joined
+    assert "facts_crawl_page_snapshots.sections" not in joined
+    assert "facts_crawl_page_snapshots.faq_questions" not in joined
+
+
+def test_the_crawl_list_query_count_does_not_grow_with_the_site(db, engine, client, client_a, team_user):
+    """A deferred column read later becomes one query per row. This would show it."""
+    from tests.conftest import client_header
+
+    headers = client_header(client_a.id, team_user.email)
+
+    seeded = 0
+
+    def count(pages):
+        nonlocal seeded
+        _seed_crawl(db, client_a, pages=pages, start=seeded)
+        seeded += pages
+        seen, stop = _record_sql(engine)
+        try:
+            client.get("/site-crawl/pages", headers=headers)
+        finally:
+            stop()
+        return len([s for s in seen if s.lstrip().upper().startswith("SELECT")])
+
+    small = count(3)
+    large = count(40)
+    assert large == small, (small, large)

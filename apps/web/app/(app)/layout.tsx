@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { ContentContainer } from "@/components/ui/ContentContainer";
-import { apiFetch, type Client } from "@/lib/api";
+import type { Client } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { getClients } from "@/lib/clients";
 import { resolveStoredRange } from "@/lib/date-range";
 
 import { signOutAction } from "./actions";
@@ -25,7 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   let clients: Client[] = [];
   try {
-    clients = await apiFetch<Client[]>("/clients");
+    clients = await getClients();
   } catch {
     clients = [];
   }

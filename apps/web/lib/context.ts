@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { apiFetch, type Client } from "@/lib/api";
+import { getClients } from "@/lib/clients";
 import { clientHref, isClientUuid } from "@/lib/client-path";
 import { resolveStoredRange } from "@/lib/date-range";
 
@@ -18,7 +19,7 @@ export async function resolveClientId(
 
   // Match the chrome default: first accessible client when none is persisted yet.
   try {
-    const clients = await apiFetch<Client[]>("/clients");
+    const clients = await getClients();
     return clients[0]?.id ?? null;
   } catch {
     return null;
@@ -52,13 +53,13 @@ export async function resolveDateRange(
 // and nobody looked at the API. "Not found" now means the client is not in the
 // list; anything else is an error and says so (app/(app)/error.tsx).
 export async function loadClientById(clientId: string): Promise<Client | null> {
-  const clients = await apiFetch<Client[]>("/clients");
+  const clients = await getClients();
   return clients.find((client) => client.id === clientId) ?? null;
 }
 
 /** Resolve a workspace path param that may be a slug or a legacy UUID. */
 export async function loadClientByParam(param: string): Promise<Client | null> {
-  const clients = await apiFetch<Client[]>("/clients");
+  const clients = await getClients();
   const bySlug = clients.find((client) => client.slug === param);
   if (bySlug) return bySlug;
   if (isClientUuid(param)) {

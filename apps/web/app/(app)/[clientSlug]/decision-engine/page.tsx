@@ -48,13 +48,16 @@ export default async function DecisionEnginePage({
   // Re-running replaces a saved record, so it stays an admin action. The API
   // enforces it; this only decides whether the button is drawn, because a
   // button that always 403s is worse than no button.
-  let canRun = false;
-  try {
-    const me = await apiFetch<{ role: string }>("/auth/me", { clientId });
-    canRun = me.role === "sma_admin";
-  } catch {
-    canRun = false;
-  }
+  //
+  // Started now and awaited below: the role and the people list do not depend on
+  // the record, so they were waiting behind it for no reason.
+  const canRunPromise = apiFetch<{ role: string }>("/auth/me", { clientId })
+    .then((me) => me.role === "sma_admin")
+    .catch(() => false);
+  const assigneesPromise = apiFetch<Assignee[]>("/decisions/assignees", { clientId }).then(
+    (people) => ({ ok: true as const, people }),
+    () => ({ ok: false as const, people: [] as Assignee[] }),
+  );
 
   try {
     runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
@@ -68,6 +71,8 @@ export default async function DecisionEnginePage({
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load the saved run";
   }
+
+  const canRun = await canRunPromise;
 
   // The workflow is fetched apart from the record for the same reason it is
   // stored apart: assigning a task must not be able to change what the engine
@@ -83,11 +88,14 @@ export default async function DecisionEnginePage({
           `/decisions/records/${encodeURIComponent(record.month)}/workflow`,
           { clientId },
         ),
-        apiFetch<Assignee[]>("/decisions/assignees", { clientId }),
+        assigneesPromise,
       ]);
+      // Both or neither, as before: a workflow without the people to assign
+      // it to would draw buttons that cannot work.
+      if (!people.ok) throw new Error("assignees unavailable");
       slotStates = new Map(workflow.actions.map((row) => [row.uid, row]));
       teamworkReady = workflow.teamwork_ready;
-      assignees = people;
+      assignees = people.people;
     } catch {
       // Leave the plan readable.
     }
