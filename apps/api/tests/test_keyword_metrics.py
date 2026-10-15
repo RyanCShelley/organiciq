@@ -9,7 +9,6 @@ ranking — by definition not these.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from types import SimpleNamespace
 from uuid import uuid4
 
 from app.ingestion.seranking import pipeline_keyword_metrics as pipeline
@@ -67,16 +66,14 @@ def _tracked(db, client_id, *keywords):
 
 
 def _stub(monkeypatch, rows=API_ROWS, spy=None):
-    monkeypatch.setattr(
-        pipeline, "get_settings", lambda: SimpleNamespace(se_ranking_api_key="k")
-    )
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
 
-    def _fetch(api_key, keywords, *, source="us"):
+    def _fetch(keywords, *, source="us"):
         if spy is not None:
             spy.append(list(keywords))
         return rows
 
-    monkeypatch.setattr(pipeline, "fetch_keyword_metrics", _fetch)
+    monkeypatch.setattr(pipeline.dataforseo, "keyword_overview", _fetch)
 
 
 def test_it_stores_difficulty_for_a_term_the_client_does_not_rank_for(
@@ -157,14 +154,12 @@ def test_a_rerun_updates_rather_than_duplicating(db, client_a, monkeypatch):
 
 def test_a_failure_records_why(db, client_a, monkeypatch):
     _tracked(db, client_a.id, "seo services")
-    monkeypatch.setattr(
-        pipeline, "get_settings", lambda: SimpleNamespace(se_ranking_api_key="k")
-    )
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
 
     def _boom(*args, **kwargs):
         raise RuntimeError("keyword database said no")
 
-    monkeypatch.setattr(pipeline, "fetch_keyword_metrics", _boom)
+    monkeypatch.setattr(pipeline.dataforseo, "keyword_overview", _boom)
 
     job = pipeline.run_seranking_keyword_metrics_job(db, _job(db, client_a.id))
 

@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, datetime, timezone
 
 from app.ingestion.seranking.pipeline_keyword_metrics import KEYWORD_METRICS_INTERVAL_DAYS
@@ -54,6 +55,16 @@ def test_maybe_run_daily_sync_enqueues_mapped_sources(db, client_a: Client, monk
     assert "ga4" in sources
 
     assert daily_sync.maybe_run_daily_sync(db) is False
+
+
+@pytest.fixture(autouse=True)
+def _dataforseo_configured(monkeypatch):
+    """Keyword pricing and competitor reads are DataForSEO's, and are not queued without it."""
+    from app.integrations import dataforseo
+
+    monkeypatch.setattr(
+        dataforseo, "load_config", lambda: dataforseo.DataForSeoConfig(login="l", password="p")
+    )
 
 
 def _track(db, client_id, keyword: str) -> None:

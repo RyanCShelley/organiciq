@@ -133,45 +133,29 @@ def parse(result: dict) -> SerpFeatures:
     )
 
 
-def fetch(
-    keyword: str,
+def _post_task(
+    url: str,
+    payload: list[dict],
     *,
-    location_code: int = DEFAULT_LOCATION_CODE,
-    language_code: str = DEFAULT_LANGUAGE,
-    depth: int = DEFAULT_DEPTH,
     config: DataForSeoConfig | None = None,
     client: httpx.Client | None = None,
-) -> SerpFeatures:
-    """One query's SERP features. One call, and the account is billed for it."""
+) -> dict:
+    """POST one task and return it once DataForSEO says it worked.
+
+    DataForSEO answers 200 with a per-task status, so the HTTP code alone does
+    not say a pull worked. Every endpoint here is billed per call.
+    """
     config = config or load_config()
     if config is None:
         raise DataForSeoError(
             "DataForSEO is not configured. Set DATAFORSEO_LOGIN and "
             "DATAFORSEO_PASSWORD."
         )
-    if not keyword.strip():
-        raise DataForSeoError("A SERP pull needs a keyword.")
-
-    # The body is an array of tasks even when there is only one.
-    payload = [
-        {
-            "keyword": keyword,
-            "location_code": location_code,
-            "language_code": language_code,
-            "depth": depth,
-            "device": "desktop",
-            # Without this the AI Overview comes back as a type with no
-            # references, so "the client does not hold it" would be a
-            # consequence of not having looked — on the one feature where
-            # that matters most.
-            "load_async_ai_overview": True,
-        }
-    ]
     owns_client = client is None
     client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
     try:
         response = client.post(
-            ENDPOINT,
+            url,
             json=payload,
             headers={
                 "Authorization": config.auth_header,
@@ -200,8 +184,6 @@ def fetch(
     except ValueError as exc:
         raise DataForSeoError("DataForSEO returned something that was not JSON.") from exc
 
-    # DataForSEO answers 200 with a per-task status, so the HTTP code alone
-    # does not say the pull worked.
     tasks = body.get("tasks") or []
     if not tasks:
         raise DataForSeoError("DataForSEO returned no task.")
@@ -218,7 +200,186 @@ def fetch(
         raise DataForSeoError(
             f"DataForSEO task failed ({code}): {task.get('status_message')}"
         )
+    return task
+
+
+def fetch(
+    keyword: str,
+    *,
+    location_code: int = DEFAULT_LOCATION_CODE,
+    language_code: str = DEFAULT_LANGUAGE,
+    depth: int = DEFAULT_DEPTH,
+    config: DataForSeoConfig | None = None,
+    client: httpx.Client | None = None,
+) -> SerpFeatures:
+    """One query's SERP features. One call, and the account is billed for it."""
+    if not keyword.strip():
+        raise DataForSeoError("A SERP pull needs a keyword.")
+
+    # The body is an array of tasks even when there is only one.
+    payload = [
+        {
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "depth": depth,
+            "device": "desktop",
+            # Without this the AI Overview comes back as a type with no
+            # references, so "the client does not hold it" would be a
+            # consequence of not having looked — on the one feature where
+            # that matters most.
+            "load_async_ai_overview": True,
+        }
+    ]
+    task = _post_task(ENDPOINT, payload, config=config, client=client)
     results = task.get("result") or []
     if not results:
         raise DataForSeoError(f"DataForSEO returned no SERP for “{keyword}”.")
     return parse(results[0])
+
+
+# --- Labs: a domain's rankings and keyword market data -----------------------
+#
+# Billed per request plus per row returned (about $0.012 + $0.00012 a row on
+# the Labs rate card, so a 1,000-row competitor pull is about $0.13). Callers
+# bound the rows; nothing here pages.
+
+LABS = "https://api.dataforseo.com/v3/dataforseo_labs/google"
+RANKED_KEYWORDS_ENDPOINT = f"{LABS}/ranked_keywords/live"
+KEYWORD_OVERVIEW_ENDPOINT = f"{LABS}/keyword_overview/live"
+
+#: Documented ceilings: 1,000 rows a ranked-keywords request and 700 keywords
+#: (each at most 80 characters and 10 words) a keyword-overview request.
+RANKED_KEYWORDS_MAX = 1000
+KEYWORD_OVERVIEW_BATCH = 700
+KEYWORD_MAX_CHARS = 80
+KEYWORD_MAX_WORDS = 10
+
+#: A client's `primary_market`, as `resolve_source` normalises it, to Google's
+#: location code and the language to ask in.
+MARKETS: dict[str, tuple[int, str]] = {
+    "us": (2840, "en"),
+    "uk": (2826, "en"),
+    "ca": (2124, "en"),
+    "au": (2036, "en"),
+}
+
+
+def market(source: str) -> tuple[int, str]:
+    return MARKETS.get(source, MARKETS["us"])
+
+
+def _number(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def ranked_keywords(
+    domain: str,
+    *,
+    source: str = "us",
+    max_position: int = 10,
+    limit: int = RANKED_KEYWORDS_MAX,
+    config: DataForSeoConfig | None = None,
+    client: httpx.Client | None = None,
+) -> list[dict]:
+    """Organic keywords a domain ranks for at `max_position` or better, biggest first.
+
+    One request. Rows are `{keyword, position, volume, difficulty, cpc, url}`,
+    the shape the competitor job stores, whichever vendor supplied them.
+    """
+    location_code, language_code = market(source)
+    payload = [
+        {
+            "target": domain,
+            "location_code": location_code,
+            "language_code": language_code,
+            "item_types": ["organic"],
+            "limit": min(int(limit), RANKED_KEYWORDS_MAX),
+            "filters": [["ranked_serp_element.serp_item.rank_group", "<=", max_position]],
+            "order_by": ["keyword_data.keyword_info.search_volume,desc"],
+        }
+    ]
+    task = _post_task(RANKED_KEYWORDS_ENDPOINT, payload, config=config, client=client)
+    results = task.get("result") or []
+    items = (results[0].get("items") if results else None) or []
+    rows: list[dict] = []
+    for item in items:
+        data = item.get("keyword_data") or {}
+        element = (item.get("ranked_serp_element") or {}).get("serp_item") or {}
+        keyword = str(data.get("keyword") or "").strip()
+        if not keyword:
+            continue
+        info = data.get("keyword_info") or {}
+        rows.append(
+            {
+                "keyword": keyword,
+                "position": _number(element.get("rank_group")),
+                "volume": _number(info.get("search_volume")),
+                "difficulty": _number((data.get("keyword_properties") or {}).get("keyword_difficulty")),
+                "cpc": _number(info.get("cpc")),
+                "url": element.get("url"),
+            }
+        )
+    return rows
+
+
+def keyword_overview(
+    keywords: list[str],
+    *,
+    source: str = "us",
+    config: DataForSeoConfig | None = None,
+    client: httpx.Client | None = None,
+) -> list[dict]:
+    """Volume, difficulty, CPC and intent for arbitrary keywords.
+
+    Rows are `{keyword, volume, difficulty, cpc, competition, intents,
+    is_data_found}`. A keyword DataForSEO has no data for is omitted from its
+    answer and not billed; it comes back here with `is_data_found` false, so the
+    caller records the answer instead of asking again next month.
+
+    A keyword over their limits (80 characters, 10 words) cannot be asked
+    about, so it is returned as not found rather than failing the batch.
+    """
+    location_code, language_code = market(source)
+    unique = list(dict.fromkeys(k.strip() for k in keywords if k and k.strip()))
+    askable = [
+        k for k in unique if len(k) <= KEYWORD_MAX_CHARS and len(k.split()) <= KEYWORD_MAX_WORDS
+    ]
+    found: dict[str, dict] = {}
+    for start in range(0, len(askable), KEYWORD_OVERVIEW_BATCH):
+        batch = askable[start : start + KEYWORD_OVERVIEW_BATCH]
+        task = _post_task(
+            KEYWORD_OVERVIEW_ENDPOINT,
+            [{"keywords": batch, "location_code": location_code, "language_code": language_code}],
+            config=config,
+            client=client,
+        )
+        results = task.get("result") or []
+        for item in (results[0].get("items") if results else None) or []:
+            keyword = str(item.get("keyword") or "").strip()
+            if not keyword:
+                continue
+            info = item.get("keyword_info") or {}
+            intent = (item.get("search_intent_info") or {}).get("main_intent")
+            found[keyword.lower()] = {
+                "keyword": keyword,
+                "volume": _number(info.get("search_volume")),
+                "difficulty": _number((item.get("keyword_properties") or {}).get("keyword_difficulty")),
+                "cpc": _number(info.get("cpc")),
+                "competition": _number(info.get("competition")),
+                "intents": [intent] if intent else None,
+                "is_data_found": True,
+            }
+    return [
+        found.get(k.lower())
+        or {
+            "keyword": k,
+            "volume": None,
+            "difficulty": None,
+            "cpc": None,
+            "competition": None,
+            "intents": None,
+            "is_data_found": False,
+        }
+        for k in unique
+    ]

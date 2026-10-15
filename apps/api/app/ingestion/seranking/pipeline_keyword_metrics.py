@@ -8,6 +8,12 @@ period for a site earning fourteen.
 Difficulty is the missing input. The rank tracker does not carry it and the
 domain-keywords endpoint only covers terms already ranking, so this asks
 the keyword database directly.
+
+The keyword database is DataForSEO Labs (keyword overview). The module keeps
+its name and its job source so nothing that queues it has to change. Rows
+bought earlier from SE Ranking stay until they are older than the refresh
+interval and are priced again; for that month the two vendors' difficulty
+figures sit side by side on slightly different scales.
 """
 
 from __future__ import annotations
@@ -21,8 +27,7 @@ from uuid import uuid4
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
-from app.ingestion.seranking.client import fetch_keyword_metrics
+from app.integrations import dataforseo
 from app.models.client import Client
 from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
 from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
@@ -106,9 +111,10 @@ def keywords_to_price(
 
 def run_seranking_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
     try:
-        api_key = get_settings().se_ranking_api_key
-        if not api_key:
-            raise RuntimeError("SE_RANKING_API_KEY is not configured")
+        if not dataforseo.configured():
+            raise RuntimeError(
+                "DataForSEO is not configured. Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD."
+            )
         client = db.query(Client).filter(Client.id == job.client_id).one()
 
         # Only what is missing or stale. `refresh_all` is for somebody who
@@ -133,7 +139,7 @@ def run_seranking_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
             return job
 
         source = (job.params_json or {}).get("source") or "us"
-        rows = fetch_keyword_metrics(api_key, keywords, source=source)
+        rows = dataforseo.keyword_overview(keywords, source=source)
         job.records_fetched = len(rows)
 
         today = job.end_date or date.today()

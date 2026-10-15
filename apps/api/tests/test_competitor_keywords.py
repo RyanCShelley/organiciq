@@ -96,14 +96,15 @@ def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
     _name(db, client_a, "a.com", "b.com", "c.com")
     asked: list[str] = []
 
-    def fake(*, api_key, domain, source):
+    def fake(domain, *, source, max_position):
         asked.append(domain)
         return [
             {"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30},
             {"keyword": "heat pump rebates", "position": 40, "volume": 500, "difficulty": 20},
         ]
 
-    monkeypatch.setattr(pipeline, "list_domain_keywords", fake)
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", fake)
     job = pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
 
     assert job.status is SyncJobStatus.SUCCESSFUL
@@ -116,10 +117,11 @@ def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
 def test_a_second_run_buys_nothing(db, client_a, monkeypatch):
     _name(db, client_a, "a.com")
     calls: list[str] = []
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
     monkeypatch.setattr(
-        pipeline,
-        "list_domain_keywords",
-        lambda **kw: calls.append(kw["domain"])
+        pipeline.dataforseo,
+        "ranked_keywords",
+        lambda domain, **kw: calls.append(domain)
         or [{"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30}],
     )
     pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
@@ -137,9 +139,10 @@ def test_it_is_a_runnable_source_and_not_in_the_daily_provider_list():
     assert "se_ranking_competitor_keywords" not in scheduled
 
 
-def test_a_client_with_a_thin_crawl_is_not_enqueued(db, client_a):
+def test_a_client_with_a_thin_crawl_is_not_enqueued(db, client_a, monkeypatch):
     from app.services.daily_sync import enqueue_due_competitor_keywords
 
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
     _name(db, client_a, "a.com")
     assert enqueue_due_competitor_keywords(db)["due"] == 0
 

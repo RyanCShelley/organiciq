@@ -213,10 +213,12 @@ def _job_handlers() -> dict[str, object]:
         # On-demand only — 100 SE Ranking credits per run, so it is deliberately
         # absent from daily_sync._PROVIDER_SOURCES.
         "se_ranking_domain_keywords": run_seranking_domain_keywords_job,
-        # Billed per keyword looked up, so on-demand like its neighbours.
+        # DataForSEO keyword overview, billed per keyword looked up, so
+        # on-demand like its neighbours.
         "se_ranking_keyword_metrics": run_seranking_keyword_metrics_job,
-        # 100 credits per competitor, capped at three a client and bought at
-        # most monthly by daily_sync.enqueue_due_competitor_keywords.
+        # DataForSEO Labs, billed per request and row: three competitors a client
+        # at most, bought at most monthly by
+        # daily_sync.enqueue_due_competitor_keywords.
         "se_ranking_competitor_keywords": run_seranking_competitor_keywords_job,
         # Per-URL backlink counts. Not in daily_sync: a link profile moves
         # slowly, and it is read monthly alongside the crawl.

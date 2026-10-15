@@ -276,6 +276,11 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     to re-price the whole list.
     """
     from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
+    from app.integrations import dataforseo
+
+    if not dataforseo.configured():
+        logger.warning("Keyword metrics not enqueued: DataForSEO is not configured")
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
     today = date.today()
     # Every active client, not only those with a tracked term: the demand a
     # site has no page for is priced too, and a client with an empty watchlist
@@ -315,16 +320,20 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
 def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
     """Read each client's closest competitors' rankings, at most monthly.
 
-    100 SE Ranking credits a competitor, three competitors a client. A client
+    About $0.13 a competitor, three competitors a client, billed by DataForSEO. A client
     whose crawl is too thin to compare against is skipped: the rankings would
     be bought and then unusable, which is how the SiteGround-blocked clients
     would otherwise spend credits for nothing.
     """
     from app.ingestion.seranking.pipeline_competitor_keywords import competitors_to_pull
     from app.ingestion.seranking.pipeline_domain import resolve_source
+    from app.integrations import dataforseo
     from app.models.crawl import FactCrawlPageSnapshot
     from app.services.content_gap_signals import MIN_CRAWLED_PAGES
 
+    if not dataforseo.configured():
+        logger.warning("Competitor keywords not enqueued: DataForSEO is not configured")
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
     today = date.today()
     clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
 
