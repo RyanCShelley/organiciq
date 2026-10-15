@@ -35,7 +35,6 @@ SITE_CRAWL_STALE_DAYS = 14
 #: How long a keyword's market data is treated as current. SE Ranking bills
 #: per keyword looked up and volume and difficulty move slowly, so this is
 #: asked once a month rather than on the daily cycle.
-KEYWORD_METRICS_INTERVAL_DAYS = 30
 
 # Job sources per mapped integration provider.
 _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
@@ -256,42 +255,31 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     the rules that weigh a term by what winning it is worth were estimating
     without the one input that says how hard it is.
 
-    Due when a client has tracked keywords and either nothing priced, a
-    term added since the last pull, or a pull older than a month.
+    Due when a client has a tracked term with no market data, or data older
+    than a month — and only those terms are bought. Adding one keyword used
+    to re-price the whole list.
     """
-    from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
+    from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
+    from app.models.seranking import FactSerKeyword
 
     today = date.today()
-    tracked = dict(
-        db.query(FactSerKeyword.client_id, func.count(func.distinct(FactSerKeyword.keyword)))
-        .group_by(FactSerKeyword.client_id)
-        .all()
-    )
-    priced = {
-        client_id: (count, newest)
-        for client_id, count, newest in db.query(
-            FactSerKeywordMetric.client_id,
-            func.count(func.distinct(FactSerKeywordMetric.keyword)),
-            func.max(FactSerKeywordMetric.fetched_at),
-        ).group_by(FactSerKeywordMetric.client_id)
-    }
-
+    has_tracked = [
+        client_id for (client_id,) in db.query(FactSerKeyword.client_id).distinct()
+    ]
     clients = (
         db.query(Client)
         .filter(Client.status == ClientStatus.ACTIVE)
-        .filter(Client.id.in_(tracked.keys()))
+        .filter(Client.id.in_(has_tracked))
         .all()
-        if tracked
+        if has_tracked
         else []
     )
 
     enqueued = skipped = errors = due = 0
     for client in clients:
-        count, newest = priced.get(client.id, (0, None))
-        # A term priced is a term paid for: asking again for the ones we
-        # already have is the cost this guard exists to avoid.
-        fresh = newest is not None and (today - newest).days < KEYWORD_METRICS_INTERVAL_DAYS
-        if fresh and count >= tracked[client.id]:
+        # Due only when there is something to buy. The job itself asks for just
+        # those terms, so the two agree on what "due" means.
+        if not keywords_to_price(db, client.id, today=today):
             continue
         due += 1
         try:

@@ -29,6 +29,13 @@ DEFAULT_LIMIT = 20
 #: A SERP older than this is not evidence about today's SERP.
 STALE_AFTER_DAYS = 45
 
+#: A term bought this recently is not bought again. Not STALE_AFTER_DAYS: the
+#: scheduled pull lands about thirty days apart, and skipping anything under
+#: forty-five would leave readings expired for a fortnight between runs. This
+#: only stops a second run — a retry, a manual rerun, an overlapping job —
+#: paying again for what was fetched days ago.
+REPULL_AFTER_DAYS = 7
+
 
 @dataclass(frozen=True)
 class SerpRow:
@@ -175,18 +182,17 @@ def pull(
     pulled = 0
     failures: list[str] = []
 
-    for term in terms_to_pull(db, client, limit=limit):
-        existing = (
-            db.query(FactSerpFeature)
-            .filter(
-                FactSerpFeature.client_id == client.id,
-                FactSerpFeature.keyword == term,
-                FactSerpFeature.pulled_on == today,
-            )
-            .one_or_none()
+    recent = {
+        (keyword or "").strip().lower()
+        for (keyword,) in db.query(FactSerpFeature.keyword).filter(
+            FactSerpFeature.client_id == client.id,
+            FactSerpFeature.pulled_on > today - timedelta(days=REPULL_AFTER_DAYS),
         )
-        if existing is not None:
-            # Already paid for today.
+    }
+
+    for term in terms_to_pull(db, client, limit=limit):
+        if term.strip().lower() in recent:
+            # Already paid for this week.
             continue
         try:
             features = dataforseo.fetch(term, client=client_http)

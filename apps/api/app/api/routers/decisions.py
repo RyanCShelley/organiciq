@@ -692,8 +692,15 @@ def suggest_page_stages(
     candidates = page_stage.load_candidates(db, client)
     if not candidates:
         return {"suggested": 0, "pages": 0}
+    # A confirmed stage is final, so there is nothing to suggest for it. The
+    # model was being sent every page and the answers for confirmed ones thrown
+    # away — billed per page, batched in twenties, inside this request.
+    confirmed = page_stage.confirmed_stages(db, client.id)
+    to_read = [c for c in candidates if c.normalized_url not in confirmed]
+    if not to_read:
+        return {"suggested": 0, "pages": len(candidates), "already_confirmed": len(candidates)}
     try:
-        suggestions = classifier.classify(candidates)
+        suggestions = classifier.classify(to_read)
     except page_stage.NotConfigured as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
@@ -701,7 +708,11 @@ def suggest_page_stages(
     written = page_stage.save_suggestions(
         db, client, suggestions, model=classifier.name
     )
-    return {"suggested": written, "pages": len(candidates)}
+    return {
+        "suggested": written,
+        "pages": len(candidates),
+        "already_confirmed": len(candidates) - len(to_read),
+    }
 
 
 @router.put("/page-stages")

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 
+from app.ingestion.seranking.pipeline_keyword_metrics import KEYWORD_METRICS_INTERVAL_DAYS
 from app.models.client import Client
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import SyncJob
@@ -113,7 +114,7 @@ def test_keyword_metrics_due_again_when_the_pull_is_old(db, client_a: Client):
         db,
         client_a.id,
         "managed it services",
-        date.today() - timedelta(days=daily_sync.KEYWORD_METRICS_INTERVAL_DAYS),
+        date.today() - timedelta(days=KEYWORD_METRICS_INTERVAL_DAYS),
     )
     assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 1
 
@@ -127,4 +128,11 @@ def test_keyword_metrics_due_for_a_term_added_since(db, client_a: Client):
 
 
 def test_keyword_metrics_skips_a_client_tracking_nothing(db, client_a: Client):
+    assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 0
+
+
+def test_keyword_metrics_not_due_when_only_the_case_differs(db, client_a: Client):
+    """Raw-string comparison kept a client 'due' forever and re-bought its list daily."""
+    _track(db, client_a.id, "  Managed IT Services ")
+    _price(db, client_a.id, "managed it services", date.today())
     assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 0

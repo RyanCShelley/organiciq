@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from app.models.client import ClientStatus
@@ -324,3 +324,81 @@ def test_a_deactivated_account_is_refused_at_sign_in(db, client, team_user):
     res = _upsert(client, team_user.email)
     assert res.status_code == 403
     assert "deactivated" in res.json()["detail"].lower()
+
+
+# ── Page-stage suggestions are paid for per page ──
+
+
+class _CountingClassifier:
+    name = "test-model"
+
+    def __init__(self):
+        self.read: list[str] = []
+
+    def classify(self, candidates):
+        from app.services.page_stage import Suggestion
+
+        self.read = [c.normalized_url for c in candidates]
+        return [Suggestion(c.normalized_url, "mofu", "high", "test") for c in candidates]
+
+
+def _candidates(urls):
+    from app.services.page_stage import PageCandidate
+
+    return [
+        PageCandidate(
+            normalized_url=u, sessions=10.0, title=u, description=None,
+            headings=(), first_paragraphs=(), word_count=500,
+        )
+        for u in urls
+    ]
+
+
+def test_suggesting_does_not_pay_to_classify_a_confirmed_page(db, client, client_a, team_user, monkeypatch):
+    """Every page went to the model and the answers for confirmed ones were
+    discarded — billed per page, inside the request."""
+    from app.models.config import ClientPageStage
+    from app.services import page_stage
+    from tests.conftest import client_header
+
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+    classifier = _CountingClassifier()
+    monkeypatch.setattr(page_stage, "load_classifier", lambda: classifier)
+    monkeypatch.setattr(page_stage, "load_candidates", lambda db, client_, **kw: _candidates(urls))
+    db.add(
+        ClientPageStage(
+            client_id=client_a.id, normalized_url=urls[0], stage="bofu",
+            confirmed_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    res = client.post("/decisions/page-stages/suggest", headers=client_header(client_a.id, team_user.email))
+
+    assert res.status_code == 200, res.text
+    assert sorted(classifier.read) == sorted(urls[1:])  # the confirmed one was not sent
+    body = res.json()
+    assert body["suggested"] == 2 and body["already_confirmed"] == 1
+
+
+def test_suggesting_with_everything_confirmed_makes_no_model_call(db, client, client_a, team_user, monkeypatch):
+    from app.models.config import ClientPageStage
+    from app.services import page_stage
+    from tests.conftest import client_header
+
+    urls = ["https://example.com/a"]
+    classifier = _CountingClassifier()
+    monkeypatch.setattr(page_stage, "load_classifier", lambda: classifier)
+    monkeypatch.setattr(page_stage, "load_candidates", lambda db, client_, **kw: _candidates(urls))
+    db.add(
+        ClientPageStage(
+            client_id=client_a.id, normalized_url=urls[0], stage="bofu",
+            confirmed_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    res = client.post("/decisions/page-stages/suggest", headers=client_header(client_a.id, team_user.email))
+
+    assert res.json() == {"suggested": 0, "pages": 1, "already_confirmed": 1}
+    assert classifier.read == []

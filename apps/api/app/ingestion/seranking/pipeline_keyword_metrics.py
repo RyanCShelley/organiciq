@@ -13,7 +13,7 @@ the keyword database directly.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
@@ -49,6 +49,48 @@ def tracked_keywords(db: Session, client_id) -> list[str]:
     return [row[0].strip() for row in rows if row[0] and row[0].strip()]
 
 
+#: How long a keyword's market data is treated as current. SE Ranking bills per
+#: keyword looked up, and volume and difficulty move slowly.
+KEYWORD_METRICS_INTERVAL_DAYS = 30
+
+
+def keywords_to_price(
+    db: Session,
+    client_id,
+    *,
+    today: date | None = None,
+    interval_days: int = KEYWORD_METRICS_INTERVAL_DAYS,
+) -> list[str]:
+    """The tracked terms that actually need a lookup: unpriced, or priced long ago.
+
+    A term already priced is a term already paid for. The job used to send the
+    whole tracked list whenever any one term was missing, so adding a keyword
+    re-bought every other one, and the "is it due" check compared raw strings,
+    so a case or whitespace difference could keep a client due indefinitely.
+    Terms are matched on lowercase, trimmed text, and a term SE Ranking had no
+    data for counts as priced: that was an answer, and asking again is the same
+    cost for the same answer.
+    """
+    today = today or date.today()
+    cutoff = today - timedelta(days=interval_days)
+    fresh = {
+        (keyword or "").strip().lower()
+        for (keyword,) in db.query(FactSerKeywordMetric.keyword).filter(
+            FactSerKeywordMetric.client_id == client_id,
+            FactSerKeywordMetric.fetched_at > cutoff,
+        )
+    }
+    seen: set[str] = set()
+    out: list[str] = []
+    for keyword in tracked_keywords(db, client_id):
+        key = keyword.lower()
+        if key in fresh or key in seen:
+            continue
+        seen.add(key)
+        out.append(keyword)
+    return out
+
+
 def run_seranking_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
     try:
         api_key = get_settings().se_ranking_api_key
@@ -56,7 +98,12 @@ def run_seranking_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
             raise RuntimeError("SE_RANKING_API_KEY is not configured")
         client = db.query(Client).filter(Client.id == job.client_id).one()
 
-        keywords = tracked_keywords(db, job.client_id)
+        # Only what is missing or stale. `refresh_all` is for somebody who
+        # means to pay for the whole list again, and nothing sets it by default.
+        if (job.params_json or {}).get("refresh_all"):
+            keywords = tracked_keywords(db, job.client_id)
+        else:
+            keywords = keywords_to_price(db, job.client_id, today=job.end_date or date.today())
         job.status = SyncJobStatus.FETCHING
         db.commit()
         if not keywords:

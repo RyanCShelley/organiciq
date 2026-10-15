@@ -146,6 +146,54 @@ def test_the_same_term_is_not_pulled_twice_in_a_day(db: Session, client_a: Clien
     assert len(calls) == 1
 
 
+def _pull_with_a_counting_http(db, client_a, today):
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.read().decode())
+        return httpx.Response(
+            200,
+            json={"tasks": [{"status_code": 20000, "result": [{"keyword": "carbon fibre", "item_types": ["organic"]}]}]},
+        )
+
+    import app.integrations.dataforseo as dfs
+
+    original = dfs.load_config
+    dfs.load_config = lambda: dfs.DataForSeoConfig(login="l", password="p")  # type: ignore[assignment]
+    try:
+        pulled = pull(db, client_a, today=today, client_http=httpx.Client(transport=httpx.MockTransport(handler)))[0]
+    finally:
+        dfs.load_config = original  # type: ignore[assignment]
+    return pulled, calls
+
+
+def test_a_term_bought_days_ago_is_not_bought_again(db: Session, client_a: Client):
+    """A rerun, a retry or an overlapping job on another day paid for it twice."""
+    from datetime import timedelta
+
+    db.add(KeywordTarget(client_id=client_a.id, keyword="carbon fibre", target_url="/a"))
+    db.commit()
+    assert _pull_with_a_counting_http(db, client_a, TODAY)[0] == 1
+
+    pulled, calls = _pull_with_a_counting_http(db, client_a, TODAY + timedelta(days=3))
+
+    assert (pulled, calls) == (0, [])
+
+
+def test_the_monthly_pull_still_refreshes_a_reading_a_month_old(db: Session, client_a: Client):
+    """The cadence is a month. Skipping anything under 45 days would leave
+    readings expired for a fortnight between runs."""
+    from datetime import timedelta
+
+    db.add(KeywordTarget(client_id=client_a.id, keyword="carbon fibre", target_url="/a"))
+    db.commit()
+    assert _pull_with_a_counting_http(db, client_a, TODAY)[0] == 1
+
+    pulled, calls = _pull_with_a_counting_http(db, client_a, TODAY + timedelta(days=30))
+
+    assert pulled == 1 and len(calls) == 1
+
+
 def test_declared_targets_are_pulled_before_tracked_terms(
     db: Session, client_a: Client
 ):

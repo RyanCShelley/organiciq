@@ -28,6 +28,21 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
+#: Responses worth asking again about: the server is busy or broken, which a
+#: second attempt can fix. Every other 4xx says the request itself is wrong
+#: (a bad parameter, a key that is refused, no credit left) and will say the
+#: same thing three times — and on a billed endpoint, three times is three
+#: charges for nothing.
+_RETRYABLE_STATUS = frozenset({408, 429})
+
+
+def _retry_after(res: httpx.Response, attempt: int) -> float:
+    try:
+        return min(30.0, max(0.0, float(res.headers.get("Retry-After", ""))))
+    except ValueError:
+        return 1.0 * (attempt + 1)
+
+
 def _request(
     *,
     api_key: str,
@@ -50,18 +65,34 @@ def _request(
                     params=params or {},
                     json=json_body,
                 )
-            if res.status_code == 429:
-                time.sleep(1.0 * (attempt + 1))
-                continue
-            res.raise_for_status()
-            if res.status_code == 204 or not res.content:
-                return None
-            return res.json()
-        except Exception as exc:  # noqa: BLE001
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            # Nothing was sent, so asking again cannot double-bill.
             last_error = exc
-            if attempt + 1 >= retries:
-                break
             time.sleep(0.5 * (attempt + 1))
+            continue
+        except httpx.TransportError as exc:
+            # Sent, and no answer: the server may well have processed it. A GET
+            # costs nothing to repeat; a billed POST might cost twice.
+            if method.upper() != "GET":
+                raise
+            last_error = exc
+            time.sleep(0.5 * (attempt + 1))
+            continue
+
+        if res.status_code in _RETRYABLE_STATUS or res.status_code >= 500:
+            # Kept as the error to raise: a 429 on the last attempt used to
+            # leave nothing to raise, and an AssertionError came out instead.
+            last_error = httpx.HTTPStatusError(
+                f"HTTP {res.status_code} from {path}", request=res.request, response=res
+            )
+            if attempt + 1 < retries:
+                time.sleep(_retry_after(res, attempt) if res.status_code == 429 else 0.5 * (attempt + 1))
+            continue
+
+        res.raise_for_status()
+        if res.status_code == 204 or not res.content:
+            return None
+        return res.json()
     assert last_error is not None
     raise last_error
 
