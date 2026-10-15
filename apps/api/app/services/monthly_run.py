@@ -515,6 +515,12 @@ def build_record(
             f"{LOOKBACK_DAYS} days; {d.get('demand_gaps', 0)} are demand with no page "
             f"and a price, {d.get('demand_unpriced', 0)} are waiting for a price."
         )
+        if d.get("competitor_keywords"):
+            empty_content += (
+                f" The closest competitors rank in the top ten for "
+                f"{d['competitor_keywords']} terms; {d.get('competitor_gaps', 0)} have "
+                "no page on this site and are not tracked."
+            )
     content_plan = fill_pool(
         slots=allowances.content_allowance if open_this_month else 0,
         prescriptions=content_prescriptions,

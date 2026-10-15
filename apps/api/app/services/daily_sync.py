@@ -312,6 +312,59 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
+def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
+    """Read each client's closest competitors' rankings, at most monthly.
+
+    100 SE Ranking credits a competitor, three competitors a client. A client
+    whose crawl is too thin to compare against is skipped: the rankings would
+    be bought and then unusable, which is how the SiteGround-blocked clients
+    would otherwise spend credits for nothing.
+    """
+    from app.ingestion.seranking.pipeline_competitor_keywords import competitors_to_pull
+    from app.ingestion.seranking.pipeline_domain import resolve_source
+    from app.models.crawl import FactCrawlPageSnapshot
+    from app.services.content_gap_signals import MIN_CRAWLED_PAGES
+
+    today = date.today()
+    clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
+
+    enqueued = skipped = errors = due = 0
+    for client in clients:
+        if not competitors_to_pull(db, client, today=today):
+            continue
+        crawled = (
+            db.query(FactCrawlPageSnapshot.id)
+            .filter(
+                FactCrawlPageSnapshot.client_id == client.id,
+                FactCrawlPageSnapshot.indexable.is_(True),
+            )
+            .limit(MIN_CRAWLED_PAGES)
+            .count()
+        )
+        if crawled < MIN_CRAWLED_PAGES:
+            continue
+        due += 1
+        try:
+            enqueue_sync_job(
+                db,
+                client.id,
+                SyncJobCreate(
+                    source="se_ranking_competitor_keywords",
+                    start_date=today,
+                    end_date=today,
+                    params={"source": resolve_source(client)},
+                ),
+            )
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("Competitor keywords enqueue failed client=%s", client.id)
+
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
 def maybe_run_daily_sync(db: Session) -> bool:
     """
     If daily sync is due (UTC hour reached and not yet run today), enqueue jobs.
@@ -353,6 +406,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
     stats = enqueue_daily_syncs(db)
     crawl_stats = enqueue_due_site_crawls(db)
     metric_stats = enqueue_due_keyword_metrics(db)
+    competitor_stats = enqueue_due_competitor_keywords(db)
     checkpoint.last_run_date = today
     checkpoint.updated_at = now
     db.commit()
@@ -381,5 +435,13 @@ def maybe_run_daily_sync(db: Session) -> bool:
             metric_stats["enqueued"],
             metric_stats["skipped"],
             metric_stats["errors"],
+        )
+    if competitor_stats["due"]:
+        logger.info(
+            "Competitor keywords due=%s enqueued=%s skipped=%s errors=%s",
+            competitor_stats["due"],
+            competitor_stats["enqueued"],
+            competitor_stats["skipped"],
+            competitor_stats["errors"],
         )
     return True

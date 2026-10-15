@@ -308,10 +308,15 @@ class DemandGap:
     absent_words: tuple[str, ...] = ()
     best_overlap: float = 0.0
     lookback_days: int = 90
+    #: Competitors that rank in the top ten for it, as (domain, position),
+    #: best first. Empty when the term came from Search Console alone.
+    competitors: tuple[tuple[str, float], ...] = ()
 
     @property
     def weight(self) -> float:
-        return self.impressions
+        # A term only a competitor ranks for has no impressions of its own, so
+        # its search volume stands in to order it among its variants.
+        return self.impressions or float(self.volume or 0)
 
     @property
     def priced(self) -> bool:
@@ -353,6 +358,7 @@ def c2_write_the_page_for_demand(gap: DemandGap) -> Prescription | None:
         if gap.position is not None
         else ""
     )
+    rivals = ", ".join(f"{domain} (#{position:.0f})" for domain, position in gap.competitors)
     stand_in = (
         f" The page Search Console shows for it is {gap.stand_in_url}, which is not "
         "about it."
@@ -386,6 +392,36 @@ def c2_write_the_page_for_demand(gap: DemandGap) -> Prescription | None:
         "keyword map, so the engine tracks the one against the other."
     )
 
+    if gap.impressions:
+        why = (
+            f"People searched “{gap.term}” and the site's results were shown "
+            f"{gap.impressions:,.0f} times in {months:.0f} months{where}; SE Ranking "
+            f"counts {gap.volume:,.0f} searches a month. Nobody is tracking it and "
+            f"no page is about it. {basis}{stand_in}"
+        )
+    else:
+        why = (
+            f"SE Ranking counts {gap.volume:,.0f} searches a month for “{gap.term}”. "
+            f"{rivals} rank in the top ten for it; the site was never shown for it. "
+            f"Nobody is tracking it and no page is about it. {basis}"
+        )
+    if gap.competitors and gap.impressions:
+        why += f" Ranking in the top ten for it: {rivals}."
+
+    evidence = [
+        f"facts_ser_keyword_metrics: {gap.volume:,.0f} searches, difficulty "
+        f"{gap.difficulty:.0f}",
+        f"facts_crawl_page_snapshots: no page of {gap.pages_searched} is about it",
+    ]
+    if gap.impressions:
+        evidence.insert(
+            0,
+            f"facts_gsc_query_pages: {gap.impressions:,.0f} impressions, "
+            f"{gap.clicks:,.0f} clicks over {gap.lookback_days} days",
+        )
+    if gap.competitors:
+        evidence.append(f"facts_ser_competitor_keywords: {rivals}")
+
     return Prescription(
         action_id="C-2",
         title=f"Write the page for “{gap.term}”",
@@ -394,25 +430,14 @@ def c2_write_the_page_for_demand(gap: DemandGap) -> Prescription | None:
         term=gap.term,
         score=gap.opportunity,
         effort_min=240,
-        why=(
-            f"People searched “{gap.term}” and the site's results were shown "
-            f"{gap.impressions:,.0f} times in {months:.0f} months{where}; SE Ranking "
-            f"counts {gap.volume:,.0f} searches a month. Nobody is tracking it and "
-            f"no page is about it. {basis}{stand_in}"
-        ),
+        why=why,
         done_when=(
             f"A page exists at its own URL, titled for “{gap.term}”, mapped to it "
             "in the keyword map and linked from the pages that sit closest to it."
         ),
         metric="Average position on the term",
         metric_key="term_position",
-        evidence=(
-            f"facts_gsc_query_pages: {gap.impressions:,.0f} impressions, "
-            f"{gap.clicks:,.0f} clicks over {gap.lookback_days} days",
-            f"facts_ser_keyword_metrics: {gap.volume:,.0f} searches, difficulty "
-            f"{gap.difficulty:.0f}",
-            f"facts_crawl_page_snapshots: no page of {gap.pages_searched} is about it",
-        ),
+        evidence=tuple(evidence),
         steps=tuple(steps),
         check_after_days=CHECK_AFTER_DAYS,
     )

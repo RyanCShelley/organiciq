@@ -129,6 +129,14 @@ export type MonthlyRecord = {
     demand_covered?: number;
     demand_unpriced?: number;
     demand_gaps?: number;
+    /** Terms the closest competitors rank in the top ten for. */
+    competitor_keywords?: number;
+    competitor_tracked?: number;
+    competitor_brand?: number;
+    competitor_small?: number;
+    competitor_earning?: number;
+    competitor_covered?: number;
+    competitor_gaps?: number;
     blocked?: string;
   };
   data_gaps: { input: string; status: string }[];
