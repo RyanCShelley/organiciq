@@ -1,3 +1,4 @@
+import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -240,18 +241,19 @@ export default async function DecisionEnginePage({
             id="incidents-heading"
             className="font-[family-name:var(--font-display)] text-[18px] font-extrabold text-[var(--text-primary)]"
           >
-            Fix before anything else
+            Check before anything else
           </h2>
           {record.incidents.map((incident) => (
             <article
               key={incident.incident_uid}
-              className="rounded-[var(--radius-lg,14px)] border-2 border-[#B4441C] bg-[#FDF4F0] px-6 py-5"
+              className="rounded-[var(--radius-lg,14px)] border-2 border-[#E3B25C] bg-[#FFF8E6] px-6 py-5"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-[#B4441C] px-2.5 py-0.5 text-[11.5px] font-semibold text-white">
-                  Incident
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F5D58A] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#6B4A00]">
+                  <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                  Caution
                 </span>
-                <span className="text-[11.5px] font-semibold text-[#8E3414]">
+                <span className="text-[11.5px] font-semibold text-[#8A4B08]">
                   {incident.scope} · no slot used
                 </span>
               </div>
@@ -301,7 +303,7 @@ export default async function DecisionEnginePage({
                 <span className="capitalize">{record.plan}</span> plan:{" "}
                 {record.action_slots}{" "}
                 {record.action_slots === 1 ? "slot" : "slots"}, filled from the
-                constraint. Leftovers go to the next failing branch.
+                constraint. Leftovers go to the next branch with room to improve.
                 {added || removed ? (
                   <span className="ml-1 font-semibold text-[var(--text-primary)]">
                     {added ? `${added} added` : ""}
@@ -363,7 +365,7 @@ export default async function DecisionEnginePage({
                   Not this month
                 </h2>
                 <p className="text-[13px] text-[var(--text-tertiary)]">
-                  Kept for when its branch fails or a slot opens
+                  Kept for when its branch becomes the focus or a slot opens
                 </p>
               </div>
               <ul className="mt-2">
