@@ -8,7 +8,7 @@ would have named it again every month.
 
 from __future__ import annotations
 
-from app.decisions.overrides import Exclusion, filter_pages, is_excluded, matches
+from app.decisions.overrides import Exclusion, is_excluded, matches
 
 CAREERS = Exclusion("/careers*", "Not recruiting this quarter.")
 
@@ -42,17 +42,5 @@ def test_the_reason_comes_back_with_the_match():
     assert found.reason == "Not recruiting this quarter."
 
 
-def test_everything_else_is_untouched():
-    pages = [
-        "https://x.com/",
-        "https://x.com/careers",
-        "https://x.com/services/panel-upgrades",
-    ]
-    assert filter_pages(pages, [CAREERS]) == [
-        "https://x.com/",
-        "https://x.com/services/panel-upgrades",
-    ]
 
 
-def test_no_exclusions_excludes_nothing():
-    assert filter_pages(["https://x.com/careers"], []) == ["https://x.com/careers"]

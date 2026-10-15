@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session

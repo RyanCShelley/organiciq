@@ -335,36 +335,33 @@ cd apps/api && source .venv/bin/activate && python -m app.seed
 
 Automated coverage: `pytest tests/test_phase8_multi_client.py tests/test_phase1.py`
 
-## Phase 9 — Decision Engine (local)
+## Phase 9 — Decision Engine
 
-Deterministic lever engine in `app/services/lever_engine.py` → `diagnose()`:
+A monthly run (`app/services/monthly_run.py`) reads each client's data and saves one plan per month.
 
-1. **Readiness gate** — requires Search Console page facts (`facts_gsc_pages`); crawl levers also need `facts_crawl_page_snapshots`
-2. **Per-page cascade** — pages with ≥30 impressions, first matching lever wins (Technical → Internal Linking → SERP/CTR)
-3. **Portfolio checks** — Structured Data/AI gap, Conversion Path (managed lead rate vs sessions)
-4. **Scoring** — `0.4·impact + 0.3·confidence + 0.2·urgency + 0.1·(100−effort)`
-5. **Rank** — top 14 recommendations returned to the UI
+1. **Triage** — which rung of *visibility → traffic → leads* is holding the client back (`app/decisions/triage.py`).
+2. **Growth actions**, outside the retainer, filled against the plan's allowance (`app/decisions/catalog.py`, `slots.py`). Visibility actions name a term and a page, Traffic and Leads actions name a page.
+3. **Retainer work**, inside the monthly fee, in two pools of its own:
+   - **Refreshes** (`app/decisions/update_catalog.py`) — pages that are losing ground, a split between two pages, an under-linked page, broken markup.
+   - **New content** (`app/decisions/content_gaps.py`) — a tracked term the crawl shows no page for.
+4. **Results loop** (`app/services/results.py`) — every action is measured when it was prescribed and again at its check date, and judged improved, no change or worse.
 
-Content Expansion is scaffolded in the UI but has no trigger yet (needs topic-demand data).
+The plan is stored as a `MonthlyRecord`, read by the Decision Engine and Content Opp screens. Assignment, the Teamwork send and skipping live in `engine_actions`, keyed apart from the record so they survive a re-run.
 
 ### API
 
-- `GET /decisions/diagnose?from=&to=` — live lever engine output (no persist)
-- `POST /decisions/evaluate` — persist top recommendations for the period
-- `PATCH /decisions/{id}` — update decision status
-- `GET/PUT /decisions/thresholds` — per-client rule thresholds
+- `GET /decisions/records`, `GET /decisions/records/{month}` — saved plans
+- `POST /decisions/records/run` — run and save a month (admin)
+- `GET /decisions/records/{month}/workflow` and the `/slots/{uid}/…` routes — assign, send, skip, ship
+- `GET/PUT /decisions/keyword-page-map`, `/page-stages`, `/excluded-pages` — the inputs a person confirms
 
-Set `DECISION_ENGINE_ENABLED=false` to disable evaluation.
-
-Until crawl snapshots are loaded, **Crawl / Audit** will show amber and Technical SEO / Internal Linking levers stay at 0. Sync via **Integrations → SE Ranking → Sync Website Audit** (requires a finished audit in SE Ranking for the mapped project).
-
-Run migration:
+Run migrations:
 
 ```bash
 cd apps/api && alembic upgrade head
 ```
 
-Automated coverage: `pytest tests/test_lever_engine_phase9.py tests/test_decisions_phase9.py`
+Tests: `pytest` from `apps/api` (they need a Postgres named `organiciq_test`; set `TEST_DATABASE_URL` to point elsewhere).
 
 ## Phase map
 

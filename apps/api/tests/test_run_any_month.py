@@ -8,7 +8,7 @@ judged a client on three days of November and filed it as the month's plan.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 

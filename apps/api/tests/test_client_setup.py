@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.models.client import Client
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Traffic
-from app.models.gsc import FactGscPage
 from app.services.client_setup import setup_state
 from tests.conftest import client_header
 

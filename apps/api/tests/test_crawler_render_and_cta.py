@@ -12,13 +12,6 @@ from urllib import robotparser
 
 from app.ingestion.crawler.fetch import _blocked_resource_count
 from app.ingestion.crawler.parse import parse_page
-from app.services.lever_engine import (
-    GrowthAction,
-    detect_technical_signal,
-    is_core_work_signal,
-    signal_lever,
-)
-from tests.test_phase3_technical import _crawl
 
 LIMITS = {"cta_min_sessions": 30, "orphan_min_impressions": 30}
 
@@ -53,23 +46,8 @@ def test_prose_about_something_not_being_found_is_not_a_soft_404():
     assert parsed.says_not_found is False
 
 
-def test_a_soft_404_is_blocking_and_prescribes_the_fix():
-    detected = detect_technical_signal(
-        "https://example.com/gone", _crawl(soft_404=True), thresholds=LIMITS
-    )
-    assert detected is not None
-    assert detected.audit_signal == "soft_404"
-    assert not is_core_work_signal("soft_404")
 
 
-def test_a_real_404_outranks_the_soft_one():
-    detected = detect_technical_signal(
-        "https://example.com/gone",
-        _crawl(soft_404=True, status_code=404),
-        thresholds=LIMITS,
-    )
-    assert detected is not None
-    assert detected.audit_signal == "status_error"
 
 
 # ── Render-critical resources ──
@@ -119,14 +97,6 @@ def test_a_cdn_is_left_alone():
     assert _blocked_resource_count(parsed, robots) == 0
 
 
-def test_blocked_resources_are_blocking_and_say_how_many():
-    detected = detect_technical_signal(
-        "https://example.com/p", _crawl(blocked_resources=2), thresholds=LIMITS
-    )
-    assert detected is not None
-    assert detected.audit_signal == "blocked_resources"
-    assert "2 scripts or stylesheets" in detected.diagnosis
-    assert not is_core_work_signal("blocked_resources")
 
 
 # ── Nothing to convert through ──
@@ -151,42 +121,10 @@ def test_a_page_with_nothing_to_convert_through_counts_zero():
     assert parsed.conversion_elements == 0
 
 
-def test_a_page_with_traffic_and_no_cta_is_conversion_work():
-    detected = detect_technical_signal(
-        "https://example.com/p",
-        _crawl(conversion_elements=0),
-        sessions=120.0,
-        thresholds=LIMITS,
-    )
-    assert detected is not None
-    assert detected.audit_signal == "no_conversion_element"
-    assert signal_lever("no_conversion_element") == GrowthAction.CONVERSION_PATH.value
 
 
-def test_a_page_nobody_visits_is_not_worth_saying_this_about():
-    assert (
-        detect_technical_signal(
-            "https://example.com/p",
-            _crawl(conversion_elements=0),
-            sessions=4.0,
-            thresholds=LIMITS,
-        )
-        is None
-    )
 
 
-def test_a_crawl_that_predates_the_check_is_not_a_finding():
-    """Null means nobody looked. Reading it as zero would report every page
-    crawled before this shipped as having no way to convert."""
-    assert (
-        detect_technical_signal(
-            "https://example.com/p",
-            _crawl(conversion_elements=None),
-            sessions=500.0,
-            thresholds=LIMITS,
-        )
-        is None
-    )
 
 
 def test_a_blocked_fetch_is_not_a_page_without_a_call_to_action(db, client_a):

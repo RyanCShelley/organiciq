@@ -27,7 +27,7 @@ from app.models.crawl import (
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
 )
-from app.services.lever_engine import BOILERPLATE_SCHEMA_TYPES
+from app.services.schema_types import BOILERPLATE_SCHEMA_TYPES
 
 router = APIRouter(prefix="/site-crawl", tags=["site-crawl"])
 

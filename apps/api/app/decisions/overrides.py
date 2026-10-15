@@ -71,6 +71,3 @@ def is_excluded(url: str, exclusions: list[Exclusion]) -> Exclusion | None:
             return exclusion
     return None
 
-
-def filter_pages(urls: list[str], exclusions: list[Exclusion]) -> list[str]:
-    return [url for url in urls if is_excluded(url, exclusions) is None]

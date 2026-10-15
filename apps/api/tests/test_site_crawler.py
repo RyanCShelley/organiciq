@@ -273,32 +273,17 @@ def test_both_crawl_sources_can_hold_a_row_for_the_same_page(db, client_a):
     assert {row.source for row in rows} == {CRAWL_SOURCE_SE_RANKING, CRAWL_SOURCE_FIRST_PARTY}
 
 
-def test_the_lever_reads_one_source_and_does_not_mix_them(db, client_a):
-    """
-    Both crawls keep writing. Reading unscoped would mix them and make the row
-    for a page depend on insert order.
-    """
-    from app.services.lever_engine import _load_crawl_by_url, active_crawl_source
-
-    db.add(_snapshot(client_a.id, CRAWL_SOURCE_FIRST_PARTY, PAGE))
-    db.add(_snapshot(client_a.id, CRAWL_SOURCE_SE_RANKING, PAGE))
-    db.commit()
-
-    loaded = _load_crawl_by_url(db, client_a.id)
-
-    assert len(loaded) == 1
-    assert loaded[PAGE].source == active_crawl_source()
 
 
 def test_the_engine_reads_the_first_party_crawl_by_default():
     """The cutover. Flipping crawl_facts_source backs it out without a deploy."""
-    from app.services.lever_engine import active_crawl_source
+    from app.services.crawl_source import active_crawl_source
 
     assert active_crawl_source() == CRAWL_SOURCE_FIRST_PARTY
 
 
 def test_an_unknown_configured_source_falls_back_rather_than_reading_nothing(monkeypatch):
-    from app.services import lever_engine
+    from app.services import crawl_source as lever_engine
 
     monkeypatch.setattr(
         lever_engine,

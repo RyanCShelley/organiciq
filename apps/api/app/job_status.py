@@ -23,7 +23,7 @@ from app.models.client import Client
 from app.models.job import DataWatermark, SyncJob
 from app.models.crawl import FactCrawlPageSnapshot
 from app.models.seranking import FactSerBacklinkPage
-from app.services.lever_engine import active_crawl_source
+from app.services.crawl_source import active_crawl_source
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("organiciq.job_status")

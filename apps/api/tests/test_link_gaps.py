@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlInternalLink
 from app.models.gsc import FactGscQueryPage
-from app.services.lever_engine import LINK_GAP_MIN_IMPRESSIONS, _link_gaps
+from app.services.link_gaps import LINK_GAP_MIN_IMPRESSIONS
+from app.services.link_gaps import link_gaps as _link_gaps
 
 END = date(2026, 8, 31)
 START = END - timedelta(days=29)
@@ -148,139 +149,22 @@ def test_no_period_or_no_targets_does_no_work(db, client_a):
     assert _link_gaps(db, client_a.id, period=PERIOD, targets=set()) == {}
 
 
-def test_the_finding_names_the_page_to_link_from(db, client_a):
-    """The point of the whole thing: the action is the work, not a diagnosis."""
-    from app.models.crawl import FactCrawlPageSnapshot
-    from app.services.decision_impact import SiteBusinessContext
-    from app.services.lever_engine import LinkGap, PageDemand, _internal_linking_finding
-
-    crawl = FactCrawlPageSnapshot(
-        id=uuid4(),
-        client_id=client_a.id,
-        source=CRAWL_SOURCE_FIRST_PARTY,
-        snapshot_date=END,
-        raw_url=ORPHAN,
-        normalized_url=ORPHAN,
-        status_code=200,
-        indexable=True,
-        word_count=900,
-        inbound_internal_links=40,
-        inbound_editorial_links=1,
-        redirect_count=0,
-    )
-    page = PageDemand(
-        normalized_url=ORPHAN,
-        impressions=800.0,
-        clicks=10.0,
-        average_position=9.0,
-        ctr_percent=1.2,
-    )
-    site = SiteBusinessContext(
-        site_lead_rate_pct=2.0,
-        period_sessions=5000.0,
-        period_leads=100,
-        period_lead_goal=120,
-        p90_page_sessions=500.0,
-    )
-
-    finding = _internal_linking_finding(
-        page,
-        crawl,
-        page_ctx=None,
-        site=site,
-        link_gap=LinkGap(source_url=PILLAR, shared_query="metal roofing cost", source_clicks=300),
-    )
-
-    assert finding is not None
-    assert PILLAR in finding.recommended_action
-    assert "metal roofing cost" in finding.recommended_action
-    assert finding.evidence_json["link_from"] == PILLAR
 
 
-def test_without_a_candidate_the_finding_still_stands(db, client_a):
-    """No page both shares the subject and has authority to lend — say less."""
-    from app.models.crawl import FactCrawlPageSnapshot
-    from app.services.decision_impact import SiteBusinessContext
-    from app.services.lever_engine import PageDemand, _internal_linking_finding
-
-    crawl = FactCrawlPageSnapshot(
-        id=uuid4(),
-        client_id=client_a.id,
-        source=CRAWL_SOURCE_FIRST_PARTY,
-        snapshot_date=END,
-        raw_url=ORPHAN,
-        normalized_url=ORPHAN,
-        status_code=200,
-        indexable=True,
-        word_count=900,
-        inbound_internal_links=40,
-        inbound_editorial_links=1,
-        redirect_count=0,
-    )
-    finding = _internal_linking_finding(
-        PageDemand(
-            normalized_url=ORPHAN,
-            impressions=800.0,
-            clicks=10.0,
-            average_position=9.0,
-            ctr_percent=1.2,
-        ),
-        crawl,
-        page_ctx=None,
-        site=SiteBusinessContext(
-            site_lead_rate_pct=2.0,
-            period_sessions=5000.0,
-            period_leads=100,
-            period_lead_goal=120,
-            p90_page_sessions=500.0,
-        ),
-    )
-
-    assert finding is not None
-    assert finding.evidence_json["link_from"] is None
-    # The old action named no page and no anchor. With no donor the card
-    # now says so, and asks for the one decision our data cannot make.
-    assert "no page on the site both shares a search query" in finding.recommended_action
 
 
 # --- T4: floors by purpose, donors by authority -----------------------------
 
 
-def test_the_floor_follows_what_the_page_is_for():
-    """Length was the wrong yardstick: a long blog post was held to the same
-    bar as the services page the business runs on."""
-    from app.services.lever_engine import _link_floor
-    from app.services.page_eligibility import PageClassification, PageType
-
-    def classify(page_type):
-        return PageClassification(
-            normalized_url="https://example.com/x",
-            page_type=page_type,
-            eligible_for_growth_action=True,
-            strategic_priority=3,
-            commercial_priority=3,
-        )
-
-    # Same length, three different expectations.
-    assert _link_floor(3000, classify(PageType.CONVERSION)) == 10
-    assert _link_floor(3000, classify(PageType.COMMERCIAL)) == 10
-    assert _link_floor(3000, classify(PageType.CONSIDERATION)) == 6
-    assert _link_floor(3000, classify(PageType.INFORMATIONAL)) == 3
 
 
-def test_without_a_classification_length_is_better_than_nothing():
-    from app.services.lever_engine import _link_floor
-
-    assert _link_floor(300) == 2
-    assert _link_floor(1200) == 5
-    assert _link_floor(3000) == 10
 
 
 def test_donors_are_ranked_by_referring_domains_then_clicks(db, client_a):
     """A page with links of its own has more to lend than one that merely
     gets clicks."""
     from app.models.seranking import FactSerBacklinkPage
-    from app.services.lever_engine import _link_gaps
+    from app.services.link_gaps import link_gaps as _link_gaps
 
     linked = "https://example.com/guides/linked"
     popular = "https://example.com/guides/popular"
@@ -311,7 +195,7 @@ def test_donors_are_ranked_by_referring_domains_then_clicks(db, client_a):
 
 
 def test_up_to_three_donors_are_returned(db, client_a):
-    from app.services.lever_engine import _link_gaps
+    from app.services.link_gaps import link_gaps as _link_gaps
 
     for index in range(5):
         _rank(db, client_a.id, f"https://example.com/d{index}", "metal roofing cost", 2000, 100 + index)
@@ -323,46 +207,3 @@ def test_up_to_three_donors_are_returned(db, client_a):
     assert len(gaps[ORPHAN]) == 3
 
 
-def test_the_action_names_every_donor_with_an_anchor(db, client_a):
-    from app.models.crawl import FactCrawlPageSnapshot
-    from app.services.decision_impact import SiteBusinessContext
-    from app.services.lever_engine import LinkGap, PageDemand, _internal_linking_finding
-
-    crawl = FactCrawlPageSnapshot(
-        id=uuid4(),
-        client_id=client_a.id,
-        source=CRAWL_SOURCE_FIRST_PARTY,
-        snapshot_date=END,
-        raw_url=ORPHAN,
-        normalized_url=ORPHAN,
-        status_code=200,
-        indexable=True,
-        word_count=900,
-        inbound_internal_links=40,
-        inbound_editorial_links=1,
-        redirect_count=0,
-    )
-    finding = _internal_linking_finding(
-        PageDemand(normalized_url=ORPHAN, impressions=800.0, clicks=10.0,
-                   average_position=9.0, ctr_percent=1.2),
-        crawl,
-        page_ctx=None,
-        site=SiteBusinessContext(
-            site_lead_rate_pct=2.0, period_sessions=5000.0, period_leads=100,
-            period_lead_goal=120, p90_page_sessions=500.0,
-        ),
-        link_gaps=[
-            LinkGap(source_url=PILLAR, shared_query="metal roofing cost",
-                    source_clicks=300, source_refdomains=12),
-            LinkGap(source_url="https://example.com/b", shared_query="metal roof prices",
-                    source_clicks=90, source_refdomains=0),
-        ],
-    )
-
-    assert PILLAR in finding.recommended_action
-    assert "https://example.com/b" in finding.recommended_action
-    assert "12 referring domains" in finding.recommended_action
-    # The anchor is a suggestion, not a promise: nothing stores page body text,
-    # so the rule cannot confirm the phrase appears in the donor's copy.
-    assert "reads naturally" in finding.recommended_action
-    assert len(finding.evidence_json["link_donors"]) == 2

@@ -12,7 +12,6 @@ Guard teeth, in order of what would hurt most:
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -20,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.decision import MonthlyRecord
-from app.models.user import User
 from tests.conftest import client_header
 
 MONTH = "2026-10"

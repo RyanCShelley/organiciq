@@ -129,28 +129,8 @@ def _backlink_page(db, client_id, url, *, refdomains, first_seen):
     )
 
 
-def _site():
-    from app.services.decision_impact import SiteBusinessContext
-
-    return SiteBusinessContext(
-        site_lead_rate_pct=2.0,
-        period_sessions=5000.0,
-        period_leads=40,
-        period_lead_goal=50,
-        p90_page_sessions=400.0,
-    )
 
 
-def _demand(url, position, impressions=800.0):
-    from app.services.lever_engine import PageDemand
-
-    return PageDemand(
-        normalized_url=url,
-        impressions=impressions,
-        clicks=10.0,
-        average_position=position,
-        ctr_percent=1.2,
-    )
 
 
 

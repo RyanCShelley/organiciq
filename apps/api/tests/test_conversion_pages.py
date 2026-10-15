@@ -13,7 +13,6 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.routers.admin import list_conversion_pages, replace_conversion_pages
-from app.models.config import ClientConversionPage
 from app.schemas import ConversionPageIn
 
 
@@ -99,49 +98,5 @@ def test_the_primary_sorts_first(db, client_a):
 # ── What the engine does with them ──
 
 
-def test_a_declared_page_beats_the_url_guess(db, client_a):
-    """The whole point. `/contact-us` is the offer even though the guesser
-    only recognises `/contact`."""
-    from app.services.lever_engine import _t1_inputs
-
-    _save(
-        db,
-        client_a,
-        [ConversionPageIn(normalized_url="https://example.com/contact-us", label="Contact", is_primary=True)],
-    )
-    declared = db.query(ClientConversionPage).filter(
-        ClientConversionPage.client_id == client_a.id
-    ).all()
-    inputs = _t1_inputs(
-        db,
-        client_a,
-        period=None,
-        classifications={},
-        crawl_by_url={},
-        declared=declared,
-    )
-    assert [offer.url for offer in inputs.offers] == ["https://example.com/contact-us"]
 
 
-def test_with_nothing_declared_the_old_guess_still_applies(db, client_a):
-    """Nothing changes for a client until someone says otherwise."""
-    from app.services.lever_engine import _t1_inputs
-    from app.services.page_eligibility import PageClassification, PageType
-
-    inputs = _t1_inputs(
-        db,
-        client_a,
-        period=None,
-        classifications={
-            "https://example.com/contact": PageClassification(
-                normalized_url="https://example.com/contact",
-                page_type=PageType.CONVERSION,
-                eligible_for_growth_action=False,
-                strategic_priority=3,
-                commercial_priority=3,
-            )
-        },
-        crawl_by_url={},
-        declared=[],
-    )
-    assert [offer.url for offer in inputs.offers] == ["https://example.com/contact"]

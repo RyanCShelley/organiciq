@@ -15,7 +15,6 @@ from uuid import uuid4
 
 from app.ingestion.seranking.publish_audit import _pick_better_row
 from app.models.crawl import FactCrawlPageSnapshot, StagingSerAuditPage
-from app.services.lever_engine import detect_technical_signal
 
 PAGE = "https://element6composites.com/the-ultimate-guide-to-carbon-fiber-design-and-application"
 
@@ -41,54 +40,12 @@ def _snapshot(client_id, *, raw_url, indexable, status, canonical=None, redirect
     )
 
 
-def test_a_redirecting_variant_is_not_a_non_indexable_finding(client_a):
-    """This is the Element Six case: the only crawled row is the 301."""
-    redirecting = _snapshot(
-        client_a.id,
-        raw_url=PAGE,
-        indexable=False,
-        status=301,
-        redirect_url=f"{PAGE}/",
-    )
-
-    signal = detect_technical_signal(PAGE, redirecting)
-
-    assert signal is None or signal.audit_signal != "non_indexable"
 
 
-def test_a_genuinely_noindexed_page_is_still_reported(client_a):
-    """The real defect must survive the fix: 200 and deliberately not indexable."""
-    noindexed = _snapshot(client_a.id, raw_url=f"{PAGE}/", indexable=False, status=200)
-
-    signal = detect_technical_signal(PAGE, noindexed)
-
-    assert signal is not None
-    assert signal.audit_signal == "non_indexable"
 
 
-def test_a_broken_redirect_is_still_reported(client_a):
-    """A 3xx pointing at a 4xx is a real problem and keeps its own signal."""
-    dead_url = "https://element6composites.com/gone"
-    broken = _snapshot(
-        client_a.id, raw_url=PAGE, indexable=False, status=301, redirect_url=dead_url
-    )
-    dead = _snapshot(client_a.id, raw_url=dead_url, indexable=False, status=404)
-    dead.normalized_url = dead_url
-
-    signal = detect_technical_signal(PAGE, broken, crawl_by_url={dead_url: dead})
-
-    assert signal is not None
-    assert signal.audit_signal == "broken_redirect"
 
 
-def test_a_redirect_chain_is_still_reported(client_a):
-    chained = _snapshot(client_a.id, raw_url=PAGE, indexable=False, status=301)
-    chained.redirect_count = 4
-
-    signal = detect_technical_signal(PAGE, chained)
-
-    assert signal is not None
-    assert signal.audit_signal == "redirect_chain"
 
 
 def test_publish_keeps_the_served_page_when_both_variants_are_crawled(client_a):
@@ -115,53 +72,7 @@ def test_publish_keeps_the_served_page_when_both_variants_are_crawled(client_a):
     assert _pick_better_row(served, redirecting) is served
 
 
-def test_a_duplicate_pointing_at_its_original_is_not_a_finding(client_a):
-    """Correct canonicalization is the point, not a defect.
-
-    Real case from SMA: /blog/schema.org-vs-... is a 200 that canonicalizes
-    to /blog/schema-org-vs-... (dot versus hyphen). The site is doing
-    exactly the right thing. Reporting it — along with /services/ppc aimed
-    at /capabilities/ppc, and /industries/legal aimed at /industries — put
-    six High-priority "problems" at the top of a queue, every one of them
-    correct behaviour, and that is what made the engine untrustworthy.
-    """
-    url = "https://smamarketing.com/blog/schema.org-vs-google-structured-data-rich-results"
-    canonical = "https://smamarketing.com/blog/schema-org-vs-google-structured-data-rich-results"
-
-    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
-    row.normalized_url = url
-    target = _snapshot(client_a.id, raw_url=canonical, indexable=True, status=200)
-    target.normalized_url = canonical
-
-    signal = detect_technical_signal(url, row, crawl_by_url={canonical: target})
-    # The fixture has no title, so some signal fires. The claim is only that
-    # pointing at a live page is not itself the problem.
-    assert signal is None or signal.audit_signal != "canonical_elsewhere"
 
 
-def test_a_canonical_pointing_at_a_dead_page_is_a_finding(client_a):
-    """The demand arrives somewhere that will never rank."""
-    url = "https://smamarketing.com/old-guide"
-    canonical = "https://smamarketing.com/new-guide"
-
-    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
-    row.normalized_url = url
-    target = _snapshot(client_a.id, raw_url=canonical, indexable=False, status=404)
-    target.normalized_url = canonical
-
-    signal = detect_technical_signal(url, row, crawl_by_url={canonical: target})
-    assert signal is not None
-    assert signal.audit_signal == "canonical_elsewhere"
 
 
-def test_a_canonical_pointing_off_site_is_a_finding(client_a):
-    """Handing your demand to another domain is rarely intended."""
-    url = "https://smamarketing.com/guide"
-    canonical = "https://someone-else.com/guide"
-
-    row = _snapshot(client_a.id, raw_url=url, indexable=True, status=200, canonical=canonical)
-    row.normalized_url = url
-
-    signal = detect_technical_signal(url, row, crawl_by_url={})
-    assert signal is not None
-    assert signal.audit_signal == "canonical_elsewhere"

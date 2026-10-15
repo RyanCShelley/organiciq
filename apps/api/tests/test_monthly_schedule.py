@@ -18,8 +18,7 @@ from app.models.config import OrganicChannel
 from app.models.decision import MonthlyRecord
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage
-from app.models.scheduler import SchedulerCheckpoint
-from app.services.monthly_run import RUN_CHECKPOINT, maybe_run_month
+from app.services.monthly_run import maybe_run_month
 
 NOV_5 = date(2026, 11, 5)
 

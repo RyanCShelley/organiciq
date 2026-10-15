@@ -38,7 +38,7 @@ from app.models.crawl import (
 )
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
-from app.services.lever_engine import _link_gaps
+from app.services.link_gaps import link_gaps
 from app.services.page_stage import confirmed_stages
 from app.services.serp_features import load as load_serp_features
 from app.services.triage_signals import MANAGED_CHANNELS
@@ -473,7 +473,7 @@ def load_page_candidates(
         and snap.inbound_editorial_links is not None
         and snap.inbound_editorial_links < THIN_LINKS
     }
-    donors_by_url = _link_gaps(
+    donors_by_url = link_gaps(
         db, client.id, period=(start, today), targets=under_linked
     )
 

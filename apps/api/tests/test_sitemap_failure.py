@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-import pytest
 
 from app.ingestion.crawler.fetch import _load_sitemap_urls
 from app.ingestion.crawler.pipeline import _sitemap_failure_note

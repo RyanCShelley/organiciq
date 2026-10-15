@@ -47,36 +47,7 @@ os.environ.setdefault("APP_ENV", "test")
 from app.core.db import Base, get_db  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import (  # noqa: E402, F401 — register all models on Base.metadata
-    Annotation,
-    FactGa4Event,
-    FactGa4Traffic,
-    FactGscDaily,
-    FactGscPage,
-    FactCrawlPageIssue,
-    FactCrawlPageSnapshot,
-    Decision,
-    DecisionThreshold,
-    FactGscQueryPage,
-    FactSerCompetitor,
-    FactSerKeyword,
-    FactSerRanking,
-    FactSerAiCheck,
-    FactSerAiPrompt,
-    SchedulerCheckpoint,
-    StagingGa4Event,
-    StagingGa4Traffic,
-    StagingGscDaily,
-    StagingGscPage,
-    StagingGscQueryPage,
-    StagingSerAuditIssue,
-    StagingSerAuditPage,
-    StagingSerCompetitor,
-    StagingSerKeyword,
-    StagingSerPosition,
-    StagingSerAiCheck,
-    StagingSerAiPrompt,
-)
+from app.models import FactGa4Traffic, FactGscPage, FactCrawlPageSnapshot
 from app.models.client import Client, ClientStatus, Tier  # noqa: E402
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider  # noqa: E402
 from app.models.user import User, UserClient, UserRole  # noqa: E402

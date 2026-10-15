@@ -508,7 +508,7 @@ def _gsc_query(db, client_id, query, url, impressions):
 
 
 def test_the_page_lookup_can_be_limited_to_the_terms_wanted(db, client_a):
-    from app.services.lever_engine import _pages_for_queries
+    from app.services.query_pages import pages_for_queries as _pages_for_queries
 
     _gsc_query(db, client_a.id, "managed it services", "https://x.test/a", 300)
     _gsc_query(db, client_a.id, "Managed IT Services", "https://x.test/b", 100)
@@ -527,7 +527,7 @@ def test_the_page_lookup_can_be_limited_to_the_terms_wanted(db, client_a):
 
 
 def test_asking_for_no_terms_reads_nothing(db, client_a):
-    from app.services.lever_engine import _pages_for_queries
+    from app.services.query_pages import pages_for_queries as _pages_for_queries
 
     _gsc_query(db, client_a.id, "managed it services", "https://x.test/a", 300)
     db.commit()

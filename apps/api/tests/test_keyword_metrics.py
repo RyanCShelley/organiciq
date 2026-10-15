@@ -172,40 +172,6 @@ def test_a_failure_records_why(db, client_a, monkeypatch):
     assert "keyword database said no" in job.error_message
 
 
-def test_the_engine_prefers_measured_difficulty_over_what_only_ranks(db, client_a):
-    """The domain endpoint cannot price a term the client does not rank for,
-    so the keyword database wins where the two disagree."""
-    from app.models.seranking import FactSerDomainKeyword
-    from app.services.lever_engine import _keyword_market_data
-
-    db.add(
-        FactSerDomainKeyword(
-            id=uuid4(),
-            client_id=client_a.id,
-            keyword="seo services",
-            difficulty=None,
-            serp_features=["ai_overview"],
-            fetched_at=TODAY,
-        )
-    )
-    db.add(
-        FactSerKeywordMetric(
-            id=uuid4(),
-            client_id=client_a.id,
-            keyword="seo services",
-            source="us",
-            difficulty=72,
-            data_found=True,
-            fetched_at=TODAY,
-        )
-    )
-    db.commit()
-
-    market = _keyword_market_data(db, client_a.id)
-    difficulty, ai_overview = market["seo services"]
-    assert difficulty == 72.0
-    # The AI Overview seen by the domain endpoint survives the merge.
-    assert ai_overview is True
 
 
 # ── Only what is missing or stale is bought ──

@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,7 +55,6 @@ class Settings(BaseSettings):
     google_data_oauth_client_secret: str = ""
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
-    decision_engine_enabled: bool = True
     se_ranking_api_key: str = ""
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True

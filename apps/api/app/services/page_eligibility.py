@@ -191,8 +191,3 @@ def _extract_topic_slug(path: str, prefix: str) -> str | None:
         return None
     return segments[0].replace("-", " ")
 
-
-def classify_pages(
-    normalized_urls: list[str], declared: frozenset[str] | None = None
-) -> dict[str, PageClassification]:
-    return {url: classify_page_url(url, declared) for url in normalized_urls}

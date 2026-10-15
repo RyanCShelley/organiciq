@@ -20,7 +20,7 @@ page rather than being an action that silently never appears.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
 from app.decisions.page_targets import PageCandidate
 from app.decisions.slots import Prescription
@@ -86,12 +86,6 @@ NO_SERP_FEATURES = (
     "needs the full SERP feature list for the query, which is not pulled — "
     "only features the client already holds are stored"
 )
-
-
-def _terms(text: str | None) -> set[str]:
-    import re
-
-    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 2}
 
 
 def _mentions(term: str, text: str | None) -> bool:
@@ -489,19 +483,6 @@ def prescribe(
         if found is not None:
             return found
     return None
-
-
-def prescribe_all(
-    targets: list[tuple[ScoredCandidate, PageFacts]],
-    **kwargs: Any,
-) -> list[Prescription]:
-    """One prescription per target, in the order the targets were ranked."""
-    out: list[Prescription] = []
-    for target, page in targets:
-        found = prescribe(target, page, **kwargs)
-        if found is not None:
-            out.append(found)
-    return out
 
 
 # ── Traffic ─────────────────────────────────────────────────────────────────

@@ -30,7 +30,6 @@ from app.decisions.triage import (
     select_constraint,
     summarise_branch,
 )
-from app.decisions.thresholds import merge_thresholds
 from app.models.annotation import Annotation
 from app.models.client import WORKED_STATUSES, Client
 from app.decisions.catalog import (
@@ -322,7 +321,11 @@ def build_record(
     """Run Decision 1 and return the record, without saving it."""
     today = today or date.today()
     month = month_key(today)
-    thresholds = merge_thresholds(getattr(client, "decision_thresholds", None))
+    # No per-client overrides. The rules read each threshold with an inline
+    # default, and the override store that used to feed this was empty in
+    # production and tuned only the engine that has been removed — it offered
+    # dials that turned nothing, which is what the guard test existed to stop.
+    thresholds: dict = {}
 
     # Clamped to the run's own day. Running October in November would
     # otherwise take GSC's window up to November's newest row and report
@@ -653,15 +656,6 @@ def save_record(
         client.slug, month, record["constraint"], record["confidence"], captured,
     )
     return existing
-
-
-def latest_record(db: Session, client: Client) -> MonthlyRecord | None:
-    return (
-        db.query(MonthlyRecord)
-        .filter(MonthlyRecord.client_id == client.id)
-        .order_by(MonthlyRecord.month.desc())
-        .first()
-    )
 
 
 # ── Running it ──────────────────────────────────────────────────────────────
