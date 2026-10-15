@@ -40,9 +40,16 @@ from app.decisions.catalog import (
     prescribe_page,
 )
 from app.decisions.page_targets import rank_for_leads, rank_for_traffic
-from app.decisions.content_gaps import prescribe_term, rank_for_content
+from app.decisions.content_gaps import (
+    content_words,
+    prescribe_demand,
+    prescribe_term,
+    rank_demand,
+    rank_for_content,
+)
 from app.decisions.update_catalog import UPDATE_ACTIONS, rank_for_updates
 from app.services.content_gap_signals import scan_term_gaps
+from app.services.demand_gaps import LOOKBACK_DAYS, scan_demand_gaps
 from app.decisions.incidents import check as check_incidents
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.slots import fill_pool, fill_slots
@@ -478,14 +485,40 @@ def build_record(
     # so the one-page-one-job rule cannot reach them; a term is their
     # identity, and `fold_variants` has already made it one page per subject.
     gap_scan = scan_term_gaps(db, client)
+    demand_scan = scan_demand_gaps(db, client)
+    # A demand gap that is the same subject as a tracked gap is that gap seen
+    # from the other side: one page, prescribed once, by the tracked term.
+    tracked_words = [content_words(gap.term) for gap in gap_scan.gaps]
+    new_demand = [
+        gap
+        for gap in rank_demand(demand_scan.gaps)
+        if not any(
+            (words := content_words(gap.term)) and (words <= tw or tw <= words)
+            for tw in tracked_words
+        )
+    ]
+    content_prescriptions = [
+        found
+        for found in (
+            [prescribe_term(gap) for gap in rank_for_content(gap_scan.gaps)]
+            + [prescribe_demand(gap) for gap in new_demand]
+        )
+        if found is not None
+    ]
+    # One prize scale for both: searches a month the page could compete for.
+    content_prescriptions.sort(key=lambda p: (-p.score, p.term or ""))
+    empty_content = gap_scan.explain_empty()
+    if not gap_scan.blocked and demand_scan.summary:
+        d = demand_scan.summary
+        empty_content += (
+            f" Search Console showed {d.get('demand_queries', 0)} queries in the last "
+            f"{LOOKBACK_DAYS} days; {d.get('demand_gaps', 0)} are demand with no page "
+            f"and a price, {d.get('demand_unpriced', 0)} are waiting for a price."
+        )
     content_plan = fill_pool(
         slots=allowances.content_allowance if open_this_month else 0,
-        prescriptions=[
-            found
-            for gap in rank_for_content(gap_scan.gaps)
-            if (found := prescribe_term(gap)) is not None
-        ],
-        empty_reason=gap_scan.explain_empty() if open_this_month else closed_reason,
+        prescriptions=content_prescriptions,
+        empty_reason=empty_content if open_this_month else closed_reason,
     )
 
     return {
@@ -578,7 +611,11 @@ def build_record(
             _candidate_row(client, month, c, today) for c in content_plan.considered
         ],
         # What the scan checked, so an empty pool can say what it looked at.
-        "content_scan": {**gap_scan.summary, **({"blocked": gap_scan.blocked} if gap_scan.blocked else {})},
+        "content_scan": {
+            **gap_scan.summary,
+            **demand_scan.summary,
+            **({"blocked": gap_scan.blocked} if gap_scan.blocked else {}),
+        },
         "not_this_month": list(plan.not_this_month),
         # Everything the engine weighed, so a plan can be argued with. The
         # slotted ones are in here too, marked — one list to read rather

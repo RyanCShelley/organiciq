@@ -34,7 +34,7 @@ from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.decision import EngineAction, MonthlyRecord
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscPage
+from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.models.seranking import FactSerAiPresence, FactSerRanking
 from app.services.triage_signals import MANAGED_CHANNELS
 
@@ -99,6 +99,34 @@ def _window(as_of: date) -> tuple[date, date]:
     return as_of - timedelta(days=WINDOW_DAYS - 1), as_of
 
 
+def _query_position(
+    db: Session, client_id: UUID, term: str, as_of: date
+) -> Measurement:
+    """Average position Search Console reported for a query in the window to `as_of`."""
+    start, end = _window(as_of)
+    row = (
+        db.query(
+            func.sum(FactGscQueryPage.impressions),
+            func.sum(FactGscQueryPage.impressions * FactGscQueryPage.average_position),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            func.lower(func.trim(FactGscQueryPage.query)) == term.strip().lower(),
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .one()
+    )
+    impressions = float(row[0] or 0)
+    if impressions <= 0:
+        return Measurement(
+            None,
+            f"no tracked position for “{term}” on or before {as_of}, and Search "
+            "Console showed nothing for it in that window",
+        )
+    return Measurement(round(float(row[1]) / impressions, 1))
+
+
 def _term_position(
     db: Session, client_id: UUID, term: str | None, as_of: date
 ) -> Measurement:
@@ -121,7 +149,9 @@ def _term_position(
         .first()
     )
     if row is None:
-        return Measurement(None, f"no tracked position for “{term}” on or before {as_of}")
+        # Not tracked: a page written for a query Search Console showed the
+        # site for is judged on where Search Console shows it.
+        return _query_position(db, client_id, term, as_of)
     # SE Ranking writes 0 or 101 for "not in the results we checked", which
     # `_rank` in triage_signals has always known and this did not: every
     # before reading came out as position zero.

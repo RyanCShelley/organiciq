@@ -88,6 +88,19 @@ def keywords_to_price(
             continue
         seen.add(key)
         out.append(keyword)
+
+    # Search Console demand the site has no page for, which nobody tracks and
+    # so nobody has priced. Bought for the few largest only; the gap analysis
+    # cannot prescribe a page without a volume and a difficulty.
+    from app.models.client import Client
+    from app.services.demand_gaps import queries_to_price
+
+    client = db.get(Client, client_id)
+    if client is not None:
+        for query in queries_to_price(db, client, today=today):
+            if query not in seen:
+                seen.add(query)
+                out.append(query)
     return out
 
 

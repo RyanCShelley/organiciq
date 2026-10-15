@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.decisions.slots import Prescription
 from app.decisions.triage import Branch
@@ -115,6 +115,11 @@ class TermGap:
     absent_words: tuple[str, ...] = ()
     #: Of the term's words, the largest share any one page carries.
     best_overlap: float = 0.0
+
+    @property
+    def weight(self) -> float:
+        """What variants of one subject are ordered by when they are folded."""
+        return self.volume
 
     @property
     def opportunity(self) -> float:
@@ -234,6 +239,167 @@ def c1_write_the_page(gap: TermGap) -> Prescription | None:
     )
 
 
+#: Impressions over the look-back below which a query is not demand worth a
+#: page: about thirty a month. Set from what a month of Search Console shows
+#: a small local site — a handful of queries a month is noise, not an audience
+#: — and not from how many queries it lets through.
+MIN_DEMAND_IMPRESSIONS = 90
+
+#: A page already holding position 10 or better for the query is earning the
+#: demand; writing a second one competes with it.
+EARNING_POSITION = 10.0
+
+
+@dataclass(frozen=True)
+class DemandGap:
+    """A query people send the site, which no page on it is about.
+
+    The tracked-term gap starts from the terms somebody chose to watch, which
+    on most clients is a short list. This starts from what Search Console says
+    people searched before landing — or failing to land — on the site, so the
+    demand it finds is demand nobody had to think of first.
+    """
+
+    term: str
+    #: Impressions the site's results earned for the query over the look-back.
+    #: Observed, and an undercount of the real search volume.
+    impressions: float
+    clicks: float
+    #: Impression-weighted average position, across every page that showed.
+    position: float | None
+    #: The page that shows most for it — the page doing the job a new page
+    #: should do properly.
+    stand_in_url: str | None = None
+    #: SE Ranking's figures, present only once the term has been priced.
+    volume: float | None = None
+    difficulty: float | None = None
+    intents: tuple[str, ...] = ()
+    also_covers: tuple[tuple[str, float], ...] = ()
+    nearest: tuple[NearPage, ...] = ()
+    pages_searched: int = 0
+    absent_words: tuple[str, ...] = ()
+    best_overlap: float = 0.0
+    lookback_days: int = 90
+
+    @property
+    def weight(self) -> float:
+        return self.impressions
+
+    @property
+    def priced(self) -> bool:
+        return self.volume is not None and self.difficulty is not None
+
+    @property
+    def opportunity(self) -> float:
+        """Searches a month the page could compete for, as for a tracked term.
+
+        Zero until the term is priced: ranking by impressions alone would put
+        the term nobody can win first, which is why a tracked gap is not
+        scored without a difficulty either.
+        """
+        if not self.priced or self.volume < MIN_VOLUME:
+            return 0.0
+        return max(0.0, self.volume * (1.0 - min(self.difficulty, 100.0) / 100.0))
+
+
+def c2_write_the_page_for_demand(gap: DemandGap) -> Prescription | None:
+    """A query the site is already shown for, with no page about it."""
+    if gap.opportunity <= 0:
+        return None
+
+    months = gap.lookback_days / 30
+    if gap.absent_words:
+        words = ", ".join(f"“{w}”" for w in gap.absent_words)
+        basis = (
+            f"None of the {gap.pages_searched} indexable pages crawled mentions "
+            f"{words} in its title, URL or headings."
+        )
+    else:
+        basis = (
+            f"Of the {gap.pages_searched} indexable pages crawled, the closest "
+            f"carries {gap.best_overlap * 100:.0f}% of its words in its title, URL "
+            "or headings."
+        )
+    where = (
+        f"; its average position is {gap.position:.0f}"
+        if gap.position is not None
+        else ""
+    )
+    stand_in = (
+        f" The page Search Console shows for it is {gap.stand_in_url}, which is not "
+        "about it."
+        if gap.stand_in_url
+        else ""
+    )
+
+    steps: list[str] = [
+        f"Write a page for “{gap.term}” — {gap.volume:,.0f} searches a month at "
+        f"keyword difficulty {gap.difficulty:.0f}. Put the term in the title, the "
+        "URL and the first heading."
+    ]
+    if gap.also_covers:
+        covered = ", ".join(f"“{t}” ({v:,.0f} impressions)" for t, v in gap.also_covers)
+        steps.append(
+            f"Cover the same subject under it rather than writing a page each: {covered}."
+        )
+    if gap.stand_in_url:
+        steps.append(
+            f"Link to the new page from {gap.stand_in_url}, which is where searchers "
+            "land today, so the demand it already draws has somewhere better to go."
+        )
+    if gap.nearest:
+        steps.append(
+            "Also link it from the closest pages the site has: "
+            + "; ".join(f"{p.url} (shares {', '.join(p.shared)})" for p in gap.nearest)
+            + "."
+        )
+    steps.append(
+        f"Add the page to the sitemap and map “{gap.term}” to its URL in the "
+        "keyword map, so the engine tracks the one against the other."
+    )
+
+    return Prescription(
+        action_id="C-2",
+        title=f"Write the page for “{gap.term}”",
+        branch=Branch.VISIBILITY,
+        target_url="",
+        term=gap.term,
+        score=gap.opportunity,
+        effort_min=240,
+        why=(
+            f"People searched “{gap.term}” and the site's results were shown "
+            f"{gap.impressions:,.0f} times in {months:.0f} months{where}; SE Ranking "
+            f"counts {gap.volume:,.0f} searches a month. Nobody is tracking it and "
+            f"no page is about it. {basis}{stand_in}"
+        ),
+        done_when=(
+            f"A page exists at its own URL, titled for “{gap.term}”, mapped to it "
+            "in the keyword map and linked from the pages that sit closest to it."
+        ),
+        metric="Average position on the term",
+        metric_key="term_position",
+        evidence=(
+            f"facts_gsc_query_pages: {gap.impressions:,.0f} impressions, "
+            f"{gap.clicks:,.0f} clicks over {gap.lookback_days} days",
+            f"facts_ser_keyword_metrics: {gap.volume:,.0f} searches, difficulty "
+            f"{gap.difficulty:.0f}",
+            f"facts_crawl_page_snapshots: no page of {gap.pages_searched} is about it",
+        ),
+        steps=tuple(steps),
+        check_after_days=CHECK_AFTER_DAYS,
+    )
+
+
+def prescribe_demand(gap: DemandGap) -> Prescription | None:
+    return c2_write_the_page_for_demand(gap)
+
+
+def rank_demand(gaps: list[DemandGap]) -> list[DemandGap]:
+    return sorted(
+        [g for g in gaps if g.opportunity > 0], key=lambda g: (-g.opportunity, g.term)
+    )
+
+
 CONTENT_ACTIONS: tuple[Callable[[TermGap], Prescription | None], ...] = (
     c1_write_the_page,
 )
@@ -254,7 +420,7 @@ def rank_for_content(gaps: list[TermGap]) -> list[TermGap]:
     )
 
 
-def fold_variants(gaps: list[TermGap]) -> list[TermGap]:
+def fold_variants(gaps: list) -> list:
     """One page per subject: a term whose words contain, or are contained
     by, a bigger term's words rides along with it.
 
@@ -263,8 +429,8 @@ def fold_variants(gaps: list[TermGap]) -> list[TermGap]:
     brief says which variants the page has to cover and nobody is given
     three slots for one subject.
     """
-    ordered = sorted(gaps, key=lambda g: (-g.volume, g.term))
-    leads: list[TermGap] = []
+    ordered = sorted(gaps, key=lambda g: (-g.weight, g.term))
+    leads: list = []
     folded: dict[str, list[tuple[str, float]]] = {}
     for gap in ordered:
         words = content_words(gap.term)
@@ -280,13 +446,5 @@ def fold_variants(gaps: list[TermGap]) -> list[TermGap]:
             leads.append(gap)
             folded[gap.term] = list(gap.also_covers)
         else:
-            folded[home.term].append((gap.term, gap.volume))
-    return [
-        TermGap(
-            **{
-                **{f: getattr(lead, f) for f in lead.__dataclass_fields__},
-                "also_covers": tuple(folded[lead.term]),
-            }
-        )
-        for lead in leads
-    ]
+            folded[home.term].append((gap.term, gap.weight))
+    return [replace(lead, also_covers=tuple(folded[lead.term])) for lead in leads]

@@ -276,20 +276,11 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     to re-price the whole list.
     """
     from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
-    from app.models.seranking import FactSerKeyword
-
     today = date.today()
-    has_tracked = [
-        client_id for (client_id,) in db.query(FactSerKeyword.client_id).distinct()
-    ]
-    clients = (
-        db.query(Client)
-        .filter(Client.status == ClientStatus.ACTIVE)
-        .filter(Client.id.in_(has_tracked))
-        .all()
-        if has_tracked
-        else []
-    )
+    # Every active client, not only those with a tracked term: the demand a
+    # site has no page for is priced too, and a client with an empty watchlist
+    # is where that matters most.
+    clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
 
     enqueued = skipped = errors = due = 0
     for client in clients:
