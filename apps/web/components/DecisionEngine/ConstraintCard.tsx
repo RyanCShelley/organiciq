@@ -11,8 +11,15 @@ import {
 
 const STATUS_CHIP: Record<string, string> = {
   pass: "bg-[#E5F4EC] text-[#15784F]",
-  fail: "bg-[#B4441C] text-white",
+  // A branch under its bar is where the month's work goes, not an alarm.
+  fail: "bg-[#FDF1E3] text-[#8A4B08]",
   blocked: "bg-[#EEF1F3] text-[#3E4954]",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pass: "On track",
+  fail: "Opportunity",
+  blocked: "Blocked",
 };
 
 const CONFIDENCE_CHIP: Record<string, string> = {
@@ -47,7 +54,7 @@ function BranchTile({
     <div
       className={`rounded-[10px] border px-4 py-3.5 ${
         isConstraint && failing
-          ? "border-2 border-[#B4441C] bg-[#FDF4F0]"
+          ? "border-2 border-[#E3B25C] bg-[#FFFAF0]"
           : "border-[var(--border)]"
       }`}
     >
@@ -61,8 +68,8 @@ function BranchTile({
           }`}
         >
           {branch.status === "fail" && isConstraint
-            ? "Fail · constraint"
-            : branch.status[0].toUpperCase() + branch.status.slice(1)}
+            ? "Opportunity · focus"
+            : (STATUS_LABEL[branch.status] ?? branch.status)}
         </span>
       </div>
 
@@ -76,7 +83,7 @@ function BranchTile({
         <>
           <p
             className={`mt-1.5 font-[family-name:var(--font-display)] text-[24px] font-black tabular-nums leading-none ${
-              failing ? "text-[#8E3414]" : "text-[var(--text-primary)]"
+              failing ? "text-[#8A4B08]" : "text-[var(--text-primary)]"
             }`}
           >
             {test ? testValue(test) : "—"}
