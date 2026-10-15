@@ -410,6 +410,24 @@ export function ClientSettingsForm({
           </p>
         </div>
         <div className="flex flex-col gap-1">
+          <FieldLabel label="Competitors (up to 3)">
+            <textarea
+              name="competitor_domains"
+              rows={3}
+              defaultValue={(client.competitor_domains ?? []).join("\n")}
+              placeholder="One domain per line, e.g. rival.com"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            The sites that really compete for this client&apos;s customers — one is
+            fine. Each month the content plan reads the terms they rank for in the top
+            ten and suggests pages for the ones this site has none about. Each competitor
+            costs 100 SE Ranking credits a month, so three is the limit. Leave blank to
+            skip it.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1">
           <FieldLabel label="Sitemap URL (optional)">
             <Input
               name="sitemap_url"

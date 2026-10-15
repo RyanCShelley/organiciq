@@ -16,6 +16,7 @@ from app.ingestion.google_credentials import (
 from app.models.client import Client
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.schemas import ClientCreate, ClientUpdate, IntegrationCreate, IntegrationUpdate
+from app.services.competitors import clean_competitor_domains
 
 # FKs have no ON DELETE CASCADE — delete client-scoped rows before clients.
 _CLIENT_CASCADE_TABLES = (
@@ -129,6 +130,9 @@ def clean_brand_aliases(values: list[str] | None) -> list[str]:
 def create_client(db: Session, payload: ClientCreate) -> Client:
     data = payload.model_dump()
     data["brand_aliases"] = clean_brand_aliases(data.get("brand_aliases"))
+    data["competitor_domains"] = clean_competitor_domains(
+        data.get("competitor_domains"), own_domain=data.get("domain")
+    )
     desired_slug = data.pop("slug", None) or data["client_name"]
     data["slug"] = allocate_client_slug(db, desired=desired_slug)
     client = Client(**data)
@@ -198,6 +202,10 @@ def update_client(db: Session, client: Client, payload: ClientUpdate) -> Client:
         data["lead_goal_overrides"] = _clean_lead_goal_overrides(data["lead_goal_overrides"])
     if "brand_aliases" in data:
         data["brand_aliases"] = clean_brand_aliases(data["brand_aliases"])
+    if "competitor_domains" in data:
+        data["competitor_domains"] = clean_competitor_domains(
+            data["competitor_domains"], own_domain=data.get("domain") or client.domain
+        )
     if "slug" in data and data["slug"]:
         data["slug"] = allocate_client_slug(
             db, desired=str(data["slug"]), exclude_client_id=client.id

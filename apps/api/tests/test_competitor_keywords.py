@@ -14,7 +14,6 @@ from app.decisions.content_gaps import c2_write_the_page_for_demand
 from app.ingestion.seranking import pipeline_competitor_keywords as pipeline
 from app.models.job import SyncJob, SyncJobStatus
 from app.models.seranking import (
-    FactSerCompetitor,
     FactSerCompetitorKeyword,
     FactSerKeyword,
     FactSerKeywordMetric,
@@ -23,14 +22,8 @@ from app.services.demand_gaps import queries_to_price, scan_demand_gaps
 from tests.test_demand_gaps import DAY, TODAY, _shown, _site
 
 
-def _competitor(db, client, domain, visibility):
-    db.add(
-        FactSerCompetitor(
-            id=uuid4(), client_id=client.id, site_engine_id="1", competitor_id=domain,
-            name=domain, url=f"https://www.{domain}/", visibility=Decimal(visibility),
-            metric_date=DAY,
-        )
-    )
+def _name(db, client, *domains):
+    client.competitor_domains = list(domains)
     db.commit()
 
 
@@ -58,28 +51,37 @@ def _job(db, client):
 # --- Cost controls ----------------------------------------------------------
 
 
-def test_only_the_three_closest_competitors_are_read(db, client_a):
-    for i, domain in enumerate(["a.com", "b.com", "c.com", "d.com", "e.com"]):
-        _competitor(db, client_a, domain, 50 - i)
-    assert pipeline.closest_competitors(db, client_a) == ["a.com", "b.com", "c.com"]
+def test_only_the_competitors_the_team_named_are_read(db, client_a):
+    _name(db, client_a, "https://www.A.com/", "b.com")
+    assert pipeline.named_competitors(client_a) == ["a.com", "b.com"]
+
+
+def test_a_client_that_names_none_is_not_read(db, client_a):
+    assert pipeline.named_competitors(client_a) == []
+    assert pipeline.competitors_to_pull(db, client_a, today=TODAY) == []
 
 
 def test_the_clients_own_domain_is_never_bought_as_a_competitor(db, client_a):
-    _competitor(db, client_a, "other.com", 10)
-    db.add(
-        FactSerCompetitor(
-            id=uuid4(), client_id=client_a.id, site_engine_id="1", competitor_id="self",
-            name="self", url=f"https://www.{client_a.domain}/", visibility=Decimal(99),
-            metric_date=DAY,
-        )
-    )
-    db.commit()
-    assert pipeline.closest_competitors(db, client_a) == ["other.com"]
+    _name(db, client_a, client_a.domain, "other.com")
+    assert pipeline.named_competitors(client_a) == ["other.com"]
+
+
+def test_a_stored_list_longer_than_three_still_costs_three(db, client_a):
+    _name(db, client_a, "a.com", "b.com", "c.com", "d.com", "e.com")
+    assert pipeline.named_competitors(client_a) == ["a.com", "b.com", "c.com"]
+
+
+def test_naming_more_than_three_is_refused():
+    import pytest
+    from app.services.competitors import clean_competitor_domains
+
+    with pytest.raises(ValueError, match="at most 3"):
+        clean_competitor_domains(["a.com", "b.com", "c.com", "d.com"])
+    assert clean_competitor_domains(["a.com", "A.com", "not a domain", "b"]) == ["a.com"]
 
 
 def test_a_competitor_read_this_month_is_not_bought_again(db, client_a):
-    _competitor(db, client_a, "a.com", 50)
-    _competitor(db, client_a, "b.com", 40)
+    _name(db, client_a, "a.com", "b.com")
     _ranks(db, client_a, "a.com", "heat pump installation", fetched=TODAY - timedelta(days=5))
     assert pipeline.competitors_to_pull(db, client_a, today=TODAY) == ["b.com"]
     assert pipeline.competitors_to_pull(db, client_a, today=TODAY + timedelta(days=30)) == [
@@ -88,11 +90,10 @@ def test_a_competitor_read_this_month_is_not_bought_again(db, client_a):
     ]
 
 
-def test_the_job_makes_one_request_per_competitor_and_keeps_the_top_ten(
+def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
     db, client_a, monkeypatch
 ):
-    for domain, visibility in [("a.com", 50), ("b.com", 40), ("c.com", 30), ("d.com", 20)]:
-        _competitor(db, client_a, domain, visibility)
+    _name(db, client_a, "a.com", "b.com", "c.com")
     asked: list[str] = []
 
     def fake(*, api_key, domain, source):
@@ -106,14 +107,14 @@ def test_the_job_makes_one_request_per_competitor_and_keeps_the_top_ten(
     job = pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
 
     assert job.status is SyncJobStatus.SUCCESSFUL
-    assert asked == ["a.com", "b.com", "c.com"], "three requests, 300 credits, never the fourth"
+    assert asked == ["a.com", "b.com", "c.com"], "three requests, 300 credits"
     stored = db.query(FactSerCompetitorKeyword).all()
     assert {row.keyword for row in stored} == {"heat pump installation"}
     assert job.records_fetched == 6 and job.records_written == 3
 
 
 def test_a_second_run_buys_nothing(db, client_a, monkeypatch):
-    _competitor(db, client_a, "a.com", 50)
+    _name(db, client_a, "a.com")
     calls: list[str] = []
     monkeypatch.setattr(
         pipeline,
@@ -139,7 +140,7 @@ def test_it_is_a_runnable_source_and_not_in_the_daily_provider_list():
 def test_a_client_with_a_thin_crawl_is_not_enqueued(db, client_a):
     from app.services.daily_sync import enqueue_due_competitor_keywords
 
-    _competitor(db, client_a, "a.com", 50)
+    _name(db, client_a, "a.com")
     assert enqueue_due_competitor_keywords(db)["due"] == 0
 
 
@@ -237,3 +238,30 @@ def test_a_price_the_client_already_bought_wins_over_the_competitors(db, client_
     db.commit()
     gap = scan_demand_gaps(db, client_a, today=TODAY).gaps[0]
     assert gap.volume == 1200 and gap.difficulty == 40
+
+
+# --- Client settings --------------------------------------------------------
+
+
+def test_settings_accept_one_to_three_competitors_and_reject_a_fourth(db, client_a):
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas import ClientUpdate
+    from app.services.clients import update_client
+
+    update_client(db, client_a, ClientUpdate(competitor_domains=["https://www.Rival.com/x"]))
+    assert client_a.competitor_domains == ["rival.com"]
+
+    with pytest.raises(ValidationError, match="at most 3"):
+        ClientUpdate(competitor_domains=["a.com", "b.com", "c.com", "d.com"])
+
+
+def test_settings_drop_the_clients_own_domain_and_can_clear_the_list(db, client_a):
+    from app.schemas import ClientUpdate
+    from app.services.clients import update_client
+
+    update_client(db, client_a, ClientUpdate(competitor_domains=[client_a.domain, "rival.com"]))
+    assert client_a.competitor_domains == ["rival.com"]
+    update_client(db, client_a, ClientUpdate(competitor_domains=[]))
+    assert client_a.competitor_domains == []

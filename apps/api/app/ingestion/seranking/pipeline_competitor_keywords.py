@@ -1,10 +1,11 @@
-"""Fetch the organic keywords the closest competitors rank for.
+"""Fetch the organic keywords the client's named competitors rank for.
 
 Each competitor is one /domain/keywords request at 100 credits, so the cost is
-bounded two ways: at most `COMPETITOR_LIMIT` competitors a client, and a
-competitor is not asked for again until `COMPETITOR_REFRESH_DAYS` have passed.
-That is 300 credits a client a month at most, and nothing when the gap
-analysis has no crawl to compare against (see `enqueue_due_competitor_keywords`).
+bounded two ways: at most `MAX_COMPETITORS` competitors a client, named in
+client settings, and a competitor is not asked for again until
+`COMPETITOR_REFRESH_DAYS` have passed. That is 300 credits a client a month at
+most, and nothing when the gap analysis has no crawl to compare against (see
+`enqueue_due_competitor_keywords`).
 
 Only the terms a competitor ranks well for are kept. The request already
 returns volume and difficulty, so a term found here is never priced again.
@@ -16,10 +17,8 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import uuid4
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -27,12 +26,10 @@ from app.ingestion.seranking.client import list_domain_keywords
 from app.ingestion.seranking.pipeline_domain import resolve_source
 from app.models.client import Client
 from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
-from app.models.seranking import FactSerCompetitor, FactSerCompetitorKeyword
+from app.models.seranking import FactSerCompetitorKeyword
+from app.services.competitors import MAX_COMPETITORS, clean_competitor_domains
 
 logger = logging.getLogger("organiciq.seranking.competitor_keywords")
-
-#: Competitors read per client. SE Ranking bills each one 100 credits a request.
-COMPETITOR_LIMIT = 3
 
 #: A competitor's rankings move slowly and the gap analysis runs monthly.
 COMPETITOR_REFRESH_DAYS = 30
@@ -51,44 +48,16 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
-def bare_domain(value: str | None) -> str:
-    text = (value or "").strip().lower()
-    if "://" in text:
-        text = urlsplit(text).netloc or text
-    return text.split("/")[0].removeprefix("www.")
+def named_competitors(client: Client) -> list[str]:
+    """The competitors the team named in client settings, at most `MAX_COMPETITORS`.
 
-
-def closest_competitors(db: Session, client: Client) -> list[str]:
-    """The `COMPETITOR_LIMIT` competitors with the most search visibility.
-
-    The visibility SE Ranking measures for each competitor against the site's
-    own keywords: the highest are the ones taking the searches the site wants.
+    Not taken from SE Ranking's competitor list: that is whoever was added to a
+    rank-tracking project, and every one read costs 100 credits. A client that
+    names none is not read at all.
     """
-    own = bare_domain(client.domain)
-    latest = (
-        db.query(FactSerCompetitor.competitor_id, func.max(FactSerCompetitor.metric_date).label("last_date"))
-        .filter(FactSerCompetitor.client_id == client.id)
-        .group_by(FactSerCompetitor.competitor_id)
-        .subquery()
+    return clean_competitor_domains(
+        (client.competitor_domains or [])[:MAX_COMPETITORS], own_domain=client.domain
     )
-    rows = (
-        db.query(FactSerCompetitor)
-        .join(
-            latest,
-            (FactSerCompetitor.competitor_id == latest.c.competitor_id)
-            & (FactSerCompetitor.metric_date == latest.c.last_date),
-        )
-        .filter(FactSerCompetitor.client_id == client.id)
-        .all()
-    )
-    ranked: dict[str, float] = {}
-    for row in rows:
-        domain = bare_domain(row.url or row.name)
-        if not domain or "." not in domain or domain == own:
-            continue
-        ranked[domain] = max(ranked.get(domain, -1.0), float(row.visibility or 0))
-    ordered = sorted(ranked, key=lambda domain: (-ranked[domain], domain))
-    return ordered[:COMPETITOR_LIMIT]
 
 
 def competitors_to_pull(
@@ -106,7 +75,7 @@ def competitors_to_pull(
         )
         .distinct()
     }
-    return [domain for domain in closest_competitors(db, client) if domain not in fresh]
+    return [domain for domain in named_competitors(client) if domain not in fresh]
 
 
 def run_seranking_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob:
