@@ -57,7 +57,7 @@ export default async function AnnotationsPage({
           <section className="workspace-section">
             <SectionHeader
               title="Completed work"
-              description={`${rows.length} entr${rows.length === 1 ? "y" : "ies"}. Marking a recommendation shipped adds it here; add a note to any of them.`}
+              description={`${rows.length} entr${rows.length === 1 ? "y" : "ies"}. Marking a recommendation done adds it here; add a note to any of them.`}
             />
             <div className="workspace-panel">
               <AnnotationsTable rows={rows} clientId={clientId} />

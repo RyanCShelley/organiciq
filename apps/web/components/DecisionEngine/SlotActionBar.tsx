@@ -216,14 +216,14 @@ export function SlotActionBar({
         )}
 
         {/* Until this is set, every verdict on this action carries "not
-            recorded as shipped" — and a caveat on every row is one nobody
+            marked done" — and a caveat on every row is one nobody
             reads. */}
         {shippedOn ? (
           <button
             type="button"
             className={BUTTON}
             disabled={pending}
-            title="Clear the shipped date"
+            title="Clear the done date"
             onClick={() =>
               run(() =>
                 shipSlotAction({
@@ -236,7 +236,7 @@ export function SlotActionBar({
               )
             }
           >
-            Shipped {formatDay(shippedOn)}
+            Done {formatDay(shippedOn)}
           </button>
         ) : null}
         {shippedOn ? (
@@ -263,7 +263,7 @@ export function SlotActionBar({
               )
             }
           >
-            Mark shipped
+            Mark done
           </button>
         )}
 
