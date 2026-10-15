@@ -29,6 +29,7 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
         { href: tool("content-opp"), label: "Content Opp" },
         { href: tool("decision-engine"), label: "Decision Engine" },
         { href: tool("site-crawl"), label: "Site crawl" },
+        { href: tool("copilot"), label: "Copilot" },
         { href: settingsHref, label: "Client settings" },
       ],
     },

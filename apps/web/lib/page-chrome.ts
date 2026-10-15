@@ -88,6 +88,11 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
         title: "Annotations",
         description: "Causal history for the account — changes and measured impact.",
       };
+    case "copilot":
+      return {
+        title: "Copilot",
+        description: "Ask about this client's data, plan and tool health. Reads only; changes nothing.",
+      };
     default:
       return { title: "Organic IQ", description: "" };
   }

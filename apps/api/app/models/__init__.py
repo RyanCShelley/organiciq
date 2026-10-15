@@ -1,5 +1,6 @@
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
+from app.models.copilot import CopilotConversation, CopilotMessage
 from app.models.config import ChannelRule, ConversionDefinition, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot, StagingSerAuditIssue, StagingSerAuditPage
 from app.models.decision import Decision, DecisionThreshold
@@ -87,4 +88,6 @@ __all__ = [
     "FactSerAiCheck",
     "FactSerAiPresence",
     "FactSerAiTrackerStats",
+    "CopilotConversation",
+    "CopilotMessage",
 ]
