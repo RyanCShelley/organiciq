@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import {
@@ -237,6 +238,14 @@ export function SlotActionBar({
           >
             Shipped {formatDay(shippedOn)}
           </button>
+        ) : null}
+        {shippedOn ? (
+          <Link
+            href={`/${slug}/annotations`}
+            className="text-[12.5px] text-[var(--brand-teal-hover)] underline"
+          >
+            In completed work
+          </Link>
         ) : (
           <button
             type="button"

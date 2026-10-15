@@ -70,7 +70,7 @@ export function SlotCard({
         <div className="min-w-0 flex-1 basis-[420px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-              Slot {action.slot} · {action.id}{yours ? " · your pick" : ""}
+              Slot {action.slot}{yours ? " · your pick" : ""}
             </span>
             <span
               className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${

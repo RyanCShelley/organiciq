@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,9 @@ class AnnotationResult(str, enum.Enum):
 
 class Annotation(Base):
     __tablename__ = "annotations"
+    __table_args__ = (
+        UniqueConstraint("client_id", "engine_uid", name="uq_annotations_engine_uid"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
@@ -63,6 +66,10 @@ class Annotation(Base):
     baseline_metrics_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     success_metric: Mapped[str | None] = mapped_column(String(255), nullable=True)
     teamwork_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    #: Set when the entry was written by marking an engine action shipped, so
+    #: marking it again updates this row and un-marking it removes this row.
+    #: Null for everything a person typed or imported.
+    engine_uid: Mapped[str | None] = mapped_column(String(128), nullable=True)
     completed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     measurement_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     measurement_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)

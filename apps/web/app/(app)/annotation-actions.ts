@@ -71,3 +71,26 @@ export async function remeasureAnnotationsAction(formData: FormData) {
   revalidatePath("/annotations");
 }
 
+
+/** Set or clear the note on one entry of the account history. */
+export async function updateAnnotationNoteAction(input: {
+  clientId: string;
+  id: string;
+  notes: string;
+}) {
+  if (!input.clientId || !input.id) return { ok: false as const, error: "Missing entry" };
+  try {
+    await apiFetch(`/annotations/${encodeURIComponent(input.id)}`, {
+      method: "PATCH",
+      clientId: input.clientId,
+      body: { notes: input.notes.trim() || null },
+    });
+  } catch (e) {
+    return {
+      ok: false as const,
+      error: e instanceof Error ? e.message : "That note did not save",
+    };
+  }
+  revalidatePath("/[clientSlug]/annotations", "page");
+  return { ok: true as const };
+}
