@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.ingestion.crawler.fetch import (
     CrawledPage,
+    USER_AGENT,
     CrawlResult,
     crawl_site,
     page_limit_for,
@@ -403,10 +404,19 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         # than the one it would replace. Throttled but still ahead is an
         # improvement, and is kept.
         throttled_short = result.rate_limited_pages > 0 and indexable_now < indexable_before
-        if not fetched or collapsed or throttled_short:
+        # The host decided we are a bot and said so. Caught on first contact: the
+        # guards above only noticed it for a client that already had a good
+        # crawl to lose, so a first crawl recorded the challenge page as a
+        # one-page site.
+        challenged = result.challenged_pages > 0 and indexable_now < max(indexable_before, 1)
+        if not fetched or collapsed or throttled_short or challenged:
             blocked = sum(1 for page in result.pages if page.blocked_by_robots)
             reason = (
-                "robots.txt disallows crawling"
+                f"{client.domain} turned the crawler away with {result.challenged_by}. "
+                f"Ask the host to allow it ({USER_AGENT.split(' ')[0]}, from this "
+                "service's address) — the crawler will not try to get past a captcha"
+                if challenged
+                else "robots.txt disallows crawling"
                 if blocked
                 else f"nothing indexable came back, where the last crawl had {indexable_before}"
                 if collapsed

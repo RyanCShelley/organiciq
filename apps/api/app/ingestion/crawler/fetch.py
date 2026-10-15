@@ -198,6 +198,42 @@ class InternalLink:
     is_template: bool = False
 
 
+#: Markers of the interstitial pages hosts serve to traffic they have decided
+#: is a bot. Checked against the start of a body that arrived with an error or
+#: "accepted" status — a 200 page that merely mentions a captcha is not one.
+_CHALLENGE_BODY_MARKERS = (
+    ("/.well-known/sgcaptcha", "SiteGround's captcha"),
+    ("just a moment...", "Cloudflare's bot challenge"),
+    ("cf-browser-verification", "Cloudflare's bot challenge"),
+    ("attention required! | cloudflare", "Cloudflare's block page"),
+    ("sucuri website firewall", "Sucuri's firewall"),
+    ("incapsula incident", "Imperva's firewall"),
+    ("_incapsula_resource", "Imperva's firewall"),
+)
+
+
+def challenge_reason(status_code: int, headers, body_start: str = "") -> str | None:
+    """Who is challenging us, when a response is a bot challenge and not a page.
+
+    popfoam.com, boyselectrical.com and eight other clients answered the worker
+    with HTTP 202 and a one-line page that redirects to a captcha. That was
+    recorded as a successful one-page crawl, so a host turning us away read as
+    "this site has one page". The signal is in the headers or the first bytes,
+    and it is the same few vendors every time.
+    """
+    lowered = {str(k).lower(): str(v).lower() for k, v in headers.items()}
+    if "sg-captcha" in lowered:
+        return "SiteGround's captcha"
+    if lowered.get("cf-mitigated") == "challenge":
+        return "Cloudflare's bot challenge"
+    if status_code in (202, 401, 403, 429, 503):
+        head = body_start[:3000].lower()
+        for marker, name in _CHALLENGE_BODY_MARKERS:
+            if marker in head:
+                return name
+    return None
+
+
 @dataclass
 class CrawledPage:
     raw_url: str
@@ -223,6 +259,10 @@ class CrawledPage:
     #: status code: sixty of ACC Tek's pages were reported as "HTTP 429 on
     #: page with demand", which read as sixty faults on the client's site.
     rate_limited: bool = False
+    #: The host served a bot challenge instead of the page. Like `rate_limited`
+    #: this is us being turned away, not the page being broken, and it must not
+    #: be stored as a status code or counted as a page the site has.
+    challenged_by: str | None = None
 
     @property
     def indexable(self) -> bool:
@@ -270,6 +310,9 @@ class CrawlResult:
     #: Pages the server turned away for the whole crawl. Reported as a
     #: condition of the run, not as findings about the site.
     rate_limited_pages: int = 0
+    #: Pages the host answered with a bot challenge, and whose challenge it was.
+    challenged_pages: int = 0
+    challenged_by: str | None = None
     #: Whether the site asked us to slow down at any point.
     throttled: bool = False
     #: `Crawl-delay` from robots.txt, when the site declares one.
@@ -722,6 +765,9 @@ async def crawl_site(
         # page about a site that is answering us perfectly well when asked
         # more slowly.
         result.rate_limited_pages = sum(1 for p in result.pages if p.rate_limited)
+        challenges = [p.challenged_by for p in result.pages if p.challenged_by]
+        result.challenged_pages = len(challenges)
+        result.challenged_by = challenges[0] if challenges else None
         result.throttled = throttle.throttled
         if result.rate_limited_pages:
             logger.warning(
@@ -893,6 +939,24 @@ async def _fetch_page(
             blocked_by_robots=False,
             fetch_error=f"{type(exc).__name__}: {exc}"[:500],
             parsed=None,
+        )
+
+    # A challenge page is not this URL's content. Without this check it was
+    # parsed as a page, found to link to nothing, and published as the site.
+    challenged_by = challenge_reason(
+        response.status_code, response.headers, response.text[:3000]
+    )
+    if challenged_by:
+        return CrawledPage(
+            raw_url=url,
+            normalized_url=normalized,
+            status_code=None,
+            redirect_url=first_redirect,
+            redirect_count=hops,
+            blocked_by_robots=False,
+            fetch_error=f"turned away by {challenged_by}",
+            parsed=None,
+            challenged_by=challenged_by,
         )
 
     content_type = response.headers.get("content-type", "").lower()

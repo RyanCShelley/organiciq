@@ -900,3 +900,69 @@ def test_a_throttled_crawl_that_still_grew_is_published(db, client_a, monkeypatc
         .all()
     }
     assert "https://example.com/n0" in urls
+
+
+def test_challenge_reason_names_the_vendor():
+    from app.ingestion.crawler.fetch import challenge_reason
+
+    assert challenge_reason(202, {"sg-captcha": "challenge"}) == "SiteGround's captcha"
+    assert challenge_reason(200, {"cf-mitigated": "challenge"}) == "Cloudflare's bot challenge"
+    assert (
+        challenge_reason(403, {}, "<title>Just a moment...</title>")
+        == "Cloudflare's bot challenge"
+    )
+    assert challenge_reason(200, {}, "<title>Just a moment...</title>") is None
+    assert challenge_reason(200, {"content-type": "text/html"}, "<h1>Hello</h1>") is None
+
+
+def test_a_first_crawl_that_was_challenged_fails_and_says_why(db, client_a, monkeypatch):
+    """The captcha page used to be recorded as a one-page site."""
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.ingestion.crawler.fetch import CrawledPage, CrawlResult
+    from app.models.job import SyncJob, SyncJobStatus
+
+    result = CrawlResult(
+        pages=[
+            CrawledPage(
+                raw_url="https://example.com/",
+                normalized_url="https://example.com/",
+                status_code=None,
+                redirect_url=None,
+                redirect_count=0,
+                blocked_by_robots=False,
+                fetch_error="turned away by SiteGround's captcha",
+                parsed=None,
+                challenged_by="SiteGround's captcha",
+            )
+        ],
+        robots_txt_found=True,
+        challenged_pages=1,
+        challenged_by="SiteGround's captcha",
+    )
+    monkeypatch.setattr(pipeline.asyncio, "run", lambda coro: (coro.close(), result)[1])
+
+    job = SyncJob(
+        id=uuid4(),
+        client_id=client_a.id,
+        source="site_crawl",
+        start_date=date_cls.today(),
+        end_date=date_cls.today(),
+        status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+    db.refresh(job)
+
+    assert job.status == SyncJobStatus.PARTIAL
+    assert "SiteGround's captcha" in (job.error_message or "")
+    assert "OrganicIQBot" in (job.error_message or "")
+    assert (
+        db.query(FactCrawlPageSnapshot)
+        .filter(FactCrawlPageSnapshot.client_id == client_a.id)
+        .count()
+        == 0
+    )
