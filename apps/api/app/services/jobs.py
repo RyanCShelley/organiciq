@@ -195,11 +195,11 @@ def _job_handlers() -> dict[str, object]:
     from app.ingestion.seranking.pipeline_audit import run_seranking_audit_job
     from app.ingestion.seranking.pipeline_ai_search import run_seranking_ai_search_job
     from app.ingestion.seranking.pipeline_backlinks import run_seranking_backlinks_job
-    from app.ingestion.seranking.pipeline_keyword_metrics import (
-        run_seranking_keyword_metrics_job,
+    from app.ingestion.dataforseo.keyword_metrics import (
+        run_dataforseo_keyword_metrics_job,
     )
-    from app.ingestion.seranking.pipeline_competitor_keywords import (
-        run_seranking_competitor_keywords_job,
+    from app.ingestion.dataforseo.competitor_keywords import (
+        run_dataforseo_competitor_keywords_job,
     )
     from app.ingestion.seranking.pipeline_domain import run_seranking_domain_keywords_job
 
@@ -215,11 +215,15 @@ def _job_handlers() -> dict[str, object]:
         "se_ranking_domain_keywords": run_seranking_domain_keywords_job,
         # DataForSEO keyword overview, billed per keyword looked up, so
         # on-demand like its neighbours.
-        "se_ranking_keyword_metrics": run_seranking_keyword_metrics_job,
+        "dataforseo_keyword_metrics": run_dataforseo_keyword_metrics_job,
         # DataForSEO Labs, billed per request and row: three competitors a client
         # at most, bought at most monthly by
         # daily_sync.enqueue_due_competitor_keywords.
-        "se_ranking_competitor_keywords": run_seranking_competitor_keywords_job,
+        "dataforseo_competitor_keywords": run_dataforseo_competitor_keywords_job,
+        # The two above were queued under these names until they moved to
+        # DataForSEO. A job already waiting when that deployed still has one.
+        "se_ranking_keyword_metrics": run_dataforseo_keyword_metrics_job,
+        "se_ranking_competitor_keywords": run_dataforseo_competitor_keywords_job,
         # Per-URL backlink counts. Not in daily_sync: a link profile moves
         # slowly, and it is read monthly alongside the crawl.
         "se_ranking_backlinks": run_seranking_backlinks_job,

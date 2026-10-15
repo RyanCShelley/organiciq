@@ -1,8 +1,7 @@
 """Fetch the organic keywords the client's named competitors rank for.
 
-Read from DataForSEO Labs (ranked keywords), not SE Ranking. The module keeps
-its place under `ingestion/seranking` and its job name so nothing that queues
-it, and no stored row, has to change.
+Read from DataForSEO Labs (ranked keywords). Rows are stored in
+`facts_ser_competitor_keywords`, a table name from before the vendor changed.
 
 Each competitor is one request, billed per request plus per row (about $0.13 for
 a full 1,000 rows), so the cost is bounded two ways: at most `MAX_COMPETITORS` competitors a client, named in
@@ -81,7 +80,7 @@ def competitors_to_pull(
     return [domain for domain in named_competitors(client) if domain not in fresh]
 
 
-def run_seranking_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob:
+def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob:
     try:
         if not dataforseo.configured():
             raise RuntimeError(

@@ -275,7 +275,7 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     than a month — and only those terms are bought. Adding one keyword used
     to re-price the whole list.
     """
-    from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
+    from app.ingestion.dataforseo.keyword_metrics import keywords_to_price
     from app.integrations import dataforseo
 
     if not dataforseo.configured():
@@ -301,7 +301,7 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
                 db,
                 client.id,
                 SyncJobCreate(
-                    source="se_ranking_keyword_metrics",
+                    source="dataforseo_keyword_metrics",
                     start_date=today,
                     end_date=today,
                     params={"source": resolve_source(client)},
@@ -325,7 +325,7 @@ def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
     be bought and then unusable, which is how the SiteGround-blocked clients
     would otherwise spend credits for nothing.
     """
-    from app.ingestion.seranking.pipeline_competitor_keywords import competitors_to_pull
+    from app.ingestion.dataforseo.competitor_keywords import competitors_to_pull
     from app.ingestion.seranking.pipeline_domain import resolve_source
     from app.integrations import dataforseo
     from app.models.crawl import FactCrawlPageSnapshot
@@ -358,7 +358,7 @@ def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
                 db,
                 client.id,
                 SyncJobCreate(
-                    source="se_ranking_competitor_keywords",
+                    source="dataforseo_competitor_keywords",
                     start_date=today,
                     end_date=today,
                     params={"source": resolve_source(client)},

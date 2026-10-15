@@ -9,8 +9,8 @@ Difficulty is the missing input. The rank tracker does not carry it and the
 domain-keywords endpoint only covers terms already ranking, so this asks
 the keyword database directly.
 
-The keyword database is DataForSEO Labs (keyword overview). The module keeps
-its name and its job source so nothing that queues it has to change. Rows
+The keyword database is DataForSEO Labs (keyword overview), stored in
+`facts_ser_keyword_metrics`, a table name from before the vendor changed. Rows
 bought earlier from SE Ranking stay until they are older than the refresh
 interval and are priced again; for that month the two vendors' difficulty
 figures sit side by side on slightly different scales.
@@ -109,7 +109,7 @@ def keywords_to_price(
     return out
 
 
-def run_seranking_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
+def run_dataforseo_keyword_metrics_job(db: Session, job: SyncJob) -> SyncJob:
     try:
         if not dataforseo.configured():
             raise RuntimeError(
