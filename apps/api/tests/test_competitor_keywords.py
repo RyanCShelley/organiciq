@@ -11,7 +11,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.decisions.content_gaps import c2_write_the_page_for_demand
-from app.ingestion.seranking import pipeline_competitor_keywords as pipeline
+from app.ingestion.dataforseo import competitor_keywords as pipeline
 from app.models.job import SyncJob, SyncJobStatus
 from app.models.seranking import (
     FactSerCompetitorKeyword,
@@ -40,7 +40,7 @@ def _ranks(db, client, domain, keyword, *, position=3, volume=900, difficulty=30
 
 def _job(db, client):
     job = SyncJob(
-        id=uuid4(), client_id=client.id, source="se_ranking_competitor_keywords",
+        id=uuid4(), client_id=client.id, source="dataforseo_competitor_keywords",
         start_date=TODAY, end_date=TODAY, status=SyncJobStatus.QUEUED, params_json={},
     )
     db.add(job)
@@ -105,7 +105,7 @@ def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
 
     monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
     monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", fake)
-    job = pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
+    job = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
 
     assert job.status is SyncJobStatus.SUCCESSFUL
     assert asked == ["a.com", "b.com", "c.com"], "three requests, 300 credits"
@@ -124,8 +124,8 @@ def test_a_second_run_buys_nothing(db, client_a, monkeypatch):
         lambda domain, **kw: calls.append(domain)
         or [{"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30}],
     )
-    pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
-    second = pipeline.run_seranking_competitor_keywords_job(db, _job(db, client_a))
+    pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    second = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
     assert calls == ["a.com"]
     assert second.records_fetched == 0
 
@@ -134,9 +134,9 @@ def test_it_is_a_runnable_source_and_not_in_the_daily_provider_list():
     from app.services.daily_sync import _PROVIDER_SOURCES
     from app.services.jobs import _job_handlers
 
-    assert "se_ranking_competitor_keywords" in _job_handlers()
+    assert "dataforseo_competitor_keywords" in _job_handlers()
     scheduled = {s for sources in _PROVIDER_SOURCES.values() for s in sources}
-    assert "se_ranking_competitor_keywords" not in scheduled
+    assert "dataforseo_competitor_keywords" not in scheduled
 
 
 def test_a_client_with_a_thin_crawl_is_not_enqueued(db, client_a, monkeypatch):
@@ -268,3 +268,12 @@ def test_settings_drop_the_clients_own_domain_and_can_clear_the_list(db, client_
     assert client_a.competitor_domains == ["rival.com"]
     update_client(db, client_a, ClientUpdate(competitor_domains=[]))
     assert client_a.competitor_domains == []
+
+
+def test_the_old_job_names_still_run_the_same_jobs():
+    """A job queued before the rename still has the old name."""
+    from app.services.jobs import _job_handlers
+
+    handlers = _job_handlers()
+    assert handlers["se_ranking_competitor_keywords"] is handlers["dataforseo_competitor_keywords"]
+    assert handlers["se_ranking_keyword_metrics"] is handlers["dataforseo_keyword_metrics"]

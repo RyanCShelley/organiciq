@@ -181,7 +181,7 @@ def test_the_pricing_job_buys_the_largest_unpriced_once(db, client_a):
 
 
 def test_the_keyword_pricing_list_includes_demand(db, client_a):
-    from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
+    from app.ingestion.dataforseo.keyword_metrics import keywords_to_price
 
     _site(db, client_a)
     _shown(db, client_a, "heat pump installation", 400)
