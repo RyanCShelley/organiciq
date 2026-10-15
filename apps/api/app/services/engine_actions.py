@@ -18,6 +18,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.models.annotation import Annotation, AnnotationType
 from app.models.client import Client
 from app.models.decision import EngineAction, MonthlyRecord
 
@@ -209,8 +210,61 @@ def mark_sent(
         row.status = "assigned"
     row.action_id = slot.action_id
     row.target_url = slot.target_url
+    # Sent after it was shipped: the entry already exists and gains its task.
+    if task_id:
+        logged = (
+            db.query(Annotation)
+            .filter(Annotation.client_id == client.id, Annotation.engine_uid == slot.uid)
+            .one_or_none()
+        )
+        if logged is not None:
+            logged.teamwork_task_id = task_id
     db.flush()
     return row
+
+
+#: What kind of entry shipping each kind of slot writes to the account history.
+_SHIPPED_TYPE = {
+    "content": AnnotationType.CONTENT_PUBLISHED,
+    "update": AnnotationType.CONTENT_UPDATED,
+    "incident": AnnotationType.TECHNICAL_CHANGE,
+    "action": AnnotationType.GROWTH_ACTION,
+}
+
+
+def _log_shipped(
+    db: Session, client: Client, slot: RecordSlot, row: EngineAction, *, on: date | None
+) -> None:
+    """Keep the account history in step with what has been marked shipped.
+
+    Shipping writes one entry and shipping it again updates that entry rather
+    than adding a second. Clearing the date removes it, which is the "marked the
+    wrong one" case: the entry exists only because of the date. Entries a person
+    typed or imported have no `engine_uid` and are never touched here.
+    """
+    existing = (
+        db.query(Annotation)
+        .filter(Annotation.client_id == client.id, Annotation.engine_uid == slot.uid)
+        .one_or_none()
+    )
+    if on is None:
+        if existing is not None:
+            db.delete(existing)
+        return
+    fields = {
+        "date": on,
+        "completed_at": on,
+        "annotation_type": _SHIPPED_TYPE.get(slot.kind, AnnotationType.GROWTH_ACTION),
+        "description": slot.title,
+        "page_url": slot.target_url or None,
+        "success_metric": slot.metric,
+        "teamwork_task_id": row.teamwork_task_id,
+    }
+    if existing is None:
+        db.add(Annotation(client_id=client.id, engine_uid=slot.uid, **fields))
+    else:
+        for key, value in fields.items():
+            setattr(existing, key, value)
 
 
 def mark_shipped(
@@ -236,6 +290,7 @@ def mark_shipped(
         row.status = "assigned"
     row.action_id = slot.action_id
     row.target_url = slot.target_url
+    _log_shipped(db, client, slot, row, on=on)
     db.flush()
     return row
 

@@ -56,11 +56,11 @@ export default async function AnnotationsPage({
 
           <section className="workspace-section">
             <SectionHeader
-              title="Account history"
-              description={`${rows.length} annotation${rows.length === 1 ? "" : "s"} with light causal impact (±5% meaningful change).`}
+              title="Completed work"
+              description={`${rows.length} entr${rows.length === 1 ? "y" : "ies"}. Marking a recommendation shipped adds it here; add a note to any of them.`}
             />
             <div className="workspace-panel">
-              <AnnotationsTable rows={rows} />
+              <AnnotationsTable rows={rows} clientId={clientId} />
             </div>
           </section>
         </div>

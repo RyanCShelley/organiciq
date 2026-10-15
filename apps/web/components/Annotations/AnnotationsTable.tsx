@@ -1,3 +1,4 @@
+import { AnnotationNote } from "@/components/Annotations/AnnotationNote";
 import { Badge } from "@/components/ui/Badge";
 import {
   annotationTypeLabel,
@@ -32,7 +33,7 @@ function metricCell(value: unknown): string {
   return String(value);
 }
 
-export function AnnotationsTable({ rows }: { rows: AnnotationRow[] }) {
+export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; clientId: string }) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-[var(--text-secondary)]">
@@ -91,8 +92,12 @@ export function AnnotationsTable({ rows }: { rows: AnnotationRow[] }) {
                       Success: {row.success_metric}
                     </div>
                   ) : null}
+                  <AnnotationNote clientId={clientId} id={row.id} notes={row.notes} />
                 </td>
                 <td className="px-2 py-3">
+                  {!row.measurement_start_date && !baseline?.sessions && !post?.sessions ? (
+                    <div className="text-xs text-[var(--text-tertiary)]">Not measured yet</div>
+                  ) : (
                   <div className="grid gap-1 text-xs text-[var(--text-secondary)]">
                     <div>
                       Sessions {metricCell(baseline?.sessions)} → {metricCell(post?.sessions)}{" "}
@@ -120,6 +125,7 @@ export function AnnotationsTable({ rows }: { rows: AnnotationRow[] }) {
                       <div className="text-[var(--text-tertiary)]">No measurement window yet</div>
                     )}
                   </div>
+                  )}
                 </td>
                 <td className="px-2 py-3">
                   <Badge variant={resultVariant(row.result)}>{resultLabel(row.result)}</Badge>

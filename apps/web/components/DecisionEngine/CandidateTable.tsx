@@ -224,10 +224,6 @@ function Detail({ row, pick }: { row: Candidate; pick: Parameters<typeof Candida
           <dt className="text-[var(--text-tertiary)]">Check on</dt>
           <dd className="font-semibold">{formatDay(row.check_on)}</dd>
         </div>
-        <div className="flex gap-1.5">
-          <dt className="text-[var(--text-tertiary)]">Action</dt>
-          <dd className="font-semibold">{row.id}</dd>
-        </div>
       </dl>
     </div>
   );
