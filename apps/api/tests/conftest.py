@@ -28,6 +28,15 @@ if "organiciq_test" not in _TEST_DATABASE_URL:
     )
 os.environ["DATABASE_URL"] = _TEST_DATABASE_URL
 os.environ["AUTH_SECRET"] = "test-auth-secret"
+# Credentials are fixed, not inherited. A developer's .env holds real ones, and
+# two tests passed only on a machine that had a real SE Ranking key — they
+# failed the first time the suite ran anywhere else. External calls are mocked,
+# so the value only has to be present; a test that forgets to mock one now
+# sends a fake key, not somebody's real one.
+os.environ["SE_RANKING_API_KEY"] = "test-se-ranking-key"
+os.environ["GOOGLE_DATA_OAUTH_CLIENT_SECRET"] = ""
+os.environ["INTERNAL_API_SECRET"] = ""
+os.environ["INTEGRATION_TOKEN_KEY_PREVIOUS"] = ""
 os.environ["SMA_ADMIN_EMAILS"] = "admin@smamarketing.net"
 
 # Production is the default now, and it refuses development secrets. Tests
