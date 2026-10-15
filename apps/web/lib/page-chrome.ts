@@ -85,8 +85,8 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
       };
     case "annotations":
       return {
-        title: "Annotations",
-        description: "Causal history for the account — changes and measured impact.",
+        title: "Completed work",
+        description: "What has been shipped for this account, with a note on each.",
       };
     default:
       return { title: "Organic IQ", description: "" };

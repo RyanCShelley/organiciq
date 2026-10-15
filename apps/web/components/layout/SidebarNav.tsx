@@ -2,7 +2,7 @@
 
 import {
   Activity,
-  Bookmark,
+  ClipboardCheck,
   Eye,
   FileSearch,
   Gauge,
@@ -36,7 +36,7 @@ const ACCOUNT_ICONS: Record<string, LucideIcon> = {
   "Watch List": Eye,
   "Content Opp": FileSearch,
   "Decision Engine": Gauge,
-  Annotations: Bookmark,
+  "Completed work": ClipboardCheck,
   // Anything unmapped falls back to Settings2, so a missing entry here reads as
   // a second "Client settings" in the sidebar.
   "Site crawl": Monitor,
