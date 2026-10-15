@@ -117,3 +117,46 @@ def test_a_client_awaiting_its_first_crawl_is_not_reported_as_disconnected():
     rows = {row["source"]: row for row in data_health_rows({}, {})}
 
     assert rows["site_crawl"]["status"] == "Not scheduled yet"
+
+
+def _crawl_jobs(db, client):
+    from app.models.job import SyncJob
+
+    return db.query(SyncJob).filter(
+        SyncJob.client_id == client.id, SyncJob.source == "site_crawl"
+    )
+
+
+def test_an_onboarding_client_is_crawled(db, client_a):
+    """Only ACTIVE clients were enqueued, so onboarding ones never crawled."""
+    from app.models.client import ClientStatus
+    from app.services.daily_sync import enqueue_due_site_crawls
+
+    client_a.status = ClientStatus.ONBOARDING
+    db.commit()
+
+    assert enqueue_due_site_crawls(db)["enqueued"] == 1
+    assert _crawl_jobs(db, client_a).count() == 1
+
+
+def test_a_paused_client_is_not_crawled(db, client_a):
+    from app.models.client import ClientStatus
+    from app.services.daily_sync import enqueue_due_site_crawls
+
+    client_a.status = ClientStatus.PAUSED
+    db.commit()
+
+    assert enqueue_due_site_crawls(db)["due"] == 0
+
+
+def test_a_blocked_never_crawled_site_is_tried_once_a_week_not_daily(db, client_a):
+    from app.models.job import SyncJobStatus
+    from app.services.daily_sync import enqueue_due_site_crawls
+
+    assert enqueue_due_site_crawls(db)["enqueued"] == 1
+    job = _crawl_jobs(db, client_a).one()
+    job.status = SyncJobStatus.FAILED
+    db.commit()
+
+    assert enqueue_due_site_crawls(db)["due"] == 0
+    assert _crawl_jobs(db, client_a).count() == 1
