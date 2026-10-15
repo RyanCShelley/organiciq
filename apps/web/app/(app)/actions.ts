@@ -17,6 +17,9 @@ export async function updateClientSettingsAction(formData: FormData) {
   const sheetRaw = String(formData.get("account_sheet_url") || "").trim();
   const startRaw = String(formData.get("start_date") || "").trim();
   const isEnterprise = String(formData.get("is_enterprise") || "") === "1";
+  // Staff cannot change the plan or its ceilings (the API refuses), and the
+  // form does not send them. Leaving them out of the body leaves them alone.
+  const planLocked = String(formData.get("plan_locked") || "") === "1";
 
   const baselineAsOf = String(formData.get("baseline_as_of") || "").trim() || null;
   const baselineSessionsRaw = String(formData.get("baseline_monthly_sessions") || "").trim();
@@ -123,7 +126,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   const body = {
     client_name: String(formData.get("client_name") || "").trim(),
     domain: String(formData.get("domain") || "").trim(),
-    tier_id: String(formData.get("tier_id") || "").trim(),
+    ...(planLocked ? {} : { tier_id: String(formData.get("tier_id") || "").trim() }),
     start_date: startRaw || null,
     ...(market === undefined ? {} : { primary_market: market }),
     timezone: String(formData.get("timezone") || "").trim() || "America/New_York",
@@ -138,21 +141,25 @@ export async function updateClientSettingsAction(formData: FormData) {
     baseline_source: String(formData.get("baseline_source") || "").trim() || "manual",
     baseline_notes: String(formData.get("baseline_notes") || "").trim() || null,
     status: String(formData.get("status") || "active"),
-    custom_tracked_keyword_limit: isEnterprise ? customKeyword : null,
-    custom_tracked_prompt_limit: isEnterprise ? (customPrompt ?? customKeyword) : null,
-    custom_content_allowance: isEnterprise ? customContent : null,
-    custom_update_allowance: isEnterprise ? customRefresh : null,
-    custom_growth_action_allowance: isEnterprise ? customGrowth : null,
-    custom_watchlist_cadence: isEnterprise ? customCadence || "monthly" : null,
-    ai_search_prompt_limit: aiPromptLimit,
-    crawl_page_limit: crawlPageLimit,
+    ...(planLocked
+      ? {}
+      : {
+          custom_tracked_keyword_limit: isEnterprise ? customKeyword : null,
+          custom_tracked_prompt_limit: isEnterprise ? (customPrompt ?? customKeyword) : null,
+          custom_content_allowance: isEnterprise ? customContent : null,
+          custom_update_allowance: isEnterprise ? customRefresh : null,
+          custom_growth_action_allowance: isEnterprise ? customGrowth : null,
+          custom_watchlist_cadence: isEnterprise ? customCadence || "monthly" : null,
+          ai_search_prompt_limit: aiPromptLimit,
+          crawl_page_limit: crawlPageLimit,
+        }),
     sitemap_url: sitemapUrl,
     path_prefix: pathPrefix,
     brand_aliases: brandAliases,
     lead_goal_overrides: leadGoalOverrides,
   };
 
-  if (!body.client_name || !body.domain || !body.tier_id) {
+  if (!body.client_name || !body.domain || (!planLocked && !("tier_id" in body && body.tier_id))) {
     return { ok: false as const, error: "Name, domain, and tier are required." };
   }
   if (body.monthly_lead_goal != null && Number.isNaN(body.monthly_lead_goal)) {

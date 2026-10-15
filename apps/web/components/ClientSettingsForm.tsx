@@ -71,10 +71,13 @@ export function ClientSettingsForm({
   client,
   tiers,
   hasLeadConversions = false,
+  canEditPlan = true,
 }: {
   client: Client;
   tiers: Tier[];
   hasLeadConversions?: boolean;
+  /** Admins only. The API refuses plan and ceiling changes from anyone else. */
+  canEditPlan?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -99,6 +102,7 @@ export function ClientSettingsForm({
     >
       <input type="hidden" name="clientId" value={client.id} />
       <input type="hidden" name="is_enterprise" value={enterprise ? "1" : "0"} />
+      {canEditPlan ? null : <input type="hidden" name="plan_locked" value="1" />}
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
@@ -127,6 +131,7 @@ export function ClientSettingsForm({
           to that folder, so a sibling brand&rsquo;s pages are never counted here. The
           folder never belongs in the domain field.
         </p>
+        {canEditPlan ? (
         <FieldLabel label="OrganicIQ tier">
           <Select
             name="tier_id"
@@ -141,6 +146,11 @@ export function ClientSettingsForm({
             ))}
           </Select>
         </FieldLabel>
+        ) : (
+          <FieldLabel label="OrganicIQ tier">
+            <Input value={client.plan_label ?? "—"} disabled readOnly />
+          </FieldLabel>
+        )}
         <FieldLabel label="Status">
           <Select name="status" defaultValue={client.status}>
             {STATUS_OPTIONS.map((option) => (
@@ -312,6 +322,13 @@ export function ClientSettingsForm({
         />
       </div>
 
+      {canEditPlan ? null : (
+        <p className="text-sm text-[var(--text-secondary)]">
+          The plan and its limits (allowances, AI prompt cap, crawl size) are changed by an
+          admin.
+        </p>
+      )}
+
       {/* Cost ceiling, not a plan allowance — this one spends SE Ranking credits
           per prompt returned, so it lives outside the tier blocks. */}
       <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
@@ -329,6 +346,7 @@ export function ClientSettingsForm({
           <FieldLabel label="Max prompts per lookup">
             <Input
               name="ai_search_prompt_limit"
+              disabled={!canEditPlan}
               type="number"
               min={1}
               max={AI_SEARCH_MAX_PROMPTS}
@@ -361,6 +379,7 @@ export function ClientSettingsForm({
           <FieldLabel label="Max pages per crawl">
             <Input
               name="crawl_page_limit"
+              disabled={!canEditPlan}
               type="number"
               min={1}
               max={CRAWL_MAX_PAGES}

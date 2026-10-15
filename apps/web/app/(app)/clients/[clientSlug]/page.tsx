@@ -44,16 +44,30 @@ export default async function ClientSettingsPage({
   let excluded: ExcludedPage[] = [];
 
   try {
-    const [tierRows, conversionRows, freshClient] = await Promise.all([
-      apiFetch<Tier[]>("/admin/tiers"),
-      apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", { clientId }),
-      apiFetch<Client>(`/clients/${clientId}`, { clientId }),
-    ]);
-    tiers = tierRows;
-    conversions = conversionRows;
+    const freshClient = await apiFetch<Client>(`/clients/${clientId}`, { clientId });
     Object.assign(client, freshClient);
   } catch (e) {
     loadError = e instanceof Error ? e.message : "Failed to load client settings";
+  }
+
+  // Admin-only. Fetched on its own: when it was one of the three loads above, a
+  // staff member's 403 here threw away the client record and the conversions
+  // too, and the whole form came up broken.
+  let conversionsReadable = true;
+  try {
+    conversions = await apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", {
+      clientId,
+    });
+  } catch {
+    // Not readable by staff; absent is not the same as "none defined".
+    conversionsReadable = false;
+  }
+
+  let canEditPlan = true;
+  try {
+    tiers = await apiFetch<Tier[]>("/admin/tiers");
+  } catch {
+    canEditPlan = false;
   }
 
   try {
@@ -78,9 +92,9 @@ export default async function ClientSettingsPage({
     canManageTeam = false;
   }
 
-  const hasLeadConversions = conversions.some(
-    (row) => row.active && row.conversion_type === "lead",
-  );
+  const hasLeadConversions =
+    !conversionsReadable ||
+    conversions.some((row) => row.active && row.conversion_type === "lead");
 
   return (
     <section>
@@ -110,6 +124,7 @@ export default async function ClientSettingsPage({
               client={client}
               tiers={tiers}
               hasLeadConversions={hasLeadConversions}
+              canEditPlan={canEditPlan}
             />
           </div>
         </section>
