@@ -317,6 +317,10 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
+#: Days to wait after a competitor read that failed before queueing it again.
+COMPETITOR_RETRY_DAYS = 3
+
+
 def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
     """Read each client's closest competitors' rankings, at most monthly.
 
@@ -334,12 +338,31 @@ def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
     if not dataforseo.configured():
         logger.warning("Competitor keywords not enqueued: DataForSEO is not configured")
         return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
+    from app.models.job import SyncJobStatus
+
     today = date.today()
     clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
+    recent = datetime.now(timezone.utc) - timedelta(days=COMPETITOR_RETRY_DAYS)
 
     enqueued = skipped = errors = due = 0
     for client in clients:
         if not competitors_to_pull(db, client, today=today):
+            continue
+        # A competitor that failed is still due, and a request that timed out
+        # may have been billed: wait a few days rather than pay for it daily.
+        tried_lately = (
+            db.query(SyncJob.id)
+            .filter(
+                SyncJob.client_id == client.id,
+                SyncJob.source.in_(
+                    ("dataforseo_competitor_keywords", "se_ranking_competitor_keywords")
+                ),
+                SyncJob.status.in_((SyncJobStatus.FAILED, SyncJobStatus.PARTIAL)),
+                SyncJob.created_at >= recent,
+            )
+            .first()
+        )
+        if tried_lately:
             continue
         crawled = (
             db.query(FactCrawlPageSnapshot.id)

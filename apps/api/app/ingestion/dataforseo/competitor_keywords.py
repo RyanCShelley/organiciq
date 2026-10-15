@@ -40,6 +40,12 @@ COMPETITOR_REFRESH_DAYS = 30
 #: showing the site what wins, and the rows would only be storage.
 KEEP_POSITION = 10
 
+#: Rows asked for a competitor, biggest volume first. A thousand was the
+#: ceiling and timed out on a large site; five hundred of the biggest terms a
+#: competitor holds in the top ten is more than a content plan can use, and
+#: costs half.
+COMPETITOR_ROWS = 500
+
 
 def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
@@ -95,8 +101,21 @@ def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob
         source = (job.params_json or {}).get("source") or resolve_source(client)
 
         fetched = written = 0
+        failures: dict[str, str] = {}
         for domain in domains:
-            rows = dataforseo.ranked_keywords(domain, source=source, max_position=KEEP_POSITION)
+            try:
+                rows = dataforseo.ranked_keywords(
+                    domain, source=source, max_position=KEEP_POSITION, limit=COMPETITOR_ROWS
+                )
+            except dataforseo.DataForSeoAuthError:
+                # Every remaining call fails the same way.
+                raise
+            except dataforseo.DataForSeoError as exc:
+                # One slow or refused competitor must not cost the others. The
+                # one that failed is not stored, so it is still due next time.
+                logger.warning("Competitor keywords for %s failed: %s", domain, exc)
+                failures[domain] = str(exc)
+                continue
             fetched += len(rows)
             payloads = []
             seen: set[str] = set()
@@ -139,9 +158,18 @@ def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob
         job.records_fetched = fetched
         job.records_written = written
         job.validation_status = ValidationStatus.PASSED if domains else ValidationStatus.SKIPPED
-        job.status = SyncJobStatus.SUCCESSFUL
+        if failures and len(failures) == len(domains):
+            job.status = SyncJobStatus.FAILED
+            job.validation_status = ValidationStatus.FAILED
+        elif failures:
+            job.status = SyncJobStatus.PARTIAL
+        else:
+            job.status = SyncJobStatus.SUCCESSFUL
         job.completed_at = datetime.now(timezone.utc)
-        job.error_message = None
+        job.error_message = (
+            "; ".join(f"{domain}: {message}" for domain, message in failures.items())[:2000]
+            or None
+        )
         db.commit()
         logger.info(
             "Competitor keywords for %s: competitors=%d fetched=%d stored=%d",
