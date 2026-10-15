@@ -96,7 +96,7 @@ def test_the_job_makes_one_request_per_named_competitor_and_keeps_the_top_ten(
     _name(db, client_a, "a.com", "b.com", "c.com")
     asked: list[str] = []
 
-    def fake(domain, *, source, max_position):
+    def fake(domain, *, source, max_position, limit):
         asked.append(domain)
         return [
             {"keyword": "heat pump installation", "position": 2, "volume": 900, "difficulty": 30},
