@@ -488,7 +488,7 @@ class PageStageIn(BaseModel):
 
 
 class MonthlyRunRequest(BaseModel):
-    """Which month to run. Absent means the one we are in, to date."""
+    """Which finished month to run. Absent means last month."""
 
     month: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 

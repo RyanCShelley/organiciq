@@ -5,6 +5,7 @@ import {
   ConstraintCard,
   type SlotProgress,
 } from "@/components/DecisionEngine/ConstraintCard";
+import { HistoricalRuns } from "@/components/DecisionEngine/HistoricalRuns";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
 import { OptionsPanel } from "@/components/DecisionEngine/OptionsPanel";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
@@ -15,8 +16,11 @@ import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import {
   BRANCH_LABEL,
+  finishedRuns,
   formatDay,
   monthName,
+  nextMonth,
+  previousMonth,
   type Assignee,
   type Candidate,
   type MonthlyRecord,
@@ -61,7 +65,10 @@ export default async function DecisionEnginePage({
   );
 
   try {
-    runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
+    runs = finishedRuns(
+      await apiFetch<RunSummary[]>("/decisions/records", { clientId }),
+      currentMonth,
+    );
     const month = wanted ?? runs[0]?.month;
     if (month) {
       record = await apiFetch<MonthlyRecord>(
@@ -116,10 +123,7 @@ export default async function DecisionEnginePage({
   if (error) {
     return (
       <section>
-        <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black tracking-[-0.02em]">
-          Decision engine
-        </h1>
-        <Alert variant="danger" className="mt-4">
+        <Alert variant="danger">
           {error}
         </Alert>
       </section>
@@ -129,20 +133,18 @@ export default async function DecisionEnginePage({
   if (!record) {
     return (
       <section>
-        <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black tracking-[-0.02em]">
-          Decision engine
-        </h1>
-        <p className="mt-3 max-w-[70ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
+        <p className="max-w-[70ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
           No saved run for {selectedClient.client_name ?? selectedClient.slug} yet.
-          The engine runs monthly and saves a record; this page renders it rather
-          than recomputing, so there is nothing to show until the first run.
+          The engine reads a whole finished month and saves a record, and that record is
+          the plan for the month after. It runs on the {5}th for the month before; this
+          page renders the saved run rather than recomputing it.
         </p>
         {canRun ? (
           <div className="mt-4 flex">
             <RunEngineButton
               clientId={clientId}
               slug={selectedClient.slug}
-              month={currentMonth}
+              month={previousMonth(currentMonth)}
               currentMonth={currentMonth}
             />
           </div>
@@ -186,47 +188,31 @@ export default async function DecisionEnginePage({
   return (
     <section className="space-y-[var(--section-gap)]">
       {/* The run is a saved thing with a date, not a window somebody picked.
-          The date picker that stood here invited a reader to ask for a range
-          the engine never ran, and then recomputed one on the spot. */}
+          It reads a whole finished month and is the plan for the month after,
+          so the title block says both. The page title is already in the top bar. */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black leading-tight tracking-[-0.02em] text-[var(--text-primary)]">
-            Decision engine
-          </h1>
+          <h2 className="font-[family-name:var(--font-display)] text-[22px] font-extrabold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
+            Plan for {monthName(nextMonth(record.month))}
+          </h2>
           <p className="mt-1.5 text-[13.5px] text-[var(--text-secondary)]">
-            {monthName(record.month)} run · saved {formatDay(record.run_saved_at)} from
+            Run on {monthName(record.month)} data · saved {formatDay(record.run_saved_at)} from
             data through {formatDay(record.data_through)}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-        {runs.length > 1 ? (
-          <nav aria-label="Saved runs" className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-[var(--text-tertiary)]">Run</span>
-            {runs.slice(0, 6).map((run) => (
-              <Link
-                key={run.month}
-                href={`?run=${run.month}`}
-                aria-current={run.month === record.month ? "page" : undefined}
-                className={`min-h-[36px] rounded-lg border px-3 py-1.5 text-[13px] no-underline ${
-                  run.month === record.month
-                    ? "border-[var(--brand-teal-deep)] font-semibold text-[var(--text-primary)]"
-                    : "border-[var(--border)] text-[var(--text-secondary)]"
-                }`}
-              >
-                {monthName(run.month)}
-              </Link>
-            ))}
-          </nav>
-        ) : null}
-        {canRun ? (
-          <RunEngineButton
-            clientId={clientId}
-            slug={selectedClient.slug}
-            month={record.month}
-            currentMonth={currentMonth}
-          />
-        ) : null}
+          {runs.length > 1 ? (
+            <HistoricalRuns slug={selectedClient.slug} runs={runs} selected={record.month} />
+          ) : null}
+          {canRun ? (
+            <RunEngineButton
+              clientId={clientId}
+              slug={selectedClient.slug}
+              month={record.month}
+              currentMonth={currentMonth}
+            />
+          ) : null}
         </div>
       </div>
 

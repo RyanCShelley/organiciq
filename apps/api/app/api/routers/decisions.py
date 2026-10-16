@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -31,7 +32,7 @@ from app.schemas import (
 from app.services import decisions as decision_service
 from app.services import engine_actions as engine_action_service
 from app.services.decisions import upsert_keyword_page_map
-from app.services.monthly_run import save_record
+from app.services.monthly_run import _previous_month, month_key, save_record
 
 logger = logging.getLogger("organiciq.decisions")
 
@@ -159,7 +160,15 @@ def run_monthly(
     run was the one they were standing in, measured to whatever day that
     happened to be.
     """
-    month = (payload.month if payload else None) or None
+    this_month = month_key(date.today())
+    month = (payload.month if payload else None) or _previous_month(this_month)
+    if month >= this_month:
+        # The engine needs the whole month, and its record is the plan for the
+        # month after. A run made mid-month is a partial run filed as a month.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Run a month after it has finished: the engine needs the whole month's data.",
+        )
     try:
         return save_record(db, client, month=month).record
     except ValueError as exc:
