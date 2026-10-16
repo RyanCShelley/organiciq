@@ -1,7 +1,9 @@
 # Baseline calculator
 
-Phase 1 of the baseline rebuild: the engine, a CSV input and two read-only API routes.
-Nothing here writes to the database. Locking, versions and the screen are phases 2 and 3.
+The baseline rebuild. Phase 1 is the engine, a CSV input and read-only routes. Phase 2
+(this document's lock, versions and screen sections) adds locking, versions and the
+settings screen. Phase 3 is the 24-month backfill, the monthly accuracy log and the
+page-view flags.
 
 Code: `apps/api/app/services/baseline_series.py`. Tests: `apps/api/tests/test_baseline_series.py`.
 
@@ -69,9 +71,30 @@ as a spike, not a new site).
 CSV columns: `month`, `sessions`, and `leads` or `lead_<event>` columns; `organic_sessions`
 optional. Months may be `2026-09`, `Sep 2026`, `9/2026`, `202609`.
 
+## Locking and versions (phase 2)
+
+* `POST /clients/{id}/baseline/lock` freezes a baseline as the next version. **Any staff
+  member with access to the client may lock.** The numbers are recomputed on the server
+  from the source (GA4 or the pasted CSV); nothing the screen displays is trusted.
+* Every blocker must be acknowledged, or the lock is refused with the list.
+* The first lock's reason is `initial`. Every later one needs a reason (`relaunch`,
+  `tracking_change`, `definition_change`, `correction`) and a note of at least 10
+  characters. Old versions are never edited.
+* A lock fills the client's `baseline_*` columns and `baseline_projection_json` in the
+  shape the dashboard already reads (plus `baseline_version`, the method version, the goal
+  basis and the ranges), so the dashboard needs no change. The monthly lead goal is left
+  alone unless one is given, except that a client with no goal gets the suggested one.
+* `GET /clients/{id}/baseline/versions` and `/versions/{n}` read them back (the latter with
+  the full analysis it was locked from). `GET /clients/{id}/baseline/events` lists the GA4
+  events, busiest first, for choosing the lead definition.
+* Screen: client settings, Baseline card: data source, baseline start month (with a
+  suggestion when traffic stepped), lead-event picker, monthly bars with the window in teal,
+  ranges, flags with acknowledgement boxes, the projection from the goal basis, the lock,
+  and the version history. It replaces the old snapshot panel; the old `from-ga4` routes
+  remain.
+
 ## Not yet
 
-Lock and versions (any staff may lock; a lock needs every blocker acknowledged), the
-settings screen, the 24-month GA4 backfill, the monthly actual-versus-projected log, test-lead
+The 24-month GA4 backfill, the monthly actual-versus-projected log, test-lead
 exclusion (waiting on the ACC Tech work), and a separate traffic-decline setting for total
 sessions (the test found 12.8% too steep for it).

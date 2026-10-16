@@ -319,6 +319,23 @@ class BaselineSeriesCsvRequest(BaseModel):
     acknowledged: list[str] = []
 
 
+class BaselineLockRequest(BaseModel):
+    """Freeze a baseline. The numbers are recomputed from the source, never taken from here."""
+
+    source: str = "ga4"
+    csv_text: str | None = Field(default=None, max_length=200_000)
+    as_of: Date | None = None
+    months: int = Field(default=24, ge=6, le=48)
+    regime_start: str | None = None
+    lead_events: list[str] = []
+    half_life_months: float = Field(default=3.0, ge=0.5, le=24)
+    acknowledged: list[str] = []
+    reason_code: str | None = None
+    reason_note: str | None = Field(default=None, max_length=2000)
+    #: Left alone when absent, unless the client has no goal yet.
+    monthly_lead_goal: int | None = Field(default=None, ge=0)
+
+
 class BaselineSnapshotPreviewOut(BaseModel):
     ready: bool
     window: dict
