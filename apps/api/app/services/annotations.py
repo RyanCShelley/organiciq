@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.lead_exclusions import not_excluded
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client
 from app.models.config import ConversionDefinition
@@ -285,6 +286,7 @@ def _window_metrics(
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.event_name.in_(lead_events),
+            not_excluded(db, client_id),
         )
         if page_url:
             leads_q = leads_q.filter(FactGa4Event.normalized_url.contains(_path_hint(page_url)))

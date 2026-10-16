@@ -425,6 +425,30 @@ class ConversionDefinitionOut(ORMModel):
     active: bool
 
 
+class LeadExclusionIn(BaseModel):
+    """A slice of lead events to drop as test submissions.
+
+    At least one match field is needed, and a reason always is.
+    """
+
+    url_pattern: str | None = None
+    event_name: str | None = None
+    session_source: str | None = None
+    date_from: Date | None = None
+    date_to: Date | None = None
+    reason: str
+
+
+class LeadExclusionOut(ORMModel):
+    id: UUID
+    url_pattern: str | None
+    event_name: str | None
+    session_source: str | None
+    date_from: Date | None
+    date_to: Date | None
+    reason: str
+
+
 class ChannelRuleOut(ORMModel):
     id: UUID
     match_source: str | None

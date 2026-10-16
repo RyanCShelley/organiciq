@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.lead_exclusions import not_excluded
 from app.models.client import Client
 from app.models.config import ConversionDefinition, OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
@@ -232,6 +233,7 @@ def _monthly_lead_actuals(
         .filter(
             FactGa4Event.client_id == client_id,
             FactGa4Event.event_name.in_(event_names),
+            not_excluded(db, client_id),
         )
         .group_by(month)
         .order_by(month)
@@ -297,6 +299,7 @@ def _cumulative_series(
                 FactGa4Event.date >= start,
                 FactGa4Event.date <= end,
                 FactGa4Event.event_name.in_(event_names),
+                not_excluded(db, client_id),
             )
             .group_by(FactGa4Event.date)
             .all()
@@ -393,6 +396,7 @@ def _sum_leads(
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.event_name.in_(event_names),
+            not_excluded(db, client_id),
         )
         .scalar()
     )
@@ -469,6 +473,7 @@ def _daily_leads_series(
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.event_name.in_(event_names),
+            not_excluded(db, client_id),
         )
         .group_by(FactGa4Event.date)
         .all()
@@ -644,6 +649,7 @@ def _leads_by_channel(
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.event_name.in_(event_names),
+            not_excluded(db, client_id),
         )
         .group_by(FactGa4Event.channel)
         .all()
@@ -1025,6 +1031,7 @@ def _traffic_by_channel(
                 FactGa4Event.date >= start,
                 FactGa4Event.date <= end,
                 FactGa4Event.event_name.in_(lead_events),
+                not_excluded(db, client_id),
             )
             .group_by(FactGa4Event.channel)
             .all()
@@ -1113,6 +1120,7 @@ def _top_pages(
                     FactGa4Event.date >= ga4_start,
                     FactGa4Event.date <= ga4_end,
                     FactGa4Event.event_name.in_(lead_events),
+                    not_excluded(db, client_id),
                 )
                 .group_by(FactGa4Event.normalized_url)
                 .all()

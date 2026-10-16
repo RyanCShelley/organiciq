@@ -30,6 +30,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.lead_exclusions import not_excluded
 from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.decision import EngineAction, MonthlyRecord
@@ -295,6 +296,7 @@ def _page_lead_rate(
             FactGa4Event.client_id == client_id,
             FactGa4Event.normalized_url == url,
             FactGa4Event.event_name.in_(lead_events),
+            not_excluded(db, client_id),
             FactGa4Event.date >= start,
             FactGa4Event.date <= end,
             FactGa4Event.channel.in_(MANAGED_CHANNELS),

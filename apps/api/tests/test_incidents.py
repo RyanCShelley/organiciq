@@ -202,3 +202,84 @@ def test_lead_silence_is_read_from_the_events(db: Session, client_a: Client):
     assert signals.days_since_last_lead == 30
     assert signals.leads_in_prior_window == 15
     assert _ids(signals) == ["stopped"]
+
+
+# ── Test-lead exclusions ────────────────────────────────────────────────────
+
+
+def _lead_def(db: Session, client: Client) -> None:
+    db.add(
+        ConversionDefinition(
+            client_id=client.id,
+            event_name="generate_lead",
+            conversion_name="Lead",
+            conversion_type="lead",
+            active=True,
+        )
+    )
+
+
+def _lead(db: Session, client: Client, day: date, url: str = "/a", count: int = 2) -> None:
+    db.add(
+        FactGa4Event(
+            client_id=client.id,
+            date=day,
+            raw_url=url,
+            normalized_url=url,
+            channel=OrganicChannel.ORGANIC_SEARCH,
+            event_name="generate_lead",
+            event_count=count,
+        )
+    )
+
+
+def test_excluded_leads_do_not_count_and_the_incident_says_so(db: Session, client_a: Client):
+    from app.models.config import LeadExclusion
+
+    _lead_def(db, client_a)
+    for week in range(4):
+        _lead(db, client_a, TODAY - timedelta(days=40 + week * 7))
+    # Recent leads, all on the contact-test page.
+    _lead(db, client_a, TODAY - timedelta(days=3), url="/test-form", count=5)
+    db.add(LeadExclusion(client_id=client_a.id, url_pattern="/test-form*", reason="owner testing"))
+    db.commit()
+
+    signals = read_incident_signals(db, client_a, today=TODAY)
+    assert signals.days_since_last_lead == 40
+    assert signals.leads_in_prior_window == 8
+    assert signals.excluded_leads_since_last == 5
+    found = check(signals, month="2026-10", slug="x")
+    assert len(found) == 1
+    assert "5 more lead events" in found[0].detail
+    assert "excluded as test submissions" in found[0].detail
+
+
+def test_a_date_range_exclusion_drops_a_burst_of_test_submissions(db: Session, client_a: Client):
+    from app.models.config import LeadExclusion
+
+    _lead_def(db, client_a)
+    _lead(db, client_a, TODAY - timedelta(days=60))
+    for day in range(3):
+        _lead(db, client_a, date(2026, 9, 1) + timedelta(days=day))
+    db.add(
+        LeadExclusion(
+            client_id=client_a.id,
+            date_from=date(2026, 9, 1),
+            date_to=date(2026, 9, 30),
+            reason="September was test submissions",
+        )
+    )
+    db.commit()
+    assert read_incident_signals(db, client_a, today=TODAY).days_since_last_lead == 60
+
+
+def test_without_exclusions_nothing_changes(db: Session, client_a: Client):
+    _lead_def(db, client_a)
+    _lead(db, client_a, TODAY - timedelta(days=20))
+    db.commit()
+    signals = read_incident_signals(db, client_a, today=TODAY)
+    assert signals.days_since_last_lead == 20
+    assert signals.excluded_leads_since_last == 0
+    assert "excluded" not in check(
+        IncidentSignals(days_since_last_lead=20, leads_in_prior_window=4), month="2026-10", slug="x"
+    )[0].detail

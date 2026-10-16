@@ -37,6 +37,33 @@ class ConversionDefinition(Base):
     )
 
 
+class LeadExclusion(Base):
+    """A slice of lead events that are not real leads (test submissions).
+
+    Matches on what the warehouse holds for an event (facts_ga4_events): the
+    page it fired on, its event name, its source, and its date. GA4 events
+    arrive aggregated, so there is no form id or email address to match on.
+    Every column that is set must match; an unset column matches anything.
+    A rule with nothing set is refused at the API, because it would drop
+    every lead.
+    """
+
+    __tablename__ = "lead_exclusions"
+    __table_args__ = (Index("ix_lead_exclusions_client", "client_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    #: A trailing `*` takes the section, as for excluded pages.
+    url_pattern: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    session_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: Required: a rule nobody can explain is one nobody dares remove.
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class OrganicChannel(str, enum.Enum):
     ORGANIC_SEARCH = "organic_search"
     AI_REFERRAL = "ai_referral"
