@@ -304,6 +304,8 @@ def load_target_inputs(
                 title=getattr(snapshot, "title", None),
                 description=getattr(snapshot, "description", None),
                 headings=headings,
+                crawled=snapshot is not None,
+                headings_known=snapshot is not None and snapshot.sections is not None,
                 sections=sections,
                 has_faq_section=_has_faq_section(raw_sections),
                 has_faq_schema=url in faq_schema_urls,

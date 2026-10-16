@@ -66,6 +66,32 @@ def test_v1_is_silent_when_the_page_already_uses_the_term():
     assert v1_term_in_high_value_spots(_target(), _page()) is None
 
 
+def test_v1_does_not_ask_for_a_meta_description_that_google_rewrites():
+    """Aquaman Leak Detection: the term was in the title and an H2, and the
+    meta description said 'your pool'. The page was told its term was missing."""
+    page = _page(description="We find and repair leaks in your pool.")
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_asks_only_for_what_is_missing():
+    found = v1_term_in_high_value_spots(_target(), _page(title="Services | X"))
+    assert found is not None
+    assert "any heading" not in found.why and "the title" in found.why
+    assert found.title.endswith("in the title")
+    assert "H2" not in found.done_when
+
+
+def test_v1_does_not_read_a_crawl_without_headings_as_a_page_with_none():
+    """A crawl that predates heading capture leaves them empty, not absent."""
+    page = _page(headings=(), headings_known=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_says_nothing_about_a_page_the_crawl_did_not_read():
+    page = _page(title=None, description=None, headings=(), crawled=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
 def test_v2_only_fires_on_a_question():
     assert v2_answer_block(_target(keyword="local seo agency"), _page()) is None
     found = v2_answer_block(_target(keyword="what is local seo"), _page(faq_questions=()))

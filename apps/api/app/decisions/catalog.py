@@ -50,6 +50,14 @@ class PageFacts:
     title: str | None = None
     description: str | None = None
     headings: tuple[str, ...] = ()
+    #: The crawl read this page. False where no snapshot matched the target
+    #: URL, in which case the title, description and headings are not "empty",
+    #: they are unknown, and nothing is prescribed from them.
+    crawled: bool = True
+    #: The crawl captured the page's headings. A crawl that predates the
+    #: capture leaves `headings` empty, which would read as a page with no
+    #: heading at all.
+    headings_known: bool = True
     faq_questions: tuple[str, ...] = ()
     #: Entity markup present on the page: `about`, `mentions`, `sameAs`.
     entity_properties: frozenset[str] = frozenset()
@@ -106,41 +114,53 @@ def _mentions(term: str, text: str | None) -> bool:
 def v1_term_in_high_value_spots(
     target: ScoredCandidate, page: PageFacts
 ) -> Prescription | None:
-    """A primary term missing from the title, the meta, or every heading.
+    """A primary term missing from the title or from every heading.
 
     Primary only. A page has one title and it belongs to the term the page
     is *for*: telling somebody to put a secondary term in it is telling them
     to take the primary term out, and the engine would then find that
     missing next month and ask for it back.
+
+    It asks only for what it can read and what it tells the reader to do. The
+    meta description is not one of them: it is not a ranking input and Google
+    rewrites it, so a page whose title and heading carry the term was being told
+    its term was missing because of a snippet. And a page the crawl did not read,
+    or read before headings were captured, is unknown rather than empty.
     """
     if target.candidate.term_role == "secondary":
         return None
+    if not page.crawled:
+        return None
     term = target.candidate.keyword
     in_title = _mentions(term, page.title)
-    in_description = _mentions(term, page.description)
-    in_headings = any(_mentions(term, h) for h in page.headings)
-    if in_title and in_description and in_headings:
+    in_headings = (not page.headings_known) or any(
+        _mentions(term, h) for h in page.headings
+    )
+    if in_title and in_headings:
         return None
 
     missing = [
         label
-        for label, present in (
-            ("the title", in_title),
-            ("the meta description", in_description),
-            ("any heading", in_headings),
-        )
+        for label, present in (("the title", in_title), ("any heading", in_headings))
         if not present
     ]
-    # "the title, the meta description, any heading" is a list read aloud by
-    # a machine. The last one takes an "or".
-    missing_text = (
-        missing[0]
-        if len(missing) == 1
-        else " or ".join([", ".join(missing[:-1]), missing[-1]])
+    missing_text = " or ".join(missing)
+    where = " and ".join(
+        place
+        for place, present in (("the title", in_title), ("a heading", in_headings))
+        if not present
+    )
+    where_done = " and ".join(
+        place
+        for place, present in (
+            ("the title tag", in_title),
+            ("one H2", in_headings),
+        )
+        if not present
     )
     return Prescription(
         action_id="V-1",
-        title=f"Put “{term}” in the title, a heading and the first 100 words",
+        title=f"Put “{term}” in {where}",
         branch=Branch.VISIBILITY,
         target_url=page.url,
         term=term,
@@ -152,8 +172,8 @@ def v1_term_in_high_value_spots(
             "search engine to infer it."
         ),
         done_when=(
-            f"“{term}” appears in the title tag, in one H2, and in the first "
-            "100 words, reading as a sentence rather than an insertion."
+            f"“{term}” appears in {where_done}, reading as a sentence rather "
+            "than an insertion."
         ),
         metric="Term position",
         metric_key="term_position",
@@ -178,6 +198,8 @@ def v8_secondary_term_section(
     if candidate.term_role != "secondary":
         return None
     term = candidate.keyword
+    if not page.crawled or not page.headings_known:
+        return None
     if any(_mentions(term, heading) for heading in page.headings):
         return None
     return Prescription(
