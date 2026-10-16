@@ -82,6 +82,17 @@ class PageFacts:
     site_median_links: float = 0.0
     page_type: str | None = None
 
+    @property
+    def readable(self) -> bool:
+        """Whether the crawl actually read this page as served.
+
+        Headings, FAQ questions, schema and link counts are all recorded only
+        for a page fetched as a 2xx and parsed. Where that did not happen they
+        arrive empty or zero, and a rule that reads empty as "the page has
+        none" prescribes work on a page nobody looked at.
+        """
+        return self.crawled and self.headings_known
+
 
 @dataclass(frozen=True)
 class SkippedAction:
@@ -237,6 +248,8 @@ def v2_answer_block(target: ScoredCandidate, page: PageFacts) -> Prescription | 
         ("what", "how", "why", "when", "where", "who", "is ", "are ", "can ", "does ")
     ):
         return None
+    if not page.readable:
+        return None
     if any(_mentions(term, q) for q in page.faq_questions):
         return None
     return Prescription(
@@ -265,6 +278,8 @@ def v2_answer_block(target: ScoredCandidate, page: PageFacts) -> Prescription | 
 
 def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """No `about` or `mentions` tying the page to the term's subject."""
+    if not page.readable:
+        return None
     if {"about", "mentions"} & page.entity_properties:
         return None
     return Prescription(
@@ -292,6 +307,8 @@ def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription |
 
 def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """Fewer in-content links than the site's own median."""
+    if not page.readable:
+        return None
     if page.site_median_links <= 0:
         return None
     if page.inbound_editorial_links >= page.site_median_links:

@@ -186,3 +186,38 @@ def test_the_order_is_the_argument():
     assert VISIBILITY_ACTIONS.index(v1_term_in_high_value_spots) < VISIBILITY_ACTIONS.index(
         v4_internal_links
     )
+
+
+def test_rules_that_read_the_crawl_stay_silent_on_a_page_it_did_not_read():
+    """Headings, FAQ questions, schema and link counts are only recorded for a
+    page fetched as a 2xx. Empty there means unknown, not "the page has none"."""
+    from app.decisions.catalog import v2_answer_block, v3_entity_markup, v4_internal_links
+
+    unread = _page(
+        crawled=False,
+        title=None,
+        description=None,
+        headings=(),
+        headings_known=False,
+        entity_properties=frozenset(),
+        inbound_editorial_links=0,
+        site_median_links=8.0,
+    )
+    question = _target(keyword="what is local seo")
+    assert v2_answer_block(question, unread) is None
+    assert v3_entity_markup(_target(), unread) is None
+    assert v4_internal_links(_target(), unread) is None
+
+    # The same facts on a page that was read do fire, so the silence is the flag.
+    read = _page(entity_properties=frozenset(), inbound_editorial_links=0, site_median_links=8.0)
+    assert v3_entity_markup(_target(), read) is not None
+    assert v4_internal_links(_target(), read) is not None
+
+
+def test_a_target_typed_http_or_www_is_the_page_that_ranks():
+    """Mapped as http://, ranking as https://: one page, not a re-homing."""
+
+    same = _target(target_url="http://www.x.com/local-seo", ranking_url="https://x.com/local-seo/")
+    assert same.rehoming is False
+    other = _target(target_url="https://x.com/local-seo", ranking_url="https://x.com/blog")
+    assert other.rehoming is True
