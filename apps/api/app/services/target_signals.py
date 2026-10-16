@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_url
 from app.decisions.catalog import PageFacts, SectionFacts
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.targets import Candidate
@@ -155,6 +156,38 @@ def _entity_properties(raw: object) -> set[str]:
     return found
 
 
+#: Redirect hops followed to reach the page that actually serves a target.
+_MAX_REDIRECT_HOPS = 5
+
+
+def _snapshot_for(crawl: dict, url: str):
+    """The crawl row for the page a target URL really lands on.
+
+    A target is typed by a person: `http://`, `www.`, a missing trailing slash.
+    The crawl keys its rows on the normalized form, and records a redirecting
+    URL as a row of its own with the status of the redirect, so its headings
+    and the other checks that need a 2xx page are null. Reading the row for
+    the typed URL gave a title and a description (parsed from the page it
+    redirected to) and no headings: a page that looked as if it had none.
+
+    So the URL is normalized, and a row that only redirects is followed to the
+    row that serves. Where the chain ends on nothing readable the last row is
+    returned, and its null headings say "unknown".
+    """
+    row = crawl.get(normalize_url(url))
+    for _ in range(_MAX_REDIRECT_HOPS):
+        if row is None or not row.redirect_url:
+            break
+        status = row.status_code
+        if status is not None and 200 <= status < 300:
+            break
+        nxt = crawl.get(normalize_url(row.redirect_url))
+        if nxt is None or nxt is row:
+            break
+        row = nxt
+    return row
+
+
 def _latest_crawl_date(db: Session, client_id: UUID) -> date | None:
     return (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
@@ -242,7 +275,7 @@ def load_target_inputs(
 
         tracked_row = tracked.get(target.keyword)
         metric = metrics.get(target.keyword)
-        snapshot = crawl.get(url) if url else None
+        snapshot = _snapshot_for(crawl, url) if url else None
 
         candidates.append(
             Candidate(
@@ -276,6 +309,7 @@ def load_target_inputs(
         if url and url not in pages:
             headings = ()
             faqs = ()
+            raw_sections: list[dict] = []
             sections: tuple[SectionFacts, ...] = ()
             if snapshot is not None:
                 raw_sections = [
@@ -304,11 +338,15 @@ def load_target_inputs(
                 title=getattr(snapshot, "title", None),
                 description=getattr(snapshot, "description", None),
                 headings=headings,
+                crawled=snapshot is not None,
+                headings_known=snapshot is not None and snapshot.sections is not None,
                 sections=sections,
                 has_faq_section=_has_faq_section(raw_sections),
-                has_faq_schema=url in faq_schema_urls,
+                has_faq_schema=(snapshot.normalized_url if snapshot else url) in faq_schema_urls,
                 faq_questions=faqs,
-                entity_properties=frozenset(schema_by_url.get(url, set())),
+                entity_properties=frozenset(
+                    schema_by_url.get(snapshot.normalized_url if snapshot else url, set())
+                ),
                 inbound_editorial_links=int(
                     getattr(snapshot, "inbound_editorial_links", 0) or 0
                 ),

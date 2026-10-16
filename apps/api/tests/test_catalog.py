@@ -66,6 +66,32 @@ def test_v1_is_silent_when_the_page_already_uses_the_term():
     assert v1_term_in_high_value_spots(_target(), _page()) is None
 
 
+def test_v1_does_not_ask_for_a_meta_description_that_google_rewrites():
+    """Aquaman Leak Detection: the term was in the title and an H2, and the
+    meta description said 'your pool'. The page was told its term was missing."""
+    page = _page(description="We find and repair leaks in your pool.")
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_asks_only_for_what_is_missing():
+    found = v1_term_in_high_value_spots(_target(), _page(title="Services | X"))
+    assert found is not None
+    assert "any heading" not in found.why and "the title" in found.why
+    assert found.title.endswith("in the title")
+    assert "H2" not in found.done_when
+
+
+def test_v1_does_not_read_a_crawl_without_headings_as_a_page_with_none():
+    """A crawl that predates heading capture leaves them empty, not absent."""
+    page = _page(headings=(), headings_known=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_says_nothing_about_a_page_the_crawl_did_not_read():
+    page = _page(title=None, description=None, headings=(), crawled=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
 def test_v2_only_fires_on_a_question():
     assert v2_answer_block(_target(keyword="local seo agency"), _page()) is None
     found = v2_answer_block(_target(keyword="what is local seo"), _page(faq_questions=()))
@@ -160,3 +186,38 @@ def test_the_order_is_the_argument():
     assert VISIBILITY_ACTIONS.index(v1_term_in_high_value_spots) < VISIBILITY_ACTIONS.index(
         v4_internal_links
     )
+
+
+def test_rules_that_read_the_crawl_stay_silent_on_a_page_it_did_not_read():
+    """Headings, FAQ questions, schema and link counts are only recorded for a
+    page fetched as a 2xx. Empty there means unknown, not "the page has none"."""
+    from app.decisions.catalog import v2_answer_block, v3_entity_markup, v4_internal_links
+
+    unread = _page(
+        crawled=False,
+        title=None,
+        description=None,
+        headings=(),
+        headings_known=False,
+        entity_properties=frozenset(),
+        inbound_editorial_links=0,
+        site_median_links=8.0,
+    )
+    question = _target(keyword="what is local seo")
+    assert v2_answer_block(question, unread) is None
+    assert v3_entity_markup(_target(), unread) is None
+    assert v4_internal_links(_target(), unread) is None
+
+    # The same facts on a page that was read do fire, so the silence is the flag.
+    read = _page(entity_properties=frozenset(), inbound_editorial_links=0, site_median_links=8.0)
+    assert v3_entity_markup(_target(), read) is not None
+    assert v4_internal_links(_target(), read) is not None
+
+
+def test_a_target_typed_http_or_www_is_the_page_that_ranks():
+    """Mapped as http://, ranking as https://: one page, not a re-homing."""
+
+    same = _target(target_url="http://www.x.com/local-seo", ranking_url="https://x.com/local-seo/")
+    assert same.rehoming is False
+    other = _target(target_url="https://x.com/local-seo", ranking_url="https://x.com/blog")
+    assert other.rehoming is True

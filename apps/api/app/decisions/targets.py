@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.urls import normalize_url
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -116,10 +118,18 @@ def reach(position: float | None, difficulty: float | None) -> float:
     return 0.15
 
 
+def _identity(url: str) -> str:
+    """Host and path, lowercased: scheme, `www.` and a trailing slash dropped."""
+    return normalize_url(url).split("://", 1)[-1].rstrip("/").lower()
+
+
 def _same_page(left: str | None, right: str | None) -> bool:
     if not left or not right:
         return False
-    return left.rstrip("/").lower() == right.rstrip("/").lower()
+    # The same page typed `http://` or `www.` is still the same page. Compared
+    # as written, a target mapped as http://x/ and ranking as https://x/ read as
+    # two pages and raised "ranks on a page that is not the one it is mapped to".
+    return _identity(left) == _identity(right)
 
 
 def fit(candidate: Candidate) -> tuple[float, bool]:
