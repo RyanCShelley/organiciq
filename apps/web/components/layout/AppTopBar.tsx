@@ -21,9 +21,10 @@ import type { Client } from "@/lib/api";
  *
  * Watch List, Annotations, All clients and the platform pages all read
  * current-state tables and never pass from/to to the API, so showing a date
- * picker there implies a filter that does not exist.
+ * picker there implies a filter that does not exist. The decision engine
+ * reads a saved monthly run, so it has its own run picker instead.
  */
-const PERIOD_AWARE_TOOLS = ["dashboard", "content-opp", "decision-engine"];
+const PERIOD_AWARE_TOOLS = ["dashboard", "content-opp"];
 
 function supportsPeriod(pathname: string): boolean {
   const parts = pathname.split("/").filter(Boolean);

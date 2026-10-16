@@ -194,6 +194,29 @@ export function monthName(month: string): string {
   });
 }
 
+/** "2026-11" from "2026-10". */
+export function nextMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** "2026-09" from "2026-10". */
+export function previousMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * The runs worth showing: months that have finished. A run needs the whole
+ * month's data, so the month we are standing in has no run yet (the plan for it
+ * is last month's run). A partial run saved before that rule is left out.
+ */
+export function finishedRuns<T extends { month: string }>(runs: T[], currentMonth: string): T[] {
+  return runs.filter((run) => run.month < currentMonth);
+}
+
 export function formatDay(iso: string | null | undefined): string {
   if (!iso) return "—";
   const parsed = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
