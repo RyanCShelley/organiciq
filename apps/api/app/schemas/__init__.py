@@ -308,6 +308,17 @@ class BaselineCheckpointOut(BaseModel):
     monthly_leads: float
 
 
+class BaselineSeriesCsvRequest(BaseModel):
+    """A monthly series pasted as CSV. Nothing is stored."""
+
+    csv_text: str = Field(min_length=1, max_length=200_000)
+    regime_start: str | None = None
+    #: The last day the data covers; a month it falls in is left out as unfinished.
+    as_of: Date | None = None
+    half_life_months: float = Field(default=3.0, ge=0.5, le=24)
+    acknowledged: list[str] = []
+
+
 class BaselineSnapshotPreviewOut(BaseModel):
     ready: bool
     window: dict
