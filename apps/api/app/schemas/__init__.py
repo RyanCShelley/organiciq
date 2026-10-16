@@ -339,6 +339,14 @@ class BaselineLockRequest(BaseModel):
     sync_lead_conversions: bool = False
 
 
+class BaselineResetRequest(BaseModel):
+    """Wipe baselines and goals. `confirm` must be exactly RESET."""
+
+    confirm: str
+    #: Leave empty to reset every client.
+    client_ids: list[UUID] = []
+
+
 class BaselineGoalRequest(BaseModel):
     monthly_lead_goal: int = Field(ge=0)
 

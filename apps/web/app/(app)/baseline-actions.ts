@@ -339,3 +339,42 @@ export async function setBaselineGoalAction(clientId: string, monthlyLeadGoal: n
     return fail(e, "Could not update the goal");
   }
 }
+
+// --- Reset every client's baseline and goals (admin) -------------------------
+
+export type BaselineResetPreview = {
+  clients: {
+    client_id: string;
+    slug: string;
+    client_name: string;
+    versions: number;
+    has_baseline: boolean;
+    baseline_as_of: string | null;
+    monthly_lead_goal: number | null;
+    goal_corrections: number;
+  }[];
+  totals: { clients: number; versions: number };
+};
+
+export async function previewBaselineResetAction() {
+  try {
+    const preview = await apiFetch<BaselineResetPreview>("/admin/baselines/reset-preview");
+    return { ok: true as const, preview };
+  } catch (e) {
+    return fail(e, "Could not check what a reset would clear");
+  }
+}
+
+export async function resetBaselinesAction(confirm: string) {
+  try {
+    const done = await apiFetch<{ reset_clients: number; versions_deleted: number; removed: unknown[] }>(
+      "/admin/baselines/reset",
+      { method: "POST", body: { confirm } },
+    );
+    revalidatePath("/clients", "layout");
+    revalidatePath("/dashboard");
+    return { ok: true as const, done };
+  } catch (e) {
+    return fail(e, "The reset did not run");
+  }
+}
