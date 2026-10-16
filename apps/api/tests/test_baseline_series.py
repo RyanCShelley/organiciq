@@ -273,7 +273,7 @@ def test_the_method_version_travels_with_every_result():
 
 
 def _seed(db, client, *, first_day: date, days: int, through: date):
-    from tests.test_baseline_snapshot import _daily_facts, _lead_definition, _watermark
+    from tests.ga4_seed import _daily_facts, _lead_definition, _watermark
 
     _lead_definition(db, client.id)
     _watermark(db, client.id, through)

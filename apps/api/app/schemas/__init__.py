@@ -291,23 +291,6 @@ class AnnotationImportResponse(BaseModel):
     errors: list[dict]
 
 
-class BaselineSnapshotApplyRequest(BaseModel):
-    monthly_lead_goal: int | None = None
-    lead_goal_overrides: dict | None = None
-    notes: str | None = None
-    # Window anchor. Defaults to the GA4 watermark when omitted.
-    as_of: Date | None = None
-    lookback_days: int = 90
-
-
-class BaselineCheckpointOut(BaseModel):
-    label: str
-    month: int
-    monthly_sessions: float
-    lead_rate_pct: float
-    monthly_leads: float
-
-
 class BaselineSeriesCsvRequest(BaseModel):
     """A monthly series pasted as CSV. Nothing is stored."""
 
@@ -353,29 +336,6 @@ class BaselineGoalRequest(BaseModel):
 
 class BaselineLeadConversionsRequest(BaseModel):
     lead_events: list[str] = Field(min_length=1)
-
-
-class BaselineSnapshotPreviewOut(BaseModel):
-    ready: bool
-    window: dict
-    lead_events: list[str]
-    tier_name: str | None
-    plan: str
-    plan_label: str
-    period_sessions: float
-    period_leads: int
-    baseline_as_of: str
-    baseline_monthly_sessions: int
-    baseline_monthly_leads: int
-    baseline_lead_rate_pct: float | None
-    baseline_source: str
-    suggested_monthly_lead_goal: int
-    projection_generated_on: str | None = None
-    goal_horizon_months: int
-    checkpoints: list[BaselineCheckpointOut]
-    disclaimer: str
-    current_monthly_lead_goal: int | None = None
-    applied_monthly_lead_goal: int | None = None
 
 
 class IntegrationCreate(BaseModel):
