@@ -11,6 +11,7 @@ import {
   Monitor,
   RefreshCw,
   Settings2,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -48,7 +49,8 @@ const PLATFORM_ICONS: Record<string, LucideIcon> = {
   Overview: LayoutGrid,
   "Data health": Activity,
   "Sync jobs": RefreshCw,
-  Settings: Settings2,
+  // Not Settings2: "Client settings" above already wears it.
+  Settings: SlidersHorizontal,
 };
 
 export function SidebarNav({

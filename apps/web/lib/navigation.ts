@@ -40,6 +40,7 @@ export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/clients", label: "All clients", exact: true },
   { href: "/platform/data-health", label: "Data health" },
   { href: "/platform/jobs", label: "Sync jobs" },
+  { href: "/platform/settings", label: "Settings" },
 ];
 
 //: The same list as ACCOUNT_TOOLS, re-exported rather than repeated. It
