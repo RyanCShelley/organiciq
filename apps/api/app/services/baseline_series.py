@@ -768,6 +768,15 @@ def lead_event_candidates(db: Any, client: Any, *, months: int = 24) -> dict[str
         .limit(80)
         .all()
     )
+    from app.models.baseline import BaselineVersion
+    from app.services import baseline_lock
+
+    newest = (
+        db.query(BaselineVersion.lead_events, BaselineVersion.version)
+        .filter(BaselineVersion.client_id == client.id)
+        .order_by(BaselineVersion.version.desc())
+        .first()
+    )
     return {
         "events": [
             {
@@ -779,4 +788,8 @@ def lead_event_candidates(db: Any, client: Any, *, months: int = 24) -> dict[str
             for name, total, first, last in rows
         ],
         "defaults": _lead_event_names(db, client.id),
+        # What the newest locked baseline counted, so a drift from the lead
+        # conversions the rest of the tool uses can be shown.
+        "locked": {"version": newest[1], "events": newest[0]} if newest else None,
+        "goal": baseline_lock.goal_state(db, client),
     }

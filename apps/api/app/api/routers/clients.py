@@ -11,6 +11,8 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.user import UserRole
 from app.schemas import (
+    BaselineGoalRequest,
+    BaselineLeadConversionsRequest,
     BaselineLockRequest,
     BaselineSeriesCsvRequest,
     BaselineSnapshotApplyRequest,
@@ -19,7 +21,7 @@ from app.schemas import (
     ClientOut,
     ClientUpdate,
 )
-from app.services import baseline_lock, baseline_series, baseline_snapshot, clients as client_service
+from app.services import baseline_lock, baseline_series, baseline_snapshot, clients as client_service, lead_conversions
 
 from app.services.plan_allowances import resolve_plan_allowances
 
@@ -253,6 +255,36 @@ def baseline_lead_event_candidates(
     """The events this client's GA4 has sent, for choosing which count as leads."""
     client = _staff_client(db, user, client_id)
     return baseline_series.lead_event_candidates(db, client)
+
+
+@router.post("/{client_id}/baseline/lead-conversions")
+def set_lead_conversions(
+    client_id: UUID,
+    payload: BaselineLeadConversionsRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Make these exactly the client's lead conversions, so the baseline and the home screen agree.
+
+    Nothing is deleted: a definition that drops out is switched off.
+    """
+    client = _staff_client(db, user, client_id)
+    changes = lead_conversions.sync(db, client.id, payload.lead_events)
+    db.commit()
+    return {"changes": changes, "lead_events": lead_conversions.active_lead_events(db, client.id)}
+
+
+@router.post("/{client_id}/baseline/goal")
+def set_baseline_goal(
+    client_id: UUID,
+    payload: BaselineGoalRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Set the plan-end monthly lead goal, e.g. to the newest locked baseline's 12-month figure."""
+    client = _staff_client(db, user, client_id)
+    client_service.update_client(db, client, ClientUpdate(monthly_lead_goal=payload.monthly_lead_goal))
+    return baseline_lock.goal_state(db, client)
 
 
 @router.post("/{client_id}/baseline/lock")

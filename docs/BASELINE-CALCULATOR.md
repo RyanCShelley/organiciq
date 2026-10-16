@@ -82,8 +82,17 @@ optional. Months may be `2026-09`, `Sep 2026`, `9/2026`, `202609`.
   characters. Old versions are never edited.
 * A lock fills the client's `baseline_*` columns and `baseline_projection_json` in the
   shape the dashboard already reads (plus `baseline_version`, the method version, the goal
-  basis and the ranges), so the dashboard needs no change. The monthly lead goal is left
-  alone unless one is given, except that a client with no goal gets the suggested one.
+  basis and the ranges), so the dashboard needs no change. **The plan-end monthly lead goal
+  is set from the baseline's own 12-month figure** unless one is given: left at an old value it
+  sat beside the new near-term target and the home screen showed two baselines.
+* **One definition of a lead.** The home screen, alerts, the engine's lead branch and the
+  results loop count the client's active lead conversions (the Conversions page). A lock
+  from GA4 compares the events it counted with those: if they differ, the lock is refused
+  until it is agreed to update the conversions to match (`sync_lead_conversions`). Nothing is
+  deleted; a dropped definition is switched off, other types are untouched, one lead stays
+  primary. `POST /baseline/lead-conversions` aligns them without locking, and
+  `POST /baseline/goal` sets the plan-end goal (the screen offers both as one-click fixes when
+  it sees a mismatch with the newest locked baseline).
 * `GET /clients/{id}/baseline/versions` and `/versions/{n}` read them back (the latter with
   the full analysis it was locked from). `GET /clients/{id}/baseline/events` lists the GA4
   events, busiest first, for choosing the lead definition.

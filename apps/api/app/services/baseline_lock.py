@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.baseline import BaselineVersion
 from app.models.client import Client
 from app.schemas import BaselineLockRequest, ClientUpdate
-from app.services import baseline_series, clients as client_service
+from app.services import baseline_series, clients as client_service, lead_conversions
 
 INITIAL = "initial"
 REBASELINE_REASONS = {
@@ -101,6 +101,20 @@ def _projection_record(result: dict[str, Any], version: int, window_end: date, w
     }
 
 
+def goal_state(db: Session, client: Client) -> dict[str, Any]:
+    """The plan-end goal now, and the one the newest locked baseline's projection gives."""
+    newest = (
+        db.query(BaselineVersion)
+        .filter(BaselineVersion.client_id == client.id)
+        .order_by(BaselineVersion.version.desc())
+        .first()
+    )
+    suggested = None
+    if newest is not None:
+        suggested = int(newest.snapshot.get("projection", {}).get("suggested_monthly_lead_goal", 0)) or None
+    return {"current": client.monthly_lead_goal, "suggested": suggested, "version": newest.version if newest else None}
+
+
 def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequest) -> dict[str, Any]:
     result = baseline_series.build_result(
         db,
@@ -122,6 +136,21 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
             "Acknowledge or fix these before locking: "
             + "; ".join(f"{flag['code']} — {flag['message']}" for flag in open_blockers)
         )
+
+    # One definition of a lead: the events this baseline counted must be the ones the
+    # dashboard, alerts and results count. A difference is agreed to, not assumed.
+    lead_change: dict[str, list[str]] | None = None
+    if result["source"]["type"] == "ga4":
+        used = result["source"]["lead_events"]
+        lead_change = lead_conversions.diff(db, client.id, used)
+        if lead_change["add"] or lead_change["remove"]:
+            if not request.sync_lead_conversions:
+                raise ValueError(
+                    "These lead events differ from the client's lead conversions, which the home screen, "
+                    f"alerts and results count: locking {lead_conversions.describe(lead_change)}. "
+                    "Agree to update the lead conversions to match, or change the events."
+                )
+            lead_conversions.sync(db, client.id, used)
 
     latest = (
         db.query(BaselineVersion.version)
@@ -175,10 +204,11 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
     db.add(row)
     db.flush()
 
+    # The plan-end goal comes from this baseline's own projection. Left at an old value
+    # it sat beside a near-term target from the new projection, and the home screen
+    # showed two baselines at once.
     suggested_goal = int(result["projection"]["suggested_monthly_lead_goal"])
-    goal_to_set = request.monthly_lead_goal
-    if goal_to_set is None and client.monthly_lead_goal is None:
-        goal_to_set = suggested_goal
+    goal_to_set = request.monthly_lead_goal if request.monthly_lead_goal is not None else suggested_goal
     update = {
         "baseline_as_of": window_end,
         "baseline_period_start": window_start,
@@ -190,13 +220,13 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         "baseline_notes": f"v{version} {reason}" + (f": {note}" if note else ""),
         "baseline_projection_json": _projection_record(result, version, window_end, window_start),
     }
-    if goal_to_set is not None:
-        update["monthly_lead_goal"] = int(goal_to_set)
+    update["monthly_lead_goal"] = int(goal_to_set)
     client_service.update_client(db, client, ClientUpdate(**update))
 
     return {
         "version": _summary(row),
+        "lead_conversions_changed": lead_change if lead_change and (lead_change["add"] or lead_change["remove"]) else None,
         "monthly_lead_goal": client.monthly_lead_goal,
         "suggested_monthly_lead_goal": suggested_goal,
-        "goal_set_by_lock": goal_to_set is not None,
+        "goal_set_by_lock": request.monthly_lead_goal is None,
     }

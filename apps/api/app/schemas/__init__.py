@@ -332,8 +332,19 @@ class BaselineLockRequest(BaseModel):
     acknowledged: list[str] = []
     reason_code: str | None = None
     reason_note: str | None = Field(default=None, max_length=2000)
-    #: Left alone when absent, unless the client has no goal yet.
+    #: The plan-end goal. Absent means the 12-month figure from this baseline's own projection.
     monthly_lead_goal: int | None = Field(default=None, ge=0)
+    #: Agree to make the chosen events the client's lead conversions, which the home
+    #: screen, alerts and results count, when they differ from what is set now.
+    sync_lead_conversions: bool = False
+
+
+class BaselineGoalRequest(BaseModel):
+    monthly_lead_goal: int = Field(ge=0)
+
+
+class BaselineLeadConversionsRequest(BaseModel):
+    lead_events: list[str] = Field(min_length=1)
 
 
 class BaselineSnapshotPreviewOut(BaseModel):

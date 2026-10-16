@@ -180,7 +180,11 @@ export type BaselineSeriesResult = {
 
 export type BaselineEventCandidates = {
   events: { name: string; total: number; first_month: string; last_month: string }[];
+  /** The events the rest of the tool counts as leads: the home screen, alerts and results. */
   defaults: string[];
+  /** What the newest locked baseline counted. */
+  locked: { version: number; events: string[] } | null;
+  goal: { current: number | null; suggested: number | null; version: number | null };
 };
 
 export type BaselineVersionRow = {
@@ -270,12 +274,14 @@ export async function lockBaselineAction(
     reasonCode?: string;
     reasonNote?: string;
     monthlyLeadGoal?: number | null;
+    syncLeadConversions?: boolean;
   },
 ) {
   if (!clientId) return { ok: false as const, error: "Missing client" };
   try {
     const locked = await apiFetch<{
       version: BaselineVersionRow;
+      lead_conversions_changed: { add: string[]; remove: string[]; keep: string[] } | null;
       monthly_lead_goal: number | null;
       suggested_monthly_lead_goal: number;
       goal_set_by_lock: boolean;
@@ -292,6 +298,7 @@ export async function lockBaselineAction(
         reason_code: input.reasonCode || null,
         reason_note: input.reasonNote || null,
         monthly_lead_goal: input.monthlyLeadGoal ?? null,
+        sync_lead_conversions: input.syncLeadConversions ?? false,
       },
     });
     revalidatePath("/clients", "layout");
@@ -299,5 +306,36 @@ export async function lockBaselineAction(
     return { ok: true as const, locked };
   } catch (e) {
     return fail(e, "Could not lock the baseline");
+  }
+}
+
+/** Make these exactly the client's lead conversions, so the baseline and the home screen agree. */
+export async function setLeadConversionsAction(clientId: string, leadEvents: string[]) {
+  try {
+    const done = await apiFetch<{ changes: { add: string[]; remove: string[] }; lead_events: string[] }>(
+      `/clients/${clientId}/baseline/lead-conversions`,
+      { method: "POST", clientId, body: { lead_events: leadEvents } },
+    );
+    revalidatePath("/clients", "layout");
+    revalidatePath("/dashboard");
+    return { ok: true as const, done };
+  } catch (e) {
+    return fail(e, "Could not update the lead conversions");
+  }
+}
+
+/** Set the plan-end monthly lead goal, e.g. to the newest locked baseline's 12-month figure. */
+export async function setBaselineGoalAction(clientId: string, monthlyLeadGoal: number) {
+  try {
+    await apiFetch(`/clients/${clientId}/baseline/goal`, {
+      method: "POST",
+      clientId,
+      body: { monthly_lead_goal: monthlyLeadGoal },
+    });
+    revalidatePath("/clients", "layout");
+    revalidatePath("/dashboard");
+    return { ok: true as const };
+  } catch (e) {
+    return fail(e, "Could not update the goal");
   }
 }

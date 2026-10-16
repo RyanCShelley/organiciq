@@ -8,6 +8,8 @@ import {
   listBaselineEventsAction,
   listBaselineVersionsAction,
   lockBaselineAction,
+  setBaselineGoalAction,
+  setLeadConversionsAction,
   type BaselineBand,
   type BaselineEventCandidates,
   type BaselineSeriesInput,
@@ -68,22 +70,40 @@ export function BaselineBuilder({
   const [reasonCode, setReasonCode] = useState("relaunch");
   const [reasonNote, setReasonNote] = useState("");
   const [goal, setGoal] = useState("");
+  const [syncLeads, setSyncLeads] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  async function reload(resetSelection: boolean) {
+    const [events, saved] = await Promise.all([
+      listBaselineEventsAction(clientId),
+      listBaselineVersionsAction(clientId),
+    ]);
+    if (events.ok) {
+      setCandidates(events.events);
+      if (resetSelection) setSelected(events.events.defaults);
+    }
+    if (saved.ok) setVersions(saved.versions);
+  }
+
   useEffect(() => {
     startTransition(async () => {
-      const [events, saved] = await Promise.all([
-        listBaselineEventsAction(clientId),
-        listBaselineVersionsAction(clientId),
-      ]);
-      if (events.ok) {
-        setCandidates(events.events);
-        setSelected(events.events.defaults);
-      }
-      if (saved.ok) setVersions(saved.versions);
+      await reload(true);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  const defaults = candidates?.defaults ?? [];
+  const leadsToAdd = source === "ga4" ? selected.filter((name) => !defaults.includes(name)) : [];
+  const leadsToRemove = source === "ga4" ? defaults.filter((name) => !selected.includes(name)) : [];
+  const leadsDiffer = leadsToAdd.length + leadsToRemove.length > 0;
+  const locked = candidates?.locked ?? null;
+  const lockedDiffers =
+    locked !== null &&
+    (locked.events.some((name) => !defaults.includes(name)) || defaults.some((name) => !locked.events.includes(name)));
+  const goalInfo = candidates?.goal ?? null;
+  const goalDiffers =
+    goalInfo !== null && goalInfo.suggested !== null && goalInfo.current !== goalInfo.suggested;
 
   const input = useMemo<BaselineSeriesInput>(
     () => ({
@@ -130,18 +150,19 @@ export function BaselineBuilder({
         reasonCode: first ? "initial" : reasonCode,
         reasonNote,
         monthlyLeadGoal: goal.trim() === "" ? null : Number(goal),
+        syncLeadConversions: leadsDiffer && syncLeads,
       });
       if (!response.ok) {
         setError(response.error);
         return;
       }
-      const saved = await listBaselineVersionsAction(clientId);
-      if (saved.ok) setVersions(saved.versions);
+      await reload(false);
       setMessage(
         `Locked as version ${response.locked.version.version}.` +
           (response.locked.goal_set_by_lock
-            ? ` Monthly lead goal set to ${num(response.locked.monthly_lead_goal)}.`
-            : ""),
+            ? ` Plan-end lead goal set to ${num(response.locked.monthly_lead_goal)}.`
+            : "") +
+          (response.locked.lead_conversions_changed ? " Lead conversions updated to match." : ""),
       );
       setReasonNote("");
       setGoal("");
@@ -158,6 +179,56 @@ export function BaselineBuilder({
           down, a long average sets a baseline the client cannot meet. Earlier months stay on the chart in grey.
         </p>
       </div>
+
+      {lockedDiffers && locked ? (
+        <Alert variant="warning">
+          <p className="text-sm">
+            Baseline v{locked.version} counted <strong>{locked.events.join(", ")}</strong> as leads, but the home
+            screen, alerts and results count <strong>{defaults.join(", ") || "nothing"}</strong>, so their numbers
+            will not match the baseline.
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary mt-2"
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const done = await setLeadConversionsAction(clientId, locked.events);
+                if (!done.ok) return setError(done.error);
+                setMessage(`Lead conversions now match v${locked.version}.`);
+                await reload(true);
+                router.refresh();
+              })
+            }
+          >
+            Make the lead conversions match v{locked.version}
+          </button>
+        </Alert>
+      ) : null}
+      {goalDiffers && goalInfo ? (
+        <Alert variant="warning">
+          <p className="text-sm">
+            The plan-end goal is <strong>{num(goalInfo.current)}</strong> a month, but baseline v{goalInfo.version}
+            &apos;s 12-month figure is <strong>{num(goalInfo.suggested)}</strong>. The home screen shows both.
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary mt-2"
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const done = await setBaselineGoalAction(clientId, goalInfo.suggested!);
+                if (!done.ok) return setError(done.error);
+                setMessage(`Plan-end goal set to ${num(goalInfo.suggested)}.`);
+                await reload(false);
+                router.refresh();
+              })
+            }
+          >
+            Set the goal to {num(goalInfo.suggested)}
+          </button>
+        </Alert>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldLabel label="Data from">
@@ -206,6 +277,19 @@ export function BaselineBuilder({
               ))}
             </ul>
           )}
+          {leadsDiffer ? (
+            <div className="mt-2 rounded-[var(--radius-md)] border border-[#E3B25C] bg-[#FFF8E6] px-3 py-2 text-xs">
+              <p>
+                This differs from the client&apos;s lead conversions, which the home screen, alerts and results count
+                {leadsToAdd.length ? <> — adds <strong>{leadsToAdd.join(", ")}</strong></> : null}
+                {leadsToRemove.length ? <> — switches off <strong>{leadsToRemove.join(", ")}</strong></> : null}.
+              </p>
+              <label className="mt-1 flex items-center gap-2">
+                <input type="checkbox" checked={syncLeads} onChange={() => setSyncLeads((v) => !v)} />
+                When I lock, update the lead conversions to match
+              </label>
+            </div>
+          ) : null}
         </fieldset>
       ) : (
         <FieldLabel label="Monthly CSV (month, sessions, leads; optional organic_sessions)">
@@ -382,23 +466,21 @@ export function BaselineBuilder({
                 </FieldLabel>
               </div>
             )}
-            <FieldLabel label="Monthly lead goal (optional)">
+            <FieldLabel label="Plan-end monthly lead goal (optional)">
               <Input
                 type="number"
                 min={0}
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
-                placeholder={
-                  currentGoal != null
-                    ? `Leave blank to keep ${num(currentGoal)}`
-                    : `Leave blank to use the suggested ${num(result.projection.suggested_monthly_lead_goal)}`
-                }
+                placeholder={`Leave blank to use ${num(result.projection.suggested_monthly_lead_goal)}, this baseline's 12-month figure${
+                  currentGoal != null ? ` (now ${num(currentGoal)})` : ""
+                }`}
               />
             </FieldLabel>
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || openBlockers.length > 0}
+              disabled={pending || openBlockers.length > 0 || (leadsDiffer && !syncLeads)}
               onClick={lock}
             >
               {pending ? "Locking…" : `Lock baseline v${nextVersion}`}
