@@ -250,6 +250,38 @@ export type BaselineResetPreview = {
   totals: { clients: number; versions: number };
 };
 
+export type EngineInputCoverage = {
+  totals: { clients: number; targets: number; needing_attention: number; affected_actions: number };
+  clients: Array<{
+    client_id: string;
+    client_name: string;
+    crawl_date: string | null;
+    targets: number;
+    ok: number;
+    redirect_followed: number;
+    not_in_crawl: number;
+    unreadable: number;
+    headings_not_captured: number;
+    problems: Array<{
+      keyword: string;
+      target_url: string;
+      status: string;
+      http_status: string | null;
+      detail: string;
+    }>;
+    affected_actions: Array<{ month: string; id: string; title: string; target_url: string }>;
+  }>;
+};
+
+export async function engineInputCoverageAction() {
+  try {
+    const report = await apiFetch<EngineInputCoverage>("/admin/engine-input-coverage");
+    return { ok: true as const, report };
+  } catch (e) {
+    return fail(e, "Could not check the engine's inputs");
+  }
+}
+
 export async function previewBaselineResetAction() {
   try {
     const preview = await apiFetch<BaselineResetPreview>("/admin/baselines/reset-preview");

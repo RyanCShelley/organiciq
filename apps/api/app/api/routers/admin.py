@@ -17,7 +17,7 @@ from app.models.config import (
 from app.models.integration import Integration
 from app.models.job import SyncJob
 from app.models.user import User, UserClient, UserRole
-from app.services import baseline_reset
+from app.services import baseline_reset, engine_input_coverage
 from app.services.ga4_event_candidates import load_event_candidates
 from app.services.data_health import (
     WATERMARK_SOURCES,
@@ -514,6 +514,15 @@ def unassign_user_client(
         db.delete(link)
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/engine-input-coverage")
+def engine_input_coverage_report(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Per client: which mapped pages the engine can read, and which saved actions rest on one it could not. Changes nothing."""
+    return engine_input_coverage.report(db)
 
 
 @router.get("/baselines/reset-preview")
