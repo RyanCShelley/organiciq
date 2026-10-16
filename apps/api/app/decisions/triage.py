@@ -141,6 +141,10 @@ class VisibilitySignals:
     priority_pages: int = 0
     priority_pages_without_reach: int = 0
     priority_pages_declared: bool = False
+    #: Declared pages that at least one tracked term is mapped to. A page with
+    #: no term mapped has not been shown to be out of reach, it has not been
+    #: given anything to reach with.
+    priority_pages_mapped: int | None = None
     #: Share of tracked prompts that mention the brand, 0-100.
     ai_mention_pct: float | None = None
     tracked_prompts: int = 0
@@ -225,24 +229,39 @@ def assess_visibility(
 
     # V4 — priority-page reach. One page out of reach fails it: a page the
     # client sells from, with nothing in the top 20, is the definition of
-    # being unfindable.
+    # being unfindable. Only a page with a term mapped to it can be judged:
+    # with the keyword map empty every page "had no term in the top 20", and
+    # the branch failed on the gap in our own setup rather than the site.
+    mapped = (
+        signals.priority_pages_mapped
+        if signals.priority_pages_mapped is not None
+        else signals.priority_pages
+    )
+    unmapped = max(0, signals.priority_pages - mapped)
+    judgeable = signals.priority_pages_declared and mapped > 0
+    if not signals.priority_pages_declared:
+        v4_missing = "no target or conversion pages declared"
+    elif mapped == 0:
+        v4_missing = (
+            f"no tracked term is mapped to any of the {signals.priority_pages} "
+            "target pages"
+        )
+    else:
+        v4_missing = None
     results.append(
         _judge(
             "V4",
             "Priority-page reach",
             "Target pages with no term in the top 20",
-            float(signals.priority_pages_without_reach)
-            if signals.priority_pages_declared
-            else None,
+            float(signals.priority_pages_without_reach) if judgeable else None,
             pass_line=0.0,
             direction="max",
             unit="count",
-            missing=None
-            if signals.priority_pages_declared
-            else "no target or conversion pages declared",
+            missing=v4_missing,
             display=(
-                f"{signals.priority_pages_without_reach} of {signals.priority_pages}"
-                if signals.priority_pages_declared
+                f"{signals.priority_pages_without_reach} of {mapped}"
+                + (f" mapped ({unmapped} have no term mapped)" if unmapped else "")
+                if judgeable
                 else None
             ),
         )
