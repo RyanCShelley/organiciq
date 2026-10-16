@@ -1,3 +1,4 @@
+import { ResetBaselinesPanel } from "@/components/Baseline/ResetBaselinesPanel";
 import { PlatformNav } from "@/components/PlatformNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
@@ -116,6 +117,16 @@ export default async function PlatformSettingsPage() {
               getRowKey={(row) => row.id}
               emptyMessage="No channel rules configured."
             />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Reset baselines"
+            description="Admin only. Start every client's baseline again with the new calculator."
+          />
+          <div className="workspace-panel">
+            <ResetBaselinesPanel />
           </div>
         </section>
       </div>
