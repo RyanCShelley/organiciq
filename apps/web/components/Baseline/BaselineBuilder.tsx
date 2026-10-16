@@ -421,13 +421,21 @@ export function BaselineBuilder({
             <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
               {result.projection.plan_label} projection, from the goal basis
             </p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+              Two columns, one growth curve, two starting points. <strong>Goal</strong> starts from the
+              low end of the baseline&rsquo;s lead range, so it is a number we can promise the client even if
+              the baseline reads low. <strong>Estimate</strong> starts from the middle of the range, the
+              likeliest outcome. The gap is widest when the baseline is only a few leads a month. Use the goal
+              column for what the client is committed to; use the estimate for internal forecasting. To set
+              something in between, type it as the plan-end goal when you lock.
+            </p>
             <table className="mt-2 w-full min-w-[420px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--text-tertiary)]">
                   <th className="py-1.5 pr-2 font-semibold">Checkpoint</th>
                   <th className="py-1.5 pr-2 font-semibold">Lead rate</th>
-                  <th className="py-1.5 pr-2 font-semibold">Leads a month</th>
-                  <th className="py-1.5 font-semibold">From the estimate</th>
+                  <th className="py-1.5 pr-2 font-semibold">Goal (leads a month)</th>
+                  <th className="py-1.5 font-semibold">Estimate (leads a month)</th>
                 </tr>
               </thead>
               <tbody>
