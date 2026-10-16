@@ -162,8 +162,8 @@ def test_the_event_picker_lists_events_busiest_first_with_the_months_they_ran(cl
 
 
 def _ga4_client(db, client_a):
-    """GA4 facts with one declared lead event, `generate_lead`, as test_baseline_snapshot seeds them."""
-    from tests.test_baseline_snapshot import _daily_facts, _lead_definition, _watermark
+    """GA4 facts with one declared lead event, `generate_lead`, as tests.ga4_seed seeds them."""
+    from tests.ga4_seed import _daily_facts, _lead_definition, _watermark
 
     _lead_definition(db, client_a.id)
     _watermark(db, client_a.id, date(2026, 9, 30))

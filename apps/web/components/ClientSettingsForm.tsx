@@ -288,67 +288,6 @@ export function ClientSettingsForm({
       <TeamworkTasklistField value={client.teamwork_tasklist_id ?? null} />
 
       <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
-        <div>
-          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-            Dashboard baseline snapshot
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Freeze starting monthly sessions, leads, and lead rate (from the growth calculator or
-            kickoff numbers). Dashboard compares the current window against this snapshot.
-          </p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <FieldLabel label="Baseline as of">
-            <Input
-              name="baseline_as_of"
-              type="date"
-              defaultValue={client.baseline_as_of ?? ""}
-            />
-          </FieldLabel>
-          <FieldLabel label="Monthly sessions">
-            <Input
-              name="baseline_monthly_sessions"
-              type="number"
-              min={0}
-              defaultValue={client.baseline_monthly_sessions ?? ""}
-              placeholder="From calculator"
-            />
-          </FieldLabel>
-          <FieldLabel label="Monthly leads">
-            <Input
-              name="baseline_monthly_leads"
-              type="number"
-              min={0}
-              defaultValue={client.baseline_monthly_leads ?? ""}
-            />
-          </FieldLabel>
-          <FieldLabel label="Lead rate %">
-            <Input
-              name="baseline_lead_rate_pct"
-              type="number"
-              min={0}
-              step="0.01"
-              defaultValue={client.baseline_lead_rate_pct ?? ""}
-              placeholder="Auto from leads ÷ sessions"
-            />
-          </FieldLabel>
-          <FieldLabel label="Source">
-            <Select name="baseline_source" defaultValue={client.baseline_source ?? "manual"}>
-              <option value="manual">Manual</option>
-              <option value="ga4_calculator">GA4 + calculator</option>
-              <option value="calculator">Growth calculator</option>
-              <option value="ga4">GA4 snapshot</option>
-              <option value="kickoff">Kickoff / audit</option>
-            </Select>
-          </FieldLabel>
-          <FieldLabel label="Notes" className="sm:col-span-2 lg:col-span-1">
-            <Input
-              name="baseline_notes"
-              defaultValue={client.baseline_notes ?? ""}
-              placeholder="e.g. Pre-engagement July 2025"
-            />
-          </FieldLabel>
-        </div>
         <BaselineBuilder clientId={client.id} currentGoal={client.monthly_lead_goal ?? null} />
       </div>
 

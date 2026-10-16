@@ -21,25 +21,6 @@ export async function updateClientSettingsAction(formData: FormData) {
   // form does not send them. Leaving them out of the body leaves them alone.
   const planLocked = String(formData.get("plan_locked") || "") === "1";
 
-  const baselineAsOf = String(formData.get("baseline_as_of") || "").trim() || null;
-  const baselineSessionsRaw = String(formData.get("baseline_monthly_sessions") || "").trim();
-  const baselineLeadsRaw = String(formData.get("baseline_monthly_leads") || "").trim();
-  const baselineRateRaw = String(formData.get("baseline_lead_rate_pct") || "").trim();
-  const baselineSessions =
-    baselineSessionsRaw === "" ? null : Number(baselineSessionsRaw);
-  const baselineLeads = baselineLeadsRaw === "" ? null : Number(baselineLeadsRaw);
-  let baselineRate = baselineRateRaw === "" ? null : Number(baselineRateRaw);
-  if (
-    baselineRate == null &&
-    baselineSessions != null &&
-    baselineLeads != null &&
-    baselineSessions > 0 &&
-    !Number.isNaN(baselineSessions) &&
-    !Number.isNaN(baselineLeads)
-  ) {
-    baselineRate = (baselineLeads / baselineSessions) * 100;
-  }
-
   const parseOptionalInt = (key: string): number | null => {
     const raw = String(formData.get(key) || "").trim();
     if (raw === "") return null;
@@ -102,14 +83,6 @@ export async function updateClientSettingsAction(formData: FormData) {
   if (crawlPageLimit != null && (crawlPageLimit < 1 || crawlPageLimit > 5000)) {
     return { ok: false as const, error: "Crawl page limit must be between 1 and 5,000." };
   }
-  if (
-    [baselineSessions, baselineLeads, baselineRate].some(
-      (value) => value != null && Number.isNaN(value),
-    )
-  ) {
-    return { ok: false as const, error: "Baseline values must be numbers." };
-  }
-
   if (isEnterprise) {
     if (
       customKeyword == null ||
@@ -141,12 +114,6 @@ export async function updateClientSettingsAction(formData: FormData) {
     account_sheet_url: sheetRaw || null,
     teamwork_tasklist_id:
       String(formData.get("teamwork_tasklist_id") || "").trim() || null,
-    baseline_as_of: baselineAsOf,
-    baseline_monthly_sessions: baselineSessions,
-    baseline_monthly_leads: baselineLeads,
-    baseline_lead_rate_pct: baselineRate,
-    baseline_source: String(formData.get("baseline_source") || "").trim() || "manual",
-    baseline_notes: String(formData.get("baseline_notes") || "").trim() || null,
     status: String(formData.get("status") || "active"),
     ...(planLocked
       ? {}
