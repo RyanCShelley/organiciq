@@ -166,6 +166,7 @@ export default async function DashboardPage({
                     </div>
                     <Sparkline
                       values={data.conversions.leads_series}
+                      direction={(data.conversions.goal_progress_pct ?? 0) >= 100 ? "up" : "flat"}
                       width={86}
                       height={30}
                     />

@@ -17,6 +17,12 @@ function formatValue(value: number | null, unit: MetricUnit): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+/** The colour of the line is the change the card reports; no change figure, no colour. */
+function directionOf(changePct: number | null): "up" | "down" | "flat" {
+  if (changePct === null || Number.isNaN(changePct) || changePct === 0) return "flat";
+  return changePct > 0 ? "up" : "down";
+}
+
 export function MetricCard({
   label,
   metric,
@@ -74,6 +80,7 @@ export function MetricCard({
         <Sparkline
           values={safeMetric.series}
           invert={invertChange}
+          direction={directionOf(safeMetric.change_pct)}
           width={isCompact ? 70 : 86}
           height={isCompact ? 26 : 30}
           stroke={isGlass ? "var(--brand-lime)" : undefined}

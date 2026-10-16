@@ -34,6 +34,7 @@ export function Sparkline({
   width = 86,
   height = 30,
   invert = false,
+  direction,
   stroke,
   fill,
 }: {
@@ -43,6 +44,13 @@ export function Sparkline({
   height?: number;
   /** When true (e.g. position), falling values color as positive. */
   invert?: boolean;
+  /**
+   * Which way the metric moved, from the same comparison the card's change
+   * pill shows. The colour follows this and not the line: daily values are
+   * noisy, so a period that is up can still end on a lower day than it began.
+   * Left out, the colour falls back to the first and last points.
+   */
+  direction?: "up" | "down" | "flat";
   /** Override stroke color (e.g. lime on glass cards). */
   stroke?: string;
   fill?: string;
@@ -65,8 +73,8 @@ export function Sparkline({
 
   const first = series[0];
   const last = series[series.length - 1];
-  const rising = last > first;
-  const falling = last < first;
+  const rising = direction ? direction === "up" : last > first;
+  const falling = direction ? direction === "down" : last < first;
   const positive = invert ? falling : rising;
   const negative = invert ? rising : falling;
   const autoStroke = positive
