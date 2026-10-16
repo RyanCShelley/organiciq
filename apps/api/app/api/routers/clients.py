@@ -11,13 +11,14 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.user import UserRole
 from app.schemas import (
+    BaselineSeriesCsvRequest,
     BaselineSnapshotApplyRequest,
     BaselineSnapshotPreviewOut,
     ClientCreate,
     ClientOut,
     ClientUpdate,
 )
-from app.services import baseline_snapshot, clients as client_service
+from app.services import baseline_series, baseline_snapshot, clients as client_service
 
 from app.services.plan_allowances import resolve_plan_allowances
 
@@ -179,6 +180,70 @@ def preview_baseline_from_ga4(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return BaselineSnapshotPreviewOut.model_validate(preview)
+
+
+@router.get("/{client_id}/baseline/series")
+def baseline_series_from_ga4(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    months: int = Query(default=24, ge=6, le=48),
+    regime_start: str | None = Query(default=None),
+    half_life_months: float = Query(default=3.0, ge=0.5, le=24),
+    lead_event: list[str] = Query(default=[]),
+    acknowledge: list[str] = Query(default=[]),
+) -> dict:
+    """The recent-window baseline, ranges and flags from the synced GA4 data. Writes nothing."""
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    try:
+        rows, info = baseline_series.series_from_ga4(
+            db, client, months=months, lead_events=lead_event or None
+        )
+        result = baseline_series.analyze(
+            rows,
+            regime_start=regime_start,
+            as_of=info["as_of"],
+            half_life_months=half_life_months,
+            plan=baseline_series.plan_for_client(db, client),
+            acknowledged=acknowledge,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result["source"] = {"type": "ga4", "lead_events": info["lead_events"], "notes": info["notes"]}
+    return result
+
+
+@router.post("/{client_id}/baseline/series")
+def baseline_series_from_csv(
+    client_id: UUID,
+    payload: BaselineSeriesCsvRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The same baseline from a pasted monthly CSV. Writes nothing."""
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    try:
+        rows, skipped = baseline_series.parse_csv(payload.csv_text)
+        result = baseline_series.analyze(
+            rows,
+            regime_start=payload.regime_start,
+            as_of=payload.as_of,
+            half_life_months=payload.half_life_months,
+            plan=baseline_series.plan_for_client(db, client),
+            acknowledged=payload.acknowledged,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result["source"] = {"type": "csv", "skipped_rows": skipped}
+    return result
 
 
 @router.post("/{client_id}/baseline/from-ga4", response_model=BaselineSnapshotPreviewOut)
