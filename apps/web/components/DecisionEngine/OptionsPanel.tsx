@@ -42,11 +42,33 @@ export function OptionsPanel({
   const [error, setError] = useState<string | null>(null);
   const [branch, setBranch] = useState<string>("all");
   const [showAll, setShowAll] = useState(false);
+  const [need, setNeed] = useState<string>("all");
 
-  const rows = useMemo(
+  const inBranch = useMemo(
     () => candidates.filter((c) => branch === "all" || c.branch === branch),
     [candidates, branch],
   );
+  // "What it needs" is one of a handful of actions repeated across pages, so it
+  // filters as chips with counts, the way the content table does.
+  const needs = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of inBranch) counts.set(row.title, (counts.get(row.title) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [inBranch]);
+  const rows = useMemo(
+    () => (need === "all" ? inBranch : inBranch.filter((c) => c.title === need)),
+    [inBranch, need],
+  );
+  // When every row left out gives the same reason, it is said once above the
+  // list rather than on each of forty lines.
+  const sharedReason = useMemo(() => {
+    const reasons = new Set(
+      rows.filter((r) => r.slot === null).map((r) => r.not_slotted_because ?? ""),
+    );
+    return reasons.size === 1 && rows.filter((r) => r.slot === null).length > 1
+      ? [...reasons][0]
+      : null;
+  }, [rows]);
   const visible = showAll ? rows : rows.slice(0, 15);
   const branches = [...new Set(candidates.map((c) => c.branch))];
 
@@ -111,7 +133,7 @@ export function OptionsPanel({
             <button
               key={key}
               type="button"
-              onClick={() => setBranch(key)}
+              onClick={() => { setBranch(key); setNeed("all"); }}
               className={`min-h-[30px] rounded-full border px-3 text-[12.5px] font-semibold ${
                 branch === key
                   ? "border-[var(--brand-teal-deep)] text-[var(--text-primary)]"
@@ -122,6 +144,32 @@ export function OptionsPanel({
             </button>
           ))}
         </div>
+      ) : null}
+
+      {needs.length > 1 ? (
+        <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Filter by what it needs">
+          {([["all", inBranch.length] as const, ...needs]).map(([key, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setNeed(key);
+                setShowAll(false);
+              }}
+              className={`min-h-[30px] rounded-full border px-3 text-[12.5px] ${
+                need === key
+                  ? "border-[var(--brand-teal-deep)] font-semibold text-[var(--text-primary)]"
+                  : "border-[var(--border)] text-[var(--text-secondary)]"
+              }`}
+            >
+              {key === "all" ? "Everything" : key} · {count}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {sharedReason ? (
+        <p className="mt-3 text-[13px] text-[var(--text-secondary)]">{sharedReason}</p>
       ) : null}
 
       <ul className="mt-3">
@@ -165,7 +213,7 @@ export function OptionsPanel({
                 {row.effort_min} min
                 {overridden ? " · your call" : ""}
                 {/* Why the engine left it out — the thing you are overruling. */}
-                {!chosen && row.not_slotted_because ? (
+                {!chosen && row.not_slotted_because && !sharedReason ? (
                   <span className="ml-2">{row.not_slotted_because}</span>
                 ) : null}
               </span>

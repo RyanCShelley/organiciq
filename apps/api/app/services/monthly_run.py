@@ -58,6 +58,7 @@ from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
 from app.models.ga4 import FactGa4Traffic
 from app.services.plan_allowances import resolve_plan_allowances
+from app.services.engine_diagnosis import empty_plan_note
 from app.services.incident_signals import read_incident_signals
 from app.services.page_signals import load_page_candidates
 from app.services.results import capture_before, previous_results
@@ -434,11 +435,17 @@ def build_record(
     for prescription in prescriptions:
         by_branch.setdefault(prescription.branch, []).append(prescription)
 
+    failing = [b.branch.value for b in triage.branches if b.status is Status.FAIL]
+    empty_note = ""
+    filled_in_failing = sum(len(by_branch.get(b.branch, [])) for b in triage.branches if b.status is Status.FAIL)
+    if slots and filled_in_failing < slots:
+        empty_note = empty_plan_note(db, client.id, failing=failing, gsc_period=gsc_period)
     plan = fill_slots(
         slots=slots,
         constraint=constraint_branch,
         branches=list(triage.branches),
         prescriptions_by_branch=by_branch,
+        empty_note=empty_note,
     )
 
     # ── The retainer pools ───────────────────────────────────────────────

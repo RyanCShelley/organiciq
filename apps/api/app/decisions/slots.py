@@ -115,6 +115,7 @@ def fill_slots(
     constraint: Branch | None,
     branches: list[BranchResult],
     prescriptions_by_branch: dict[Branch, list[Prescription]],
+    empty_note: str = "",
 ) -> Plan:
     """Fill the month's slots, constraint first, spilling to failing branches.
 
@@ -232,7 +233,7 @@ def fill_slots(
             )
 
     empty = tuple(
-        EmptySlot(slot=n, reason=_empty_reason(branches, order))
+        EmptySlot(slot=n, reason=(_empty_reason(branches, order) + (" " + empty_note if empty_note else "")))
         for n in range(len(filled) + 1, slots + 1)
     )
     return Plan(

@@ -222,3 +222,67 @@ def test_the_reason_names_the_failing_number():
     t = select_constraint([*_branches()[:2], leads])
     assert "4 of 50 leads" in t.reason_text
     assert "80%" in t.reason_text
+
+
+def test_v4_does_not_fail_a_page_that_has_no_term_mapped():
+    """Corvant: one declared page, an empty keyword map. Every page 'had no term in
+    the top 20' because nothing was mapped to it, and Visibility failed on our gap."""
+    from app.decisions.triage import VisibilitySignals, assess_visibility
+
+    unmapped = VisibilitySignals(
+        priority_pages=1,
+        priority_pages_without_reach=1,
+        priority_pages_declared=True,
+        priority_pages_mapped=0,
+    )
+    v4 = next(t for t in assess_visibility(unmapped, thresholds={}) if t.id == "V4")
+    assert v4.status.value == "blocked"
+    assert "no tracked term is mapped" in v4.missing
+
+    mapped_and_missing = VisibilitySignals(
+        priority_pages=3,
+        priority_pages_without_reach=1,
+        priority_pages_declared=True,
+        priority_pages_mapped=2,
+    )
+    v4 = next(t for t in assess_visibility(mapped_and_missing, thresholds={}) if t.id == "V4")
+    assert v4.status.value == "fail"
+    assert "1 of 2 mapped" in v4.display and "1 have no term mapped" in v4.display
+
+
+def test_an_empty_keyword_map_leaves_v4_unjudged_not_failed(db, client_a):
+    """The same Corvant case, through the database: one conversion page declared,
+    no term mapped to it."""
+    from datetime import date
+
+    from app.models.config import ClientConversionPage
+    from app.services.triage_signals import visibility_signals
+
+    db.add(ClientConversionPage(client_id=client_a.id, normalized_url="https://x.example/contact", label="Contact"))
+    db.commit()
+
+    signals = visibility_signals(db, client_a, today=date(2026, 9, 30), ai_period=None)
+    assert signals.priority_pages == 1
+    assert signals.priority_pages_mapped == 0
+    v4 = next(t for t in assess_visibility(signals, thresholds=T) if t.id == "V4")
+    assert v4.status is Status.BLOCKED
+
+
+def test_an_empty_plan_says_what_is_behind_it(db, client_a):
+    from datetime import date
+
+    from app.services.engine_diagnosis import empty_plan_note, traffic_gap
+
+    gap = traffic_gap(
+        [
+            {"url": "/a", "impressions": 500.0, "clicks": 10.0, "position": 2.0, "expected_clicks": 150.0, "missed_clicks": 140.0},
+            {"url": "/b", "impressions": 40.0, "clicks": 0.0, "position": 1.5, "expected_clicks": 12.0, "missed_clicks": 12.0},
+            {"url": "/c", "impressions": 900.0, "clicks": 5.0, "position": 8.0, "expected_clicks": 40.0, "missed_clicks": 35.0},
+        ]
+    )
+    assert gap["reachable"] == {"pages": 1, "missed": 140}
+    assert gap["too_few_impressions"] == {"pages": 1, "missed": 12}
+    assert gap["below_top_three"] == {"pages": 1, "missed": 35}
+
+    note = empty_plan_note(db, client_a.id, failing=["visibility"], gsc_period=(date(2026, 9, 1), date(2026, 9, 30)))
+    assert "no tracked keywords" in note

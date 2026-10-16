@@ -338,7 +338,9 @@ export default async function DecisionEnginePage({
             />
           ) : null}
 
-          {record.not_this_month.length > 0 ? (
+          {/* The options list above already carries every one of these with its reason;
+              this list is only for a record saved before it did. */}
+          {candidates.length === 0 && record.not_this_month.length > 0 ? (
             <section
               aria-labelledby="later-heading"
               className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] px-6 py-5"

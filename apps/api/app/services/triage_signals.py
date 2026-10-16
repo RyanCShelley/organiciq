@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_url
 from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.triage import LeadSignals, TrafficSignals, VisibilitySignals
 from app.models.client import Client
@@ -135,25 +136,38 @@ def visibility_signals(
     in_top_10 = sum(1 for row in judged.values() if (_rank(row.current_position) or 999) <= 10)
 
     # V4 — a declared target page with no tracked term inside the top 20.
+    # "Declared" is a priority target's page or a conversion page; "reached"
+    # asks every confirmed mapping, not only the priority ones, because any term
+    # mapped to the page that ranks well is proof the page can be found.
     declared_pages = {
-        (t.target_url or "").strip() for t in targets if (t.target_url or "").strip()
+        normalize_url(t.target_url) for t in targets if (t.target_url or "").strip()
     }
     declared_pages |= {
-        (p.normalized_url or "").strip()
+        normalize_url(p.normalized_url)
         for p in db.query(ClientConversionPage).filter(
             ClientConversionPage.client_id == client.id
         )
         if (p.normalized_url or "").strip()
     }
-    reached: set[str] = set()
-    for term, row in tracked.items():
-        position = _rank(row.current_position)
-        if position is None or position > 20:
-            continue
-        target = next((t.target_url for t in targets if t.keyword == term), None)
-        if target:
-            reached.add(target.strip())
-    without_reach = len(declared_pages - reached)
+    mapped_terms: dict[str, set[str]] = {}
+    for t in (
+        db.query(KeywordTarget).filter(
+            KeywordTarget.client_id == client.id, KeywordTarget.source == "confirmed"
+        )
+    ):
+        keyword = (t.keyword or "").strip().lower()
+        if (t.target_url or "").strip() and keyword in tracked:
+            mapped_terms.setdefault(normalize_url(t.target_url), set()).add(keyword)
+    mapped_pages = {url for url in declared_pages if mapped_terms.get(url)}
+    reached = {
+        url
+        for url in mapped_pages
+        if any(
+            (_rank(tracked[kw].current_position) or 999) <= 20
+            for kw in mapped_terms[url]
+        )
+    }
+    without_reach = len(mapped_pages - reached)
 
     # V2 — SE Ranking's own visibility score, now against ninety days ago.
     latest_summary = (
@@ -220,6 +234,7 @@ def visibility_signals(
         impressions_28d=impressions(recent_start, recent_end),
         impressions_prior_28d=impressions(prior_start, prior_end),
         priority_pages=len(declared_pages),
+        priority_pages_mapped=len(mapped_pages),
         priority_pages_without_reach=without_reach,
         priority_pages_declared=bool(declared_pages),
         ai_mention_pct=(
@@ -231,35 +246,57 @@ def visibility_signals(
     )
 
 
+def page_shortfalls(
+    db: Session, client_id: UUID, gsc_period: tuple[date, date]
+) -> list[dict]:
+    """Per page: clicks earned, clicks the measured curve expects at its position, and the gap.
+
+    The one place T1's number is made, so the figure the test judges and the
+    breakdown that explains it cannot drift apart.
+    """
+    rows = (
+        db.query(
+            FactGscPage.normalized_url,
+            func.sum(FactGscPage.impressions).label("impressions"),
+            func.sum(FactGscPage.clicks).label("clicks"),
+            func.avg(FactGscPage.average_position).label("position"),
+        )
+        .filter(
+            FactGscPage.client_id == client_id,
+            FactGscPage.date >= gsc_period[0],
+            FactGscPage.date <= gsc_period[1],
+        )
+        .group_by(FactGscPage.normalized_url)
+        .all()
+    )
+    out: list[dict] = []
+    for url, impressions, clicks, position in rows:
+        impressions = float(impressions or 0)
+        clicks = float(clicks or 0)
+        expected = None
+        if impressions and position is not None:
+            expected = expected_ctr_percent(float(position)) / 100.0 * impressions
+        out.append(
+            {
+                "url": url,
+                "impressions": impressions,
+                "clicks": clicks,
+                "position": float(position) if position is not None else None,
+                "expected_clicks": expected,
+                "missed_clicks": max(0.0, expected - clicks) if expected is not None else 0.0,
+            }
+        )
+    return out
+
+
 def traffic_signals(
     db: Session, client: Client, *, today: date, gsc_period: tuple[date, date] | None
 ) -> TrafficSignals:
     missed = actual = None
     if gsc_period is not None:
-        rows = (
-            db.query(
-                func.sum(FactGscPage.impressions).label("impressions"),
-                func.sum(FactGscPage.clicks).label("clicks"),
-                func.avg(FactGscPage.average_position).label("position"),
-            )
-            .filter(
-                FactGscPage.client_id == client.id,
-                FactGscPage.date >= gsc_period[0],
-                FactGscPage.date <= gsc_period[1],
-            )
-            .group_by(FactGscPage.normalized_url)
-            .all()
-        )
-        missed = 0.0
-        actual = 0.0
-        for impressions, clicks, position in rows:
-            impressions = float(impressions or 0)
-            clicks = float(clicks or 0)
-            actual += clicks
-            if not impressions or position is None:
-                continue
-            expected = expected_ctr_percent(float(position)) / 100.0 * impressions
-            missed += max(0.0, expected - clicks)
+        shortfalls = page_shortfalls(db, client.id, gsc_period)
+        actual = sum(row["clicks"] for row in shortfalls)
+        missed = sum(row["missed_clicks"] for row in shortfalls)
 
     recent_end = today
     recent_start = recent_end - timedelta(days=TREND_DAYS - 1)
