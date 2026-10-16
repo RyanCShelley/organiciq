@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 
 import { updateClientSettingsAction } from "@/app/(app)/actions";
 import { LeadGoalSchedule } from "@/components/LeadGoalSchedule";
-import { BaselineSnapshotPanel } from "@/components/BaselineSnapshotPanel";
+import { BaselineBuilder } from "@/components/Baseline/BaselineBuilder";
 import { TeamworkTasklistField } from "@/components/TeamworkTasklistField";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -70,12 +70,10 @@ const SEARCH_MARKETS = [
 export function ClientSettingsForm({
   client,
   tiers,
-  hasLeadConversions = false,
   canEditPlan = true,
 }: {
   client: Client;
   tiers: Tier[];
-  hasLeadConversions?: boolean;
   /** Admins only. The API refuses plan and ceiling changes from anyone else. */
   canEditPlan?: boolean;
 }) {
@@ -351,13 +349,7 @@ export function ClientSettingsForm({
             />
           </FieldLabel>
         </div>
-        <BaselineSnapshotPanel
-          clientId={client.id}
-          clientSlug={client.slug}
-          hasLeadConversions={hasLeadConversions}
-          savedAsOf={client.baseline_as_of ?? null}
-          savedProjection={client.baseline_projection_json ?? null}
-        />
+        <BaselineBuilder clientId={client.id} currentGoal={client.monthly_lead_goal ?? null} />
       </div>
 
       {canEditPlan ? null : (

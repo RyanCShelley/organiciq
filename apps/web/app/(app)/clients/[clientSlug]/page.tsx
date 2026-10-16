@@ -97,10 +97,6 @@ export default async function ClientSettingsPage({
     canManageTeam = false;
   }
 
-  const hasLeadConversions =
-    !conversionsReadable ||
-    conversions.some((row) => row.active && row.conversion_type === "lead");
-
   return (
     <section>
       <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug)} />
@@ -128,7 +124,6 @@ export default async function ClientSettingsPage({
             <ClientSettingsForm
               client={client}
               tiers={tiers}
-              hasLeadConversions={hasLeadConversions}
               canEditPlan={canEditPlan}
             />
           </div>

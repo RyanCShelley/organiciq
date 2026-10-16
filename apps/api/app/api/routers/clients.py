@@ -11,6 +11,7 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.user import UserRole
 from app.schemas import (
+    BaselineLockRequest,
     BaselineSeriesCsvRequest,
     BaselineSnapshotApplyRequest,
     BaselineSnapshotPreviewOut,
@@ -18,7 +19,7 @@ from app.schemas import (
     ClientOut,
     ClientUpdate,
 )
-from app.services import baseline_series, baseline_snapshot, clients as client_service
+from app.services import baseline_lock, baseline_series, baseline_snapshot, clients as client_service
 
 from app.services.plan_allowances import resolve_plan_allowances
 
@@ -182,6 +183,15 @@ def preview_baseline_from_ga4(
     return BaselineSnapshotPreviewOut.model_validate(preview)
 
 
+def _staff_client(db: Session, user: AuthUser, client_id: UUID) -> Client:
+    if not user_can_access_client(db, user, client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
+    client = client_service.get_client(db, client_id)
+    if client is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    return client
+
+
 @router.get("/{client_id}/baseline/series")
 def baseline_series_from_ga4(
     client_id: UUID,
@@ -194,27 +204,20 @@ def baseline_series_from_ga4(
     acknowledge: list[str] = Query(default=[]),
 ) -> dict:
     """The recent-window baseline, ranges and flags from the synced GA4 data. Writes nothing."""
-    if not user_can_access_client(db, user, client_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
-    client = client_service.get_client(db, client_id)
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    client = _staff_client(db, user, client_id)
     try:
-        rows, info = baseline_series.series_from_ga4(
-            db, client, months=months, lead_events=lead_event or None
-        )
-        result = baseline_series.analyze(
-            rows,
+        return baseline_series.build_result(
+            db,
+            client,
+            source="ga4",
             regime_start=regime_start,
-            as_of=info["as_of"],
+            lead_events=lead_event or None,
             half_life_months=half_life_months,
-            plan=baseline_series.plan_for_client(db, client),
             acknowledged=acknowledge,
+            months=months,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    result["source"] = {"type": "ga4", "lead_events": info["lead_events"], "notes": info["notes"]}
-    return result
 
 
 @router.post("/{client_id}/baseline/series")
@@ -225,25 +228,76 @@ def baseline_series_from_csv(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """The same baseline from a pasted monthly CSV. Writes nothing."""
-    if not user_can_access_client(db, user, client_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
-    client = client_service.get_client(db, client_id)
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    client = _staff_client(db, user, client_id)
     try:
-        rows, skipped = baseline_series.parse_csv(payload.csv_text)
-        result = baseline_series.analyze(
-            rows,
+        return baseline_series.build_result(
+            db,
+            client,
+            source="csv",
+            csv_text=payload.csv_text,
             regime_start=payload.regime_start,
-            as_of=payload.as_of,
             half_life_months=payload.half_life_months,
-            plan=baseline_series.plan_for_client(db, client),
             acknowledged=payload.acknowledged,
+            as_of=payload.as_of,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    result["source"] = {"type": "csv", "skipped_rows": skipped}
-    return result
+
+
+@router.get("/{client_id}/baseline/events")
+def baseline_lead_event_candidates(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The events this client's GA4 has sent, for choosing which count as leads."""
+    client = _staff_client(db, user, client_id)
+    return baseline_series.lead_event_candidates(db, client)
+
+
+@router.post("/{client_id}/baseline/lock")
+def lock_baseline(
+    client_id: UUID,
+    payload: BaselineLockRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Freeze a baseline as the next version. Any staff may lock.
+
+    The numbers are recomputed here from the data; nothing the screen shows is
+    trusted. Every blocker must be acknowledged, and a re-baseline needs a reason.
+    """
+    client = _staff_client(db, user, client_id)
+    try:
+        return baseline_lock.lock(db, client, user.email, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{client_id}/baseline/versions")
+def list_baseline_versions(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """Every locked baseline for the client, newest first."""
+    client = _staff_client(db, user, client_id)
+    return baseline_lock.list_versions(db, client)
+
+
+@router.get("/{client_id}/baseline/versions/{version}")
+def get_baseline_version(
+    client_id: UUID,
+    version: int,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """One locked baseline with the full analysis it was locked from."""
+    client = _staff_client(db, user, client_id)
+    found = baseline_lock.get_version(db, client, version)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such baseline version")
+    return found
 
 
 @router.post("/{client_id}/baseline/from-ga4", response_model=BaselineSnapshotPreviewOut)

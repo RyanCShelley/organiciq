@@ -697,3 +697,86 @@ def plan_for_client(db: Any, client: Any) -> growth_calculator.PlanKey:
 
     tier = db.query(Tier).filter(Tier.id == client.tier_id).one_or_none()
     return growth_calculator.plan_key_from_tier_name(tier.tier_name if tier else None)
+
+
+def build_result(
+    db: Any,
+    client: Any,
+    *,
+    source: str = "ga4",
+    csv_text: str | None = None,
+    regime_start: str | date | None = None,
+    lead_events: list[str] | None = None,
+    half_life_months: float = DEFAULT_HALF_LIFE_MONTHS,
+    acknowledged: Iterable[str] = (),
+    months: int = 24,
+    as_of: date | None = None,
+) -> dict[str, Any]:
+    """The analysis for one client from synced GA4 or a pasted CSV, with its source noted.
+
+    Shared by the read-only routes and the lock, so what is locked is always
+    recomputed here from the data rather than accepted from the screen.
+    """
+    plan = plan_for_client(db, client)
+    if source == "csv":
+        rows, skipped = parse_csv(csv_text or "")
+        result = analyze(
+            rows,
+            regime_start=regime_start,
+            as_of=as_of,
+            half_life_months=half_life_months,
+            plan=plan,
+            acknowledged=acknowledged,
+        )
+        result["source"] = {"type": "csv", "skipped_rows": skipped}
+        return result
+    if source != "ga4":
+        raise ValueError("The source must be ga4 or csv.")
+    rows, info = series_from_ga4(db, client, months=months, lead_events=lead_events)
+    result = analyze(
+        rows,
+        regime_start=regime_start,
+        as_of=info["as_of"],
+        half_life_months=half_life_months,
+        plan=plan,
+        acknowledged=acknowledged,
+    )
+    result["source"] = {"type": "ga4", "lead_events": info["lead_events"], "notes": info["notes"]}
+    return result
+
+
+def lead_event_candidates(db: Any, client: Any, *, months: int = 24) -> dict[str, Any]:
+    """Every event the client's GA4 has sent, so the lead definition can be chosen.
+
+    `defaults` are the events already declared as lead conversions.
+    """
+    from sqlalchemy import func
+
+    from app.models.ga4 import FactGa4Event
+    from app.services.dashboard import _lead_event_names
+
+    rows = (
+        db.query(
+            FactGa4Event.event_name,
+            func.coalesce(func.sum(FactGa4Event.event_count), 0),
+            func.min(FactGa4Event.date),
+            func.max(FactGa4Event.date),
+        )
+        .filter(FactGa4Event.client_id == client.id)
+        .group_by(FactGa4Event.event_name)
+        .order_by(func.sum(FactGa4Event.event_count).desc())
+        .limit(80)
+        .all()
+    )
+    return {
+        "events": [
+            {
+                "name": name,
+                "total": int(total),
+                "first_month": normalize_month(first),
+                "last_month": normalize_month(last),
+            }
+            for name, total, first, last in rows
+        ],
+        "defaults": _lead_event_names(db, client.id),
+    }
