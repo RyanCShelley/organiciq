@@ -48,6 +48,10 @@ def _upsert_watermark(
     else:
         # Failed refreshes are job failures, not invalidations of previously
         # verified observations. Keep the last good reporting cutoff.
+        if (validation_status == ValidationStatus.PASSED and row.validation_status == ValidationStatus.PASSED
+                and row.fact_through_date is not None and fact_through is not None):
+            # A historical repair must not hide newer verified observations.
+            fact_through = max(row.fact_through_date, fact_through)
         if validation_status == ValidationStatus.PASSED or row.validation_status != ValidationStatus.PASSED:
             row.fact_through_date = fact_through
             row.validation_status = validation_status
@@ -68,7 +72,8 @@ def _touch_integration(db: Session, client_id, *, success: bool, fact_date: date
     integration.last_sync_completed = now
     if success:
         integration.last_successful_sync = now
-        integration.last_fact_date = fact_date
+        if fact_date is not None:
+            integration.last_fact_date = max(integration.last_fact_date, fact_date) if integration.last_fact_date else fact_date
         integration.error_message = None
         integration.connection_status = ConnectionStatus.CONNECTED
     else:

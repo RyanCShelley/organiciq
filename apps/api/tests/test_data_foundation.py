@@ -148,3 +148,17 @@ def test_complete_fetch_rejects_missing_metrics_before_touching_staging(db, clie
         fetch_ga4(db, job)
     assert db.query(StagingGa4Traffic).filter_by(job_id=job.id).one().sessions == 100
     assert db.query(StagingGa4Event).filter_by(job_id=job.id).one().event_count == 3
+
+
+def test_historical_repair_does_not_move_current_reporting_cutoff_backwards(db, client_a):
+    from app.ingestion.ga4.pipeline import _upsert_watermark, _touch_integration
+    from app.models.integration import Integration, IntegrationProvider
+    current = date(2026, 10, 16)
+    db.add(DataWatermark(client_id=client_a.id, source='ga4', fact_through_date=current, validation_status=ValidationStatus.PASSED))
+    integration = db.query(Integration).filter_by(client_id=client_a.id, provider=IntegrationProvider.GA4).one()
+    integration.last_fact_date = current
+    db.commit()
+    _upsert_watermark(db, client_id=client_a.id, fact_through=DAY, validation_status=ValidationStatus.PASSED)
+    _touch_integration(db, client_a.id, success=True, fact_date=DAY, error=None)
+    assert db.query(DataWatermark).filter_by(client_id=client_a.id, source='ga4').one().fact_through_date == current
+    assert integration.last_fact_date == current
