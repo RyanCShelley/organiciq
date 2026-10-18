@@ -101,6 +101,7 @@ export default async function DashboardPage({
 
       {data ? (
         <div className="space-y-[30px]">
+          {data.effective_periods?.ga4?.current && data.effective_periods.ga4.current[1] !== to && <p className="text-sm text-[var(--text-secondary)]" role="status">GA4 data is available through {formatDateLabel(data.effective_periods.ga4.current[1])}. Comparisons use the same number of days in each period.</p>}
           <ProgressPanel baseline={data.baseline} editHref={clientId ? clientPath : null} />
 
           <section>
@@ -545,7 +546,7 @@ export default async function DashboardPage({
                     },
                     {
                       key: "ga4_key_events",
-                      header: "Key events",
+                      header: "Lead events",
                       sortValue: (row) => row.ga4_key_events,
                       align: "right",
                       render: (row) =>
@@ -559,14 +560,14 @@ export default async function DashboardPage({
                     },
                     {
                       key: "session_key_event_rate",
-                      header: "Session → key event",
+                      header: "Lead events / 100 visits",
                       sortValue: (row) => row.session_key_event_rate,
                       align: "right",
                       render: (row) =>
                         row.session_key_event_rate === null ? (
                           <span className="text-[var(--text-tertiary)]">—</span>
                         ) : (
-                          `${row.session_key_event_rate.toFixed(2)}%`
+                          row.session_key_event_rate.toFixed(2)
                         ),
                     },
                     {

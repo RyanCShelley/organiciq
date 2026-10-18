@@ -46,8 +46,11 @@ def _upsert_watermark(
             )
         )
     else:
-        row.fact_through_date = fact_through
-        row.validation_status = validation_status
+        # Failed refreshes are job failures, not invalidations of previously
+        # verified observations. Keep the last good reporting cutoff.
+        if validation_status == ValidationStatus.PASSED or row.validation_status != ValidationStatus.PASSED:
+            row.fact_through_date = fact_through
+            row.validation_status = validation_status
         if validation_status == ValidationStatus.PASSED:
             row.last_successful_sync_at = now
     db.commit()

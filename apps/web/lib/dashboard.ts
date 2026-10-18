@@ -38,6 +38,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       previous_from: "",
       previous_to: "",
     },
+    effective_periods: data.effective_periods ?? {},
     freshness: Array.isArray(data.freshness) ? data.freshness : [],
     conversions: {
       configured: conversions?.configured === true,
@@ -249,6 +250,7 @@ export type DashboardFreshness = {
 };
 
 export type DashboardResponse = {
+  effective_periods?: Record<string, {current: [string, string] | null; previous: [string, string] | null}>;
   period: {
     from: string;
     to: string;

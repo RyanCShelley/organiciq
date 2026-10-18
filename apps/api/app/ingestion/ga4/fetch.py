@@ -51,6 +51,19 @@ def _metric(row: dict, index: int) -> Decimal:
     return Decimal(str((values[index] or {}).get("value") or 0))
 
 
+def _validate_report_rows(rows: list[dict], *, dimensions: int, metrics: int) -> None:
+    for row in rows:
+        if len(row.get("dimensionValues") or []) != dimensions or not _dim(row, 0):
+            raise ValueError("GA4 report dimensions are incomplete")
+        values = row.get("metricValues") or []
+        if len(values) != metrics or any(value.get("value") in (None, "") for value in values):
+            raise ValueError("GA4 report metrics are incomplete")
+        for i in range(metrics):
+            value = _metric(row, i)
+            if not value.is_finite() or value < 0 or value != value.to_integral_value():
+                raise ValueError("GA4 report count metric is invalid")
+
+
 def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     integration = _load_ga4_integration(db, job.client_id)
     token = access_token_for_client(db, job.client_id)
@@ -72,6 +85,13 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "eventName"],
         metrics=["eventCount"],
     )
+
+    complete = bool(getattr(traffic_rows, "complete", False) and getattr(event_rows, "complete", False))
+    if complete:
+        _validate_report_rows(traffic_rows, dimensions=4, metrics=4)
+        _validate_report_rows(event_rows, dimensions=5, metrics=1)
+        if any(not _dim(row, 4) for row in event_rows):
+            raise ValueError("GA4 event name is missing")
 
     db.query(StagingGa4Traffic).filter(StagingGa4Traffic.job_id == job.id).delete()
     db.query(StagingGa4Event).filter(StagingGa4Event.job_id == job.id).delete()
@@ -114,5 +134,10 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 event_count=int(_metric(row, 0)),
             )
         )
+    job.params_json = {**(job.params_json or {}), "ga4_extract": {
+        "complete": complete, "start": job.start_date.isoformat(), "end": job.end_date.isoformat(),
+        "property": property_id, "traffic_rows": len(traffic_rows), "event_rows": len(event_rows),
+        "traffic_pages": getattr(traffic_rows, "pages", []), "event_pages": getattr(event_rows, "pages", []),
+    }}
     db.commit()
     return len(traffic_rows), len(event_rows)

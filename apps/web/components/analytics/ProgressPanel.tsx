@@ -426,6 +426,9 @@ export function ProgressPanel({
    */
   function projectionSeries(key: "monthly_sessions" | "monthly_leads"): Point[] {
     if (!anchorIso || checkpoints.length < 2 || !dates.length) return [];
+    // Do not compare a full actuals window against a pace that only covers
+    // the part after the plan started.
+    if ((daysBetween(anchorIso, dates[0]) ?? -1) < 0) return [];
     const curve = checkpoints
       .map((checkpoint) => ({ x: checkpoint.month * DAYS_PER_MONTH, value: checkpoint[key] }))
       .sort((a, b) => a.x - b.x);

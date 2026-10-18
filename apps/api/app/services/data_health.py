@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from uuid import UUID
+from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,9 @@ WEEKLY_SOURCES = frozenset({"site_crawl"})
 def data_health_rows(
     integrations: dict[str, Integration],
     watermarks: dict[str, DataWatermark],
+    *, today: date | None = None,
 ) -> list[dict]:
+    today = today or date.today()
     result = []
     for source in WATERMARK_SOURCES:
         provider = PROVIDER_FOR_SOURCE[source]
@@ -46,15 +49,19 @@ def data_health_rows(
         watermark = watermarks.get(source)
         needs_integration = provider is not None
         if needs_integration and (
-            integration is None or integration.connection_status.value == "not_connected"
+            integration is None or integration.connection_status.value in {"not_connected", "disconnected", "error"}
         ):
             status_label = "Not Connected"
+        elif integration is not None and integration.error_message:
+            status_label = "Sync error"
         elif watermark is None:
             status_label = "Not scheduled yet" if source in WEEKLY_SOURCES else "Not Connected"
         else:
             status_label = (
                 "Healthy"
-                if watermark.validation_status and watermark.validation_status.value == "passed"
+                if (watermark.validation_status and watermark.validation_status.value == "passed"
+                    and watermark.fact_through_date is not None
+                    and 0 <= (today - watermark.fact_through_date).days <= (14 if source in WEEKLY_SOURCES else 7))
                 else "Stale"
             )
 
@@ -91,7 +98,7 @@ def load_client_data_health(db: Session, client_id: UUID) -> list[dict]:
 def integration_status_label(integration: Integration | None) -> str:
     if integration is None:
         return "Not Connected"
-    if integration.connection_status.value == "not_connected":
+    if integration.connection_status.value in {"not_connected", "disconnected", "error"}:
         return "Not Connected"
     if integration.connection_status.value == "connected":
         return "Connected"
