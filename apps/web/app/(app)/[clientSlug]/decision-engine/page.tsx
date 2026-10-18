@@ -233,7 +233,7 @@ export default async function DecisionEnginePage({
       <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Explore the evidence · keywords, channels, lead rate and calculation details</summary><div className="mt-4">
       <ConstraintCard record={record} progress={progress} measurementSettings={measurementSettings ? { clientId, slug: selectedClient.slug, target: measurementSettings.target_lead_rate_pct } : undefined} />
       </div></details>
-      {review ? <PlanReviewPanel key={`${record.month}-${review.revision}`} initial={review} lockedUids={actions.filter(a => { const state = slotStates.get(a.action_uid); return Boolean(state?.assignee_email || state?.sent_at || state?.shipped_on); }).map(a => a.action_uid)} clientId={clientId} slug={selectedClient.slug} month={record.month} /> : <Alert variant="danger">Plan review could not load. Reload before editing this plan.</Alert>}
+      {review ? <PlanReviewPanel key={`${record.month}-${record.run_saved_at}-${review.revision}`} initial={review} lockedUids={actions.filter(a => { const state = slotStates.get(a.action_uid); return Boolean(state?.assignee_email || state?.sent_at || state?.shipped_on); }).map(a => a.action_uid)} clientId={clientId} slug={selectedClient.slug} month={record.month} /> : <Alert variant="danger">Plan review could not load. Reload before editing this plan.</Alert>}
 
       {/* Above the plan, because a plan read as if the site were working is
           worse than no plan. An incident takes no slot and does not change
