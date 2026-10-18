@@ -80,3 +80,7 @@ def test_automatic_focus_excludes_legacy_maps_and_inactive_tracker_terms(db, cli
     assert {row["text"] for row in read(db, client_a)} == {"current", "retired", "map only"}
     assert [row["text"] for row in measure(db, client_a, end=day)["visibility"]["keywords"]] == ["current"]
     assert db.query(FactSerRanking).filter_by(client_id=client_a.id, keyword="retired").count() == 1
+    from app.services.triage_signals import visibility_signals
+    signals = visibility_signals(db, client_a, today=day, ai_period=None)
+    assert signals.priority_keywords == 1
+    assert signals.priority_in_top_10 == 1
