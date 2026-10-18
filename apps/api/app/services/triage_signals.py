@@ -116,22 +116,21 @@ def _managed_sessions(db: Session, client_id: UUID, start: date, end: date) -> f
 def visibility_signals(
     db: Session, client: Client, *, today: date, ai_period: tuple[date, date] | None
 ) -> VisibilitySignals:
-    targets = (
-        db.query(KeywordTarget)
-        .filter(
-            KeywordTarget.client_id == client.id,
-            KeywordTarget.priority.is_(True),
-            KeywordTarget.source.in_(("confirmed", "auto")),
-        )
-        .all()
-    )
-    priority_terms = {t.keyword for t in targets}
-    tracked = {
-        (k.keyword or "").strip().lower(): k
-        for k in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id)
-    }
-    judged = {k: v for k, v in tracked.items() if k in priority_terms}
-    in_top_10 = sum(1 for row in judged.values() if (_rank(row.current_position) or 999) <= 10)
+    from app.services.watchlist import read as read_watchlist
+    from app.services.decision_measurements import keyword_readings
+    watch_keywords = [item for item in read_watchlist(db, client)
+                      if item["kind"] == "keyword" and item["state"] != "excluded"]
+    priority_terms = {item["text"].strip().lower() for item in watch_keywords}
+    readings = keyword_readings(db, client.id, today)
+    judged = {term: row for term, row in readings.items()
+              if term in priority_terms and row["position"] is not None}
+    in_top_10 = sum(1 for row in judged.values() if 0 < row["position"] <= 10)
+    targets = db.query(KeywordTarget).filter(
+        KeywordTarget.client_id == client.id,
+        KeywordTarget.source.in_(("confirmed", "auto")),
+    ).all()
+    targets = [target for target in targets if target.keyword.strip().lower() in priority_terms]
+    tracked = readings
 
     # V4 — a declared target page with no tracked term inside the top 20.
     declared_pages = {
@@ -145,20 +144,18 @@ def visibility_signals(
         if (p.normalized_url or "").strip()
     }
     from app.core.urls import normalize_url
-    all_targets = db.query(KeywordTarget).filter(
-        KeywordTarget.client_id == client.id, KeywordTarget.source.in_(("confirmed", "auto")),
-    ).all()
+    all_targets = targets
     declared_pages = {normalize_url(url) for url in declared_pages}
     mapped_pages = {normalize_url(t.target_url) for t in all_targets if t.target_url}
     # Reach can only be assessed for mapped pages; unmapped is a setup gap.
     assessed_pages = declared_pages & mapped_pages
     reached: set[str] = set()
     for term, row in tracked.items():
-        position = _rank(row.current_position)
+        position = _rank(row["position"])
         if position is None or position > 20:
             continue
         target = next((t.target_url for t in all_targets if t.keyword == term), None)
-        if target and row.ranking_url and normalize_url(row.ranking_url) == normalize_url(target):
+        if target and row["ranking_url"] and normalize_url(row["ranking_url"]) == normalize_url(target):
             reached.add(normalize_url(target))
     without_reach = len(assessed_pages - reached)
 
@@ -232,6 +229,8 @@ def visibility_signals(
         priority_pages=len(assessed_pages),
         priority_pages_without_reach=without_reach,
         priority_pages_declared=bool(assessed_pages),
+        page_reach_missing=("no target or conversion pages declared" if not declared_pages
+                            else "declared pages have no Watch List keyword mappings" if not assessed_pages else None),
         ai_mention_pct=(
             float(stats.mention_presence_pct)
             if stats and stats.mention_presence_pct is not None

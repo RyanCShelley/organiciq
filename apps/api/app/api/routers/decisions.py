@@ -152,7 +152,9 @@ def get_measurement_settings(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     from app.services.decision_measurements import lead_rate_target
-    return {"target_lead_rate_pct": lead_rate_target(db, client.id)}
+    from app.models.config import ClientConversionPage
+    return {"target_lead_rate_pct": lead_rate_target(db, client.id),
+            "conversion_page_count": db.query(ClientConversionPage).filter_by(client_id=client.id).count()}
 
 
 @router.put("/measurement-settings")

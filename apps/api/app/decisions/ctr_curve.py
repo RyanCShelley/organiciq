@@ -6,6 +6,8 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
+REFERENCE_SCENARIO = "ai_overviews_desktop_aug_2026"
+
 BENCHMARK_SOURCE = "organic_aggregated_2026_jul_us"
 BENCHMARK_COLUMN = "Organic Aggregated"
 UNDERPERFORMANCE_RATIO = 0.5
@@ -100,7 +102,8 @@ def ai_overview_curve() -> dict[int, float]:
     """User-supplied desktop scenario; header says August, not filename September.
 
     No enforced monotonicity: the observed second position exceeds the first.
-    This is not silently used for mobile, unknown devices, or non-AIO SERPs.
+    The decision diagnostic explicitly applies this user-selected curve across
+    terms/devices/markets as a planning reference, without claiming AIO presence.
     """
     path = Path(__file__).resolve().parent / "data" / "ai_overviews_desktop_2026_aug.csv"
     with path.open(encoding="utf-8-sig", newline="") as handle:

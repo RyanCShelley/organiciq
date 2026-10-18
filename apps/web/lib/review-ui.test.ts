@@ -51,6 +51,16 @@ assert.deepEqual(locked, [bundled]);
 
 const trackedTerms = Array.from({length: 20}, (_, i) => ({ text: `term ${i}`, priority: false, position: i === 0 ? 1 : null, status: i === 0 ? "top_10" : "not_in_top_100", target_url: null, ranking_url: null }));
 assert.equal(visibilitySummary(trackedTerms).value, "1 of 20");
-assert.match(visibilitySummary(trackedTerms).note ?? "", /No priority keywords selected/);
+assert.equal(visibilitySummary(trackedTerms).note, null);
+assert.equal(visibilitySummary(trackedTerms.map((term, index) => ({...term, priority: index === 0}))).value, "1 of 20");
 assert.equal(visibilitySummary([]).value, "No tracked keywords");
 assert.equal(visibilitySummary([{...trackedTerms[0], status:"not_measured", position:null}]).value, "No dated rankings");
+
+// Current setup explains old run limits without silently rewriting saved evidence.
+import { dataGapGuidance } from "./data-gap-guidance";
+const configured = {target_lead_rate_pct: 2, conversion_page_count: 1};
+assert.match(dataGapGuidance("no target lead conversion rate", configured).title, /2%/);
+assert.match(dataGapGuidance("no target or conversion pages declared", configured).title, /configured now/);
+assert.match(dataGapGuidance("no target lead conversion rate", {target_lead_rate_pct: null, conversion_page_count:0}).title, /Set the target/);
+assert.match(dataGapGuidance("no keyword group is marked priority").next, /No separate priority/);
+assert.match(dataGapGuidance("CTR reference is diagnostic only").next, /does not require an observed AI Overview/);

@@ -54,8 +54,7 @@ def monthly_keyword_trend(db, client, end):
     before = keyword_readings(db, client.id, previous_end)
     now = keyword_readings(db, client.id, end)
     targets = [item for item in read(db, client) if item["kind"] == "keyword" and item["state"] != "excluded"]
-    priority = [item for item in targets if item["priority"]]
-    cohort = priority or targets
+    cohort = targets
     rows = []
     for item in cohort:
         term = item["text"].strip().lower()
@@ -69,7 +68,7 @@ def monthly_keyword_trend(db, client, end):
         current = b["position"] if 0 < b["position"] <= 100 else 101
         rows.append({"text": item["text"], "previous": previous, "current": current,
             "previous_date": a["observed_on"], "current_date": b["observed_on"]})
-    return {"scope": "priority" if priority else "tracked", "cohort": len(rows), "rows": rows,
+    return {"scope": "watchlist", "cohort": len(rows), "rows": rows,
         "declined": sum(row["current"] - row["previous"] >= 3 for row in rows),
         "improved": sum(row["previous"] - row["current"] >= 3 for row in rows),
         "entered_top_10": sum(row["previous"] > 10 and row["current"] <= 10 for row in rows),

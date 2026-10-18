@@ -126,12 +126,11 @@ def _judge(
 @dataclass(frozen=True)
 class VisibilitySignals:
     monthly_keyword_trend: dict[str, Any] = field(default_factory=dict)
-    #: Priority-group keywords only. V1 is about the terms the client is
-    #: actually judged on, not every term anyone ever tracked.
+    #: Active Watch List keywords. Legacy field names retained for compatibility;
+    #: there is no extra priority selection requirement.
     priority_keywords: int = 0
     priority_in_top_10: int = 0
-    #: True when no keyword group has been marked priority, which is a
-    #: different statement from a client whose priority terms rank badly.
+    #: Whether the client has active Watch List keywords.
     priority_group_set: bool = False
     #: SE Ranking's visibility score now and 90 days ago.
     visibility_percent: float | None = None
@@ -143,6 +142,7 @@ class VisibilitySignals:
     priority_pages: int = 0
     priority_pages_without_reach: int = 0
     priority_pages_declared: bool = False
+    page_reach_missing: str | None = None
     #: Share of tracked prompts that mention the brand, 0-100.
     ai_mention_pct: float | None = None
     tracked_prompts: int = 0
@@ -158,7 +158,7 @@ def assess_visibility(
 
     results: list[TestResult] = []
 
-    # V1 — priority-term coverage.
+    # V1 — measured Watch List keyword coverage.
     share = (
         signals.priority_in_top_10 / signals.priority_keywords * 100.0
         if signals.priority_keywords
@@ -167,20 +167,20 @@ def assess_visibility(
     results.append(
         _judge(
             "V1",
-            "Priority-term coverage",
-            "Priority terms in the top 10",
+            "Watch List keyword coverage",
+            "Measured Watch List keywords in the top 10",
             share,
             pass_line=t("v1_priority_top10_pct", 30.0),
             missing=None
             if signals.priority_group_set and signals.priority_keywords
-            else "no keyword group is marked priority",
+            else "no dated Watch List keyword rankings",
             display=(
                 f"{signals.priority_in_top_10} of {signals.priority_keywords}"
                 if signals.priority_keywords
                 else None
             ),
             evidence={
-                "priority_keywords": signals.priority_keywords,
+                "scope": "watchlist", "priority_keywords": signals.priority_keywords,
                 "in_top_10": signals.priority_in_top_10,
             },
         )
@@ -249,7 +249,7 @@ def assess_visibility(
             unit="count",
             missing=None
             if signals.priority_pages_declared
-            else "no target or conversion pages declared",
+            else signals.page_reach_missing or "no target or conversion pages declared",
             display=(
                 f"{signals.priority_pages_without_reach} of {signals.priority_pages}"
                 if signals.priority_pages_declared

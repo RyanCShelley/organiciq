@@ -89,7 +89,7 @@ export default async function DecisionEnginePage({
   const review = record ? await apiFetch<PlanReview>(
     `/decisions/records/${encodeURIComponent(record.month)}/review`, { clientId },
   ).catch(() => null) : null;
-  const measurementSettings = await apiFetch<{ target_lead_rate_pct: number | null }>("/decisions/measurement-settings", { clientId }).catch(() => null);
+  const measurementSettings = await apiFetch<{ target_lead_rate_pct: number | null; conversion_page_count: number }>("/decisions/measurement-settings", { clientId }).catch(() => null);
   const watchlist = await apiFetch<WatchItem[]>("/decisions/watchlist", { clientId }).catch(() => null);
 
   // The workflow is fetched apart from the record for the same reason it is
@@ -428,7 +428,7 @@ export default async function DecisionEnginePage({
             Data that limited this run
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            These diagnostics have setup, coverage or history limits. Each note explains the next step; a history or reference limit is not a finding that the site needs fixing.
+            These limits describe the saved assessment. Current setup is checked separately below; rerun the assessment to use changed settings. History and reference limits do not mean the site needs fixing.
           </p>
           {record.data_gaps.length === 0 ? (
             <p className="mt-3 text-[13px] text-[var(--text-tertiary)]">
@@ -437,7 +437,7 @@ export default async function DecisionEnginePage({
           ) : (
             <ul className="mt-3 space-y-3">
               {record.data_gaps.map(gap => {
-                const guidance = dataGapGuidance(gap.input);
+                const guidance = dataGapGuidance(gap.input, measurementSettings ?? undefined);
                 return <li key={gap.input} className="rounded-lg border border-[var(--border)] p-3 text-sm">
                   <p className="font-semibold">{guidance.title} <span className="text-xs font-normal text-[var(--text-secondary)]">· {guidance.kind}</span></p>
                   <p className="mt-1 text-[var(--text-secondary)]">{guidance.next}</p>

@@ -5,10 +5,10 @@ export function metricExplanation(test: BranchTest): { calculation: string; sour
   const pct = test.value == null ? "unknown" : `${Math.round(test.value)}%`;
   if (test.id === "V1") return {
     calculation: e.priority_keywords != null && e.in_top_10 != null
-      ? `${e.in_top_10} terms in the top 10 ÷ ${e.priority_keywords} measured priority terms × 100 = ${pct}`
+      ? `${e.in_top_10} terms in the top 10 ÷ ${e.priority_keywords} measured ${e.scope === "watchlist" ? "Watch List" : "priority"} terms × 100 = ${pct}`
       : "Top-10 priority terms ÷ measured priority terms × 100. This saved run has no underlying counts; rerun to record them.",
-    source: "Confirmed priority keyword targets joined to tracked keyword positions.",
-    limitation: "This describes the measured priority subset, not every keyword or AI prompt. A small or incomplete watchlist limits the conclusion.",
+    source: e.scope === "watchlist" ? "Active Watch List keywords joined to dated ranking observations as of the assessment date." : "Legacy priority keyword targets joined to tracked positions in this saved run. Rerun to use the full Watch List.",
+    limitation: "All active Watch List keywords define the target set for new assessments. Unmeasured terms stay unknown; prompt mentions and citations are measured separately. Older runs may use the former priority subset.",
   };
   if (test.id === "V2" && e.source === "matched_monthly_keyword_history") return {
     calculation: `${e.declined} terms losing at least 3 positions ÷ ${e.cohort} terms observed in both months × 100 = ${pct}`,
@@ -21,8 +21,8 @@ export function metricExplanation(test: BranchTest): { calculation: string; sour
       : e.estimated_missed_clicks != null && e.actual_clicks != null
         ? `${e.estimated_missed_clicks} estimated shortfall ÷ (${e.estimated_missed_clicks} shortfall + ${e.actual_clicks} earned clicks) × 100 = ${pct}`
         : "Estimated shortfall ÷ (shortfall + earned clicks) × 100. Underlying counts unavailable.",
-    source: e.benchmark ? `Desktop US query/page Search Console observations matched to a dated AI Overview SERP snapshot. ${e.matched_impressions} of ${e.total_query_impressions} query impressions match (${Number(e.coverage_pct ?? 0).toFixed(1)}% coverage).` : "Search Console clicks and impressions versus a reference CTR curve.",
-    limitation: "A benchmark diagnostic, not measured missed traffic or a forecast. GA4 sessions measure visits. Query intent, device and SERP features affect CTR; a desktop AI Overview curve is a separate scenario, not a universal expectation.",
+    source: e.application === "all_terms_reference" ? `All-device, all-market query/page Search Console observations using the supplied industry curve as a common reference. ${e.matched_impressions} of ${e.total_query_impressions} impressions have supported positions (1–20). No observed AI Overview is required.` : e.benchmark ? `Desktop US query/page Search Console observations matched to a dated AI Overview SERP snapshot. ${e.matched_impressions} of ${e.total_query_impressions} query impressions match (${Number(e.coverage_pct ?? 0).toFixed(1)}% coverage).` : "Search Console clicks and impressions versus a reference CTR curve.",
+    limitation: "A benchmark diagnostic, not measured missed traffic or a forecast. GA4 sessions measure visits. Query intent, device and SERP features affect CTR; the supplied desktop study is applied as your planning reference across terms, not a measured expectation for each device, market or SERP.",
   };
   if (test.id === "L1") return {
     calculation: e.formula_version === 2

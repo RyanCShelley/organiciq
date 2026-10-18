@@ -42,7 +42,7 @@ export function MeasurementSummary({ data, settings }: { data?: Measurements; se
       <p className="mt-3 text-xs text-[var(--text-secondary)]">{traffic.source} Channel rows are parts of the total; do not add the total to them.</p>
       {traffic.ctr_reference && <details className="mt-3 text-sm"><summary className="cursor-pointer">CTR reference · supplied industry averages</summary>
         <p className="mt-2">{traffic.ctr_reference.scope} · {traffic.ctr_reference.period}</p>
-        <p className="mt-2">A reference scenario for matching search results. It does not measure visits, prove missed clicks, or establish AI Overview presence for every keyword.</p>
+        <p className="mt-2">The supplied industry curve is the baseline reference for all terms, across devices and markets; no observed AI Overview is required. Positions 1–20 are supported. It does not measure visits, prove missed clicks, or establish AI Overview presence for every keyword.</p>
         <table className="mt-2 text-left"><thead><tr><th className="px-3 py-1">Position</th><th className="px-3 py-1">Industry CTR</th></tr></thead><tbody>{traffic.ctr_reference.positions.map(row => <tr key={row.position}><td className="px-3 py-1">{row.position}</td><td className="px-3 py-1">{row.ctr_pct}%</td></tr>)}</tbody></table>
       </details>}
     </section>

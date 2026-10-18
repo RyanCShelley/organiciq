@@ -1,6 +1,6 @@
 # Input setup and automatic ownership
 
-Local follow-up to the monthly-review release. Production inspection of ACCTek found 20 September keyword observations, one in the top 10, and no priority flags in the evidence view. The overview's priority-only filter hid this measured data. It now uses measured tracked keywords when a priority cohort is unavailable and labels the scope explicitly. Missing dated readings and missing tracked terms have separate messages.
+Local follow-up to the monthly-review release. Production inspection of ACCTek found 20 September keyword observations, one in the top 10, and no priority flags in the evidence view. The overview's priority-only filter hid this measured data. All active Watch List keywords now define the target set, regardless of legacy priority flags or page ownership. Excluded terms stay excluded. Rankings must be dated on or before the assessment. Prompts remain separate observations; no extra priority selection is needed. The overview and monthly trend use the same active Watch List scope.
 
 ## Monthly visibility
 
@@ -14,7 +14,13 @@ The baseline workflow accepts and saves an explicit target lead conversion rate 
 
 ## CTR
 
-Match stored GSC query/page observations to dated desktop US DataForSEO observations with an AI Overview. Use the supplied AIO desktop reference only for that subset. Report matched impression/query coverage and require 100 matched impressions for the diagnostic. Newer snapshots without AIO supersede older ones; future, stale, other-device and other-market observations do not qualify. No billable pull runs on page load.
+Apply the user-selected supplied industry curve as the common reference across queries, devices and markets. No observed AI Overview or DataForSEO snapshot is required. The source remains labeled as a desktop August 2026 study: application as a planning reference does not prove a matching SERP or forecast visits. Query/page positions 1–20 are supported; require 100 reference impressions. Report covered/total query impressions and keep the numerator and denominator in the same subset. Page-action diagnostics use the same curve and supported position range. GA4 remains the source for actual visits.
+
+## Saved diagnostics versus current setup
+
+Saved assessments remain immutable. Current client-scoped settings are read separately when displaying their setup gaps. If a rate or conversion page exists now, explain that setup is configured and the assessment needs a rerun; do not request duplicate entry. Page reach distinguishes no declared pages from declarations without usable keyword mappings. History gaps for new clients remain history limits. No client ID, domain, target rate or conversion URL is hardcoded.
+
+Regression coverage includes clients sharing the same keyword, different markets/devices, no AIO observations, incomplete/new histories, exclusion overrides, mixed legacy priority flags, future readings, and current settings isolated between clients.
 
 ## Automatic keyword map
 
