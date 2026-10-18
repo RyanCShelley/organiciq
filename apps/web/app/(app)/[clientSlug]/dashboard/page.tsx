@@ -108,7 +108,7 @@ export default async function DashboardPage({
             <SectionHeader
               accent
               title="Conversions"
-              description="Lead events and lead rate from GA4 conversion definitions."
+              description="Lead events count outcomes. Lead conversion rate counts each visit producing a lead once."
               actions={
                 clientId ? (
                   <Link
@@ -136,7 +136,7 @@ export default async function DashboardPage({
 
             <div className="metric-grid">
               <MetricCard
-                label="Leads"
+                label="Lead events"
                 metric={
                   compare === "baseline" && baselineConfigured
                     ? data.baseline.vs_current.leads
@@ -146,15 +146,16 @@ export default async function DashboardPage({
                 showComparison={showComparison}
               />
               <MetricCard
-                label="Lead Rate"
-                metric={
-                  compare === "baseline" && baselineConfigured
-                    ? data.baseline.vs_current.lead_rate
-                    : data.conversions.lead_rate
-                }
+                label="Lead conversion rate"
+                metric={data.conversions.session_lead_rate}
                 unit="pct"
-                comparisonLabel={comparisonLabel}
-                showComparison={showComparison}
+                comparisonLabel="vs previous period"
+                showComparison={showComparison && compare !== "baseline"}
+                hint="Visits with at least one configured lead event ÷ matching GA4 visits. Each visit counts once."
+                footer={<p className="text-xs text-[var(--text-secondary)]">{data.conversions.session_measurement?.status === "measured"
+                  ? `${data.conversions.session_measurement.lead_sessions?.toLocaleString()} visits produced a lead / ${data.conversions.session_measurement.sessions?.toLocaleString()} visits · all channels`
+                  : data.conversions.session_measurement?.reason ?? "Visit-based rate not measured for this period"}
+                  {data.conversions.session_rate_target_pct == null ? " · Target not set" : ` · Target ${data.conversions.session_rate_target_pct}%`}</p>}
               />
               {data.conversions.period_lead_goal ? (
                 <Card className="flex h-full flex-col p-[18px_20px]">
@@ -256,14 +257,14 @@ export default async function DashboardPage({
                     },
                     {
                       key: "lead_rate",
-                      header: "Lead rate",
+                      header: "Lead events / 100 visits",
                       sortValue: (row) => row.lead_rate,
                       align: "right",
                       render: (row) =>
                         row.lead_rate === null ? (
                           <span className="text-[var(--text-tertiary)]">—</span>
                         ) : (
-                          `${row.lead_rate.toFixed(2)}%`
+                          row.lead_rate.toFixed(2)
                         ),
                     },
                     {
@@ -426,10 +427,11 @@ export default async function DashboardPage({
               />
               <MetricCard
                 label="GA4 Sessions"
+                hint="The exact-period GA4 total is used when available. Detailed page/channel estimates can sum differently; baseline comparisons retain the original basis."
                 metric={
                   compare === "baseline" && baselineConfigured
                     ? data.baseline.vs_current.sessions
-                    : data.traffic.ga4_sessions
+                    : (data.traffic.ga4_reported_sessions?.current != null ? data.traffic.ga4_reported_sessions : data.traffic.ga4_sessions)
                 }
                 comparisonLabel={comparisonLabel}
                 showComparison={showComparison}

@@ -11,7 +11,7 @@ export type Measurements = {
     prompts: { text: string; provider: string | null; mentioned: boolean | null; cited: boolean | null; observed_on: string | null }[];
   };
   traffic: { current: { total: number | null; channels: Record<string, number> }; previous: { total: number | null; channels: Record<string, number> }; source: string; ctr_reference?: { scope: string; period: string; positions: { position: number; ctr_pct: number }[] } };
-  leads: { count: number | null; sessions: number | null; rate_pct: number | null; target_rate_pct: number | null; monthly_goal: number | null; source: string };
+  leads: { count: number | null; sessions: number | null; rate_pct: number | null; event_rate_pct?: number | null; lead_sessions?: number | null; session_measurement?: { sessions: number | null; status: string; reason?: string }; target_rate_pct: number | null; monthly_goal: number | null; source: string };
 };
 const number = (value: number | null | undefined) => value == null ? "Not measured" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
 const presence = (value: boolean | null) => value === true ? "Yes" : value === false ? "No" : "Not measured";
@@ -47,8 +47,10 @@ export function MeasurementSummary({ data, settings }: { data?: Measurements; se
       </details>}
     </section>
     <section className="rounded-lg border border-[var(--border)] p-4">
-      <h3 className="font-semibold">Leads · {leads.rate_pct == null ? "Rate not measured" : `${number(leads.rate_pct)}% lead event rate`}</h3>
-      <p className="mt-2 text-sm">{number(leads.count)} lead events ÷ {number(leads.sessions)} visits × 100.</p>
+      <h3 className="font-semibold">Leads · {leads.rate_pct == null ? "Rate not measured" : `${leads.rate_pct.toFixed(2)}% lead conversion rate`}</h3>
+      <p className="mt-2 text-sm">{number(leads.count)} lead events, including repeats. {number(leads.lead_sessions)} visits produced a lead ÷ {number(leads.session_measurement?.sessions)} matching GA4 visits × 100.</p>
+      {leads.session_measurement?.reason && <p className="mt-2 text-sm">{leads.session_measurement.reason}</p>}
+      <p className="mt-2 text-xs text-[var(--text-secondary)]">Legacy event rate: {leads.event_rate_pct == null ? "Not measured" : `${leads.event_rate_pct.toFixed(2)} lead events per 100 visits`}. Existing event-based baseline history is retained separately.</p>
       {settings ? <LeadRateGoal initial={settings.target} actual={leads.rate_pct} clientId={settings.clientId} slug={settings.slug} /> : <p className="mt-2 text-sm">Assessment target rate: {leads.target_rate_pct == null ? "Not configured" : `${number(leads.target_rate_pct)}%`}</p>}
       <p className="mt-2 text-sm">Monthly lead-count goal: {number(leads.monthly_goal)}. A count goal is separate from a conversion-rate target.</p>
       <p className="mt-3 text-xs text-[var(--text-secondary)]">{leads.source}</p>

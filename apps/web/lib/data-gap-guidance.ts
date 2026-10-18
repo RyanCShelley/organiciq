@@ -19,6 +19,10 @@ export function dataGapGuidance(input: string, current?: { target_lead_rate_pct:
     title: "CTR reference covers a limited search sample", kind: "coverage", tool: "client",
     next: "The supplied industry CTR curve is the common baseline reference for all terms, devices and markets; it does not require an observed AI Overview. Sync query/page Search Console observations with positions 1–20 and at least 100 impressions. This is a benchmark estimate; actual visits come from GA4. If this saved run used the old SERP matching requirement, rerun it.",
   };
+  if (input.includes("session-based lead conversion baseline")) return {
+    title: "The existing baseline uses a different lead-rate definition", kind: "history",
+    next: "Your saved baseline is preserved. It counts lead events per visit; the new conversion rate counts visits producing a lead once. The engine does not compare these different measures. A matching session-based baseline can be reviewed separately without resetting your history.",
+  };
   if (input.includes("target lead conversion rate")) return {
     title: "Set the target lead conversion rate", kind: "setup", tool: "client",
     next: "Choose the target rate alongside the monthly lead goal when locking a baseline. For an existing baseline, use Set target conversion rate under Explore the evidence → Leads. The measured baseline rate and the target are separate numbers.",

@@ -3,7 +3,7 @@ from app.models.client import Client, ClientStatus, Tier
 from app.models.config import ChannelRule, ConversionDefinition, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot, StagingSerAuditIssue, StagingSerAuditPage
 from app.models.decision import Decision, DecisionThreshold
-from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Event, StagingGa4Traffic
+from app.models.ga4 import Ga4LeadMeasurement, FactGa4Event, FactGa4Traffic, StagingGa4Event, StagingGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage, FactGscQueryPage, StagingGscDaily, StagingGscPage, StagingGscQueryPage
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus

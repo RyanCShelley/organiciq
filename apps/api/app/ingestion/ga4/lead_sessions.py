@@ -69,7 +69,7 @@ def fetch_lead_session_measurement(
     }}}
     numerator_filter = {"andGroup": {"expressions": [scope, selected]}} if scope else selected
     args = dict(access_token=access_token, property_id=property_id,
-        start_date=start_date, end_date=end_date, dimensions=[], metrics=["sessions"])
+        start_date=start_date, end_date=end_date, dimensions=[], metrics=["sessions"], timeout_seconds=6.0, max_attempts=1)
     denominator_rows = run_report(**args, dimension_filter=scope)
     numerator_rows = run_report(**args, dimension_filter=numerator_filter)
     denominator, numerator = _sessions(denominator_rows), _sessions(numerator_rows)

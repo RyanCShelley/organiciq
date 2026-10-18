@@ -31,6 +31,7 @@ def test_selected_outcomes_use_one_union_report_not_summed_event_sessions(monkey
     assert source.call_count == 2
     numerator = source.call_args_list[1].kwargs
     assert numerator['dimensions'] == []
+    assert numerator['timeout_seconds'] == 6.0 and numerator['max_attempts'] == 1
     assert numerator['dimension_filter']['filter']['inListFilter']['values'] == ['form_submission', 'phone_calls']
 
 

@@ -501,7 +501,7 @@ export function ProgressPanel({
             style={{ borderColor: HAIRLINE }}
           >
             <StatCell
-              label="Lead rate"
+              label="Lead event rate (legacy baseline)"
               value={
                 baseline.vs_current.lead_rate.current !== null
                   ? `${baseline.vs_current.lead_rate.current.toFixed(2)}%`

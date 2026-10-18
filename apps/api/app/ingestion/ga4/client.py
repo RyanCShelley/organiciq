@@ -65,6 +65,8 @@ def run_report(
     metrics: list[str],
     limit: int = 100000,
     dimension_filter: dict[str, Any] | None = None,
+    timeout_seconds: float = 120.0,
+    max_attempts: int | None = None,
 ) -> list[dict[str, Any]]:
     prop = property_id if property_id.startswith("properties/") else f"properties/{property_id}"
     url = RUN_REPORT_URL.format(property=prop)
@@ -73,7 +75,7 @@ def run_report(
     expected_count = None
     seen = set()
 
-    with httpx.Client(timeout=120.0) as client:
+    with httpx.Client(timeout=timeout_seconds) as client:
         while True:
             body = {
                 "dateRanges": [
@@ -86,16 +88,13 @@ def run_report(
             }
             if dimension_filter is not None:
                 body["dimensionFilter"] = dimension_filter
-            res = post_json(
-                client,
-                url,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-                description=f"GA4 runReport offset={offset}",
-            )
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            description = f"GA4 runReport offset={offset}"
+            if max_attempts is None:
+                res = post_json(client, url, headers=headers, json=body, description=description)
+            else:
+                res = request_with_retry(lambda: client.post(url, headers=headers, json=body),
+                    description=description, max_attempts=max_attempts)
             data = res.json()
             metadata = data.get("metadata") or {}
             rows.pages.append({"row_count": data.get("rowCount"), "metadata": metadata})

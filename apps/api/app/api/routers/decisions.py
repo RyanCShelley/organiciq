@@ -169,7 +169,7 @@ def put_measurement_settings(
     if row is None:
         row = DecisionThreshold(client_id=client.id, thresholds={})
         db.add(row)
-    row.thresholds = {**(row.thresholds or {}), "target_lead_rate_pct": payload.target_lead_rate_pct}
+    row.thresholds = {**(row.thresholds or {}), "target_session_lead_rate_pct": payload.target_lead_rate_pct}
     db.commit()
     return {"target_lead_rate_pct": payload.target_lead_rate_pct}
 
@@ -196,15 +196,19 @@ def get_monthly_record(
         )
     from app.decisions.planning import effective_record
     result = effective_record(row.record)
-    if "measurements" not in result:
+    if not result.get("measurements") or result["measurements"].get("version", 0) < 3:
         # Production already has saved assessments. Populate their new display
         # from stored facts without rerunning integrations or rewriting history.
         import calendar
         from app.services.decision_measurements import measure
         year, month_number = map(int, row.month.split("-"))
         end = date(year, month_number, calendar.monthrange(year, month_number)[1])
+        was_sample = bool((result.get("measurements") or {}).get("sample"))
         result["measurements"] = measure(db, client, end=end)
-        result["measurements"]["source_note"] = "Measured from currently stored facts for this assessment period. Saved recommendations and approval history are unchanged."
+        if was_sample:
+            result["measurements"]["sample"] = True
+        result["measurements"]["source_note"] = "Current source measurements for this period are shown below. Saved recommendations and approval history are unchanged; older findings retain their original measurement basis."
+    db.commit()  # Persist only the source-measurement cache, not the saved assessment.
     return result
 
 

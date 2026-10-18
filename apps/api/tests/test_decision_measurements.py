@@ -26,7 +26,8 @@ def test_measurement_scope_unknowns_and_rate_target(db, client, client_a, admin_
     assert result["traffic"]["current"]["total"] == 1000
     assert result["traffic"]["current"]["channels"]["direct_unattributed"] == 200
     assert result["leads"]["count"] == 20
-    assert result["leads"]["rate_pct"] == 2
+    assert result["leads"]["rate_pct"] is None  # Event totals cannot supply converting visits.
+    assert result["leads"]["event_rate_pct"] == 2
     assert result["leads"]["target_rate_pct"] == 3.25
     assert result["traffic"]["ctr_reference"]["positions"][0]["ctr_pct"] == 7.52
     assert client.put(path, headers=headers, json={"target_lead_rate_pct": None}).status_code == 200

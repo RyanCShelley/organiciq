@@ -262,7 +262,7 @@ def test_baseline_lock_saves_explicit_rate_goal_and_preserves_it_when_omitted(cl
     assert response.status_code == 200, response.text
     assert response.json()["target_lead_rate_pct"] == 3.5
     assert lead_rate_target(db, client_a.id) == 3.5
-    assert db.query(BaselineVersion).filter_by(client_id=client_a.id, version=1).one().snapshot["target_lead_rate_pct"] == 3.5
+    assert db.query(BaselineVersion).filter_by(client_id=client_a.id, version=1).one().snapshot["target_session_lead_rate_pct"] == 3.5
     again = _lock(client, headers, client_a.id, reason_code="correction", reason_note="Confirm source and keep agreed rate")
     assert again.status_code == 200, again.text
     assert lead_rate_target(db, client_a.id) == 3.5
