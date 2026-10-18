@@ -106,6 +106,15 @@ export function ClientSettingsForm({
       {message ? <Alert variant="success">{message}</Alert> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <FieldLabel label="Agency services">
+          <Select name="service_reporting" defaultValue={client.service_reporting == null ? "" : client.service_reporting.organiciq ? (client.service_reporting.ad_accelerator ? "both" : "organiciq") : (client.service_reporting.ad_accelerator ? "ad_accelerator" : "none")}>
+            <option value="">Not set</option>
+            <option value="organiciq">OrganicIQ</option>
+            <option value="ad_accelerator">Ad Accelerator</option>
+            <option value="both">OrganicIQ + Ad Accelerator</option>
+            <option value="none">No agency services</option>
+          </Select>
+        </FieldLabel>
         <FieldLabel label="Company name">
           <Input name="client_name" defaultValue={client.client_name} required />
         </FieldLabel>

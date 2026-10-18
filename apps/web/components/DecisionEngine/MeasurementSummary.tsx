@@ -1,6 +1,8 @@
+import { ServiceReportingSummary } from "@/components/analytics/ServiceReportingSummary";
 import { LeadRateGoal } from "./LeadRateGoal";
 export type MeasurementSettingsProps = { clientId: string; slug: string; target: number | null };
 export type Measurements = {
+  service_reporting?: import("@/lib/dashboard").ServiceReportingData;
   version: number; start: string; end: string; prior_start: string; prior_end: string;
   sample?: boolean;
   source_note?: string;
@@ -15,13 +17,14 @@ export type Measurements = {
 };
 const number = (value: number | null | undefined) => value == null ? "Not measured" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
 const presence = (value: boolean | null) => value === true ? "Yes" : value === false ? "No" : "Not measured";
-const names: Record<string, string> = { organic_search: "Organic search", direct_unattributed: "Direct / unattributed", ai_referral: "AI referrals", referral: "Referral", paid_search: "Paid search", social: "Social", email: "Email", other: "Other" };
+const names: Record<string, string> = { organic_search: "Organic search", direct_unattributed: "Direct / unattributed", ai_referral: "AI referrals", referral: "Referral", paid_search: "Paid search", paid_social: "Paid social", display: "Display", cross_network: "Cross-network", other_paid: "Other paid", social: "Social", email: "Email", other: "Other" };
 
 export function MeasurementSummary({ data, settings }: { data?: Measurements; settings?: MeasurementSettingsProps }) {
   if (!data) return <p className="mt-5 rounded-md bg-[var(--surface-muted)] p-4 text-sm">This saved assessment predates the revised measurements. Run a new assessment to capture individual term visibility, all-channel visits and lead rates. The old percentages are not summary scores.</p>;
   const { visibility, traffic, leads } = data;
   const channels = [...new Set(["organic_search", "direct_unattributed", "ai_referral", ...Object.keys(traffic.current.channels), ...Object.keys(traffic.previous.channels)])];
   return <div className="mt-5 space-y-5">
+    <ServiceReportingSummary data={data.service_reporting} />
     <p className="text-sm text-[var(--text-secondary)]">Measured period: {data.start}–{data.end}. Traffic comparison: {data.prior_start}–{data.prior_end}.{data.sample && <strong> Synthetic sample data for this preview.</strong>}</p>
     {data.source_note && <p className="text-xs text-[var(--text-secondary)]">{data.source_note}</p>}
     <section className="rounded-lg border border-[var(--border)] p-4">

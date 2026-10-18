@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ServiceReportingSummary } from "@/components/analytics/ServiceReportingSummary";
 import { DataTable } from "@/components/analytics/DataTable";
 import { MetricCard } from "@/components/analytics/MetricCard";
 import { ProgressPanel } from "@/components/analytics/ProgressPanel";
@@ -288,6 +289,8 @@ export default async function DashboardPage({
               </div>
             ) : null}
           </section>
+
+          <ServiceReportingSummary data={data.service_reporting} />
 
           <section>
             <SectionHeader

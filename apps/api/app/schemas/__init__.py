@@ -57,7 +57,13 @@ class TierCreate(BaseModel):
     watchlist_cadence: str = "monthly"
 
 
+class ServiceReportingConfig(BaseModel):
+    organiciq: bool
+    ad_accelerator: bool
+
+
 class ClientCreate(BaseModel):
+    service_reporting: ServiceReportingConfig | None = None
     client_name: str
     domain: str
     tier_id: UUID
@@ -117,6 +123,7 @@ class ClientCreate(BaseModel):
 
 
 class ClientUpdate(BaseModel):
+    service_reporting: ServiceReportingConfig | None = None
     client_name: str | None = None
     slug: str | None = None
     domain: str | None = None
@@ -176,6 +183,7 @@ class ClientUpdate(BaseModel):
 
 
 class ClientOut(ORMModel):
+    service_reporting: ServiceReportingConfig | None = None
     id: UUID
     client_name: str
     slug: str
