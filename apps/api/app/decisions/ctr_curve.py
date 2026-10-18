@@ -6,6 +6,8 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
+REFERENCE_SCENARIO = "ai_overviews_desktop_aug_2026"
+
 BENCHMARK_SOURCE = "organic_aggregated_2026_jul_us"
 BENCHMARK_COLUMN = "Organic Aggregated"
 UNDERPERFORMANCE_RATIO = 0.5
@@ -59,9 +61,11 @@ def _load_organic_aggregated_curve() -> dict[int, float]:
     return curve or dict(_FALLBACK_ORGANIC_AGGREGATED_CTR)
 
 
-def expected_ctr_percent(position: float) -> float:
+def expected_ctr_percent(position: float, *, scenario: str = "organic_aggregated") -> float:
     """Linearly interpolate Organic Aggregated CTR for fractional average positions."""
-    curve = _load_organic_aggregated_curve()
+    if scenario not in ("organic_aggregated", "ai_overviews_desktop_aug_2026"):
+        raise ValueError("Unknown CTR benchmark scenario")
+    curve = ai_overview_curve() if scenario == "ai_overviews_desktop_aug_2026" else _load_organic_aggregated_curve()
     if position <= 1:
         return curve[1]
     if position >= 20:
@@ -91,3 +95,17 @@ AI_OVERVIEW_FEATURES = frozenset(
     {"ai_overview", "ai_overviews", "sge", "generative_ai", "ai_answer"}
 )
 
+
+
+@lru_cache(maxsize=1)
+def ai_overview_curve() -> dict[int, float]:
+    """User-supplied desktop scenario; header says August, not filename September.
+
+    No enforced monotonicity: the observed second position exceeds the first.
+    The decision diagnostic explicitly applies this user-selected curve across
+    terms/devices/markets as a planning reference, without claiming AIO presence.
+    """
+    path = Path(__file__).resolve().parent / "data" / "ai_overviews_desktop_2026_aug.csv"
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = csv.DictReader(handle)
+        return {int(row["Position"]): float(row["AI Overviews, Aug 2026"]) for row in rows}

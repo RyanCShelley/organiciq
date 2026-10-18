@@ -36,6 +36,7 @@ from app.decisions.catalog import (
     BLOCKED_ACTIONS,
     LEAD_ACTIONS,
     TRAFFIC_ACTIONS,
+    VISIBILITY_ACTIONS,
     prescribe,
     prescribe_page,
 )
@@ -52,7 +53,7 @@ from app.services.content_gap_signals import scan_term_gaps
 from app.services.demand_gaps import LOOKBACK_DAYS, scan_demand_gaps
 from app.decisions.incidents import check as check_incidents
 from app.decisions.overrides import Exclusion, is_excluded
-from app.decisions.slots import fill_pool, fill_slots
+from app.decisions.slots import Considered, Prescription, fill_pool, fill_slots
 from app.decisions.targets import rank_candidates
 from app.models.decision import ConstraintOverride, ExcludedPage, MonthlyRecord
 from app.models.gsc import FactGscPage
@@ -63,6 +64,7 @@ from app.services.page_signals import load_page_candidates
 from app.services.results import capture_before, previous_results
 from app.services.target_signals import load_target_inputs
 from app.services.triage_signals import lead_signals, traffic_signals, visibility_signals
+from app.services.decision_measurements import measure as measure_outcomes
 
 logger = logging.getLogger("organiciq.monthly_run")
 
@@ -231,7 +233,7 @@ def _relaunched_recently(db: Session, client: Client, today: date) -> bool:
     since = today - timedelta(days=RELAUNCH_WINDOW_DAYS)
     rows = (
         db.query(Annotation)
-        .filter(Annotation.client_id == client.id, Annotation.date >= since)
+        .filter(Annotation.client_id == client.id, Annotation.date >= since, Annotation.date <= today)
         .all()
     )
     for row in rows:
@@ -400,10 +402,19 @@ def build_record(
     inputs = load_target_inputs(db, client, exclusions=exclusions)
     ranked = rank_candidates(inputs.candidates, thresholds=thresholds)
     prescriptions = []
+    findings = []
+    # Missing volume limits ranking confidence; it must not erase a strategic target.
+    from app.decisions.targets import score_candidate
+    ranked_terms = {s.candidate.keyword for s in ranked}
+    review_targets = ranked + [score_candidate(c) for c in inputs.candidates if c.keyword not in ranked_terms]
+    for scored in review_targets:
+        page = inputs.pages.get(scored.candidate.target_url)
+        if page is not None and page.page_type != "utility":
+            findings.extend(found for rule in VISIBILITY_ACTIONS if (found := rule(scored, page)) is not None)
     for scored in ranked:
         url = scored.candidate.target_url
         page = inputs.pages.get(url) if url else None
-        if page is None:
+        if page is None or page.page_type == "utility":
             # Nothing crawled for this page, so no trigger can be tested
             # against it. V-6 is the exception and needs no page facts.
             continue
@@ -415,14 +426,16 @@ def build_record(
     # their own candidates. Until these existed, a client constrained on
     # Traffic got a plan of Visibility spillover or an empty one — the engine
     # named the problem and then prescribed for a different branch.
+    from app.services.page_eligibility import classify_page_url
     page_candidates = load_page_candidates(db, client, today=today)
     for ranked_pages, actions in (
         (rank_for_traffic(page_candidates), TRAFFIC_ACTIONS),
         (rank_for_leads(page_candidates), LEAD_ACTIONS),
     ):
         for candidate in ranked_pages:
-            if is_excluded(candidate.url, exclusions):
+            if is_excluded(candidate.url, exclusions) or not classify_page_url(candidate.url).eligible_for_growth_action:
                 continue
+            findings.extend(found for rule in actions if (found := rule(candidate)) is not None)
             found = prescribe_page(candidate, actions=actions)
             if found is not None:
                 prescriptions.append(found)
@@ -430,6 +443,28 @@ def build_record(
     constraint_branch = next(
         (b for b in Branch if b.value == triage.constraint), None
     )
+    from app.services.watchlist import read as read_watchlist
+    from app.services.decision_measurements import prompt_readings
+    prompt_history = prompt_readings(db, client.id, today)
+    for watched in read_watchlist(db, client):
+        observation = prompt_history.get((watched.get("provider"), watched["text"].strip().lower())) or watched.get("observation") or {}
+        observed_on = observation.get("observed_on")
+        if (watched["kind"] != "prompt" or watched["state"] != "existing"
+                or not observed_on or observed_on > today.isoformat()
+                or not (observation.get("brand_cited") is False or observation.get("brand_mentioned") is False)):
+            continue
+        findings.append(Prescription(
+            action_id="G-1", title="Review the answer and citation gap",
+            branch=Branch.VISIBILITY, target_url=watched["target_url"], term=watched["text"],
+            score=0, effort_min=60,
+            why=f"The observed answer for this selected prompt has a brand mention or citation gap. Review the response and source type before choosing a page change.",
+            done_when="The brief names a verified answer gap and selected intervention, or records why an on-site change is not justified.",
+            metric="Prompt mention and citations, checked on the same engine and prompt set",
+            metric_key="decision",
+            evidence=(f"Prompt: {watched['text']}", f"Provider: {watched.get('provider') or 'unspecified'}; observed: {observed_on}",
+                      f"Observation: {observation}", "This observation does not establish that an on-site edit will win a citation."),
+            steps=("Review the captured answer and cited sources.", "Choose and specify the answer or source improvement using verified facts.", "Recheck the same prompt and engine after the change."),
+        ))
     by_branch: dict[Branch, list] = {}
     for prescription in prescriptions:
         by_branch.setdefault(prescription.branch, []).append(prescription)
@@ -454,6 +489,13 @@ def build_record(
         for slot in plan.filled
         if slot.prescription.target_url
     }
+    previous_record = db.query(MonthlyRecord).filter(
+        MonthlyRecord.client_id == client.id, MonthlyRecord.month == month,
+    ).one_or_none()
+    if previous_record and previous_record.record.get("plan_review"):
+        review = previous_record.record["plan_review"]
+        approved = review if review.get("approved_at") else next(iter(reversed(review.get("versions", []))), {})
+        taken |= {x["target_url"] for x in approved.get("items", []) if x.get("target_url")}
     open_this_month = allowances.slots_open_in(month)
     closed_reason = (
         f"{allowances.tier_name} buys this quarterly, and this is not the "
@@ -505,6 +547,25 @@ def build_record(
         )
         if found is not None
     ]
+    # A deliberately planned page is a human strategy decision, not an
+    # inferred demand gap. Prompt-led pages need no invented search volume.
+    planned_notes = set()
+    for watched in read_watchlist(db, client):
+        if watched["state"] != "planned" or not watched.get("note"):
+            continue
+        note_key = watched["note"].strip().lower()
+        if note_key in planned_notes:
+            continue
+        planned_notes.add(note_key)
+        content_prescriptions.append(Prescription(
+            action_id="C-P", title=f"Create the planned page for “{watched['text']}”",
+            branch=Branch.VISIBILITY, target_url="", term=watched["text"],
+            score=0, effort_min=180, why=f"A person selected this page in the strategic watchlist: {watched['note']}",
+            done_when="The reviewed page brief is implemented, published, mapped to its watchlist items and annotated.",
+            metric="Manual check of the selected keyword or prompt intent", metric_key="decision",
+            evidence=(f"Watchlist: {watched['kind']} — {watched['text']}", f"Planned page: {watched['note']}", "No keyword-volume estimate is required for this human-selected page."),
+            steps=("Confirm the audience, intent and planned page against the strategy.", watched["note"], "Publish, record the final URL and update the watchlist target."),
+        ))
     # One prize scale for both: searches a month the page could compete for.
     content_prescriptions.sort(key=lambda p: (-p.score, p.term or ""))
     empty_content = gap_scan.explain_empty()
@@ -528,6 +589,13 @@ def build_record(
     )
 
     return {
+        "review_required": True,
+        "recommendation_version": 3,
+        "growth_capacity": allowances.growth_action_allowance,
+        "findings": [
+            _candidate_row(client, month, Considered(p, reason="Review against the client strategy."), today)
+            for p in findings
+        ],
         "client": client.slug,
         "client_name": client.client_name,
         "domain": client.domain,
@@ -553,6 +621,7 @@ def build_record(
         "held_since": _held_since(db, client, month, triage.constraint),
         "confidence": confidence,
         "confidence_reasons": confidence_reasons,
+        "measurements": measure_outcomes(db, client, end=today),
         "branches": [
             {
                 "branch": branch.branch.value,
@@ -570,6 +639,7 @@ def build_record(
                         "direction": test.direction,
                         "unit": test.unit,
                         "status": test.status.value,
+                        "evidence": test.evidence,
                         **({"display": test.display} if test.display else {}),
                         **({"missing": test.missing} if test.missing else {}),
                     }
@@ -668,17 +738,24 @@ def save_record(
     days elapsed in the month somebody happens to be sitting in.
     """
     today = as_of(month, today=today) if month else (today or date.today())
+    from app.services.automatic_keyword_map import build as build_map
+    map_summary = build_map(db, client)
     record = build_record(db, client, today=today)
+    record["mapping_summary"] = map_summary
     month = record["month"]
 
     existing = (
         db.query(MonthlyRecord)
         .filter(MonthlyRecord.client_id == client.id, MonthlyRecord.month == month)
-        .one_or_none()
+        .with_for_update().one_or_none()
     )
     if existing is None:
         existing = MonthlyRecord(id=uuid4(), client_id=client.id, month=month)
         db.add(existing)
+
+    # A new assessment never overwrites a human decision or its approved versions.
+    if existing.record and existing.record.get("plan_review"):
+        record["plan_review"] = existing.record["plan_review"]
 
     existing.run_saved_at = datetime.now(timezone.utc)
     existing.data_through = (

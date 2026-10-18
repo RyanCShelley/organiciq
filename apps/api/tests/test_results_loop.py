@@ -33,7 +33,7 @@ from app.services.results import (
 
 SEPT = "2026-09"
 PRESCRIBED = date(2026, 9, 30)
-CHECK_ON = date(2026, 10, 28)
+CHECK_ON = date(2026, 10, 29)
 
 
 def _record(db: Session, client: Client, **over) -> MonthlyRecord:
@@ -62,6 +62,18 @@ def _record(db: Session, client: Client, **over) -> MonthlyRecord:
     db.add(row)
     db.commit()
     return row
+
+
+def _ship(db, client, record):
+    """Make shipment explicit; metric movement alone is not completed work."""
+    from app.services.results import _slotted
+    for kind, action in _slotted(record.record):
+        row = db.query(EngineAction).filter_by(client_id=client.id, uid=action["action_uid"]).one_or_none()
+        if row is None:
+            row = EngineAction(client_id=client.id, uid=action["action_uid"], month=SEPT, kind=kind, status="done")
+            db.add(row)
+        row.shipped_on = PRESCRIBED + timedelta(days=1)
+    db.commit()
 
 
 def _rank(db: Session, client: Client, when: date, position: float):
@@ -209,6 +221,7 @@ def test_an_action_is_not_judged_before_its_check_date(db: Session, client_a: Cl
     capture_before(db, client_a, record)
     _rank(db, client_a, CHECK_ON, 6.0)
 
+    _ship(db, client_a, record)
     assert check_due(db, client_a, today=CHECK_ON - timedelta(days=1)) == []
     assert db.query(EngineAction).one().after_value is None
 
@@ -226,6 +239,7 @@ def test_the_check_writes_a_verdict(db: Session, client_a: Client):
     capture_before(db, client_a, record)
     _rank(db, client_a, CHECK_ON, 6.0)
 
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
     assert len(judged) == 1
     row = db.query(EngineAction).one()
@@ -239,6 +253,7 @@ def test_a_judged_action_is_not_judged_twice(db: Session, client_a: Client):
     _rank(db, client_a, PRESCRIBED, 18.0)
     capture_before(db, client_a, record)
     _rank(db, client_a, CHECK_ON, 6.0)
+    _ship(db, client_a, record)
     check_due(db, client_a, today=CHECK_ON)
 
     _rank(db, client_a, CHECK_ON + timedelta(days=5), 2.0)
@@ -257,8 +272,8 @@ def test_previous_results_say_when_nobody_recorded_shipping_it(
 
     rows = previous_results(db, client_a, "2026-10", previous=SEPT)
     assert len(rows) == 1
-    assert rows[0]["before"] == 18.0 and rows[0]["after"] == 6.0
-    assert rows[0]["result"] == "improved"
+    assert rows[0]["before"] == 18.0 and rows[0]["after"] is None
+    assert rows[0]["result"] == "waiting"
     # A verdict on work nobody recorded doing is an accusation, not a
     # measurement — so the row says what is not known about it.
     assert rows[0]["shipped"] is False
@@ -351,6 +366,7 @@ def test_entering_the_rankings_counts_as_improved(db: Session, client_a: Client)
     assert capture_before(db, client_a, record) == 0
 
     _rank(db, client_a, CHECK_ON, 34.0)
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
     assert len(judged) == 1
     assert judged[0].result == "improved"
@@ -361,9 +377,10 @@ def test_entering_the_rankings_counts_as_improved(db: Session, client_a: Client)
 def test_still_unranked_at_the_check_is_not_an_improvement(
     db: Session, client_a: Client
 ):
-    _record(db, client_a)
+    record = _record(db, client_a)
     _rank(db, client_a, PRESCRIBED, 0.0)
     _rank(db, client_a, CHECK_ON, 0.0)
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
     assert [r.result for r in judged] == ["no_change"]
 
@@ -376,10 +393,11 @@ def test_still_unranked_at_the_check_is_no_change_not_silence(
     Skipping the unranked reading left it showing "not checked yet" forever,
     which claims less than is known: it was checked, and nothing moved.
     """
-    _record(db, client_a)
+    record = _record(db, client_a)
     _rank(db, client_a, PRESCRIBED, 0.0)
     _rank(db, client_a, CHECK_ON, 0.0)
 
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
     assert len(judged) == 1
     assert judged[0].result == "no_change"
@@ -391,6 +409,7 @@ def test_falling_out_of_the_rankings_is_worse(db: Session, client_a: Client):
     capture_before(db, client_a, record)
     _rank(db, client_a, CHECK_ON, 0.0)
 
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
     assert len(judged) == 1
     assert judged[0].result == "worse"
@@ -483,6 +502,7 @@ def test_retainer_work_is_measured_and_judged_like_a_growth_action(
     assert capture_before(db, client_a, record) == 1
     _rank(db, client_a, CHECK_ON, 6.0)
 
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
 
     assert len(judged) == 1
@@ -495,7 +515,7 @@ def test_a_new_page_for_a_term_nobody_ranks_for_is_judged_when_it_starts_ranking
     db: Session, client_a: Client
 ):
     """C-1's starting state is 'off the rankings', which is a real reading."""
-    _pool_record(
+    record = _pool_record(
         db, client_a, "new_content", id="C-1", target_url="", term="aeo agency"
     )
     # The tracker writes 0 for "not in the results checked" — tracked, and
@@ -510,6 +530,7 @@ def test_a_new_page_for_a_term_nobody_ranks_for_is_judged_when_it_starts_ranking
         )
     db.commit()
 
+    _ship(db, client_a, record)
     judged = check_due(db, client_a, today=CHECK_ON)
 
     assert [row.result for row in judged] == ["improved"]

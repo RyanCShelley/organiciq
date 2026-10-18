@@ -4,10 +4,9 @@ Decision 2 scores a keyword-page pair and the catalog decides what to do
 about it. Both are pure functions over explicit inputs; this is the join that
 assembles those inputs from the warehouse.
 
-Candidates come from `keyword_targets` rather than from everything the rank
-tracker follows. That is the point of the map: a term somebody declared a
-page for is a term somebody intends to win, and the engine stops guessing
-which page it meant.
+Candidates use current SE Ranking terms with a confirmed or automatically
+mapped page. Older maps remain reference data rather than expanding the
+automatic focus. The map supplies page ownership, not tracker membership.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_url
 from app.decisions.catalog import PageFacts, SectionFacts
 from app.decisions.overrides import Exclusion, is_excluded
 from app.decisions.targets import Candidate
@@ -155,6 +155,38 @@ def _entity_properties(raw: object) -> set[str]:
     return found
 
 
+#: Redirect hops followed to reach the page that actually serves a target.
+_MAX_REDIRECT_HOPS = 5
+
+
+def _snapshot_for(crawl: dict, url: str):
+    """The crawl row for the page a target URL really lands on.
+
+    A target is typed by a person: `http://`, `www.`, a missing trailing slash.
+    The crawl keys its rows on the normalized form, and records a redirecting
+    URL as a row of its own with the status of the redirect, so its headings
+    and the other checks that need a 2xx page are null. Reading the row for
+    the typed URL gave a title and a description (parsed from the page it
+    redirected to) and no headings: a page that looked as if it had none.
+
+    So the URL is normalized, and a row that only redirects is followed to the
+    row that serves. Where the chain ends on nothing readable the last row is
+    returned, and its null headings say "unknown".
+    """
+    row = crawl.get(normalize_url(url))
+    for _ in range(_MAX_REDIRECT_HOPS):
+        if row is None or not row.redirect_url:
+            break
+        status = row.status_code
+        if status is not None and 200 <= status < 300:
+            break
+        nxt = crawl.get(normalize_url(row.redirect_url))
+        if nxt is None or nxt is row:
+            break
+        row = nxt
+    return row
+
+
 def _latest_crawl_date(db: Session, client_id: UUID) -> date | None:
     return (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
@@ -179,7 +211,7 @@ def load_target_inputs(
         db.query(KeywordTarget)
         .filter(
             KeywordTarget.client_id == client.id,
-            KeywordTarget.source == "confirmed",
+            KeywordTarget.source.in_(("confirmed", "auto")),
         )
         .all()
     )
@@ -229,8 +261,20 @@ def load_target_inputs(
     candidates: list[Candidate] = []
     pages: dict[str, PageFacts] = {}
     excluded: list[dict[str, str]] = []
+    from app.models.watch_target import WatchTarget
+    from app.services.watchlist import item_key
+    watch_states = {x.item_key: x.state for x in db.query(WatchTarget).filter(
+        WatchTarget.client_id == client.id, WatchTarget.kind == "keyword")}
 
+    from app.services.watchlist import automatic_focus
+    focus = {row["text"].strip().lower() for row in automatic_focus(db, client) if row["kind"] == "keyword"}
     for target in targets:
+        if target.keyword.strip().lower() not in focus:
+            continue
+        # Exclusions are explicit strategy decisions, not low scores.
+        state = watch_states.get(item_key("keyword", target.keyword))
+        if state in ("excluded", "planned", "unmapped"):
+            continue
         url = (target.target_url or "").strip()
         if url:
             skip = is_excluded(url, exclusions)
@@ -242,7 +286,7 @@ def load_target_inputs(
 
         tracked_row = tracked.get(target.keyword)
         metric = metrics.get(target.keyword)
-        snapshot = crawl.get(url) if url else None
+        snapshot = _snapshot_for(crawl, url) if url else None
 
         candidates.append(
             Candidate(
@@ -254,7 +298,9 @@ def load_target_inputs(
                 position=_rank(getattr(tracked_row, "current_position", None))
                 if tracked_row
                 else None,
-                volume=float(metric.volume) if metric and metric.volume else None,
+                volume=float(metric.volume) if metric and metric.volume is not None else (
+                    float(tracked_row.volume) if tracked_row and tracked_row.volume is not None else None
+                ),
                 difficulty=float(metric.difficulty)
                 if metric and metric.difficulty
                 else None,
@@ -276,6 +322,7 @@ def load_target_inputs(
         if url and url not in pages:
             headings = ()
             faqs = ()
+            raw_sections: list[dict] = []
             sections: tuple[SectionFacts, ...] = ()
             if snapshot is not None:
                 raw_sections = [
@@ -304,11 +351,15 @@ def load_target_inputs(
                 title=getattr(snapshot, "title", None),
                 description=getattr(snapshot, "description", None),
                 headings=headings,
+                crawled=snapshot is not None,
+                headings_known=snapshot is not None and snapshot.sections is not None,
                 sections=sections,
                 has_faq_section=_has_faq_section(raw_sections),
-                has_faq_schema=url in faq_schema_urls,
+                has_faq_schema=(snapshot.normalized_url if snapshot else url) in faq_schema_urls,
                 faq_questions=faqs,
-                entity_properties=frozenset(schema_by_url.get(url, set())),
+                entity_properties=frozenset(
+                    schema_by_url.get(snapshot.normalized_url if snapshot else url, set())
+                ),
                 inbound_editorial_links=int(
                     getattr(snapshot, "inbound_editorial_links", 0) or 0
                 ),

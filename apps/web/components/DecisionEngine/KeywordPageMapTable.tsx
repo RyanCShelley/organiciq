@@ -236,7 +236,7 @@ function Row({
         >
           {/* It decides what the engine asks for: the title for a primary
               term, a section of its own for a secondary one. */}
-          <option value="">Not set — treated as primary</option>
+          <option value="">Not set — no role assumed</option>
           <option value="primary">Primary — owns the title</option>
           <option value="secondary">Secondary — earns a section</option>
         </select>
@@ -308,7 +308,7 @@ function Row({
       <td className="whitespace-nowrap">
         {row.mapped ? (
           <Badge variant={row.target_url ? "success" : "neutral"}>
-            {row.target_url ? "Mapped" : "No page, recorded"}
+            {row.target_url ? row.source === "auto" ? "Auto-mapped" : "Your mapping" : "No page, recorded"}
           </Badge>
         ) : (
           <Badge variant="warning">Unmapped</Badge>
@@ -334,7 +334,7 @@ export function KeywordPageMapTable({
   const [matchNote, setMatchNote] = useState<string | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [onlyUnmapped, setOnlyUnmapped] = useState(false);
+  const [onlyUnmapped, setOnlyUnmapped] = useState(true);
   const [onlyPriority, setOnlyPriority] = useState(false);
   const [group, setGroup] = useState("");
   // Volume first: the question this table is usually opened with is "what
@@ -438,12 +438,9 @@ export function KeywordPageMapTable({
       }
       // Say what it did not propose as well as what it did: a term with no
       // page close enough to name is the finding, not an omission.
-      const short = (body.terms ?? 0) - (body.stored ?? 0);
-      setMatchNote(
-        `Read ${body.pages} pages against ${body.terms} terms and proposed ${body.stored}` +
-          `${short > 0 ? `. The other ${short} had no page close enough to name` : ""}` +
-          `${body.measured === false ? " (margin not measured — too few confirmed pairs, so the default was used)" : ""}.`,
-      );
+      setMatchNote(body.map
+        ? `Built ${body.map.mapped} automatic mappings. Preserved ${body.map.preserved} user decisions. ${body.map.gaps} gaps and ${body.map.conflicts} conflicting matches need review.`
+        : `Read ${body.pages} pages and generated ${body.stored} suggestions.`);
       router.refresh();
     });
   }
@@ -452,7 +449,7 @@ export function KeywordPageMapTable({
     <section className="workspace-section">
       <SectionHeader
         title="Keyword to page map"
-        description="Which page is meant to own each term. The engine asks for this on every ranking finding, because Search Console reports where Google currently shows a page — which on a term you do not rank for is either nothing or the wrong page."
+        description="The tool builds page ownership from page topics and observed search evidence. Review the gaps or override a match. Your saved decisions are preserved when the map is rebuilt."
         actions={
           <div className="flex items-center gap-3">
             <span className="text-xs text-[var(--text-tertiary)]">
@@ -465,7 +462,7 @@ export function KeywordPageMapTable({
               onClick={suggestPages}
               disabled={matching}
             >
-              {matching ? "Reading the site…" : "Suggest pages"}
+              {matching ? "Reading the site…" : "Build / refresh map"}
             </button>
           </div>
         }
@@ -494,7 +491,7 @@ export function KeywordPageMapTable({
             checked={onlyUnmapped}
             onChange={(event) => setOnlyUnmapped(event.target.checked)}
           />
-          Unmapped only{unmapped > 0 ? ` (${unmapped})` : ""}
+          Gaps only{unmapped > 0 ? ` (${unmapped})` : ""}
         </label>
         <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
           <input
@@ -594,7 +591,7 @@ export function KeywordPageMapTable({
 
       <p className="mt-3 text-xs text-[var(--text-tertiary)]">
         Leaving a page blank and saving records “no page owns this yet”. That
-        is an answer: the engine stops asking and prescribes writing one.
+        preserves your decision for content planning; rebuilding the map will not replace it.
       </p>
     </section>
   );

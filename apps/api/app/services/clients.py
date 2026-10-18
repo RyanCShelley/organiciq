@@ -37,6 +37,7 @@ _CLIENT_CASCADE_TABLES = (
     "staging_ser_keywords",
     "facts_ser_competitors",
     "facts_ser_competitor_keywords",
+    "baseline_versions",
     "facts_ser_rankings",
     "facts_ser_keywords",
     "staging_ga4_events",

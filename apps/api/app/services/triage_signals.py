@@ -22,7 +22,6 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.triage import LeadSignals, TrafficSignals, VisibilitySignals
 from app.services.lead_exclusions import not_excluded
 from app.models.client import Client
@@ -30,7 +29,7 @@ from app.models.config import ClientConversionPage, ConversionDefinition, Organi
 from app.models.crawl import FactCrawlInternalLink
 from app.models.decision import KeywordTarget
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscDaily, FactGscPage
+from app.models.gsc import FactGscDaily
 from app.models.seranking import (
     FactSerAiCheck,
     FactSerAiTrackerStats,
@@ -118,22 +117,21 @@ def _managed_sessions(db: Session, client_id: UUID, start: date, end: date) -> f
 def visibility_signals(
     db: Session, client: Client, *, today: date, ai_period: tuple[date, date] | None
 ) -> VisibilitySignals:
-    targets = (
-        db.query(KeywordTarget)
-        .filter(
-            KeywordTarget.client_id == client.id,
-            KeywordTarget.priority.is_(True),
-            KeywordTarget.source == "confirmed",
-        )
-        .all()
-    )
-    priority_terms = {t.keyword for t in targets}
-    tracked = {
-        (k.keyword or "").strip().lower(): k
-        for k in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id)
-    }
-    judged = {k: v for k, v in tracked.items() if k in priority_terms}
-    in_top_10 = sum(1 for row in judged.values() if (_rank(row.current_position) or 999) <= 10)
+    from app.services.watchlist import automatic_focus as read_watchlist
+    from app.services.decision_measurements import keyword_readings
+    watch_keywords = [item for item in read_watchlist(db, client)
+                      if item["kind"] == "keyword" and item["state"] != "excluded"]
+    priority_terms = {item["text"].strip().lower() for item in watch_keywords}
+    readings = keyword_readings(db, client.id, today)
+    judged = {term: row for term, row in readings.items()
+              if term in priority_terms and row["position"] is not None}
+    in_top_10 = sum(1 for row in judged.values() if 0 < row["position"] <= 10)
+    targets = db.query(KeywordTarget).filter(
+        KeywordTarget.client_id == client.id,
+        KeywordTarget.source.in_(("confirmed", "auto")),
+    ).all()
+    targets = [target for target in targets if target.keyword.strip().lower() in priority_terms]
+    tracked = readings
 
     # V4 — a declared target page with no tracked term inside the top 20.
     declared_pages = {
@@ -146,15 +144,21 @@ def visibility_signals(
         )
         if (p.normalized_url or "").strip()
     }
+    from app.core.urls import normalize_url
+    all_targets = targets
+    declared_pages = {normalize_url(url) for url in declared_pages}
+    mapped_pages = {normalize_url(t.target_url) for t in all_targets if t.target_url}
+    # Reach can only be assessed for mapped pages; unmapped is a setup gap.
+    assessed_pages = declared_pages & mapped_pages
     reached: set[str] = set()
     for term, row in tracked.items():
-        position = _rank(row.current_position)
+        position = _rank(row["position"])
         if position is None or position > 20:
             continue
-        target = next((t.target_url for t in targets if t.keyword == term), None)
-        if target:
-            reached.add(target.strip())
-    without_reach = len(declared_pages - reached)
+        target = next((t.target_url for t in all_targets if t.keyword == term), None)
+        if target and row["ranking_url"] and normalize_url(row["ranking_url"]) == normalize_url(target):
+            reached.add(normalize_url(target))
+    without_reach = len(assessed_pages - reached)
 
     # V2 — SE Ranking's own visibility score, now against ninety days ago.
     latest_summary = (
@@ -162,6 +166,7 @@ def visibility_signals(
         .filter(
             FactSerSiteSummary.client_id == client.id,
             FactSerSiteSummary.visibility_percent.isnot(None),
+            FactSerSiteSummary.metric_date <= today,
         )
         .order_by(FactSerSiteSummary.metric_date.desc())
         .first()
@@ -188,7 +193,7 @@ def visibility_signals(
     # V5 — the AI tracker's own presence figure, and share of voice over time.
     stats = (
         db.query(FactSerAiTrackerStats)
-        .filter(FactSerAiTrackerStats.client_id == client.id)
+        .filter(FactSerAiTrackerStats.client_id == client.id, FactSerAiTrackerStats.metric_date <= today)
         .order_by(FactSerAiTrackerStats.metric_date.desc())
         .first()
     )
@@ -205,7 +210,9 @@ def visibility_signals(
             or 0
         )
 
+    from app.services.decision_measurements import monthly_keyword_trend
     return VisibilitySignals(
+        monthly_keyword_trend=monthly_keyword_trend(db, client, today),
         priority_keywords=len(judged),
         priority_in_top_10=in_top_10,
         priority_group_set=bool(priority_terms),
@@ -220,9 +227,11 @@ def visibility_signals(
         ),
         impressions_28d=impressions(recent_start, recent_end),
         impressions_prior_28d=impressions(prior_start, prior_end),
-        priority_pages=len(declared_pages),
+        priority_pages=len(assessed_pages),
         priority_pages_without_reach=without_reach,
-        priority_pages_declared=bool(declared_pages),
+        priority_pages_declared=bool(assessed_pages),
+        page_reach_missing=("no target or conversion pages declared" if not declared_pages
+                            else "declared pages have no Watch List keyword mappings" if not assessed_pages else None),
         ai_mention_pct=(
             float(stats.mention_presence_pct)
             if stats and stats.mention_presence_pct is not None
@@ -235,32 +244,8 @@ def visibility_signals(
 def traffic_signals(
     db: Session, client: Client, *, today: date, gsc_period: tuple[date, date] | None
 ) -> TrafficSignals:
-    missed = actual = None
-    if gsc_period is not None:
-        rows = (
-            db.query(
-                func.sum(FactGscPage.impressions).label("impressions"),
-                func.sum(FactGscPage.clicks).label("clicks"),
-                func.avg(FactGscPage.average_position).label("position"),
-            )
-            .filter(
-                FactGscPage.client_id == client.id,
-                FactGscPage.date >= gsc_period[0],
-                FactGscPage.date <= gsc_period[1],
-            )
-            .group_by(FactGscPage.normalized_url)
-            .all()
-        )
-        missed = 0.0
-        actual = 0.0
-        for impressions, clicks, position in rows:
-            impressions = float(impressions or 0)
-            clicks = float(clicks or 0)
-            actual += clicks
-            if not impressions or position is None:
-                continue
-            expected = expected_ctr_percent(float(position)) / 100.0 * impressions
-            missed += max(0.0, expected - clicks)
+    from app.services.ctr_diagnostic import read as read_ctr
+    ctr = read_ctr(db, client.id, *(gsc_period or (today - timedelta(days=27), today)))
 
     recent_end = today
     recent_start = recent_end - timedelta(days=TREND_DAYS - 1)
@@ -283,9 +268,6 @@ def traffic_signals(
             .scalar()
         )
         return float(total) if total else None
-
-    sessions_now = _managed_sessions(db, client.id, recent_start, recent_end)
-    sessions_before = _managed_sessions(db, client.id, prior_start, prior_end)
 
     # T3 — engaged rate on managed sessions, and the client's own median.
     engaged_rate = None
@@ -324,13 +306,21 @@ def traffic_signals(
     if six_months and float(six_months[0] or 0) > 0:
         median_rate = float(six_months[1] or 0) / float(six_months[0]) * 100.0
 
+    # T0 uses all measured visits. T2 keeps an organic-search-only session
+    # comparison because its other half is Search Console impressions.
+    from app.services.decision_measurements import session_totals
+    all_now = session_totals(db, client.id, recent_start, recent_end)
+    all_before = session_totals(db, client.id, prior_start, prior_end)
+    organic_now = all_now["channels"].get("organic_search")
+    organic_before = all_before["channels"].get("organic_search")
     return TrafficSignals(
-        missed_clicks=missed,
-        actual_clicks=actual,
+        sessions=all_now["total"], prior_sessions=all_before["total"],
+        missed_clicks=ctr["missed_clicks"], actual_clicks=ctr["actual_clicks"],
+        ctr_context_matched=ctr["matched"], ctr_missing=ctr["missing"], ctr_evidence=ctr["evidence"],
         impressions_change_pct=change(
             impressions(recent_start, recent_end), impressions(prior_start, prior_end)
         ),
-        sessions_change_pct=change(sessions_now, sessions_before),
+        sessions_change_pct=change(organic_now, organic_before),
         engaged_rate=engaged_rate,
         engaged_rate_median=median_rate,
     )
@@ -471,17 +461,17 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
         days_in_month = calendar.monthrange(today.year, today.month)[1]
         goal_to_date = monthly_goal * today.day / days_in_month
 
-    lead_rate = None
-    if configured and leads_mtd is not None:
-        sessions = _managed_sessions(db, client.id, month_start, today)
-        if sessions:
-            lead_rate = leads_mtd / sessions * 100.0
+    # Rate numerator and denominator use the same all-channel scope and period.
+    from app.services.decision_measurements import measure
+    measured = measure(db, client, end=today)["leads"]
+    lead_rate = measured["rate_pct"]
 
-    baseline = getattr(client, "baseline_lead_rate_pct", None)
+    baseline = None  # Existing baselines use event counts, not converting sessions.
 
     tofu_share, next_step_blocked_by = _next_step(db, client, month_start, today)
 
     return LeadSignals(
+        target_lead_rate=measured["target_rate_pct"],
         conversions_configured=configured,
         leads_month_to_date=leads_mtd,
         goal_to_date=goal_to_date,

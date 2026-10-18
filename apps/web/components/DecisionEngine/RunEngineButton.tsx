@@ -4,13 +4,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { runMonthlyRecordAction } from "@/app/(app)/[clientSlug]/decision-engine/actions";
-import { monthName } from "@/lib/monthly-record";
+import { monthName, nextMonth, previousMonth } from "@/lib/monthly-record";
 
-/** The last `count` months, newest first, as `YYYY-MM`. */
-function recentMonths(from: string, count = 13): string[] {
+/** The last `count` finished months before `from`, newest first, as `YYYY-MM`. */
+function finishedMonths(from: string, count = 12): string[] {
   const [year, month] = from.split("-").map(Number);
   const out: string[] = [];
-  for (let i = 0; i < count; i += 1) {
+  for (let i = 1; i <= count; i += 1) {
     const d = new Date(Date.UTC(year, month - 1 - i, 1));
     out.push(
       `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`,
@@ -22,12 +22,16 @@ function recentMonths(from: string, count = 13): string[] {
 /**
  * Run a month, from the page that shows it.
  *
- * The month is a choice rather than "now", because a month is reviewed once
- * it has finished: the usual press is November asking for October. A finished
- * month is judged as of its last day, so its month-to-date measures cover the
- * whole month and not the few days elapsed in the month somebody is sitting
- * in. The button names the month it will replace before it replaces it.
+ * Only a finished month can be run: the engine needs the whole month's data,
+ * and the plan for this month is last month's run. The usual press is
+ * November asking for October. A finished month is judged as of its last day.
+ * The button names the month it will replace before it replaces it.
  */
+/** The run on screen if it is a finished month, otherwise the latest finished one. */
+function startingMonth(month: string, currentMonth: string): string {
+  return month < currentMonth ? month : previousMonth(currentMonth);
+}
+
 export function RunEngineButton({
   clientId,
   slug,
@@ -43,10 +47,10 @@ export function RunEngineButton({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState(month);
+  const [chosen, setChosen] = useState(startingMonth(month, currentMonth));
   const router = useRouter();
 
-  const months = recentMonths(currentMonth);
+  const months = finishedMonths(currentMonth);
 
   function run() {
     setError(null);
@@ -91,9 +95,8 @@ export function RunEngineButton({
         </button>
       </div>
       <p className="text-[11.5px] text-[var(--text-tertiary)]">
-        {chosen === currentMonth
-          ? "Runs to today, and replaces this month's saved record"
-          : `Runs all of ${monthName(chosen)}, and replaces its saved record`}
+        Runs all of {monthName(chosen)} and replaces its saved record. It becomes
+        the plan for {monthName(nextMonth(chosen))}.
       </p>
       {error ? (
         <p role="alert" className="max-w-[40ch] text-right text-[12px] text-[#B4441C]">

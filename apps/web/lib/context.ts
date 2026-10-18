@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { apiFetch, type Client } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import { clientHref, isClientUuid } from "@/lib/client-path";
-import { resolveStoredRange } from "@/lib/date-range";
+import { resolveQueryRange, resolveStoredRange } from "@/lib/date-range";
 
 export async function resolveClientId(
   searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>,
@@ -36,7 +36,9 @@ export async function resolveDateRange(
   if (fromQuery && toQuery) {
     // A shared or reloaded link carries the dates the range meant when it was
     // built, so re-resolve a relative one the same way the cookie is resolved.
-    return resolveStoredRange(rangeQuery, fromQuery, toQuery);
+    // Explicit shared-link dates are authoritative. Only an explicit relative
+    // preset may move them; legacy cookie recovery must not rewrite a URL.
+    return resolveQueryRange(rangeQuery, fromQuery, toQuery);
   }
 
   const cookieStore = await cookies();

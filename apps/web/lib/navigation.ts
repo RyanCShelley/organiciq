@@ -25,11 +25,8 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
       label: "Account",
       items: [
         { href: tool("dashboard"), label: "Dashboard", exact: true },
-        { href: tool("watch-list"), label: "Watch List" },
-        { href: tool("content-opp"), label: "Content Opp" },
         { href: tool("decision-engine"), label: "Decision Engine" },
         { href: tool("annotations"), label: "Completed work" },
-        { href: tool("site-crawl"), label: "Site crawl" },
         { href: settingsHref, label: "Client settings" },
       ],
     },
@@ -40,6 +37,7 @@ export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/clients", label: "All clients", exact: true },
   { href: "/platform/data-health", label: "Data health" },
   { href: "/platform/jobs", label: "Sync jobs" },
+  { href: "/platform/settings", label: "Settings" },
 ];
 
 //: The same list as ACCOUNT_TOOLS, re-exported rather than repeated. It

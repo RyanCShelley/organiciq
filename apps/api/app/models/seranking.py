@@ -113,6 +113,7 @@ class FactSerKeyword(Base):
     site_engine_id: Mapped[str] = mapped_column(String(64), nullable=False)
     keyword_id: Mapped[str] = mapped_column(String(64), nullable=False)
     keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    is_tracked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     group_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

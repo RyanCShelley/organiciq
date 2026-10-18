@@ -10,6 +10,7 @@
 export type TestStatus = "pass" | "fail" | "blocked";
 
 export type BranchTest = {
+  evidence?: Record<string, number | string | null>;
   id: string;
   name: string;
   metric_label: string;
@@ -32,6 +33,7 @@ export type BranchResult = {
 };
 
 export type RecordAction = {
+  family?: string;
   action_uid: string;
   slot: number;
   id: string;
@@ -49,6 +51,7 @@ export type RecordAction = {
   steps?: string[];
   metric: string;
   check_on: string;
+  check_after_days?: number;
   flags?: string[];
 };
 
@@ -60,6 +63,10 @@ export type Candidate = RecordAction & {
 };
 
 export type MonthlyRecord = {
+  measurements?: import("@/components/DecisionEngine/MeasurementSummary").Measurements;
+  review_required?: boolean;
+  recommendation_version?: number;
+  plan_review?: { approved_at: string | null };
   client: string;
   client_name?: string;
   domain?: string;
@@ -181,6 +188,8 @@ export const CONSTRAINT_LABEL: Record<string, string> = {
   leads: "Leads",
   visibility_expansion: "Visibility expansion",
   withheld: "Withheld",
+  continue_strategy: "Continue current strategy",
+  insufficient_evidence: "Insufficient evidence",
 };
 
 /** "October 2026" from "2026-10". */
@@ -192,6 +201,29 @@ export function monthName(month: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** "2026-11" from "2026-10". */
+export function nextMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** "2026-09" from "2026-10". */
+export function previousMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * The runs worth showing: months that have finished. A run needs the whole
+ * month's data, so the month we are standing in has no run yet (the plan for it
+ * is last month's run). A partial run saved before that rule is left out.
+ */
+export function finishedRuns<T extends { month: string }>(runs: T[], currentMonth: string): T[] {
+  return runs.filter((run) => run.month < currentMonth);
 }
 
 export function formatDay(iso: string | null | undefined): string {

@@ -43,6 +43,7 @@ def lead(**kw) -> PageCandidate:
     base = dict(
         url="/guide",
         sessions=200.0,
+        crawl_readable=True,
         stage="tofu",
         matched_offers=("/newsletter",),
         conversion_elements=2,
@@ -252,20 +253,8 @@ def test_t1_refuses_a_query_that_names_the_site():
     assert _t(traffic(**{**page.__dict__, "top_query_is_navigational": False})).action_id == "T-1"
 
 
-def test_an_offer_with_no_declared_stage_suits_any_reader():
-    """Every conversion page in the warehouse has a null stage.
-
-    Treating that as "matches nothing" meant `matched_offers` was empty for
-    every client, and no lead action could fire for anybody.
-    """
-    from app.services.page_signals import brand_terms, is_navigational  # noqa: F401
-
-    # A page that links only to the stageless offer is already routed.
+def test_an_unknown_existing_offer_is_not_assumed_wrong():
     assert _l(lead(linked_offer_stages=frozenset({"generic"}))) is None
-    # One that links nowhere still gets L-1, pointed at that offer.
-    found = _l(lead(matched_offers=("/contact",)))
-    assert found is not None and found.action_id == "L-1"
-    assert "/contact" in found.done_when
 
 
 def test_brand_terms_cover_the_domain_and_the_name():
@@ -310,3 +299,43 @@ def test_a_conversion_page_is_not_told_to_route_onward():
     # And it is never offered as its own destination.
     routed = lead(url="/", is_conversion_page=True, matched_offers=("/contact",))
     assert _l(routed) is None
+
+
+@pytest.mark.parametrize('sessions', [0, 1, 49])
+def test_lead_actions_do_not_spend_work_on_tiny_traffic(sessions):
+    from app.decisions.catalog import l1_route_to_the_next_step, l2_add_a_call_to_action, l3_match_the_offer_to_the_reader
+    page = lead(sessions=sessions, conversion_elements=0, linked_offer_stages=frozenset({'bofu'}))
+    for rule in (l1_route_to_the_next_step, l2_add_a_call_to_action, l3_match_the_offer_to_the_reader):
+        assert rule(page) is None
+
+
+def test_lead_actions_require_a_readable_crawl_and_exclude_utility_pages():
+    assert _l(lead(crawl_readable=False, conversion_elements=0)) is None
+    assert _l(lead(url='https://example.com/privacy-policy/', conversion_elements=0)) is None
+    assert _l(lead(sessions=50)).action_id == 'L-1'
+
+
+def test_unknown_destination_intent_does_not_justify_a_replacement():
+    assert _l(lead(linked_offer_stages=frozenset({'generic'}))) is None
+    assert _l(lead(stage='tofu', matched_offers=(), conversion_elements=0)) is None
+
+
+def test_loader_requires_declared_offer_intent_and_first_party_crawl(db, client_a):
+    from datetime import date, datetime, timezone
+    from app.models.config import ClientConversionPage, ClientPageStage, OrganicChannel
+    from app.models.ga4 import FactGa4Traffic
+    from app.models.crawl import FactCrawlPageSnapshot, CRAWL_SOURCE_FIRST_PARTY, CRAWL_SOURCE_SE_RANKING
+    from app.services.page_signals import load_page_candidates
+    today=date(2026,9,30); url='https://example.com/guide'; offer='https://example.com/contact'
+    db.add(FactGa4Traffic(client_id=client_a.id,date=today,raw_url=url,normalized_url=url,channel=OrganicChannel.ORGANIC_SEARCH,sessions=200))
+    db.add(ClientPageStage(client_id=client_a.id,normalized_url=url,stage='tofu',confirmed_at=datetime.now(timezone.utc)))
+    destination=ClientConversionPage(client_id=client_a.id,normalized_url=offer,label='Contact',stage=None)
+    db.add(destination)
+    for source in (CRAWL_SOURCE_FIRST_PARTY, CRAWL_SOURCE_SE_RANKING):
+        db.add(FactCrawlPageSnapshot(client_id=client_a.id,source=source,snapshot_date=today,raw_url=url,normalized_url=url,status_code=200,sections=[],conversion_elements=0))
+    db.commit()
+    page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
+    assert page.crawl_readable and page.matched_offers==() and _l(page) is None
+    destination.stage='mofu';db.flush()
+    page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
+    assert page.matched_offers==(offer,) and _l(page).action_id=='L-1'

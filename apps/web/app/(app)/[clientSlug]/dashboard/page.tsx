@@ -101,13 +101,14 @@ export default async function DashboardPage({
 
       {data ? (
         <div className="space-y-[30px]">
+          {data.effective_periods?.ga4?.current && data.effective_periods.ga4.current[1] !== to && <p className="text-sm text-[var(--text-secondary)]" role="status">GA4 data is available through {formatDateLabel(data.effective_periods.ga4.current[1])}. Comparisons use the same number of days in each period.</p>}
           <ProgressPanel baseline={data.baseline} editHref={clientId ? clientPath : null} />
 
           <section>
             <SectionHeader
               accent
               title="Conversions"
-              description="Lead events and lead rate from GA4 conversion definitions."
+              description="Lead events count outcomes. Lead conversion rate counts each visit producing a lead once."
               actions={
                 clientId ? (
                   <Link
@@ -135,7 +136,7 @@ export default async function DashboardPage({
 
             <div className="metric-grid">
               <MetricCard
-                label="Leads"
+                label="Lead events"
                 metric={
                   compare === "baseline" && baselineConfigured
                     ? data.baseline.vs_current.leads
@@ -145,15 +146,16 @@ export default async function DashboardPage({
                 showComparison={showComparison}
               />
               <MetricCard
-                label="Lead Rate"
-                metric={
-                  compare === "baseline" && baselineConfigured
-                    ? data.baseline.vs_current.lead_rate
-                    : data.conversions.lead_rate
-                }
+                label="Lead conversion rate"
+                metric={data.conversions.session_lead_rate}
                 unit="pct"
-                comparisonLabel={comparisonLabel}
-                showComparison={showComparison}
+                comparisonLabel="vs previous period"
+                showComparison={showComparison && compare !== "baseline"}
+                hint="Visits with at least one configured lead event ÷ matching GA4 visits. Each visit counts once."
+                footer={<p className="text-xs text-[var(--text-secondary)]">{data.conversions.session_measurement?.status === "measured"
+                  ? `${data.conversions.session_measurement.lead_sessions?.toLocaleString()} visits produced a lead / ${data.conversions.session_measurement.sessions?.toLocaleString()} visits · all channels`
+                  : data.conversions.session_measurement?.reason ?? "Visit-based rate not measured for this period"}
+                  {data.conversions.session_rate_target_pct == null ? " · Target not set" : ` · Target ${data.conversions.session_rate_target_pct}%`}</p>}
               />
               {data.conversions.period_lead_goal ? (
                 <Card className="flex h-full flex-col p-[18px_20px]">
@@ -166,6 +168,7 @@ export default async function DashboardPage({
                     </div>
                     <Sparkline
                       values={data.conversions.leads_series}
+                      direction={(data.conversions.goal_progress_pct ?? 0) >= 100 ? "up" : "flat"}
                       width={86}
                       height={30}
                     />
@@ -254,14 +257,14 @@ export default async function DashboardPage({
                     },
                     {
                       key: "lead_rate",
-                      header: "Lead rate",
+                      header: "Lead events / 100 visits",
                       sortValue: (row) => row.lead_rate,
                       align: "right",
                       render: (row) =>
                         row.lead_rate === null ? (
                           <span className="text-[var(--text-tertiary)]">—</span>
                         ) : (
-                          `${row.lead_rate.toFixed(2)}%`
+                          row.lead_rate.toFixed(2)
                         ),
                     },
                     {
@@ -424,10 +427,11 @@ export default async function DashboardPage({
               />
               <MetricCard
                 label="GA4 Sessions"
+                hint="The exact-period GA4 total is used when available. Detailed page/channel estimates can sum differently; baseline comparisons retain the original basis."
                 metric={
                   compare === "baseline" && baselineConfigured
                     ? data.baseline.vs_current.sessions
-                    : data.traffic.ga4_sessions
+                    : (data.traffic.ga4_reported_sessions?.current != null ? data.traffic.ga4_reported_sessions : data.traffic.ga4_sessions)
                 }
                 comparisonLabel={comparisonLabel}
                 showComparison={showComparison}
@@ -439,6 +443,16 @@ export default async function DashboardPage({
                 showComparison={showComparison}
               />
             </div>
+
+            {data.search_console_sources?.combined_history ? <div className="mt-4 rounded-lg border border-[var(--border)] p-4 text-sm">
+              <h3 className="font-semibold">Search Console · combined domain history</h3>
+              <p className="mt-1 text-[var(--text-secondary)]">Search totals include the domains below. Each source remains separate; these totals describe the migration history.</p>
+              <table className="mt-3 w-full text-left"><thead><tr><th>Property</th><th>Clicks</th><th>Impressions</th></tr></thead>
+                <tbody>{data.search_console_sources.properties.map(source => <tr key={source.property}>
+                  <td className="py-1">{source.property.replace("sc-domain:", "")}</td><td>{formatNum(source.clicks)}</td><td>{formatNum(source.impressions)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div> : null}
 
             {data.traffic.by_channel.length > 0 ? (
               <div className="mt-3.5">
@@ -544,7 +558,7 @@ export default async function DashboardPage({
                     },
                     {
                       key: "ga4_key_events",
-                      header: "Key events",
+                      header: "Lead events",
                       sortValue: (row) => row.ga4_key_events,
                       align: "right",
                       render: (row) =>
@@ -558,14 +572,14 @@ export default async function DashboardPage({
                     },
                     {
                       key: "session_key_event_rate",
-                      header: "Session → key event",
+                      header: "Lead events / 100 visits",
                       sortValue: (row) => row.session_key_event_rate,
                       align: "right",
                       render: (row) =>
                         row.session_key_event_rate === null ? (
                           <span className="text-[var(--text-tertiary)]">—</span>
                         ) : (
-                          `${row.session_key_event_rate.toFixed(2)}%`
+                          row.session_key_event_rate.toFixed(2)
                         ),
                     },
                     {

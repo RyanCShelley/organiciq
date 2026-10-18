@@ -345,3 +345,63 @@ def test_fetch_maps_competitor_metrics_by_domain(db, client_a, monkeypatch):
     assert by_id["101"].visibility == Decimal("57.01")
     assert by_id["102"].visibility == Decimal("16.26")
     get_settings.cache_clear()
+
+
+def test_historical_backfill_does_not_backdate_current_site_summary(db, client_a, monkeypatch):
+    from contextlib import ExitStack
+    from app.ingestion.seranking.fetch import fetch_seranking_search
+    from app.models.seranking import StagingSerSiteSummary
+    monkeypatch.setenv("SE_RANKING_API_KEY", "test-key")
+    get_settings.cache_clear()
+    _connect_ser(db, client_a)
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="se_ranking_search",
+        start_date=date(2026, 1, 1), end_date=date(2026, 1, 31), status=SyncJobStatus.QUEUED)
+    db.add(job)
+    db.commit()
+    with ExitStack() as stack:
+        for method in ("list_search_engines", "list_keyword_groups", "list_keywords", "list_positions", "list_competitors"):
+            stack.enter_context(patch(f"app.ingestion.seranking.fetch.ser_client.{method}", return_value=[]))
+        stack.enter_context(patch("app.ingestion.seranking.fetch.ser_client.site_summary", return_value={"visibility_percent": 12}))
+        fetch_seranking_search(db, job)
+    row = db.query(StagingSerSiteSummary).filter_by(job_id=job.id).one()
+    assert row.metric_date == date.today()
+    assert row.metric_date != job.end_date
+    get_settings.cache_clear()
+
+
+def test_ranking_urls_use_only_landing_page_evidence_available_at_the_check_date():
+    from app.ingestion.seranking.fetch import _flatten_positions
+    rows=_flatten_positions([{'site_engine_id':'e','keywords':[{'id':'k','name':'service',
+        'landing_pages':[{'url':'https://example.com/old','date':'2026-08-17'},{'url':'https://example.com/new','date':'2026-10-01'}],
+        'positions':[{'date':'2026-08-01','pos':2},{'date':'2026-09-30','pos':3},{'date':'2026-10-02','pos':1},{'date':'2026-10-03','pos':0}]}]}],'e')
+    assert [r['ranking_url'] for r in rows]==[None,'https://example.com/old','https://example.com/new',None]
+
+
+def test_catalog_refresh_retires_terms_without_deleting_history(db, client_a, client_b):
+    start, end = _window(2)
+    job = SyncJob(client_id=client_a.id, source="se_ranking_search", start_date=start,
+                  end_date=end, status=SyncJobStatus.QUEUED)
+    db.add(job)
+    db.flush()
+    for owner, engine, term in [(client_a, "one", "keep"), (client_a, "one", "retire"),
+                                (client_a, "two", "other engine"), (client_b, "one", "other client")]:
+        db.add(FactSerKeyword(client_id=owner.id, site_engine_id=engine, keyword_id=term,
+                              keyword=term, is_tracked=True))
+    db.add(FactSerRanking(client_id=client_a.id, site_engine_id="one", keyword_id="retire",
+                          keyword="retire", date=end, position=7))
+    db.add(StagingSerKeyword(job_id=job.id, client_id=client_a.id, raw={},
+                             site_engine_id="one", keyword_id="keep", keyword="keep"))
+    db.flush()
+    publish_seranking_search(db, job)
+    db.expire_all()
+    tracked = {(str(row.client_id), row.keyword): row.is_tracked for row in db.query(FactSerKeyword)}
+    assert tracked[(str(client_a.id), "keep")] is True
+    assert tracked[(str(client_a.id), "retire")] is False
+    assert tracked[(str(client_a.id), "other engine")] is True
+    assert tracked[(str(client_b.id), "other client")] is True
+    assert db.query(FactSerRanking).filter_by(client_id=client_a.id, keyword="retire").count() == 1
+    # No catalog is not evidence that the tracker removed everything.
+    db.query(StagingSerKeyword).filter_by(job_id=job.id).delete()
+    publish_seranking_search(db, job)
+    db.expire_all()
+    assert db.query(FactSerKeyword).filter_by(client_id=client_a.id, keyword="keep").one().is_tracked is True

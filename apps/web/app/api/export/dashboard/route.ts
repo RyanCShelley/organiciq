@@ -34,7 +34,9 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       headers: METRIC_HEADERS,
       rows: [
         metricRow("Leads", conversions.leads),
-        metricRow("Lead rate %", conversions.lead_rate),
+        metricRow("Lead event rate per 100 visits (legacy)", conversions.lead_rate),
+        metricRow("Lead conversion rate % (visits with a lead)", conversions.session_lead_rate ?? {current:null,previous:null,change_pct:null,series:[]}),
+        metricRow("Visits producing a lead", conversions.lead_sessions ?? {current:null,previous:null,change_pct:null,series:[]}),
         ["Monthly lead goal", conversions.monthly_lead_goal ?? "", "", ""],
         ["Period lead goal", conversions.period_lead_goal ?? "", "", ""],
         ["Goal period days", conversions.goal_period_days ?? "", "", ""],
@@ -43,7 +45,7 @@ function buildSections(data: DashboardResponse): CsvSection[] {
     },
     {
       title: "Leads by channel",
-      headers: ["Channel", "Leads", "Sessions", "Lead rate %", "% of period goal"],
+      headers: ["Channel", "Leads", "Sessions", "Lead events per 100 visits", "% of period goal"],
       rows: conversions.leads_by_channel.map((row) => [
         row.label,
         row.leads,
@@ -79,7 +81,7 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       rows: [
         metricRow("GSC clicks", traffic.gsc_clicks),
         metricRow("GSC CTR %", traffic.gsc_ctr),
-        metricRow("GA4 sessions", traffic.ga4_sessions),
+        metricRow("GA4 sessions (landing-row sum)", traffic.ga4_sessions),
         metricRow("GA4 views", traffic.ga4_views),
       ],
     },
@@ -99,8 +101,8 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       headers: [
         "Page",
         "Sessions",
-        "Key events",
-        "Session to key event %",
+        "Lead events",
+        "Lead events per 100 visits",
         "Views",
         "GSC impressions",
         "GSC clicks",
@@ -125,7 +127,7 @@ function buildSections(data: DashboardResponse): CsvSection[] {
         ["Tier", baseline.tier_name ?? ""],
         ["Monthly sessions", baseline.monthly_sessions ?? ""],
         ["Monthly leads", baseline.monthly_leads ?? ""],
-        ["Lead rate %", baseline.lead_rate ?? ""],
+        ["Lead events per 100 visits", baseline.lead_rate ?? ""],
       ],
     },
     {
@@ -134,7 +136,7 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       rows: [
         metricRow("Monthly sessions", baseline.vs_current.sessions),
         metricRow("Monthly leads", baseline.vs_current.leads),
-        metricRow("Lead rate %", baseline.vs_current.lead_rate),
+        metricRow("Lead events per 100 visits", baseline.vs_current.lead_rate),
       ],
     },
   ];

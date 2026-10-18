@@ -291,44 +291,52 @@ class AnnotationImportResponse(BaseModel):
     errors: list[dict]
 
 
-class BaselineSnapshotApplyRequest(BaseModel):
-    monthly_lead_goal: int | None = None
-    lead_goal_overrides: dict | None = None
-    notes: str | None = None
-    # Window anchor. Defaults to the GA4 watermark when omitted.
+class BaselineSeriesCsvRequest(BaseModel):
+    """A monthly series pasted as CSV. Nothing is stored."""
+
+    csv_text: str = Field(min_length=1, max_length=200_000)
+    regime_start: str | None = None
+    #: The last day the data covers; a month it falls in is left out as unfinished.
     as_of: Date | None = None
-    lookback_days: int = 90
+    half_life_months: float = Field(default=3.0, ge=0.5, le=24)
+    acknowledged: list[str] = []
 
 
-class BaselineCheckpointOut(BaseModel):
-    label: str
-    month: int
-    monthly_sessions: float
-    lead_rate_pct: float
-    monthly_leads: float
+class BaselineLockRequest(BaseModel):
+    """Freeze a baseline. The numbers are recomputed from the source, never taken from here."""
+
+    source: str = "ga4"
+    csv_text: str | None = Field(default=None, max_length=200_000)
+    as_of: Date | None = None
+    months: int = Field(default=24, ge=6, le=48)
+    regime_start: str | None = None
+    lead_events: list[str] = []
+    half_life_months: float = Field(default=3.0, ge=0.5, le=24)
+    acknowledged: list[str] = []
+    reason_code: str | None = None
+    reason_note: str | None = Field(default=None, max_length=2000)
+    #: The plan-end goal. Absent means the 12-month figure from this baseline's own projection.
+    monthly_lead_goal: int | None = Field(default=None, ge=0)
+    target_lead_rate_pct: float | None = Field(default=None, gt=0, le=100)
+    #: Agree to make the chosen events the client's lead conversions, which the home
+    #: screen, alerts and results count, when they differ from what is set now.
+    sync_lead_conversions: bool = False
 
 
-class BaselineSnapshotPreviewOut(BaseModel):
-    ready: bool
-    window: dict
-    lead_events: list[str]
-    tier_name: str | None
-    plan: str
-    plan_label: str
-    period_sessions: float
-    period_leads: int
-    baseline_as_of: str
-    baseline_monthly_sessions: int
-    baseline_monthly_leads: int
-    baseline_lead_rate_pct: float | None
-    baseline_source: str
-    suggested_monthly_lead_goal: int
-    projection_generated_on: str | None = None
-    goal_horizon_months: int
-    checkpoints: list[BaselineCheckpointOut]
-    disclaimer: str
-    current_monthly_lead_goal: int | None = None
-    applied_monthly_lead_goal: int | None = None
+class BaselineResetRequest(BaseModel):
+    """Wipe baselines and goals. `confirm` must be exactly RESET."""
+
+    confirm: str
+    #: Leave empty to reset every client.
+    client_ids: list[UUID] = []
+
+
+class BaselineGoalRequest(BaseModel):
+    monthly_lead_goal: int = Field(ge=0)
+
+
+class BaselineLeadConversionsRequest(BaseModel):
+    lead_events: list[str] = Field(min_length=1)
 
 
 class IntegrationCreate(BaseModel):
@@ -505,7 +513,7 @@ class PageStageIn(BaseModel):
 
 
 class MonthlyRunRequest(BaseModel):
-    """Which month to run. Absent means the one we are in, to date."""
+    """Which finished month to run. Absent means last month."""
 
     month: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$")
 

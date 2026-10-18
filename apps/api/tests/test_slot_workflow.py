@@ -220,7 +220,7 @@ def test_marking_shipped_records_the_day_the_work_went_live(
     assert shipped.status_code == 200
     assert shipped.json()["shipped_on"] == "2026-10-14"
     # A planned slot that shipped is no longer planned.
-    assert shipped.json()["status"] == "assigned"
+    assert shipped.json()["status"] == "done"
 
     cleared = client.post(
         f"/decisions/records/{MONTH}/slots/{uid}/shipped",

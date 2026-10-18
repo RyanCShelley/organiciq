@@ -126,3 +126,8 @@ export function formatDateLabel(iso: string): string {
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+
+/** A shared URL is a fixed period unless it explicitly names a relative preset. */
+export function resolveQueryRange(range: string | undefined, from: string, to: string): {from: string; to: string} {
+  return resolveStoredRange(range ?? "custom", from, to);
+}

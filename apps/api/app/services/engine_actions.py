@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,9 @@ class RecordSlot:
     metric: str | None
     check_on: str | None
     effort_min: int | None
+    steps: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+    check_after_days: int | None = None
 
 
 def slots_in_record(record: dict) -> dict[str, RecordSlot]:
@@ -80,6 +83,9 @@ def slots_in_record(record: dict) -> dict[str, RecordSlot]:
                 metric=row.get("metric"),
                 check_on=row.get("check_on"),
                 effort_min=row.get("effort_min"),
+                steps=tuple(row.get("steps") or []),
+                evidence=tuple(row.get("evidence") or []),
+                check_after_days=row.get("check_after_days"),
             )
     return out
 
@@ -285,9 +291,23 @@ def mark_shipped(
     Clearing it is allowed: somebody marks the wrong slot eventually.
     """
     row = _row_for(db, client, month, slot)
+    if on != row.shipped_on:
+        row.after_value = None
+        row.result = None
+        row.before_value = None
+        if on is not None:
+            from app.services.results import measure, metric_key_for
+            from app.services.plan_review import workflow_record
+            record = load_record(db, client, month)
+            data = workflow_record(record.record) if record else {}
+            action = next((a for key in ("actions", "updates", "new_content", "candidates")
+                           for a in data.get(key, []) if a.get("action_uid") == slot.uid), {})
+            reading = measure(db, client, metric_key_for(action),
+                              url=slot.target_url, term=action.get("term"),
+                              as_of=on - timedelta(days=1))
+            row.before_value = reading.value
     row.shipped_on = on
-    if on is not None and row.status == "planned":
-        row.status = "assigned"
+    row.status = "done" if on is not None else ("assigned" if row.assignee_email else "planned")
     row.action_id = slot.action_id
     row.target_url = slot.target_url
     _log_shipped(db, client, slot, row, on=on)

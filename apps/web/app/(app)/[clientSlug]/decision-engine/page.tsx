@@ -1,21 +1,29 @@
+import { dataGapGuidance } from "@/lib/data-gap-guidance";
+import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import {
   ConstraintCard,
   type SlotProgress,
 } from "@/components/DecisionEngine/ConstraintCard";
+import { HistoricalRuns } from "@/components/DecisionEngine/HistoricalRuns";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
-import { OptionsPanel } from "@/components/DecisionEngine/OptionsPanel";
+import { PlanReviewState, ApprovedWork } from "@/components/DecisionEngine/PlanReviewState";
+import { MonthlyReviewOverview } from "@/components/DecisionEngine/MonthlyReviewOverview";
+import { PlanReviewPanel } from "@/components/DecisionEngine/PlanReviewPanel";
+import { actionCount, type PlanReview } from "@/lib/plan-review";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch } from "@/lib/api";
-import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import {
   BRANCH_LABEL,
+  finishedRuns,
   formatDay,
   monthName,
+  nextMonth,
+  previousMonth,
   type Assignee,
   type Candidate,
   type MonthlyRecord,
@@ -24,7 +32,6 @@ import {
   type Workflow,
 } from "@/lib/monthly-record";
 import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
-import { withNavContext } from "@/lib/navigation";
 
 export default async function DecisionEnginePage({
   params,
@@ -60,7 +67,10 @@ export default async function DecisionEnginePage({
   );
 
   try {
-    runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
+    runs = finishedRuns(
+      await apiFetch<RunSummary[]>("/decisions/records", { clientId }),
+      currentMonth,
+    );
     const month = wanted ?? runs[0]?.month;
     if (month) {
       record = await apiFetch<MonthlyRecord>(
@@ -73,6 +83,10 @@ export default async function DecisionEnginePage({
   }
 
   const canRun = await canRunPromise;
+  const review = record ? await apiFetch<PlanReview>(
+    `/decisions/records/${encodeURIComponent(record.month)}/review`, { clientId },
+  ).catch(() => null) : null;
+  const measurementSettings = await apiFetch<{ target_lead_rate_pct: number | null; conversion_page_count: number }>("/decisions/measurement-settings", { clientId }).catch(() => null);
 
   // The workflow is fetched apart from the record for the same reason it is
   // stored apart: assigning a task must not be able to change what the engine
@@ -101,24 +115,10 @@ export default async function DecisionEnginePage({
     }
   }
 
-  // Content opportunities still works in date ranges, so it is handed the
-  // window this run actually covered rather than a window nobody chose.
-  const windowFrom = record ? `${record.month}-01` : "";
-  const windowTo = record?.data_through ?? windowFrom;
-  const contentOppHref = withNavContext(
-    accountToolHref(selectedClient.slug, "content-opp"),
-    clientId,
-    windowFrom,
-    windowTo,
-  );
-
   if (error) {
     return (
       <section>
-        <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black tracking-[-0.02em]">
-          Decision engine
-        </h1>
-        <Alert variant="danger" className="mt-4">
+        <Alert variant="danger">
           {error}
         </Alert>
       </section>
@@ -128,20 +128,18 @@ export default async function DecisionEnginePage({
   if (!record) {
     return (
       <section>
-        <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black tracking-[-0.02em]">
-          Decision engine
-        </h1>
-        <p className="mt-3 max-w-[70ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
+        <p className="max-w-[70ch] text-[14.5px] leading-relaxed text-[var(--text-secondary)]">
           No saved run for {selectedClient.client_name ?? selectedClient.slug} yet.
-          The engine runs monthly and saves a record; this page renders it rather
-          than recomputing, so there is nothing to show until the first run.
+          The engine reads a whole finished month and saves a record, and that record is
+          the plan for the month after. It runs on the {5}th for the month before; this
+          page renders the saved run rather than recomputing it.
         </p>
         {canRun ? (
           <div className="mt-4 flex">
             <RunEngineButton
               clientId={clientId}
               slug={selectedClient.slug}
-              month={currentMonth}
+              month={previousMonth(currentMonth)}
               currentMonth={currentMonth}
             />
           </div>
@@ -163,7 +161,7 @@ export default async function DecisionEnginePage({
   });
   // Fall back to the saved actions for a record written before candidates
   // were stored, so an older month still renders its plan.
-  const actions = candidates.length ? planned : record.actions;
+  const actions = record.plan_review ? record.actions : candidates.length ? planned : record.actions;
   const added = planned.filter((c) => !engineChose.has(c.action_uid)).length;
   const removed = candidates.filter(
     (c) => engineChose.has(c.action_uid) && slotStates.get(c.action_uid)?.in_plan === false,
@@ -171,65 +169,56 @@ export default async function DecisionEnginePage({
 
   // Counted from what the team did, not from what the engine prescribed:
   // five filled slots nobody owns is not five slots of progress.
-  const states = actions.map((a) => slotStates.get(a.action_uid)?.status);
+  const weighted = (statuses: string[]) => actions.filter(a => statuses.includes(slotStates.get(a.action_uid)?.status ?? "")).reduce((n, a) => n + (record.plan_review ? actionCount([a]) : 1), 0);
   const progress: SlotProgress = {
     total: record.action_slots,
-    filled: actions.length,
-    assigned: states.filter((s) => s === "assigned" || s === "done").length,
-    skipped: states.filter((s) => s === "skipped").length,
+    filled: record.plan_review ? actionCount(actions) : actions.length,
+    assigned: weighted(["assigned", "done"]),
+    skipped: weighted(["skipped"]),
   };
 
   const withheld = record.constraint === "withheld";
   const assignable = record.actions.length + record.incidents.length;
 
   return (
-    <section className="space-y-[var(--section-gap)]">
+    <PlanReviewState key={`${record.month}-${review?.revision ?? 0}`}><section className="space-y-[var(--section-gap)]">
       {/* The run is a saved thing with a date, not a window somebody picked.
-          The date picker that stood here invited a reader to ask for a range
-          the engine never ran, and then recomputed one on the spot. */}
+          It reads a whole finished month and is the plan for the month after,
+          so the title block says both. The page title is already in the top bar. */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-[30px] font-black leading-tight tracking-[-0.02em] text-[var(--text-primary)]">
-            Decision engine
-          </h1>
+          <h2 className="font-[family-name:var(--font-display)] text-[22px] font-extrabold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
+            Plan for {monthName(nextMonth(record.month))}
+          </h2>
           <p className="mt-1.5 text-[13.5px] text-[var(--text-secondary)]">
-            {monthName(record.month)} run · saved {formatDay(record.run_saved_at)} from
+            Run on {monthName(record.month)} data · saved {formatDay(record.run_saved_at)} from
             data through {formatDay(record.data_through)}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4">
-        {runs.length > 1 ? (
-          <nav aria-label="Saved runs" className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-[var(--text-tertiary)]">Run</span>
-            {runs.slice(0, 6).map((run) => (
-              <Link
-                key={run.month}
-                href={`?run=${run.month}`}
-                aria-current={run.month === record.month ? "page" : undefined}
-                className={`min-h-[36px] rounded-lg border px-3 py-1.5 text-[13px] no-underline ${
-                  run.month === record.month
-                    ? "border-[var(--brand-teal-deep)] font-semibold text-[var(--text-primary)]"
-                    : "border-[var(--border)] text-[var(--text-secondary)]"
-                }`}
-              >
-                {monthName(run.month)}
-              </Link>
-            ))}
-          </nav>
-        ) : null}
-        {canRun ? (
-          <RunEngineButton
-            clientId={clientId}
-            slug={selectedClient.slug}
-            month={record.month}
-            currentMonth={currentMonth}
-          />
-        ) : null}
-        </div>
+        <details className="text-sm"><summary className="cursor-pointer">Assessment history & controls</summary><div className="mt-3 flex flex-wrap items-center gap-4">
+          {runs.length > 1 ? (
+            <HistoricalRuns slug={selectedClient.slug} runs={runs} selected={record.month} />
+          ) : null}
+          {canRun ? (
+            <RunEngineButton
+              clientId={clientId}
+              slug={selectedClient.slug}
+              month={record.month}
+              currentMonth={currentMonth}
+            />
+          ) : null}
+        </div></details>
       </div>
 
-      <ConstraintCard record={record} progress={progress} />
+      {(record.recommendation_version ?? 1) < 3 ? <Alert variant="warning">
+        These recommendations were saved under earlier rules. Re-run this month’s assessment under Assessment history &amp; controls before choosing new work. Updated rules check traffic, offer fit and crawl evidence, and exclude exact-phrase-only title tasks. Existing approved work stays in its history.
+      </Alert> : null}
+      <MonthlyReviewOverview record={record} targetRate={measurementSettings?.target_lead_rate_pct ?? null} suggestedFocus={review?.suggested_focus ?? record.engine_constraint ?? record.constraint} />
+      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Explore the evidence · keywords, channels, lead rate and calculation details</summary><div className="mt-4">
+      <ConstraintCard record={record} progress={progress} measurementSettings={measurementSettings ? { clientId, slug: selectedClient.slug, target: measurementSettings.target_lead_rate_pct } : undefined} />
+      </div></details>
+      {review ? <PlanReviewPanel key={`${record.month}-${record.run_saved_at}-${review.revision}`} initial={review} lockedUids={actions.filter(a => { const state = slotStates.get(a.action_uid); return Boolean(state?.assignee_email || state?.sent_at || state?.shipped_on); }).map(a => a.action_uid)} clientId={clientId} slug={selectedClient.slug} month={record.month} /> : <Alert variant="danger">Plan review could not load. Reload before editing this plan.</Alert>}
 
       {/* Above the plan, because a plan read as if the site were working is
           worse than no plan. An incident takes no slot and does not change
@@ -240,18 +229,19 @@ export default async function DecisionEnginePage({
             id="incidents-heading"
             className="font-[family-name:var(--font-display)] text-[18px] font-extrabold text-[var(--text-primary)]"
           >
-            Fix before anything else
+            Check before anything else
           </h2>
           {record.incidents.map((incident) => (
             <article
               key={incident.incident_uid}
-              className="rounded-[var(--radius-lg,14px)] border-2 border-[#B4441C] bg-[#FDF4F0] px-6 py-5"
+              className="rounded-[var(--radius-lg,14px)] border-2 border-[#E3B25C] bg-[#FFF8E6] px-6 py-5"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-[#B4441C] px-2.5 py-0.5 text-[11.5px] font-semibold text-white">
-                  Incident
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F5D58A] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#6B4A00]">
+                  <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                  Caution
                 </span>
-                <span className="text-[11.5px] font-semibold text-[#8E3414]">
+                <span className="text-[11.5px] font-semibold text-[#8A4B08]">
                   {incident.scope} · no slot used
                 </span>
               </div>
@@ -284,15 +274,15 @@ export default async function DecisionEnginePage({
         <Alert variant="danger">
           Nothing is prescribed this month. {record.reason_text}
         </Alert>
-      ) : (
-        <>
+      ) : record.plan_review?.approved_at ? (
+        <ApprovedWork><details className="rounded-xl border border-[var(--border)] p-5"><summary className="cursor-pointer font-semibold">Approved work · assignment and Teamwork</summary><div className="mt-4 space-y-4">
           <section aria-labelledby="plan-heading" className="space-y-3">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2
                 id="plan-heading"
                 className="font-[family-name:var(--font-display)] text-[18px] font-extrabold text-[var(--text-primary)]"
               >
-                Growth actions to assign
+                4. Assign and send to Teamwork
               </h2>
               {/* One rule, stated once. The old screen had three orderings
                   on the same page and told the reader none of them was
@@ -300,8 +290,7 @@ export default async function DecisionEnginePage({
               <p className="text-[13px] text-[var(--text-secondary)]">
                 <span className="capitalize">{record.plan}</span> plan:{" "}
                 {record.action_slots}{" "}
-                {record.action_slots === 1 ? "slot" : "slots"}, filled from the
-                constraint. Leftovers go to the next failing branch.
+                {record.action_slots === 1 ? "action" : "actions"}. Your selected work is ready for assignment and delivery.
                 {added || removed ? (
                   <span className="ml-1 font-semibold text-[var(--text-primary)]">
                     {added ? `${added} added` : ""}
@@ -326,6 +315,7 @@ export default async function DecisionEnginePage({
                   slug={selectedClient.slug}
                   month={record.month}
                   teamworkReady={teamworkReady}
+                  approved={Boolean(record.plan_review?.approved_at)}
                 />
               </SlotCard>
             ))}
@@ -340,16 +330,6 @@ export default async function DecisionEnginePage({
             ) : null}
           </section>
 
-          {candidates.length > 0 ? (
-            <OptionsPanel
-              candidates={candidates}
-              states={slotStates}
-              clientId={clientId}
-              slug={selectedClient.slug}
-              month={record.month}
-            />
-          ) : null}
-
           {record.not_this_month.length > 0 ? (
             <section
               aria-labelledby="later-heading"
@@ -363,7 +343,7 @@ export default async function DecisionEnginePage({
                   Not this month
                 </h2>
                 <p className="text-[13px] text-[var(--text-tertiary)]">
-                  Kept for when its branch fails or a slot opens
+                  Kept for when its branch becomes the focus or a slot opens
                 </p>
               </div>
               <ul className="mt-2">
@@ -396,8 +376,10 @@ export default async function DecisionEnginePage({
               ) : null}
             </section>
           ) : null}
-        </>
-      )}
+        </div></details></ApprovedWork>
+      ) : null}
+
+      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Supporting information · previous results and data gaps</summary><div className="mt-4 space-y-5">
 
       <div className="grid gap-4 md:grid-cols-2">
         <section
@@ -411,8 +393,8 @@ export default async function DecisionEnginePage({
             Last month&rsquo;s results
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            Each action is checked 28 to 45 days after it ships, on the metric it
-            was meant to move.
+            Approved work is checked after its recorded shipment and chosen waiting period.
+            Manual verification stays separate from automated metric checks.
           </p>
           <PreviousResults
             rows={record.previous_results.filter(
@@ -433,33 +415,28 @@ export default async function DecisionEnginePage({
             Data that limited this run
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            Rules needing these did not fire. Fixing them raises confidence.
+            These limits describe the saved assessment. Current setup is checked separately below; rerun the assessment to use changed settings. History and reference limits do not mean the site needs fixing.
           </p>
           {record.data_gaps.length === 0 ? (
             <p className="mt-3 text-[13px] text-[var(--text-tertiary)]">
               Nothing was missing.
             </p>
           ) : (
-            <ul className="mt-3 flex flex-wrap gap-2">
-              {record.data_gaps.map((gap) => (
-                <li
-                  key={gap.input}
-                  className="rounded-full bg-[#FDF1E3] px-3 py-1 text-[12px] font-medium text-[#8A4B08]"
-                >
-                  {gap.input}
-                </li>
-              ))}
+            <ul className="mt-3 space-y-3">
+              {record.data_gaps.map(gap => {
+                const guidance = dataGapGuidance(gap.input, measurementSettings ?? undefined);
+                return <li key={gap.input} className="rounded-lg border border-[var(--border)] p-3 text-sm">
+                  <p className="font-semibold">{guidance.title} <span className="text-xs font-normal text-[var(--text-secondary)]">· {guidance.kind}</span></p>
+                  <p className="mt-1 text-[var(--text-secondary)]">{guidance.next}</p>
+                  {guidance.tool && <Link className="mt-2 inline-block underline" href={`/clients/${selectedClient.slug}`}>Open client setup</Link>}
+                </li>;
+              })}
             </ul>
           )}
         </section>
       </div>
 
-      <Link
-        href={contentOppHref}
-        className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 text-[13.5px] font-semibold no-underline"
-      >
-        See content opportunities
-      </Link>
-    </section>
+      </div></details>
+    </section></PlanReviewState>
   );
 }

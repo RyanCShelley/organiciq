@@ -18,6 +18,7 @@ from app.models.config import (
 from app.models.integration import Integration
 from app.models.job import SyncJob
 from app.models.user import User, UserClient, UserRole
+from app.services import baseline_reset, engine_input_coverage
 from app.services.ga4_event_candidates import load_event_candidates
 from app.services.data_health import (
     WATERMARK_SOURCES,
@@ -25,6 +26,7 @@ from app.services.data_health import (
     load_client_data_health,
 )
 from app.schemas import (
+    BaselineResetRequest,
     ClientTeamMemberOut,
     ChannelRuleOut,
     ConversionDefinitionCreate,
@@ -570,3 +572,39 @@ def unassign_user_client(
         db.delete(link)
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/engine-input-coverage")
+def engine_input_coverage_report(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Per client: which mapped pages the engine can read, and which saved actions rest on one it could not. Changes nothing."""
+    return engine_input_coverage.report(db)
+
+
+@router.get("/baselines/reset-preview")
+def baseline_reset_preview(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Which clients have a baseline or goal that a reset would clear. Changes nothing."""
+    return baseline_reset.preview(db)
+
+
+@router.post("/baselines/reset")
+def baseline_reset_run(
+    payload: BaselineResetRequest,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Clear baselines and goals (all clients, or those listed) so they can be re-baselined.
+
+    Admin only, irreversible, and it returns everything it removed so a copy can be kept.
+    """
+    if payload.confirm != baseline_reset.CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Type {baseline_reset.CONFIRMATION} to confirm. Nothing was changed.",
+        )
+    return baseline_reset.reset(db, payload.client_ids or None)

@@ -116,3 +116,17 @@ class FactGa4Event(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Ga4LeadMeasurement(Base):
+    """Exact-period provider measurement, versioned by its selected-lead scope."""
+    __tablename__ = "ga4_lead_measurements"
+    __table_args__ = (UniqueConstraint("client_id", "start_date", "end_date", "definition_key", name="uq_ga4_lead_measurement_scope"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False, index=True)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    definition_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    measurement: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

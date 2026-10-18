@@ -136,6 +136,15 @@ def _flatten_positions(payload: Any, default_engine_id: str | None) -> list[dict
     """Normalize SE Ranking positions payloads into flat rows."""
     rows: list[dict[str, Any]] = []
 
+    def landing_url(keyword, observed_on):
+        if observed_on is None:
+            return None
+        eligible = [(d, page.get("url") or page.get("ascii_url"))
+            for page in (keyword.get("landing_pages") or []) if isinstance(page, dict)
+            if (d := _as_date(page.get("date"))) is not None and d <= observed_on
+            and (page.get("url") or page.get("ascii_url"))]
+        return max(eligible, key=lambda row: row[0])[1] if eligible else None
+
     def add_row(item: dict[str, Any], engine_id: str | None, keyword_id: str | None, keyword: str | None) -> None:
         pos_date = _as_date(item.get("date") or item.get("check_date"))
         position = _as_decimal(item.get("pos") if "pos" in item else item.get("position"))
@@ -176,6 +185,8 @@ def _flatten_positions(payload: Any, default_engine_id: str | None) -> list[dict
                                 add_row(p, engine_id, keyword_id, keyword or _as_str(p.get("name")))
                                 if keyword_volume is not None and rows[-1]["volume"] is None:
                                     rows[-1]["volume"] = keyword_volume
+                                if rows[-1]["ranking_url"] is None and rows[-1]["position"] is not None and 0 < rows[-1]["position"] <= 100:
+                                    rows[-1]["ranking_url"] = landing_url(kw, rows[-1]["date"])
                 continue
 
             keyword_id = _as_str(item.get("keyword_id") or item.get("id"))
@@ -383,7 +394,9 @@ def fetch_seranking_search(db: Session, job: SyncJob) -> tuple[int, int, int, in
     except Exception:  # noqa: BLE001 — summary optional; do not fail whole sync
         summary_payload = {}
     if isinstance(summary_payload, dict) and summary_payload:
-        metric_date = job.end_date
+        # This endpoint is a current snapshot, even during a historical backfill.
+        # Stamping the requested end date would invent historical visibility.
+        metric_date = date.today()
         db.add(
             StagingSerSiteSummary(
                 job_id=job.id,

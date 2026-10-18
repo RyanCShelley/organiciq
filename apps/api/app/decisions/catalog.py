@@ -1,23 +1,15 @@
-"""The action catalog: what to actually do about a scored target.
+"""Evidence-based growth actions with stable rule identities.
 
-Twelve actions with stable ids. Within a branch, the first action whose
-trigger fires for a target is the one prescribed — so a page missing the term
-from its title gets V-1 rather than V-4, because putting the term on the page
-comes before pointing links at it.
-
-Every action names a page, says what "done" looks like, and carries the
-metric it will be judged on and when. "Improve the content" is the sentence
-this module exists to stop producing: a prescription nobody can tell you have
-finished is a prescription nobody finishes.
-
-Two of the twelve cannot fire yet. V-5 and T-2 both need the full SERP
-feature list — which features a query shows, not just the ones the client
-already holds — and that is a pull we do not make. They are defined here with
-their trigger and skipped with a named reason, so the gap is visible on the
-page rather than being an action that silently never appears.
+Automatic actions use the active catalogs below. Legacy rule functions remain
+available for historical records and explicit evaluation; their existence does
+not make them automatic recommendations. Missing exact wording or optional
+entity properties alone does not establish an actionable gap.
 """
 
 from __future__ import annotations
+
+import re
+import unicodedata
 
 from dataclasses import dataclass
 from typing import Callable
@@ -50,6 +42,14 @@ class PageFacts:
     title: str | None = None
     description: str | None = None
     headings: tuple[str, ...] = ()
+    #: The crawl read this page. False where no snapshot matched the target
+    #: URL, in which case the title, description and headings are not "empty",
+    #: they are unknown, and nothing is prescribed from them.
+    crawled: bool = True
+    #: The crawl captured the page's headings. A crawl that predates the
+    #: capture leaves `headings` empty, which would read as a page with no
+    #: heading at all.
+    headings_known: bool = True
     faq_questions: tuple[str, ...] = ()
     #: Entity markup present on the page: `about`, `mentions`, `sameAs`.
     entity_properties: frozenset[str] = frozenset()
@@ -74,6 +74,17 @@ class PageFacts:
     site_median_links: float = 0.0
     page_type: str | None = None
 
+    @property
+    def readable(self) -> bool:
+        """Whether the crawl actually read this page as served.
+
+        Headings, FAQ questions, schema and link counts are all recorded only
+        for a page fetched as a 2xx and parsed. Where that did not happen they
+        arrive empty or zero, and a rule that reads empty as "the page has
+        none" prescribes work on a page nobody looked at.
+        """
+        return self.crawled and self.headings_known
+
 
 @dataclass(frozen=True)
 class SkippedAction:
@@ -97,7 +108,10 @@ def _mentions(term: str, text: str | None) -> bool:
     """
     if not text:
         return False
-    return term.strip().lower() in text.strip().lower()
+    def words(value):
+        return re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", value).casefold())
+    needle, haystack = words(term), words(text)
+    return bool(needle) and any(haystack[i:i + len(needle)] == needle for i in range(len(haystack) - len(needle) + 1))
 
 
 # ── Visibility ──────────────────────────────────────────────────────────────
@@ -106,41 +120,53 @@ def _mentions(term: str, text: str | None) -> bool:
 def v1_term_in_high_value_spots(
     target: ScoredCandidate, page: PageFacts
 ) -> Prescription | None:
-    """A primary term missing from the title, the meta, or every heading.
+    """A primary term missing from the title or from every heading.
 
     Primary only. A page has one title and it belongs to the term the page
     is *for*: telling somebody to put a secondary term in it is telling them
     to take the primary term out, and the engine would then find that
     missing next month and ask for it back.
+
+    It asks only for what it can read and what it tells the reader to do. The
+    meta description is not one of them: it is not a ranking input and Google
+    rewrites it, so a page whose title and heading carry the term was being told
+    its term was missing because of a snippet. And a page the crawl did not read,
+    or read before headings were captured, is unknown rather than empty.
     """
-    if target.candidate.term_role == "secondary":
+    if target.candidate.term_role != "primary":
+        return None
+    if not page.crawled:
         return None
     term = target.candidate.keyword
     in_title = _mentions(term, page.title)
-    in_description = _mentions(term, page.description)
-    in_headings = any(_mentions(term, h) for h in page.headings)
-    if in_title and in_description and in_headings:
+    in_headings = (not page.headings_known) or any(
+        _mentions(term, h) for h in page.headings
+    )
+    if in_title and in_headings:
         return None
 
     missing = [
         label
-        for label, present in (
-            ("the title", in_title),
-            ("the meta description", in_description),
-            ("any heading", in_headings),
-        )
+        for label, present in (("the title", in_title), ("any heading", in_headings))
         if not present
     ]
-    # "the title, the meta description, any heading" is a list read aloud by
-    # a machine. The last one takes an "or".
-    missing_text = (
-        missing[0]
-        if len(missing) == 1
-        else " or ".join([", ".join(missing[:-1]), missing[-1]])
+    missing_text = " or ".join(missing)
+    where = " and ".join(
+        place
+        for place, present in (("the title", in_title), ("a heading", in_headings))
+        if not present
+    )
+    where_done = " and ".join(
+        place
+        for place, present in (
+            ("the title tag", in_title),
+            ("one H2", in_headings),
+        )
+        if not present
     )
     return Prescription(
         action_id="V-1",
-        title=f"Put “{term}” in the title, a heading and the first 100 words",
+        title=f"Put “{term}” in {where}",
         branch=Branch.VISIBILITY,
         target_url=page.url,
         term=term,
@@ -152,8 +178,8 @@ def v1_term_in_high_value_spots(
             "search engine to infer it."
         ),
         done_when=(
-            f"“{term}” appears in the title tag, in one H2, and in the first "
-            "100 words, reading as a sentence rather than an insertion."
+            f"“{term}” appears in {where_done}, reading as a sentence rather "
+            "than an insertion."
         ),
         metric="Term position",
         metric_key="term_position",
@@ -178,6 +204,8 @@ def v8_secondary_term_section(
     if candidate.term_role != "secondary":
         return None
     term = candidate.keyword
+    if not page.crawled or not page.headings_known:
+        return None
     if any(_mentions(term, heading) for heading in page.headings):
         return None
     return Prescription(
@@ -215,6 +243,8 @@ def v2_answer_block(target: ScoredCandidate, page: PageFacts) -> Prescription | 
         ("what", "how", "why", "when", "where", "who", "is ", "are ", "can ", "does ")
     ):
         return None
+    if not page.readable:
+        return None
     if any(_mentions(term, q) for q in page.faq_questions):
         return None
     return Prescription(
@@ -243,6 +273,8 @@ def v2_answer_block(target: ScoredCandidate, page: PageFacts) -> Prescription | 
 
 def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """No `about` or `mentions` tying the page to the term's subject."""
+    if not page.readable:
+        return None
     if {"about", "mentions"} & page.entity_properties:
         return None
     return Prescription(
@@ -270,6 +302,8 @@ def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription |
 
 def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """Fewer in-content links than the site's own median."""
+    if not page.readable:
+        return None
     if page.site_median_links <= 0:
         return None
     if page.inbound_editorial_links >= page.site_median_links:
@@ -412,16 +446,16 @@ def v5_add_an_extractable_structure(
         effort_min=45,
         why=(
             f"The results for “{term}” carry {EXTRACTIVE_FEATURES[feature]}, "
-            "so an engine is lifting an answer from somewhere. The heading "
-            "that asks it on this page is followed by prose and nothing "
-            "else — no table, no list, no figure to quote."
+            "which makes this section worth reviewing. The crawl detected "
+            "no table, list or stat block under the matching heading. "
+            "A direct prose answer may already be sufficient; verify the gap first."
         ),
         done_when=(
-            "A table, a bullet summary or a stat block sits directly under "
-            "that heading, answering the question on its own without the "
-            "paragraph around it."
+            "The reviewed brief names the missing answer, chooses a direct answer, "
+            "comparison table or steps that fit the question, and lists verified "
+            "facts and sources. The approved section is live."
         ),
-        metric="Term position and AI citation",
+        metric="Term position; prompt citations require a separate observed check",
         metric_key="term_position",
         evidence=(
             f"facts_serp_features: {feature} present",
@@ -441,14 +475,11 @@ EXTRACTIVE_FEATURES = {
 }
 
 
-#: In order. The first whose trigger fires is the one prescribed: putting the
-#: term on the page comes before pointing links at it.
+#: Active automatic visibility actions, in priority order.
 VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | None], ...] = (
     v6_rehoming,
-    v1_term_in_high_value_spots,
-    # Beside V-1, not after it: the two never both fire, because a term is
-    # either the page's primary or one of its secondaries.
-    v8_secondary_term_section,
+    # V-1 and V-8 are legacy: exact-phrase absence alone is not a content gap.
+    # A missing exact-match secondary heading alone does not prove a content gap.
     v2_answer_block,
     # Before the rest: the answers are already written, so this is fifteen
     # minutes of markup against a page rewrite. Cheapest first where the
@@ -458,7 +489,7 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
     # giving it something to lift beats marking up or linking to a page it
     # cannot quote.
     v5_add_an_extractable_structure,
-    v3_entity_markup,
+    # Optional about/mentions absence alone does not justify an automatic task.
     v4_internal_links,
 )
 
@@ -514,7 +545,7 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
         or page.position is None
         or page.position > SNIPPET_MAX_POSITION
         or page.impressions < MIN_IMPRESSIONS
-        or missed < 1
+        or missed < 5
         # A query naming the site is navigation. The shortfall is real and
         # the snippet is not the cause, so this would be a rewrite sold on a
         # number it cannot move.
@@ -532,16 +563,17 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
         why=(
             f"The page averages position {page.position:.1f} and earned "
             f"{page.clicks:.0f} clicks from {page.impressions:.0f} "
-            f"impressions. The measured curve puts a page at that position on "
+            f"impressions. A reference CTR scenario estimates "
             f"{page.expected_clicks:.0f}. At the top of the page one, what is "
-            "left to explain the gap is the snippet."
+            "worth reviewing is query intent, the results layout and the snippet. "
+            "The benchmark is an estimate and does not establish the cause."
         ),
         done_when=(
             "The title is 60 characters or fewer, carries the term and a "
             "reason to click that the page delivers, and the old version is "
             "logged so the check has something to compare."
         ),
-        metric="Clicks against the curve's expectation",
+        metric="Observed Search Console clicks after the change",
         metric_key="page_clicks",
         evidence=(
             f"facts_gsc_pages: {page.clicks:.0f} clicks, "
@@ -573,8 +605,8 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
             f"{page.sessions:.0f} sessions landed here and "
             f"{rate * 100:.0f}% engaged, against a site median of "
             f"{page.site_median_engagement * 100:.0f}%. The page is winning "
-            "the click and losing the reader, which is a mismatch between "
-            "what the search promised and what the opening delivers."
+            "visits with lower recorded engagement. Review the visitor intent "
+            "and opening before deciding whether a rewrite is the right intervention."
         ),
         done_when=(
             "The H1 and the first two paragraphs answer the query the page "
@@ -664,7 +696,7 @@ def t2_match_the_serp_format(page: PageCandidate) -> Prescription | None:
             f"The page carries {FEATURE_SHAPE[feature]}, answering the query "
             "in the words it is asked in."
         ),
-        metric="Clicks against the curve's expectation",
+        metric="Observed Search Console clicks after the change",
         metric_key="page_clicks",
         evidence=(
             f"facts_serp_features: {', '.join(page.missing_serp_features)} "
@@ -706,9 +738,20 @@ STAGE_WORDS = {
 }
 
 
+# A prioritization floor, not a claim of statistical significance. Visibility
+# work on strategic low-traffic pages remains available independently.
+MIN_SESSIONS_FOR_LEAD_ACTION = 50
+
+
+def _lead_page_eligible(page: PageCandidate) -> bool:
+    from app.services.page_eligibility import classify_page_url
+    return (page.crawl_readable and page.sessions >= MIN_SESSIONS_FOR_LEAD_ACTION
+            and classify_page_url(page.url).eligible_for_growth_action)
+
+
 def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
     """A page people land on with no in-content way forward."""
-    if page.stage is None or page.stage == "bofu" or page.routes_onward:
+    if not _lead_page_eligible(page) or page.stage is None or page.stage == "bofu" or page.routes_onward:
         return None
     # The destination does not need a route to a destination.
     if page.is_conversion_page or not page.matched_offers:
@@ -723,16 +766,16 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
         effort_min=30,
         why=(
             f"{page.sessions:.0f} sessions land here and the page carries no "
-            "in-content link to any declared conversion page. Navigation and "
-            "the footer do not count: they are on every page and say nothing "
-            "about this one, so the reader is left to go looking."
+            "qualifying in-content link detected to a declared conversion page. "
+            "This is crawl evidence, not measured visitor progression. Verify "
+            "the page and destination before changing the route."
         ),
         done_when=(
             f"An in-content link to {page.matched_offers[0]}, with a sentence "
             "saying what the reader gets by following it, placed where the "
             "page has finished answering what they came for."
         ),
-        metric="Leads from sessions starting on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             f"facts_crawl_internal_links: no in-content link to a conversion page",
@@ -745,9 +788,11 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
 
 def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
     """The page routes onward and never asks."""
-    if page.stage is None or page.conversion_elements is None:
+    if not _lead_page_eligible(page) or page.stage is None or page.conversion_elements is None:
         return None
     if page.conversion_elements > 0:
+        return None
+    if page.stage == "tofu" and not page.matched_offers:
         return None
     return Prescription(
         action_id="L-2",
@@ -766,7 +811,7 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
             "One call to action on the first screen, worded for what this "
             "page is about rather than the site's standard line."
         ),
-        metric="Lead rate for sessions landing on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             "facts_crawl_page_snapshots: conversion_elements = 0",
@@ -781,15 +826,13 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
 
 def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None:
     """Every route out goes somewhere the reader is not ready for."""
-    if page.stage is None or not page.routes_onward or not page.matched_offers:
+    if not _lead_page_eligible(page) or page.stage is None or not page.routes_onward or not page.matched_offers:
         return None
     if page.is_conversion_page:
         return None
-    # "generic" is an offer nobody gave a stage. It suits any reader by
-    # definition — `matched_offers` already counts it as a match — so a page
-    # linking to one is not pointing its reader somewhere wrong. Without this
-    # L-3 would tell somebody to link to the page they already link to.
-    fits = set(STAGE_FIT.get(page.stage, ())) | {"generic"}
+    if "generic" in page.linked_offer_stages:
+        return None  # Unknown intent is not proof that an existing route is wrong.
+    fits = set(STAGE_FIT.get(page.stage, ()))
     if page.linked_offer_stages & fits:
         return None
     linked = ", ".join(sorted(page.linked_offer_stages)) or "none"
@@ -810,7 +853,7 @@ def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None
             f"The in-content route points at {page.matched_offers[0]}, with "
             "the link text rewritten for what that offer gives this reader."
         ),
-        metric="Lead rate for sessions landing on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             f"client_page_stages: {page.stage}",

@@ -51,6 +51,7 @@ LADDER: tuple[Branch, ...] = (Branch.VISIBILITY, Branch.TRAFFIC, Branch.LEADS)
 #: Constraints that are not one of the three branches.
 WITHHELD = "withheld"
 VISIBILITY_EXPANSION = "visibility_expansion"
+INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
 @dataclass(frozen=True)
@@ -124,12 +125,12 @@ def _judge(
 
 @dataclass(frozen=True)
 class VisibilitySignals:
-    #: Priority-group keywords only. V1 is about the terms the client is
-    #: actually judged on, not every term anyone ever tracked.
+    monthly_keyword_trend: dict[str, Any] = field(default_factory=dict)
+    #: Active Watch List keywords. Legacy field names retained for compatibility;
+    #: there is no extra priority selection requirement.
     priority_keywords: int = 0
     priority_in_top_10: int = 0
-    #: True when no keyword group has been marked priority, which is a
-    #: different statement from a client whose priority terms rank badly.
+    #: Whether the client has active Watch List keywords.
     priority_group_set: bool = False
     #: SE Ranking's visibility score now and 90 days ago.
     visibility_percent: float | None = None
@@ -141,6 +142,7 @@ class VisibilitySignals:
     priority_pages: int = 0
     priority_pages_without_reach: int = 0
     priority_pages_declared: bool = False
+    page_reach_missing: str | None = None
     #: Share of tracked prompts that mention the brand, 0-100.
     ai_mention_pct: float | None = None
     tracked_prompts: int = 0
@@ -156,7 +158,7 @@ def assess_visibility(
 
     results: list[TestResult] = []
 
-    # V1 — priority-term coverage.
+    # V1 — measured Watch List keyword coverage.
     share = (
         signals.priority_in_top_10 / signals.priority_keywords * 100.0
         if signals.priority_keywords
@@ -165,20 +167,20 @@ def assess_visibility(
     results.append(
         _judge(
             "V1",
-            "Priority-term coverage",
-            "Priority terms in the top 10",
+            "Watch List keyword coverage",
+            "Measured Watch List keywords in the top 10",
             share,
             pass_line=t("v1_priority_top10_pct", 30.0),
             missing=None
             if signals.priority_group_set and signals.priority_keywords
-            else "no keyword group is marked priority",
+            else "no dated Watch List keyword rankings",
             display=(
                 f"{signals.priority_in_top_10} of {signals.priority_keywords}"
                 if signals.priority_keywords
                 else None
             ),
             evidence={
-                "priority_keywords": signals.priority_keywords,
+                "scope": "watchlist", "priority_keywords": signals.priority_keywords,
                 "in_top_10": signals.priority_in_top_10,
             },
         )
@@ -190,18 +192,26 @@ def assess_visibility(
     if signals.visibility_percent is not None and signals.visibility_percent_90d_ago:
         before = signals.visibility_percent_90d_ago
         drop = max(0.0, (before - signals.visibility_percent) / before * 100.0)
-    results.append(
-        _judge(
-            "V2",
-            "Visibility trend",
-            "Visibility lost over 90 days",
-            drop,
-            pass_line=t("v2_visibility_drop_pct", 15.0),
-            direction="max",
-            unit="chg",
-            missing=None if drop is not None else "no visibility history",
+    trend = signals.monthly_keyword_trend
+    if trend.get("cohort", 0) >= 5:
+        results.append(_judge("V2", "Monthly keyword movement", "Matched keywords losing at least 3 positions",
+            trend["declined"] / trend["cohort"] * 100,
+            pass_line=t("v2_monthly_declining_terms_pct", 30), direction="max",
+            display=f"{trend['declined']} of {trend['cohort']} matched terms declined",
+            evidence={"source": "matched_monthly_keyword_history", **trend}))
+    else:
+        results.append(
+            _judge(
+                "V2",
+                "Visibility trend",
+                "Visibility lost over 90 days",
+                drop,
+                pass_line=t("v2_visibility_drop_pct", 15.0),
+                direction="max",
+                unit="chg",
+                missing=None if drop is not None else "no comparable visibility history (90-day score or 5 matched monthly keywords)",
+            )
         )
-    )
 
     # V3 — impression trend.
     impression_drop = None
@@ -239,7 +249,7 @@ def assess_visibility(
             unit="count",
             missing=None
             if signals.priority_pages_declared
-            else "no target or conversion pages declared",
+            else signals.page_reach_missing or "no target or conversion pages declared",
             display=(
                 f"{signals.priority_pages_without_reach} of {signals.priority_pages}"
                 if signals.priority_pages_declared
@@ -284,6 +294,11 @@ def assess_visibility(
 
 @dataclass(frozen=True)
 class TrafficSignals:
+    ctr_context_matched: bool = False
+    ctr_missing: str | None = None
+    ctr_evidence: dict[str, Any] = field(default_factory=dict)
+    sessions: float | None = None
+    prior_sessions: float | None = None
     #: Clicks the measured CTR curve says the rankings should earn and do not.
     missed_clicks: float | None = None
     actual_clicks: float | None = None
@@ -301,25 +316,38 @@ def assess_traffic(
 
     results: list[TestResult] = []
 
-    # T1 — missed clicks as a share of the clicks actually earned.
+    change = None
+    if signals.sessions is not None and signals.prior_sessions:
+        change = (signals.sessions - signals.prior_sessions) / signals.prior_sessions * 100
+    results.append(_judge("T0", "Site visits", "Change in all-channel GA4 sessions", change,
+        pass_line=-t("t0_session_drop_pct", 15.0), direction="min", unit="chg",
+        missing=None if change is not None else "no comparable all-channel GA4 session periods",
+        evidence={"sessions": signals.sessions, "prior_sessions": signals.prior_sessions}))
+
+    # T1 — estimated shortfall share of the benchmark opportunity, bounded 0–100.
     missed_share = None
-    if signals.missed_clicks is not None and signals.actual_clicks:
-        missed_share = signals.missed_clicks / signals.actual_clicks * 100.0
+    if signals.missed_clicks is not None and signals.actual_clicks is not None:
+        opportunity = max(0, signals.missed_clicks) + max(0, signals.actual_clicks)
+        if opportunity:
+            missed_share = max(0, signals.missed_clicks) / opportunity * 100.0
     results.append(
         _judge(
             "T1",
-            "Missed clicks",
-            "Clicks the rankings should earn and do not",
+            "CTR benchmark gap",
+            "Estimated click shortfall / benchmark opportunity",
             missed_share,
             pass_line=t("t1_missed_click_pct", 20.0),
             direction="max",
-            missing=None if missed_share is not None else "no Search Console clicks",
+            missing=signals.ctr_missing or ("CTR reference is diagnostic only until device and SERP context match the benchmark"
+                     if missed_share is not None and not signals.ctr_context_matched
+                     else None if missed_share is not None else "no measured click opportunity"),
             display=(
                 f"{int(signals.missed_clicks):,} missed against "
                 f"{int(signals.actual_clicks):,} earned"
                 if missed_share is not None
                 else None
             ),
+            evidence={"estimated_missed_clicks": signals.missed_clicks, "actual_clicks": signals.actual_clicks, "formula_version": 2, **signals.ctr_evidence},
         )
     )
 
@@ -380,6 +408,7 @@ def assess_traffic(
 
 @dataclass(frozen=True)
 class LeadSignals:
+    target_lead_rate: float | None = None
     #: No conversion definitions means Leads is blocked, never passed.
     conversions_configured: bool = False
     leads_month_to_date: float | None = None
@@ -403,31 +432,14 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
     blocked = None if signals.conversions_configured else "no conversion events set"
     results: list[TestResult] = []
 
-    # L1 — goal pace, against the goal pro-rated to today rather than the
-    # whole month. Judging day three against a monthly goal fails everyone.
-    pace = None
-    if (
-        signals.leads_month_to_date is not None
-        and signals.goal_to_date
-        and signals.conversions_configured
-    ):
-        pace = signals.leads_month_to_date / signals.goal_to_date * 100.0
-    results.append(
-        _judge(
-            "L1",
-            "Goal pace",
-            "Leads against the goal so far this month",
-            pace,
-            pass_line=t("l1_goal_pace_pct", 80.0),
-            missing=blocked or (None if pace is not None else "no monthly lead goal"),
-            display=(
-                f"{int(signals.leads_month_to_date)} of "
-                f"{int(signals.monthly_goal)} leads"
-                if signals.leads_month_to_date is not None and signals.monthly_goal
-                else None
-            ),
-        )
-    )
+    # L1 — actual conversion rate against the explicitly configured rate goal.
+    results.append(_judge("L1", "Lead conversion rate", "Visits producing a lead versus the session conversion target",
+        signals.lead_rate if signals.conversions_configured else None,
+        pass_line=signals.target_lead_rate or 0.0,
+        missing=blocked or ("no target lead conversion rate" if not signals.target_lead_rate else
+                           "no measured lead rate for this period" if signals.lead_rate is None else None),
+        evidence={"lead_rate_pct": signals.lead_rate, "target_rate_pct": signals.target_lead_rate,
+                  "formula_version": 3}))
 
     # L2 — lead rate against the client's own baseline.
     against_baseline = None
@@ -444,7 +456,7 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
             "Lead rate against this client's baseline",
             against_baseline,
             pass_line=t("l2_lead_rate_pct", 80.0),
-            missing=blocked or (None if against_baseline is not None else "no baseline lead rate"),
+            missing=blocked or (None if against_baseline is not None else "no comparable session-based lead conversion baseline; existing baselines use lead events"),
         )
     )
 
@@ -564,6 +576,11 @@ def select_constraint(
                 reason_text=_reason_for(result, headline),
                 branches=ordered,
             )
+
+    if ordered and all(result.status is Status.BLOCKED for result in ordered):
+        return Triage(constraint=INSUFFICIENT_EVIDENCE,
+                      reason_text="No branch has enough evidence. Review coverage and choose the next step.",
+                      branches=ordered)
 
     # Nothing failing. Blocked branches are skipped rather than fatal, so this
     # is reached when every branch either passed or could not be judged.

@@ -51,3 +51,16 @@ def test_the_endpoint_refuses_a_bad_month(client, client_a, admin_user):
         json={"month": "2026-13"},
     )
     assert response.status_code == 422
+
+
+def test_the_endpoint_refuses_a_month_that_has_not_finished(client, client_a, admin_user):
+    from tests.conftest import client_header
+
+    for month in (month_key(date.today()), "2999-01"):
+        response = client.post(
+            "/decisions/records/run",
+            headers=client_header(client_a.id, admin_user.email),
+            json={"month": month},
+        )
+        assert response.status_code == 422
+        assert "after it has finished" in response.json()["detail"]

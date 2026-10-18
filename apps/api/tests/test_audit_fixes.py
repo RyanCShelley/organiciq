@@ -24,7 +24,7 @@ def test_a_page_scoped_annotation_can_be_measured(db, client_a):
         lead_events=["generate_lead"],
     )
     assert set(result) == {"sessions", "leads", "lead_rate", "impressions", "clicks"}
-    assert result["sessions"] == 0
+    assert result["sessions"] is None
 
 
 def _connect_gsc(db, client):

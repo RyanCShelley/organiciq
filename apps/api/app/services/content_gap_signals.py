@@ -102,7 +102,7 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         )
 
     tracked: dict[str, FactSerKeyword] = {}
-    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id):
+    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True)):
         key = (row.keyword or "").strip().lower()
         held = tracked.get(key)
         if key and (held is None or (row.checked_at or 0) > (held.checked_at or 0)):
@@ -117,7 +117,7 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         (row.keyword or "").strip().lower(): row
         for row in db.query(KeywordTarget).filter(
             KeywordTarget.client_id == client.id,
-            KeywordTarget.source == "confirmed",
+            KeywordTarget.source.in_(("confirmed", "auto")),
         )
     }
     serp = load_serp_features(db, client)
@@ -129,7 +129,13 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         "pages_searched": len(pages),
     }
     gaps: list[TermGap] = []
+    from app.models.watch_target import WatchTarget
+    excluded_terms = {x.text.strip().lower() for x in db.query(WatchTarget).filter(
+        WatchTarget.client_id == client.id, WatchTarget.kind == "keyword", WatchTarget.state == "excluded")}
     for term, row in tracked.items():
+        if term in excluded_terms:
+            summary["excluded"] = summary.get("excluded", 0) + 1
+            continue
         target = targets.get(term)
         recorded_no_page = target is not None and not (target.target_url or "").strip()
         if target is not None and not recorded_no_page:

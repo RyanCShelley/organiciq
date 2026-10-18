@@ -397,7 +397,15 @@ SLOTTED_POOLS = (("action", "actions"), ("update", "updates"), ("content", "new_
 
 def _slotted(data: dict[str, Any]):
     for kind, key in SLOTTED_POOLS:
-        for action in data.get(key) or []:
+        if kind == "action" and data.get("plan_review"):
+            review = data["plan_review"]
+            snapshot = review if review.get("approved_at") else next(iter(reversed(review.get("versions", []))), {})
+            actions = snapshot.get("items", [])
+        elif kind == "action" and data.get("review_required"):
+            actions = []
+        else:
+            actions = data.get(key) or []
+        for action in actions:
             yield kind, action
 
 
@@ -461,14 +469,19 @@ def check_due(
         db.query(MonthlyRecord).filter(MonthlyRecord.client_id == client.id).all()
     ):
         for kind, action in _slotted(record.record or {}):
-            uid, check_on = action.get("action_uid"), action.get("check_on")
-            if not uid or not check_on or date.fromisoformat(check_on) > today:
+            uid = action.get("action_uid")
+            if not uid:
                 continue
             row = (
                 db.query(EngineAction)
                 .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
                 .one_or_none()
             )
+            if row is None or row.shipped_on is None or row.status == "skipped":
+                continue
+            days = action.get("check_after_days", WINDOW_DAYS)
+            if row.shipped_on + timedelta(days=days) > today:
+                continue
             # `row` may legitimately not exist: an action whose term was
             # off the rankings when it was prescribed has no before reading
             # to store, and that is the most common start there is.
@@ -505,8 +518,7 @@ def check_due(
                     metric_key,
                     url=action.get("target_url"),
                     term=action.get("term"),
-                    as_of=record.data_through
-                    or date.fromisoformat(f"{record.month}-01"),
+                    as_of=row.shipped_on - timedelta(days=1),
                 )
                 if not started.unranked:
                     continue
@@ -528,8 +540,6 @@ def check_due(
 
             row.after_value = reading.value
             row.result = verdict(metric_key, before, reading.value)
-            if row.status == "assigned":
-                row.status = "done"
             judged.append(row)
 
     db.commit()

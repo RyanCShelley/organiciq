@@ -43,6 +43,18 @@ def upsert_keyword_page_map(db, client_id, entries):
         # suggestion only becomes confirmed by passing through here.
         row.source = "confirmed"
         row.note = (entry.note or "").strip() or None
+        # The legacy map editor and unified watchlist share the same decision.
+        from app.models.watch_target import WatchTarget
+        from app.services.watchlist import item_key
+        watched = db.query(WatchTarget).filter(
+            WatchTarget.client_id == client_id, WatchTarget.kind == "keyword",
+            WatchTarget.item_key == item_key("keyword", keyword),
+        ).one_or_none()
+        if watched is not None:
+            watched.target_url = row.target_url
+            watched.state = "existing" if row.target_url else "unmapped"
+            watched.priority = row.priority
+            watched.note = row.note
     db.commit()
     return (
         db.query(KeywordTarget)
@@ -155,7 +167,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 "keyword": keyword,
                 "target_url": row.target_url if row else None,
                 "note": row.note if row else None,
-                "mapped": row is not None,
+                "mapped": row is not None and (row.source == "confirmed" or (row.source == "auto" and bool(row.target_url))),
                 #: primary | secondary | None. Null is its own answer.
                 "term_role": row.term_role if row else None,
                 #: SE Ranking's own grouping, so the only new judgement is
@@ -175,7 +187,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 "difficulty": (
                     float(metric.difficulty) if metric and metric.difficulty else None
                 ),
-                "current_position": rank_position(tracked.current_position),
+                "current_position": rank_position(tracked.current_position) if tracked.current_position is not None and float(tracked.current_position) <= 100 else None,
                 "suggested_target_url": suggested_url,
                 #: Which read it came from. They mean different things: one
                 #: is where the site ranks, the other is what the page is

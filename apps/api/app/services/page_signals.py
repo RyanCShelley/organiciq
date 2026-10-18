@@ -20,7 +20,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import REFERENCE_SCENARIO, expected_ctr_percent
 from app.decisions.page_targets import (
     CONTESTED_MIN_IMPRESSIONS,
     CONTESTED_MIN_RIVAL_SHARE,
@@ -32,6 +32,7 @@ from app.decisions.page_targets import (
 from app.models.client import Client
 from app.models.config import ClientConversionPage
 from app.models.crawl import (
+    CRAWL_SOURCE_FIRST_PARTY,
     FactCrawlInternalLink,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
@@ -395,7 +396,8 @@ def load_page_candidates(
 
     newest_crawl = (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
-        .filter(FactCrawlPageSnapshot.client_id == client.id)
+        .filter(FactCrawlPageSnapshot.client_id == client.id,
+                FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY)
         .scalar()
     )
     crawl: dict[str, FactCrawlPageSnapshot] = {}
@@ -405,14 +407,11 @@ def load_page_candidates(
             for row in db.query(FactCrawlPageSnapshot).filter(
                 FactCrawlPageSnapshot.client_id == client.id,
                 FactCrawlPageSnapshot.snapshot_date == newest_crawl,
+                FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
             )
         }
 
-    # An offer with no declared stage is the generic one and suits any
-    # reader — which is what `ClientConversionPage` already assumes when it
-    # falls back to the primary offer. Treating a null stage as "matches
-    # nothing" meant that for every client in the warehouse, all of whose
-    # conversion pages have a null stage, no lead action could ever fire.
+    # Unknown offer intent is retained as unknown, never a match for every stage.
     broken_schema = _broken_schema(db, client.id)
     with_schema = _pages_with_schema(db, client.id)
 
@@ -495,8 +494,8 @@ def load_page_candidates(
         impressions = page.get("impressions", 0.0)
         lost_query, lost_before, lost_after = shifts.get(url, (None, None, None))
         expected = (
-            expected_ctr_percent(position) / 100.0 * impressions
-            if position and impressions
+            expected_ctr_percent(position, scenario=REFERENCE_SCENARIO) / 100.0 * impressions
+            if position is not None and 1 <= position <= 20 and impressions
             else None
         )
         total_sessions, engaged = sessions.get(url, (0.0, None))
@@ -522,6 +521,8 @@ def load_page_candidates(
                 engaged_sessions=engaged,
                 site_median_engagement=median_engagement,
                 stage=stage,
+                crawl_readable=bool(snapshot and snapshot.status_code is not None
+                    and 200 <= snapshot.status_code < 300 and snapshot.sections is not None),
                 linked_offer_stages=frozenset(routes.get(url, set())),
                 # Never itself. SMA's declared conversion page is its
                 # homepage, so the top lead action told the homepage to add
@@ -530,7 +531,7 @@ def load_page_candidates(
                     sorted(
                         u
                         for u, s in offers.items()
-                        if (s is None or s in fits) and u != url
+                        if s in fits and u != url
                     )
                 ),
                 is_conversion_page=url in offers,

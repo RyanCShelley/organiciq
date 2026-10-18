@@ -13,6 +13,7 @@ import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import {
   effectivePlan,
+  finishedRuns,
   type Assignee,
   type MonthlyRecord,
   type SlotState,
@@ -52,7 +53,12 @@ export default async function ContentOppPage({
     () => ({ ok: false as const, people: [] as Assignee[] }),
   );
   try {
-    const runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const runs = finishedRuns(
+      await apiFetch<RunSummary[]>("/decisions/records", { clientId }),
+      currentMonth,
+    );
     const month = typeof query.run === "string" ? query.run : runs[0]?.month;
     if (month) {
       record = await apiFetch<MonthlyRecord>(

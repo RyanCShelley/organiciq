@@ -346,6 +346,20 @@ def _effective_range(
     return from_date, effective_to
 
 
+def _comparison_range(from_date, to_date, current, watermark):
+    """Compare the observed prefix with the same days of the requested prior window.
+
+    For Oct 1–17 observed through Oct 14, compare Sep 14–27, not all
+    Sep 14–30. If the prior window is itself incomplete, withhold its delta.
+    """
+    if current is None:
+        return None
+    prior_start, _ = previous_period(from_date, to_date)
+    prior_end = prior_start + (current[1] - current[0])
+    prior = _effective_range(prior_start, prior_end, watermark)
+    return prior if prior == (prior_start, prior_end) else None
+
+
 def _freshness(watermarks: dict[str, DataWatermark]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for source in DASHBOARD_WATERMARK_SOURCES:
@@ -588,11 +602,17 @@ def _daily_ai_presence_series(
             mention_top3[day] = float(row.mention_top3_pct)
         if row.link_top3_pct is not None:
             link_top3[day] = float(row.link_top3_pct)
+    # A missing observation is not zero visibility. The compact chart cannot
+    # represent gaps, so show it only for a completely observed period.
+    days = (end - start).days + 1
     return {
-        "mention_presence": _fill_daily(period, mention, forward_fill=True),
-        "link_presence": _fill_daily(period, link, forward_fill=True),
-        "mention_top3": _fill_daily(period, mention_top3, forward_fill=True),
-        "link_top3": _fill_daily(period, link_top3, forward_fill=True),
+        key: _fill_daily(period, readings) if len(readings) == days else []
+        for key, readings in {
+            "mention_presence": mention,
+            "link_presence": link,
+            "mention_top3": mention_top3,
+            "link_top3": link_top3,
+        }.items()
     }
 
 
@@ -756,49 +776,28 @@ def _gsc_weighted_position(
     return avg_position
 
 
-def _tracked_keyword_position(
-    db: Session,
-    client_id: UUID,
-    period: tuple[date, date] | None,
-) -> float | None:
+def _period_keyword_readings(db, client_id, period):
+    """Current cohort, with observations dated inside the selected period."""
     if period is None:
-        return None
+        return []
+    from app.services.decision_measurements import keyword_readings
     start, end = period
-    avg = (
-        db.query(func.avg(FactSerKeyword.current_position))
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-            FactSerKeyword.current_position.isnot(None),
-            FactSerKeyword.current_position > 0,
-        )
-        .scalar()
-    )
-    return _to_float(avg)
+    terms = {(row.keyword or "").strip().lower() for row in
+             db.query(FactSerKeyword).filter_by(client_id=client_id, is_tracked=True)}
+    return [reading for term, reading in keyword_readings(db, client_id, end).items()
+            if term in terms and reading["observed_on"] >= start.isoformat()]
 
 
-def _tracked_search_visibility(
-    db: Session,
-    client_id: UUID,
-    period: tuple[date, date] | None,
-) -> float | None:
-    if period is None:
-        return None
-    start, end = period
-    avg = (
-        db.query(func.avg(FactSerKeyword.visibility))
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-            FactSerKeyword.visibility.isnot(None),
-        )
-        .scalar()
-    )
-    return _to_float(avg)
+def _tracked_keyword_position(db, client_id, period):
+    values = [row["position"] for row in _period_keyword_readings(db, client_id, period)
+              if row["position"] is not None and 0 < row["position"] <= 100]
+    return sum(values) / len(values) if values else None
+
+
+def _tracked_search_visibility(db, client_id, period):
+    values = [row["visibility"] for row in _period_keyword_readings(db, client_id, period)
+              if row.get("visibility") is not None]
+    return sum(values) / len(values) if values else None
 
 
 def _ser_visibility_score(value: Decimal | float | int | None) -> float | None:
@@ -903,20 +902,12 @@ def _keyword_distribution(
     empty = {"top_3": 0, "top_10": 0, "top_20": 0, "beyond_20": 0, "not_ranking": 0}
     if period is None:
         return empty
-    start, end = period
-    rows = (
-        db.query(FactSerKeyword.current_position)
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-        )
-        .all()
-    )
     buckets = empty.copy()
-    for (position,) in rows:
-        if position is None or position <= 0:
+    for row in _period_keyword_readings(db, client_id, period):
+        position = row["position"]
+        if position is None:
+            continue
+        if position <= 0 or position > 100:
             buckets["not_ranking"] += 1
         elif position <= 3:
             buckets["top_3"] += 1
@@ -1170,7 +1161,8 @@ def _top_pages(
                 "ga4_sessions": sessions,
                 "ga4_views": views,
                 "ga4_key_events": key_events,
-                # Session-to-key-event rate: the page's actual conversion job.
+                # Legacy response key: lead-event count per 100 sessions, not the
+                # percentage of sessions with a lead. Multiple events can occur per session.
                 "session_key_event_rate": (
                     round((key_events / sessions) * 100, 2) if sessions > 0 else None
                 ),
@@ -1184,18 +1176,33 @@ def _top_pages(
     return pages[:limit]
 
 
+def _gsc_source_breakdown(db, client_id, period):
+    if period is None:
+        return {"properties": [], "combined_history": False}
+    start, end = period
+    rows = db.query(FactGscDaily.gsc_site_url, func.sum(FactGscDaily.clicks),
+        func.sum(FactGscDaily.impressions), func.sum(FactGscDaily.average_position * FactGscDaily.impressions),
+        func.count(func.distinct(FactGscDaily.date))).filter(FactGscDaily.client_id == client_id,
+            FactGscDaily.date >= start, FactGscDaily.date <= end).group_by(FactGscDaily.gsc_site_url).all()
+    properties = [{"property": site or "Legacy / source not recorded", "clicks": float(clicks or 0),
+        "impressions": float(impressions or 0), "average_position": float(weighted / impressions) if impressions else None,
+        "observed_days": days, "provenance_known": bool(site)} for site, clicks, impressions, weighted, days in rows]
+    return {"properties": properties, "combined_history": sum(item["provenance_known"] for item in properties) > 1,
+        "note": "Combined history sums the configured Search Console properties. Original domains are shown separately; canonical page aliases are used for page-level engine evidence. Search Console page/query reports have different coverage from property totals."}
+
+
 def build_dashboard(db: Session, client: Client, from_date: date, to_date: date) -> dict[str, Any]:
     watermarks = _load_watermarks(db, client.id)
     prev_from, prev_to = previous_period(from_date, to_date)
 
     ga4_current = _effective_range(from_date, to_date, watermarks.get("ga4"))
-    ga4_previous = _effective_range(prev_from, prev_to, watermarks.get("ga4"))
+    ga4_previous = _comparison_range(from_date, to_date, ga4_current, watermarks.get("ga4"))
     gsc_current = _effective_range(from_date, to_date, watermarks.get("gsc_pages"))
-    gsc_previous = _effective_range(prev_from, prev_to, watermarks.get("gsc_pages"))
+    gsc_previous = _comparison_range(from_date, to_date, gsc_current, watermarks.get("gsc_pages"))
     ser_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_search"))
-    ser_previous = _effective_range(prev_from, prev_to, watermarks.get("se_ranking_search"))
+    ser_previous = _comparison_range(from_date, to_date, ser_current, watermarks.get("se_ranking_search"))
     ai_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_ai"))
-    ai_previous = _effective_range(prev_from, prev_to, watermarks.get("se_ranking_ai"))
+    ai_previous = _comparison_range(from_date, to_date, ai_current, watermarks.get("se_ranking_ai"))
 
     lead_events = _lead_event_names(db, client.id)
     conversions_configured = len(lead_events) > 0
@@ -1204,6 +1211,10 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     previous_leads = _sum_leads(db, client.id, lead_events, ga4_previous)
     current_sessions = _sum_sessions(db, client.id, ga4_current)
     previous_sessions = _sum_sessions(db, client.id, ga4_previous)
+    from app.services.lead_measurements import session_lead_measurement
+    from app.services.decision_measurements import lead_rate_target
+    session_now = session_lead_measurement(db, client, *ga4_current) if ga4_current else None
+    session_before = session_lead_measurement(db, client, *ga4_previous) if ga4_previous else None
     current_lead_rate = _lead_rate(current_leads, current_sessions)
     previous_lead_rate = _lead_rate(previous_leads, previous_sessions)
 
@@ -1238,7 +1249,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     # The goal in force now, not the twelve-month target: judging a thirty-day
     # review against next September's number makes an on-track client look like
     # a failing one.
-    monthly_goal, goal_checkpoint = current_lead_goal(client)
+    monthly_goal, goal_checkpoint = current_lead_goal(client, on=to_date)
     period_goal, goal_period_days = period_lead_goal(monthly_goal, from_date, to_date)
     progress_pct: float | None = None
     if period_goal and current_leads is not None:
@@ -1291,9 +1302,23 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "previous_to": prev_to.isoformat(),
         },
         "baseline": baseline_payload,
+        "search_console_sources": _gsc_source_breakdown(db, client.id, gsc_current),
         "freshness": _freshness(watermarks),
+        "effective_periods": {
+            source: {"current": [d.isoformat() for d in current] if current else None,
+                     "previous": [d.isoformat() for d in previous] if previous else None}
+            for source, current, previous in (("ga4", ga4_current, ga4_previous),
+                ("gsc", gsc_current, gsc_previous), ("rankings", ser_current, ser_previous),
+                ("ai", ai_current, ai_previous))
+        },
         "conversions": {
             "configured": conversions_configured,
+            "session_measurement": session_now,
+            "session_lead_rate": _period_metric(session_now.get("conversion_rate_pct") if session_now else None,
+                session_before.get("conversion_rate_pct") if session_before else None),
+            "lead_sessions": _period_metric(session_now.get("lead_sessions") if session_now else None,
+                session_before.get("lead_sessions") if session_before else None),
+            "session_rate_target_pct": lead_rate_target(db, client.id),
             "lead_events": lead_events,
             "leads": _period_metric(current_leads, previous_leads, leads_series),
             "lead_rate": _period_metric(current_lead_rate, previous_lead_rate, lead_rate_series),
@@ -1316,7 +1341,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                 if goal_checkpoint
                 else None
             ),
-            "goal_schedule": schedule_payload(client),
+            "goal_schedule": schedule_payload(client, on=to_date),
             "final_lead_goal": client.monthly_lead_goal,
             "leads_series": leads_series,
         },
@@ -1374,6 +1399,8 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             ),
             "gsc_ctr": _period_metric(gsc_ctr_current, gsc_ctr_previous, gsc_ctr_series),
             "ga4_sessions": _period_metric(current_sessions, previous_sessions, sessions_series),
+            "ga4_reported_sessions": _period_metric(session_now.get("sessions") if session_now else None,
+                session_before.get("sessions") if session_before else None),
             "ga4_views": _period_metric(
                 _ga4_views(db, client.id, ga4_current),
                 _ga4_views(db, client.id, ga4_previous),

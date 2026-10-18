@@ -1,3 +1,5 @@
+import { ResetBaselinesPanel } from "@/components/Baseline/ResetBaselinesPanel";
+import { EngineInputCheckPanel } from "@/components/DecisionEngine/EngineInputCheckPanel";
 import { PlatformNav } from "@/components/PlatformNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
@@ -116,6 +118,26 @@ export default async function PlatformSettingsPage() {
               getRowKey={(row) => row.id}
               emptyMessage="No channel rules configured."
             />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Decision engine inputs"
+            description="Admin only. Mapped pages the engine could not read, and the saved actions that rest on them."
+          />
+          <div className="workspace-panel">
+            <EngineInputCheckPanel />
+          </div>
+        </section>
+
+        <section className="workspace-section">
+          <SectionHeader
+            title="Reset baselines"
+            description="Admin only. Start every client's baseline again with the new calculator."
+          />
+          <div className="workspace-panel">
+            <ResetBaselinesPanel />
           </div>
         </section>
       </div>

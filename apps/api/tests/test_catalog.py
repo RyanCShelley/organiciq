@@ -26,7 +26,7 @@ def _target(**kw):
     base = dict(
         keyword="local seo agency", target_url="https://x/local-seo",
         ranking_url="https://x/local-seo", position=12.0, volume=1000.0,
-        priority=True, target_page_type="commercial",
+        priority=True, target_page_type="commercial", term_role="primary",
     )
     base.update(kw)
     return score_candidate(Candidate(**base))
@@ -64,6 +64,32 @@ def test_v1_is_phrase_aware_not_a_bag_of_words():
 
 def test_v1_is_silent_when_the_page_already_uses_the_term():
     assert v1_term_in_high_value_spots(_target(), _page()) is None
+
+
+def test_v1_does_not_ask_for_a_meta_description_that_google_rewrites():
+    """Aquaman Leak Detection: the term was in the title and an H2, and the
+    meta description said 'your pool'. The page was told its term was missing."""
+    page = _page(description="We find and repair leaks in your pool.")
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_asks_only_for_what_is_missing():
+    found = v1_term_in_high_value_spots(_target(), _page(title="Services | X"))
+    assert found is not None
+    assert "any heading" not in found.why and "the title" in found.why
+    assert found.title.endswith("in the title")
+    assert "H2" not in found.done_when
+
+
+def test_v1_does_not_read_a_crawl_without_headings_as_a_page_with_none():
+    """A crawl that predates heading capture leaves them empty, not absent."""
+    page = _page(headings=(), headings_known=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
+
+
+def test_v1_says_nothing_about_a_page_the_crawl_did_not_read():
+    page = _page(title=None, description=None, headings=(), crawled=False)
+    assert v1_term_in_high_value_spots(_target(), page) is None
 
 
 def test_v2_only_fires_on_a_question():
@@ -112,11 +138,11 @@ def test_re_homing_comes_before_optimising_the_page():
     assert found is not None and found.action_id == "V-6"
 
 
-def test_the_term_goes_on_the_page_before_links_point_at_it():
+def test_a_verified_link_gap_still_fires_when_exact_wording_is_missing():
     target = _target()
     page = _page(title="Services | X", headings=(), inbound_editorial_links=1, site_median_links=8)
     found = prescribe(target, page)
-    assert found is not None and found.action_id == "V-1"
+    assert found is not None and found.action_id == "V-4"
 
 
 def test_every_action_says_what_done_looks_like():
@@ -124,9 +150,7 @@ def test_every_action_says_what_done_looks_like():
     finishes."""
     cases = [
         (_target(ranking_url="https://x/other"), _page()),
-        (_target(), _page(title="Services | X", headings=())),
         (_target(keyword="what is local seo"), _page(faq_questions=())),
-        (_target(), _page(entity_properties=frozenset())),
         (_target(), _page(inbound_editorial_links=0, site_median_links=9)),
     ]
     for target, page in cases:
@@ -157,6 +181,59 @@ def test_the_actions_that_cannot_fire_say_why():
 
 def test_the_order_is_the_argument():
     assert VISIBILITY_ACTIONS[0] is v6_rehoming
-    assert VISIBILITY_ACTIONS.index(v1_term_in_high_value_spots) < VISIBILITY_ACTIONS.index(
-        v4_internal_links
+    assert v1_term_in_high_value_spots not in VISIBILITY_ACTIONS
+    assert VISIBILITY_ACTIONS.index(v6_rehoming) < VISIBILITY_ACTIONS.index(v4_internal_links)
+
+
+def test_rules_that_read_the_crawl_stay_silent_on_a_page_it_did_not_read():
+    """Headings, FAQ questions, schema and link counts are only recorded for a
+    page fetched as a 2xx. Empty there means unknown, not "the page has none"."""
+    from app.decisions.catalog import v2_answer_block, v3_entity_markup, v4_internal_links
+
+    unread = _page(
+        crawled=False,
+        title=None,
+        description=None,
+        headings=(),
+        headings_known=False,
+        entity_properties=frozenset(),
+        inbound_editorial_links=0,
+        site_median_links=8.0,
     )
+    question = _target(keyword="what is local seo")
+    assert v2_answer_block(question, unread) is None
+    assert v3_entity_markup(_target(), unread) is None
+    assert v4_internal_links(_target(), unread) is None
+
+    # The same facts on a page that was read do fire, so the silence is the flag.
+    read = _page(entity_properties=frozenset(), inbound_editorial_links=0, site_median_links=8.0)
+    assert v3_entity_markup(_target(), read) is not None
+    assert v4_internal_links(_target(), read) is not None
+
+
+def test_a_target_typed_http_or_www_is_the_page_that_ranks():
+    """Mapped as http://, ranking as https://: one page, not a re-homing."""
+
+    same = _target(target_url="http://www.x.com/local-seo", ranking_url="https://x.com/local-seo/")
+    assert same.rehoming is False
+    other = _target(target_url="https://x.com/local-seo", ranking_url="https://x.com/blog")
+    assert other.rehoming is True
+
+
+def test_optional_markup_and_exact_secondary_heading_are_not_automatic_work():
+    from app.decisions.catalog import VISIBILITY_ACTIONS, v8_secondary_term_section
+    assert v3_entity_markup not in VISIBILITY_ACTIONS
+    assert v8_secondary_term_section not in VISIBILITY_ACTIONS
+    assert prescribe(_target(), _page(entity_properties=frozenset())) is None
+
+
+def test_phrase_presence_tolerates_html_whitespace_and_punctuation():
+    assert v1_term_in_high_value_spots(_target(), _page(title='Local\u00a0SEO — Agency', headings=('Local SEO: agency',))) is None
+
+
+def test_missing_exact_phrase_alone_never_becomes_automatic_work():
+    target = _target()
+    page = _page(title="Services | X", headings=("Our approach",))
+    assert v1_term_in_high_value_spots(target, page) is not None  # legacy evaluation
+    assert all(rule(target, page) is None for rule in VISIBILITY_ACTIONS)
+    assert prescribe(target, page) is None
