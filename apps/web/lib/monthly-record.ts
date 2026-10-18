@@ -10,6 +10,7 @@
 export type TestStatus = "pass" | "fail" | "blocked";
 
 export type BranchTest = {
+  evidence?: Record<string, number | string | null>;
   id: string;
   name: string;
   metric_label: string;
@@ -32,6 +33,7 @@ export type BranchResult = {
 };
 
 export type RecordAction = {
+  family?: string;
   action_uid: string;
   slot: number;
   id: string;
@@ -49,6 +51,7 @@ export type RecordAction = {
   steps?: string[];
   metric: string;
   check_on: string;
+  check_after_days?: number;
   flags?: string[];
 };
 
@@ -60,6 +63,9 @@ export type Candidate = RecordAction & {
 };
 
 export type MonthlyRecord = {
+  measurements?: import("@/components/DecisionEngine/MeasurementSummary").Measurements;
+  review_required?: boolean;
+  plan_review?: { approved_at: string | null };
   client: string;
   client_name?: string;
   domain?: string;
@@ -181,6 +187,8 @@ export const CONSTRAINT_LABEL: Record<string, string> = {
   leads: "Leads",
   visibility_expansion: "Visibility expansion",
   withheld: "Withheld",
+  continue_strategy: "Continue current strategy",
+  insufficient_evidence: "Insufficient evidence",
 };
 
 /** "October 2026" from "2026-10". */

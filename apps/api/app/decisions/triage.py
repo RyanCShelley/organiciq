@@ -51,6 +51,7 @@ LADDER: tuple[Branch, ...] = (Branch.VISIBILITY, Branch.TRAFFIC, Branch.LEADS)
 #: Constraints that are not one of the three branches.
 WITHHELD = "withheld"
 VISIBILITY_EXPANSION = "visibility_expansion"
+INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,9 @@ def assess_visibility(
 
 @dataclass(frozen=True)
 class TrafficSignals:
+    ctr_context_matched: bool = False
+    sessions: float | None = None
+    prior_sessions: float | None = None
     #: Clicks the measured CTR curve says the rankings should earn and do not.
     missed_clicks: float | None = None
     actual_clicks: float | None = None
@@ -301,25 +305,38 @@ def assess_traffic(
 
     results: list[TestResult] = []
 
-    # T1 — missed clicks as a share of the clicks actually earned.
+    change = None
+    if signals.sessions is not None and signals.prior_sessions:
+        change = (signals.sessions - signals.prior_sessions) / signals.prior_sessions * 100
+    results.append(_judge("T0", "Site visits", "Change in all-channel GA4 sessions", change,
+        pass_line=-t("t0_session_drop_pct", 15.0), direction="min", unit="chg",
+        missing=None if change is not None else "no comparable all-channel GA4 session periods",
+        evidence={"sessions": signals.sessions, "prior_sessions": signals.prior_sessions}))
+
+    # T1 — estimated shortfall share of the benchmark opportunity, bounded 0–100.
     missed_share = None
-    if signals.missed_clicks is not None and signals.actual_clicks:
-        missed_share = signals.missed_clicks / signals.actual_clicks * 100.0
+    if signals.missed_clicks is not None and signals.actual_clicks is not None:
+        opportunity = max(0, signals.missed_clicks) + max(0, signals.actual_clicks)
+        if opportunity:
+            missed_share = max(0, signals.missed_clicks) / opportunity * 100.0
     results.append(
         _judge(
             "T1",
-            "Missed clicks",
-            "Clicks the rankings should earn and do not",
+            "CTR benchmark gap",
+            "Estimated click shortfall / benchmark opportunity",
             missed_share,
             pass_line=t("t1_missed_click_pct", 20.0),
             direction="max",
-            missing=None if missed_share is not None else "no Search Console clicks",
+            missing=("CTR reference is diagnostic only until device and SERP context match the benchmark"
+                     if missed_share is not None and not signals.ctr_context_matched
+                     else None if missed_share is not None else "no measured click opportunity"),
             display=(
                 f"{int(signals.missed_clicks):,} missed against "
                 f"{int(signals.actual_clicks):,} earned"
                 if missed_share is not None
                 else None
             ),
+            evidence={"estimated_missed_clicks": signals.missed_clicks, "actual_clicks": signals.actual_clicks, "formula_version": 2},
         )
     )
 
@@ -380,6 +397,7 @@ def assess_traffic(
 
 @dataclass(frozen=True)
 class LeadSignals:
+    target_lead_rate: float | None = None
     #: No conversion definitions means Leads is blocked, never passed.
     conversions_configured: bool = False
     leads_month_to_date: float | None = None
@@ -403,31 +421,13 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
     blocked = None if signals.conversions_configured else "no conversion events set"
     results: list[TestResult] = []
 
-    # L1 — goal pace, against the goal pro-rated to today rather than the
-    # whole month. Judging day three against a monthly goal fails everyone.
-    pace = None
-    if (
-        signals.leads_month_to_date is not None
-        and signals.goal_to_date
-        and signals.conversions_configured
-    ):
-        pace = signals.leads_month_to_date / signals.goal_to_date * 100.0
-    results.append(
-        _judge(
-            "L1",
-            "Goal pace",
-            "Leads against the goal so far this month",
-            pace,
-            pass_line=t("l1_goal_pace_pct", 80.0),
-            missing=blocked or (None if pace is not None else "no monthly lead goal"),
-            display=(
-                f"{int(signals.leads_month_to_date)} of "
-                f"{int(signals.monthly_goal)} leads"
-                if signals.leads_month_to_date is not None and signals.monthly_goal
-                else None
-            ),
-        )
-    )
+    # L1 — actual conversion rate against the explicitly configured rate goal.
+    results.append(_judge("L1", "Lead conversion rate", "Lead event rate versus target rate",
+        signals.lead_rate if signals.conversions_configured else None,
+        pass_line=signals.target_lead_rate or 0.0,
+        missing=blocked or (None if signals.target_lead_rate and signals.lead_rate is not None else "no target lead conversion rate or measured sessions"),
+        evidence={"lead_rate_pct": signals.lead_rate, "target_rate_pct": signals.target_lead_rate,
+                  "formula_version": 2}))
 
     # L2 — lead rate against the client's own baseline.
     against_baseline = None
@@ -564,6 +564,11 @@ def select_constraint(
                 reason_text=_reason_for(result, headline),
                 branches=ordered,
             )
+
+    if ordered and all(result.status is Status.BLOCKED for result in ordered):
+        return Triage(constraint=INSUFFICIENT_EVIDENCE,
+                      reason_text="No branch has enough evidence. Review coverage and choose the next step.",
+                      branches=ordered)
 
     # Nothing failing. Blocked branches are skipped rather than fatal, so this
     # is reached when every branch either passed or could not be judged.

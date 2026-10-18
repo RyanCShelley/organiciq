@@ -43,6 +43,18 @@ def upsert_keyword_page_map(db, client_id, entries):
         # suggestion only becomes confirmed by passing through here.
         row.source = "confirmed"
         row.note = (entry.note or "").strip() or None
+        # The legacy map editor and unified watchlist share the same decision.
+        from app.models.watch_target import WatchTarget
+        from app.services.watchlist import item_key
+        watched = db.query(WatchTarget).filter(
+            WatchTarget.client_id == client_id, WatchTarget.kind == "keyword",
+            WatchTarget.item_key == item_key("keyword", keyword),
+        ).one_or_none()
+        if watched is not None:
+            watched.target_url = row.target_url
+            watched.state = "existing" if row.target_url else "unmapped"
+            watched.priority = row.priority
+            watched.note = row.note
     db.commit()
     return (
         db.query(KeywordTarget)

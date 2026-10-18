@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import { mergeBrief, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
+import { metricExplanation } from "./metric-explanation";
+import type { BranchTest } from "./monthly-record";
+
+const row = (uid: string, ids: string[], steps: string[]): Brief => ({
+  action_uid: uid, id: ids[0], family: "priority_page", title: "Improve page",
+  target_url: "https://example.com/service", branch: "visibility", term: "service",
+  why: `Reason ${uid}`, done_when: `Done ${uid}`, steps, evidence: [`Evidence ${uid}`],
+  finding_ids: ids, effort_min: 30, metric: "Term position", metric_key: "term_position", check_after_days: 28,
+});
+const original = row("a", ["V-1"], ["Check intent"]);
+const incoming = row("b", ["V-3"], ["Check intent", "Validate entity graph"]);
+const merged = mergeBrief(original, incoming);
+assert.deepEqual(merged.steps, ["Check intent", "Validate entity graph"]);
+assert.match(merged.why, /Reason a[\s\S]*Reason b/);
+assert.match(merged.done_when, /Done a[\s\S]*Done b/);
+assert.equal(merged.action_uid, original.action_uid);
+assert.equal(includesProposal(merged, incoming), true);
+assert.deepEqual(mergeBrief(merged, incoming), merged); // repeat clicks cannot duplicate work
+assert.deepEqual(original.steps, ["Check intent"]); // saved state stays untouched
+assert.equal(suggestedPlan([original, incoming, { ...row("c", ["V-4"], ["Link"]), target_url: "https://example.com/other" }], "visibility", 5).length, 3);
+assert.equal(suggestedPlan([original, incoming], "visibility", 1).length, 1);
+
+const explanation = (id: string, value: number, evidence: Record<string, number>) => metricExplanation({ id, value, evidence } as BranchTest).calculation;
+assert.match(explanation("V1", 25, { in_top_10: 2, priority_keywords: 8 }), /2.*8.*25%/);
+assert.match(explanation("T1", 75, { estimated_missed_clicks: 150, actual_clicks: 50, formula_version: 2 }), /150.*150.*50.*75%/);
+assert.match(explanation("L1", 2, { lead_rate_pct: 2, target_rate_pct: 3, formula_version: 2 }), /2%.*3%/);
+assert.match(metricExplanation({ id: "T1", value: 300 } as BranchTest).calculation, /Superseded/);
+console.log("review-ui: merge, inclusion, suggested selection and calculation explanations passed");
+
+const bundled = { ...original, steps: ["Task one", "Task two", "Task three"] };
+assert.equal(actionCount([bundled, { ...incoming, steps: ["Task four", "Task five"] }]), 5);
+let choices = toggleAction([], bundled, "Task two", 1);
+assert.equal(actionCount(choices), 1);
+assert.equal(choices[0].done_when, "Task two");
+assert.equal(selectedAction(choices, bundled, "Task two")?.action_uid, choices[0].action_uid);
+choices = toggleAction(choices, bundled, "Task two", 1);
+assert.equal(choices.length, 0);
+const unbundled = toggleAction([bundled], bundled, "Task two", 1);
+assert.deepEqual(unbundled.map(x => x.steps), [["Task one"], ["Task three"]]);
+assert.equal(new Set(unbundled.map(x => x.action_uid)).size, 2);
+const normalized = toggleAction([bundled, { ...incoming, steps: ["Task four", "Task five"] }], bundled, "Task two", 1);
+assert.equal(normalized.length, 4);
+assert.ok(normalized.every(item => item.steps.length === 1));
+assert.equal(actionCount(normalized), 4);
+const locked = toggleAction([bundled], bundled, "Task two", 1, [bundled.action_uid]);
+assert.deepEqual(locked, [bundled]);

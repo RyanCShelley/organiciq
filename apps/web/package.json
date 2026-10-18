@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx lib/client-path.test.ts && tsx lib/csv.test.ts && tsx lib/table-sort.test.ts && tsx lib/workspace-account.test.ts && tsx lib/effective-plan.test.ts"
+    "test": "tsx lib/client-path.test.ts && tsx lib/csv.test.ts && tsx lib/table-sort.test.ts && tsx lib/workspace-account.test.ts && tsx lib/effective-plan.test.ts && tsx lib/review-ui.test.ts"
   },
   "dependencies": {
     "jose": "^6.0.10",

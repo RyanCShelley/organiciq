@@ -8,6 +8,8 @@ import {
   type BranchTest,
   type MonthlyRecord,
 } from "@/lib/monthly-record";
+import { metricExplanation } from "@/lib/metric-explanation";
+import { MeasurementSummary, type MeasurementSettingsProps } from "./MeasurementSummary";
 
 const STATUS_CHIP: Record<string, string> = {
   pass: "bg-[#E5F4EC] text-[#15784F]",
@@ -91,13 +93,26 @@ function BranchTile({
                   : "text-[var(--text-primary)]"
             }`}
           >
-            {test ? testValue(test) : "—"}
+            {test?.id === "T1" && test.evidence?.formula_version !== 2 ? "Superseded" : test ? testValue(test) : "—"}
           </p>
           <p className="mt-1.5 text-[12px] leading-snug text-[var(--text-tertiary)]">
             {test ? `${test.metric_label} · ${passLine(test)}` : ""}
           </p>
         </>
       )}
+      <details className="mt-3 border-t border-[var(--border)] pt-2 text-[12px] leading-relaxed">
+        <summary className="cursor-pointer font-semibold">How is this calculated?</summary>
+        {branch.tests.map(t => {
+          const explanation = metricExplanation(t);
+          return <div className="mt-3 space-y-1" key={t.id}>
+            <p className="font-semibold">{t.name} · {t.status === "blocked" ? "Not measured" : (t.id === "T1" || t.id === "L1") && t.evidence?.formula_version !== 2 ? "Superseded calculation" : testValue(t)}</p>
+            <p>{t.status === "blocked" ? t.missing : explanation.calculation}</p>
+            <p><strong>Source:</strong> {explanation.source}</p>
+            <p><strong>Threshold:</strong> {passLine(t)}. This is an engine rule, not a proven business constraint.</p>
+            <p className="text-[var(--text-tertiary)]">{explanation.limitation}</p>
+          </div>;
+        })}
+      </details>
     </div>
   );
 }
@@ -168,9 +183,11 @@ function SlotPips({ progress }: { progress: SlotProgress }) {
 export function ConstraintCard({
   record,
   progress,
+  measurementSettings,
 }: {
   record: MonthlyRecord;
   progress?: SlotProgress;
+  measurementSettings?: MeasurementSettingsProps;
 }) {
   const label = CONSTRAINT_LABEL[record.constraint] ?? record.constraint;
   const held = monthsHeld(record.held_since, record.month);
@@ -188,7 +205,7 @@ export function ConstraintCard({
       <div className="flex flex-wrap justify-between gap-5">
         <div className="min-w-0 flex-1 basis-[420px]">
           <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            This month&rsquo;s constraint
+            {record.plan_review ? "Your selected focus" : "Assessment suggestion"}
           </p>
           <h2
             id="constraint-heading"
@@ -258,7 +275,9 @@ export function ConstraintCard({
           was always a strict subset of the other. The chip above still says
           how many there are, and that card says what they are. */}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <MeasurementSummary data={record.measurements} settings={measurementSettings} />
+      <details className="mt-5 text-sm"><summary className="cursor-pointer font-semibold">Assessment diagnostics · rules and benchmark assumptions</summary>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {record.branches.map((branch) => (
           <BranchTile
             key={branch.branch}
@@ -267,6 +286,7 @@ export function ConstraintCard({
           />
         ))}
       </div>
+      </details>
     </section>
   );
 }

@@ -36,6 +36,7 @@ export function SlotActionBar({
   slug,
   month,
   teamworkReady,
+  approved = true,
 }: {
   action: RecordAction;
   state: SlotState | undefined;
@@ -44,6 +45,7 @@ export function SlotActionBar({
   slug: string;
   month: string;
   teamworkReady: boolean;
+  approved?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +96,13 @@ export function SlotActionBar({
       "Done when",
       action.done_when,
       "",
-      `Measured on ${action.metric}, checked ${action.check_on}`,
+      "Checklist",
+      ...(action.steps ?? []).map((step, index) => `${index + 1}. ${step}`),
+      "",
+      "Evidence and limitations",
+      ...(action.evidence ?? []),
+      "",
+      `Measured on ${action.metric}, checked ${action.check_after_days ? `${action.check_after_days} days after shipment` : action.check_on}`,
       `Estimated ${action.effort_min} minutes`,
     ];
     navigator.clipboard.writeText(lines.join("\n")).then(
@@ -106,6 +114,7 @@ export function SlotActionBar({
     );
   }
 
+  if (!approved) return <p className="text-sm text-[var(--text-secondary)]">Save and approve the reviewed plan before assigning or delivering growth work.</p>;
   if (status === "skipped") {
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">

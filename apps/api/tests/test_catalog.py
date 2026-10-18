@@ -26,7 +26,7 @@ def _target(**kw):
     base = dict(
         keyword="local seo agency", target_url="https://x/local-seo",
         ranking_url="https://x/local-seo", position=12.0, volume=1000.0,
-        priority=True, target_page_type="commercial",
+        priority=True, target_page_type="commercial", term_role="primary",
     )
     base.update(kw)
     return score_candidate(Candidate(**base))

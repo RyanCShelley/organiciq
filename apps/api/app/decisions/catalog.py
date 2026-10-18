@@ -138,7 +138,7 @@ def v1_term_in_high_value_spots(
     its term was missing because of a snippet. And a page the crawl did not read,
     or read before headings were captured, is unknown rather than empty.
     """
-    if target.candidate.term_role == "secondary":
+    if target.candidate.term_role != "primary":
         return None
     if not page.crawled:
         return None
@@ -451,16 +451,16 @@ def v5_add_an_extractable_structure(
         effort_min=45,
         why=(
             f"The results for “{term}” carry {EXTRACTIVE_FEATURES[feature]}, "
-            "so an engine is lifting an answer from somewhere. The heading "
-            "that asks it on this page is followed by prose and nothing "
-            "else — no table, no list, no figure to quote."
+            "which makes this section worth reviewing. The crawl detected "
+            "no table, list or stat block under the matching heading. "
+            "A direct prose answer may already be sufficient; verify the gap first."
         ),
         done_when=(
-            "A table, a bullet summary or a stat block sits directly under "
-            "that heading, answering the question on its own without the "
-            "paragraph around it."
+            "The reviewed brief names the missing answer, chooses a direct answer, "
+            "comparison table or steps that fit the question, and lists verified "
+            "facts and sources. The approved section is live."
         ),
-        metric="Term position and AI citation",
+        metric="Term position; prompt citations require a separate observed check",
         metric_key="term_position",
         evidence=(
             f"facts_serp_features: {feature} present",
@@ -553,7 +553,7 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
         or page.position is None
         or page.position > SNIPPET_MAX_POSITION
         or page.impressions < MIN_IMPRESSIONS
-        or missed < 1
+        or missed < 5
         # A query naming the site is navigation. The shortfall is real and
         # the snippet is not the cause, so this would be a rewrite sold on a
         # number it cannot move.
@@ -571,16 +571,17 @@ def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
         why=(
             f"The page averages position {page.position:.1f} and earned "
             f"{page.clicks:.0f} clicks from {page.impressions:.0f} "
-            f"impressions. The measured curve puts a page at that position on "
+            f"impressions. A reference CTR scenario estimates "
             f"{page.expected_clicks:.0f}. At the top of the page one, what is "
-            "left to explain the gap is the snippet."
+            "worth reviewing is query intent, the results layout and the snippet. "
+            "The benchmark is an estimate and does not establish the cause."
         ),
         done_when=(
             "The title is 60 characters or fewer, carries the term and a "
             "reason to click that the page delivers, and the old version is "
             "logged so the check has something to compare."
         ),
-        metric="Clicks against the curve's expectation",
+        metric="Observed Search Console clicks after the change",
         metric_key="page_clicks",
         evidence=(
             f"facts_gsc_pages: {page.clicks:.0f} clicks, "
@@ -612,8 +613,8 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
             f"{page.sessions:.0f} sessions landed here and "
             f"{rate * 100:.0f}% engaged, against a site median of "
             f"{page.site_median_engagement * 100:.0f}%. The page is winning "
-            "the click and losing the reader, which is a mismatch between "
-            "what the search promised and what the opening delivers."
+            "visits with lower recorded engagement. Review the visitor intent "
+            "and opening before deciding whether a rewrite is the right intervention."
         ),
         done_when=(
             "The H1 and the first two paragraphs answer the query the page "
@@ -703,7 +704,7 @@ def t2_match_the_serp_format(page: PageCandidate) -> Prescription | None:
             f"The page carries {FEATURE_SHAPE[feature]}, answering the query "
             "in the words it is asked in."
         ),
-        metric="Clicks against the curve's expectation",
+        metric="Observed Search Console clicks after the change",
         metric_key="page_clicks",
         evidence=(
             f"facts_serp_features: {', '.join(page.missing_serp_features)} "
@@ -762,16 +763,16 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
         effort_min=30,
         why=(
             f"{page.sessions:.0f} sessions land here and the page carries no "
-            "in-content link to any declared conversion page. Navigation and "
-            "the footer do not count: they are on every page and say nothing "
-            "about this one, so the reader is left to go looking."
+            "qualifying in-content link detected to a declared conversion page. "
+            "This is crawl evidence, not measured visitor progression. Verify "
+            "the page and destination before changing the route."
         ),
         done_when=(
             f"An in-content link to {page.matched_offers[0]}, with a sentence "
             "saying what the reader gets by following it, placed where the "
             "page has finished answering what they came for."
         ),
-        metric="Leads from sessions starting on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             f"facts_crawl_internal_links: no in-content link to a conversion page",
@@ -805,7 +806,7 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
             "One call to action on the first screen, worded for what this "
             "page is about rather than the site's standard line."
         ),
-        metric="Lead rate for sessions landing on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             "facts_crawl_page_snapshots: conversion_elements = 0",
@@ -849,7 +850,7 @@ def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None
             f"The in-content route points at {page.matched_offers[0]}, with "
             "the link text rewritten for what that offer gives this reader."
         ),
-        metric="Lead rate for sessions landing on this page",
+        metric="Page-local lead events per landing session (not journey attribution)",
         metric_key="page_lead_rate",
         evidence=(
             f"client_page_stages: {page.stage}",

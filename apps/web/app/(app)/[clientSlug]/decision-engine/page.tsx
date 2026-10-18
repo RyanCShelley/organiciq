@@ -7,7 +7,11 @@ import {
 } from "@/components/DecisionEngine/ConstraintCard";
 import { HistoricalRuns } from "@/components/DecisionEngine/HistoricalRuns";
 import { RunEngineButton } from "@/components/DecisionEngine/RunEngineButton";
-import { OptionsPanel } from "@/components/DecisionEngine/OptionsPanel";
+import { PlanReviewState, ApprovedWork } from "@/components/DecisionEngine/PlanReviewState";
+import { MonthlyReviewOverview } from "@/components/DecisionEngine/MonthlyReviewOverview";
+import { PlanReviewPanel } from "@/components/DecisionEngine/PlanReviewPanel";
+import { actionCount, type PlanReview } from "@/lib/plan-review";
+import { WatchlistPanel, type WatchItem } from "@/components/DecisionEngine/WatchlistPanel";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
@@ -81,6 +85,11 @@ export default async function DecisionEnginePage({
   }
 
   const canRun = await canRunPromise;
+  const review = record ? await apiFetch<PlanReview>(
+    `/decisions/records/${encodeURIComponent(record.month)}/review`, { clientId },
+  ).catch(() => null) : null;
+  const measurementSettings = await apiFetch<{ target_lead_rate_pct: number | null }>("/decisions/measurement-settings", { clientId }).catch(() => null);
+  const watchlist = await apiFetch<WatchItem[]>("/decisions/watchlist", { clientId }).catch(() => null);
 
   // The workflow is fetched apart from the record for the same reason it is
   // stored apart: assigning a task must not be able to change what the engine
@@ -166,7 +175,7 @@ export default async function DecisionEnginePage({
   });
   // Fall back to the saved actions for a record written before candidates
   // were stored, so an older month still renders its plan.
-  const actions = candidates.length ? planned : record.actions;
+  const actions = record.plan_review ? record.actions : candidates.length ? planned : record.actions;
   const added = planned.filter((c) => !engineChose.has(c.action_uid)).length;
   const removed = candidates.filter(
     (c) => engineChose.has(c.action_uid) && slotStates.get(c.action_uid)?.in_plan === false,
@@ -174,19 +183,19 @@ export default async function DecisionEnginePage({
 
   // Counted from what the team did, not from what the engine prescribed:
   // five filled slots nobody owns is not five slots of progress.
-  const states = actions.map((a) => slotStates.get(a.action_uid)?.status);
+  const weighted = (statuses: string[]) => actions.filter(a => statuses.includes(slotStates.get(a.action_uid)?.status ?? "")).reduce((n, a) => n + (record.plan_review ? actionCount([a]) : 1), 0);
   const progress: SlotProgress = {
     total: record.action_slots,
-    filled: actions.length,
-    assigned: states.filter((s) => s === "assigned" || s === "done").length,
-    skipped: states.filter((s) => s === "skipped").length,
+    filled: record.plan_review ? actionCount(actions) : actions.length,
+    assigned: weighted(["assigned", "done"]),
+    skipped: weighted(["skipped"]),
   };
 
   const withheld = record.constraint === "withheld";
   const assignable = record.actions.length + record.incidents.length;
 
   return (
-    <section className="space-y-[var(--section-gap)]">
+    <PlanReviewState key={`${record.month}-${review?.revision ?? 0}`}><section className="space-y-[var(--section-gap)]">
       {/* The run is a saved thing with a date, not a window somebody picked.
           It reads a whole finished month and is the plan for the month after,
           so the title block says both. The page title is already in the top bar. */}
@@ -201,7 +210,7 @@ export default async function DecisionEnginePage({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4">
+        <details className="text-sm"><summary className="cursor-pointer">Assessment history & controls</summary><div className="mt-3 flex flex-wrap items-center gap-4">
           {runs.length > 1 ? (
             <HistoricalRuns slug={selectedClient.slug} runs={runs} selected={record.month} />
           ) : null}
@@ -213,10 +222,14 @@ export default async function DecisionEnginePage({
               currentMonth={currentMonth}
             />
           ) : null}
-        </div>
+        </div></details>
       </div>
 
-      <ConstraintCard record={record} progress={progress} />
+      <MonthlyReviewOverview record={record} targetRate={measurementSettings?.target_lead_rate_pct ?? null} suggestedFocus={review?.suggested_focus ?? record.engine_constraint ?? record.constraint} />
+      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Explore the evidence · keywords, channels, lead rate and calculation details</summary><div className="mt-4">
+      <ConstraintCard record={record} progress={progress} measurementSettings={measurementSettings ? { clientId, slug: selectedClient.slug, target: measurementSettings.target_lead_rate_pct } : undefined} />
+      </div></details>
+      {review ? <PlanReviewPanel key={`${record.month}-${review.revision}`} initial={review} lockedUids={actions.filter(a => { const state = slotStates.get(a.action_uid); return Boolean(state?.assignee_email || state?.sent_at || state?.shipped_on); }).map(a => a.action_uid)} clientId={clientId} slug={selectedClient.slug} month={record.month} /> : <Alert variant="danger">Plan review could not load. Reload before editing this plan.</Alert>}
 
       {/* Above the plan, because a plan read as if the site were working is
           worse than no plan. An incident takes no slot and does not change
@@ -272,15 +285,15 @@ export default async function DecisionEnginePage({
         <Alert variant="danger">
           Nothing is prescribed this month. {record.reason_text}
         </Alert>
-      ) : (
-        <>
+      ) : record.plan_review?.approved_at ? (
+        <ApprovedWork><details className="rounded-xl border border-[var(--border)] p-5"><summary className="cursor-pointer font-semibold">Approved work · assignment and Teamwork</summary><div className="mt-4 space-y-4">
           <section aria-labelledby="plan-heading" className="space-y-3">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2
                 id="plan-heading"
                 className="font-[family-name:var(--font-display)] text-[18px] font-extrabold text-[var(--text-primary)]"
               >
-                Growth actions to assign
+                4. Assign and send to Teamwork
               </h2>
               {/* One rule, stated once. The old screen had three orderings
                   on the same page and told the reader none of them was
@@ -288,8 +301,7 @@ export default async function DecisionEnginePage({
               <p className="text-[13px] text-[var(--text-secondary)]">
                 <span className="capitalize">{record.plan}</span> plan:{" "}
                 {record.action_slots}{" "}
-                {record.action_slots === 1 ? "slot" : "slots"}, filled from the
-                constraint. Leftovers go to the next branch with room to improve.
+                {record.action_slots === 1 ? "action" : "actions"}. Your selected work is ready for assignment and delivery.
                 {added || removed ? (
                   <span className="ml-1 font-semibold text-[var(--text-primary)]">
                     {added ? `${added} added` : ""}
@@ -314,6 +326,7 @@ export default async function DecisionEnginePage({
                   slug={selectedClient.slug}
                   month={record.month}
                   teamworkReady={teamworkReady}
+                  approved={Boolean(record.plan_review?.approved_at)}
                 />
               </SlotCard>
             ))}
@@ -327,16 +340,6 @@ export default async function DecisionEnginePage({
               </p>
             ) : null}
           </section>
-
-          {candidates.length > 0 ? (
-            <OptionsPanel
-              candidates={candidates}
-              states={slotStates}
-              clientId={clientId}
-              slug={selectedClient.slug}
-              month={record.month}
-            />
-          ) : null}
 
           {record.not_this_month.length > 0 ? (
             <section
@@ -384,8 +387,11 @@ export default async function DecisionEnginePage({
               ) : null}
             </section>
           ) : null}
-        </>
-      )}
+        </div></details></ApprovedWork>
+      ) : null}
+
+      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Supporting information · targets, previous results and data gaps</summary><div className="mt-4 space-y-5">
+      {watchlist ? <WatchlistPanel initial={watchlist} clientId={clientId} slug={selectedClient.slug} /> : <Alert variant="danger">Watchlist could not load.</Alert>}
 
       <div className="grid gap-4 md:grid-cols-2">
         <section
@@ -399,8 +405,8 @@ export default async function DecisionEnginePage({
             Last month&rsquo;s results
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            Each action is checked 28 to 45 days after it ships, on the metric it
-            was meant to move.
+            Approved work is checked after its recorded shipment and chosen waiting period.
+            Manual verification stays separate from automated metric checks.
           </p>
           <PreviousResults
             rows={record.previous_results.filter(
@@ -442,12 +448,13 @@ export default async function DecisionEnginePage({
         </section>
       </div>
 
+      </div></details>
       <Link
         href={contentOppHref}
         className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 text-[13.5px] font-semibold no-underline"
       >
         See content opportunities
       </Link>
-    </section>
+    </section></PlanReviewState>
   );
 }

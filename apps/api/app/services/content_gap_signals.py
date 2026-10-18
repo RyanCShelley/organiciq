@@ -129,7 +129,13 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         "pages_searched": len(pages),
     }
     gaps: list[TermGap] = []
+    from app.models.watch_target import WatchTarget
+    excluded_terms = {x.text.strip().lower() for x in db.query(WatchTarget).filter(
+        WatchTarget.client_id == client.id, WatchTarget.kind == "keyword", WatchTarget.state == "excluded")}
     for term, row in tracked.items():
+        if term in excluded_terms:
+            summary["excluded"] = summary.get("excluded", 0) + 1
+            continue
         target = targets.get(term)
         recorded_no_page = target is not None and not (target.target_url or "").strip()
         if target is not None and not recorded_no_page:
