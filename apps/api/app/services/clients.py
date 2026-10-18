@@ -20,6 +20,7 @@ from app.services.competitors import clean_competitor_domains
 
 # FKs have no ON DELETE CASCADE — delete client-scoped rows before clients.
 _CLIENT_CASCADE_TABLES = (
+    "ga4_native_channel_observations",
     "facts_crawl_internal_links",
     "facts_crawl_page_schema",
     "staging_ser_ai_checks",

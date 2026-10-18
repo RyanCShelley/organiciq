@@ -86,6 +86,28 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         metrics=["eventCount"],
     )
 
+    # Service reporting is opt-in per client. Existing whole-site report grain
+    # stays unchanged, so native dimensions cannot restate baseline inputs.
+    from app.models.client import Client
+    client = db.get(Client, job.client_id)
+    native_traffic, native_events = [], []
+    native_enabled = client.service_reporting is not None
+    if native_enabled:
+        native_traffic = run_report(access_token=token, property_id=property_id,
+            start_date=job.start_date, end_date=job.end_date,
+            dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "sessionDefaultChannelGroup"],
+            metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions"])
+        native_events = run_report(access_token=token, property_id=property_id,
+            start_date=job.start_date, end_date=job.end_date,
+            dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "eventName", "sessionDefaultChannelGroup"],
+            metrics=["eventCount"])
+        if not (getattr(native_traffic, "complete", False) and getattr(native_events, "complete", False)):
+            raise ValueError("Native GA4 channel reports were not verified complete")
+        _validate_report_rows(native_traffic, dimensions=5, metrics=4)
+        _validate_report_rows(native_events, dimensions=6, metrics=1)
+        if any(not _dim(row, 4) for row in native_events):
+            raise ValueError("Native GA4 event name is missing")
+
     complete = bool(getattr(traffic_rows, "complete", False) and getattr(event_rows, "complete", False))
     if complete:
         _validate_report_rows(traffic_rows, dimensions=4, metrics=4)
@@ -134,10 +156,24 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 event_count=int(_metric(row, 0)),
             )
         )
+    for row in native_traffic:
+        db.add(StagingGa4Traffic(job_id=job.id, client_id=job.client_id, raw=row,
+            date=_parse_ga4_date(_dim(row, 0)), landing_page=_dim(row, 1),
+            session_source=_dim(row, 2), session_medium=_dim(row, 3),
+            session_default_channel_group=_dim(row, 4), report_basis="native",
+            sessions=_metric(row, 0), active_users=_metric(row, 1), views=_metric(row, 2), engaged_sessions=_metric(row, 3)))
+    for row in native_events:
+        db.add(StagingGa4Event(job_id=job.id, client_id=job.client_id, raw=row,
+            date=_parse_ga4_date(_dim(row, 0)), landing_page=_dim(row, 1),
+            session_source=_dim(row, 2), session_medium=_dim(row, 3),
+            event_name=_dim(row, 4), session_default_channel_group=_dim(row, 5),
+            report_basis="native", event_count=int(_metric(row, 0))))
     job.params_json = {**(job.params_json or {}), "ga4_extract": {
         "complete": complete, "start": job.start_date.isoformat(), "end": job.end_date.isoformat(),
-        "property": property_id, "traffic_rows": len(traffic_rows), "event_rows": len(event_rows),
+        "property": property_id, "native_complete": native_enabled, "native_traffic_rows": len(native_traffic),
+        "native_event_rows": len(native_events), "native_traffic_pages": getattr(native_traffic, "pages", []),
+        "native_event_pages": getattr(native_events, "pages", []), "traffic_rows": len(traffic_rows), "event_rows": len(event_rows),
         "traffic_pages": getattr(traffic_rows, "pages", []), "event_pages": getattr(event_rows, "pages", []),
     }}
     db.commit()
-    return len(traffic_rows), len(event_rows)
+    return len(traffic_rows) + len(native_traffic), len(event_rows) + len(native_events)
