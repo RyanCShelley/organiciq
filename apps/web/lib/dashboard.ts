@@ -45,6 +45,10 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       lead_events: Array.isArray(conversions?.lead_events) ? conversions.lead_events : [],
       leads: periodMetric(conversions?.leads),
       lead_rate: periodMetric(conversions?.lead_rate),
+      session_lead_rate: periodMetric(conversions?.session_lead_rate),
+      lead_sessions: periodMetric(conversions?.lead_sessions),
+      session_measurement: conversions?.session_measurement ?? null,
+      session_rate_target_pct: conversions?.session_rate_target_pct ?? null,
       leads_by_channel: Array.isArray(conversions?.leads_by_channel)
         ? conversions.leads_by_channel.map((row) => ({
             channel: String(row.channel ?? ""),
@@ -118,6 +122,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       gsc_clicks: periodMetric(traffic?.gsc_clicks),
       gsc_ctr: periodMetric(traffic?.gsc_ctr),
       ga4_sessions: periodMetric(traffic?.ga4_sessions),
+      ga4_reported_sessions: periodMetric(traffic?.ga4_reported_sessions),
       ga4_views: periodMetric(traffic?.ga4_views),
       by_channel: Array.isArray(traffic?.by_channel)
         ? traffic.by_channel.map((row) => ({
@@ -263,6 +268,10 @@ export type DashboardResponse = {
     lead_events: string[];
     leads: DashboardPeriodMetric;
     lead_rate: DashboardPeriodMetric;
+    session_lead_rate?: DashboardPeriodMetric;
+    lead_sessions?: DashboardPeriodMetric;
+    session_rate_target_pct?: number | null;
+    session_measurement?: { status: string; sessions: number | null; lead_sessions: number | null; conversion_rate_pct: number | null; reason?: string; measured_at?: string } | null;
     leads_by_channel: {
       channel: string;
       label: string;
@@ -316,6 +325,7 @@ export type DashboardResponse = {
     gsc_clicks: DashboardPeriodMetric;
     gsc_ctr: DashboardPeriodMetric;
     ga4_sessions: DashboardPeriodMetric;
+    ga4_reported_sessions?: DashboardPeriodMetric;
     ga4_views: DashboardPeriodMetric;
     by_channel: {
       channel: string;
@@ -330,7 +340,7 @@ export type DashboardResponse = {
       ga4_sessions: number;
       ga4_views: number;
       ga4_key_events: number;
-      /** Session-to-key-event rate, already a percentage. */
+      /** Legacy field: lead events per 100 visits; not session conversion probability. */
       session_key_event_rate: number | null;
       gsc_impressions: number;
       gsc_clicks: number;

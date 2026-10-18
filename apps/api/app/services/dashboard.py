@@ -1211,6 +1211,10 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     previous_leads = _sum_leads(db, client.id, lead_events, ga4_previous)
     current_sessions = _sum_sessions(db, client.id, ga4_current)
     previous_sessions = _sum_sessions(db, client.id, ga4_previous)
+    from app.services.lead_measurements import session_lead_measurement
+    from app.services.decision_measurements import lead_rate_target
+    session_now = session_lead_measurement(db, client, *ga4_current) if ga4_current else None
+    session_before = session_lead_measurement(db, client, *ga4_previous) if ga4_previous else None
     current_lead_rate = _lead_rate(current_leads, current_sessions)
     previous_lead_rate = _lead_rate(previous_leads, previous_sessions)
 
@@ -1308,6 +1312,12 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         },
         "conversions": {
             "configured": conversions_configured,
+            "session_measurement": session_now,
+            "session_lead_rate": _period_metric(session_now.get("conversion_rate_pct") if session_now else None,
+                session_before.get("conversion_rate_pct") if session_before else None),
+            "lead_sessions": _period_metric(session_now.get("lead_sessions") if session_now else None,
+                session_before.get("lead_sessions") if session_before else None),
+            "session_rate_target_pct": lead_rate_target(db, client.id),
             "lead_events": lead_events,
             "leads": _period_metric(current_leads, previous_leads, leads_series),
             "lead_rate": _period_metric(current_lead_rate, previous_lead_rate, lead_rate_series),
@@ -1388,6 +1398,8 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             ),
             "gsc_ctr": _period_metric(gsc_ctr_current, gsc_ctr_previous, gsc_ctr_series),
             "ga4_sessions": _period_metric(current_sessions, previous_sessions, sessions_series),
+            "ga4_reported_sessions": _period_metric(session_now.get("sessions") if session_now else None,
+                session_before.get("sessions") if session_before else None),
             "ga4_views": _period_metric(
                 _ga4_views(db, client.id, ga4_current),
                 _ga4_views(db, client.id, ga4_previous),

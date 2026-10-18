@@ -464,7 +464,7 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
     measured = measure(db, client, end=today)["leads"]
     lead_rate = measured["rate_pct"]
 
-    baseline = getattr(client, "baseline_lead_rate_pct", None)
+    baseline = None  # Existing baselines use event counts, not converting sessions.
 
     tofu_share, next_step_blocked_by = _next_step(db, client, month_start, today)
 

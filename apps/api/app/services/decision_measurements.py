@@ -16,9 +16,10 @@ from app.models.decision import DecisionThreshold
 from app.decisions.ctr_curve import ai_overview_curve
 
 
-def lead_rate_target(db, client_id):
+def lead_rate_target(db, client_id, *, basis="session"):
+    key = "target_session_lead_rate_pct" if basis == "session" else "target_lead_rate_pct"
     row = db.query(DecisionThreshold).filter_by(client_id=client_id).one_or_none()
-    return (row.thresholds or {}).get("target_lead_rate_pct") if row else None
+    return (row.thresholds or {}).get(key) if row else None
 
 
 def session_totals(db, client_id, start, end):
@@ -118,7 +119,14 @@ def measure(db, client, *, end: date):
         leads = float(total or 0) if count else None
     goal, checkpoint = current_lead_goal(client, on=end)
     sessions = current["total"]
-    return {"version": 2, "start": start.isoformat(), "end": end.isoformat(),
+    from app.services.lead_measurements import session_lead_measurement
+    session_measurement = session_lead_measurement(db, client, start, end)
+    prior_measurement = session_lead_measurement(db, client, prior_start, prior_end)
+    for total, measurement in ((current, session_measurement), (previous, prior_measurement)):
+        if measurement.get("sessions") is not None:
+            total["detailed_total"] = total["total"]
+            total["total"] = measurement["sessions"]
+    return {"version": 3, "start": start.isoformat(), "end": end.isoformat(),
         "prior_start": prior_start.isoformat(), "prior_end": prior_end.isoformat(),
         "visibility": {"keywords": keywords, "prompts": prompts,
             "monthly_trend": monthly_keyword_trend(db, client, end),
@@ -127,9 +135,11 @@ def measure(db, client, *, end: date):
             "ctr_reference": {"scope": "Desktop · AI Overviews · industry averages supplied by the account lead",
                 "period": "Aug 2026 (CSV column label)",
                 "positions": [{"position": p, "ctr_pct": ctr} for p, ctr in ai_overview_curve().items()]},
-            "source": "GA4 sessions, all ingested channels. Direct remains direct/unattributed; it is not proof of organic or AI attribution."},
+            "source": "GA4 sessions, all channels. The headline uses the exact-period provider total when available; detailed channel estimates can sum differently. Direct remains unattributed, not proof of agency influence."},
         "leads": {"count": leads, "sessions": sessions,
-            "rate_pct": leads / sessions * 100 if leads is not None and sessions else None,
+            "rate_pct": session_measurement["conversion_rate_pct"],
+            "lead_sessions": session_measurement["lead_sessions"], "session_measurement": session_measurement,
+            "event_rate_pct": leads / sessions * 100 if leads is not None and sessions else None,
             "monthly_goal": goal, "goal_checkpoint": checkpoint.month if checkpoint else None,
             "target_rate_pct": lead_rate_target(db, client.id),
-            "source": "Configured GA4 lead event counts / all-channel GA4 sessions in the same period. Events may include repeats; this is not a unique-lead or qualified-lead rate."}}
+            "source": "Lead events count configured outcomes, including repeats. Lead conversion rate counts visits with at least one selected outcome once, divided by the matching GA4 session total for this period; all channels."}}

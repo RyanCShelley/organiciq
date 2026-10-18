@@ -245,6 +245,7 @@ def test_existing_assessment_gets_measurement_view_without_rewriting_history(db,
     result = client.get(f"/decisions/records/{MONTH}", headers=headers)
     assert result.status_code == 200, result.text
     assert result.json()["measurements"]["end"] == "2026-09-30"
-    assert "currently stored facts" in result.json()["measurements"]["source_note"]
+    assert result.json()["measurements"]["version"] == 3
+    assert "older findings retain their original measurement basis" in result.json()["measurements"]["source_note"]
     db.refresh(row)
     assert row.record == before

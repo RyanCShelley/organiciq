@@ -140,7 +140,8 @@ def test_current_measurement_settings_do_not_leak_between_clients(db, client_a, 
     db.flush()
     a = get_measurement_settings(client=client_a, _=None, db=db)
     b = get_measurement_settings(client=client_b, _=None, db=db)
-    assert a == {'target_lead_rate_pct': 2, 'conversion_page_count': 1}
+    assert a == {'target_lead_rate_pct': None, 'conversion_page_count': 1}
+    assert db.query(DecisionThreshold).filter_by(client_id=client_a.id).one().thresholds['target_lead_rate_pct'] == 2
     assert b == {'target_lead_rate_pct': None, 'conversion_page_count': 0}
 
 

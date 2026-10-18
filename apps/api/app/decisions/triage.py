@@ -433,13 +433,13 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
     results: list[TestResult] = []
 
     # L1 — actual conversion rate against the explicitly configured rate goal.
-    results.append(_judge("L1", "Lead conversion rate", "Lead event rate versus target rate",
+    results.append(_judge("L1", "Lead conversion rate", "Visits producing a lead versus the session conversion target",
         signals.lead_rate if signals.conversions_configured else None,
         pass_line=signals.target_lead_rate or 0.0,
         missing=blocked or ("no target lead conversion rate" if not signals.target_lead_rate else
                            "no measured lead rate for this period" if signals.lead_rate is None else None),
         evidence={"lead_rate_pct": signals.lead_rate, "target_rate_pct": signals.target_lead_rate,
-                  "formula_version": 2}))
+                  "formula_version": 3}))
 
     # L2 — lead rate against the client's own baseline.
     against_baseline = None
@@ -456,7 +456,7 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
             "Lead rate against this client's baseline",
             against_baseline,
             pass_line=t("l2_lead_rate_pct", 80.0),
-            missing=blocked or (None if against_baseline is not None else "no baseline lead rate"),
+            missing=blocked or (None if against_baseline is not None else "no comparable session-based lead conversion baseline; existing baselines use lead events"),
         )
     )
 

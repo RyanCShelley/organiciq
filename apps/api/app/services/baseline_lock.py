@@ -229,9 +229,9 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         if rate_goal is None:
             rate_goal = DecisionThreshold(client_id=client.id, thresholds={})
             db.add(rate_goal)
-        rate_goal.thresholds = {**(rate_goal.thresholds or {}), "target_lead_rate_pct": request.target_lead_rate_pct}
+        rate_goal.thresholds = {**(rate_goal.thresholds or {}), "target_session_lead_rate_pct": request.target_lead_rate_pct}
         # Keep the chosen target with the frozen version as well as live settings.
-        row.snapshot = {**row.snapshot, "target_lead_rate_pct": request.target_lead_rate_pct}
+        row.snapshot = {**row.snapshot, "target_session_lead_rate_pct": request.target_lead_rate_pct}
     client_service.update_client(db, client, ClientUpdate(**update))
 
     return {
