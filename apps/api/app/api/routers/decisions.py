@@ -790,6 +790,10 @@ def run_keyword_suggestions(
             detail=f"The matcher did not finish: {exc}"[:300],
         ) from exc
 
+    from app.services.automatic_keyword_map import build as build_map
+    found["map"] = build_map(db, client)
+    db.commit()
+
     if not found["pages"]:
         return {**found, "reason": "No crawled page has a title or headings to read."}
     if not found["terms"]:

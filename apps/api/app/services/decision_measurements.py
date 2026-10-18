@@ -37,14 +37,43 @@ def keyword_readings(db, client_id, end):
             FactSerRanking.date <= end).order_by(FactSerRanking.date.desc()):
         tracked.setdefault((row.keyword or "").strip().lower(), {
             "position": float(row.position) if row.position is not None else None,
-            "ranking_url": row.ranking_url, "observed_on": row.date.isoformat()})
+            "ranking_url": row.ranking_url, "observed_on": row.date.isoformat(), "engine": row.site_engine_id})
     for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id,
             FactSerKeyword.checked_at <= end):
         key = (row.keyword or "").strip().lower()
         if key not in tracked or row.checked_at.isoformat() > tracked[key]["observed_on"]:
             tracked[key] = {"position": float(row.current_position) if row.current_position is not None else None,
-                "ranking_url": row.ranking_url, "observed_on": row.checked_at.isoformat()}
+                "ranking_url": row.ranking_url, "observed_on": row.checked_at.isoformat(), "engine": row.site_engine_id}
     return tracked
+
+
+def monthly_keyword_trend(db, client, end):
+    """Compare the same terms with a dated reading in each calendar month."""
+    start = end.replace(day=1)
+    previous_end = start - timedelta(days=1)
+    before = keyword_readings(db, client.id, previous_end)
+    now = keyword_readings(db, client.id, end)
+    targets = [item for item in read(db, client) if item["kind"] == "keyword" and item["state"] != "excluded"]
+    priority = [item for item in targets if item["priority"]]
+    cohort = priority or targets
+    rows = []
+    for item in cohort:
+        term = item["text"].strip().lower()
+        a, b = before.get(term), now.get(term)
+        if not a or not b or a["position"] is None or b["position"] is None or a["engine"] != b["engine"]:
+            continue
+        if a["observed_on"] < previous_end.replace(day=1).isoformat() or b["observed_on"] < start.isoformat():
+            continue
+        # Vendor 0/101 represent an observed absence from the top 100.
+        previous = a["position"] if 0 < a["position"] <= 100 else 101
+        current = b["position"] if 0 < b["position"] <= 100 else 101
+        rows.append({"text": item["text"], "previous": previous, "current": current,
+            "previous_date": a["observed_on"], "current_date": b["observed_on"]})
+    return {"scope": "priority" if priority else "tracked", "cohort": len(rows), "rows": rows,
+        "declined": sum(row["current"] - row["previous"] >= 3 for row in rows),
+        "improved": sum(row["previous"] - row["current"] >= 3 for row in rows),
+        "entered_top_10": sum(row["previous"] > 10 and row["current"] <= 10 for row in rows),
+        "left_top_10": sum(row["previous"] <= 10 and row["current"] > 10 for row in rows)}
 
 
 def measure(db, client, *, end: date):
@@ -93,6 +122,7 @@ def measure(db, client, *, end: date):
     return {"version": 2, "start": start.isoformat(), "end": end.isoformat(),
         "prior_start": prior_start.isoformat(), "prior_end": prior_end.isoformat(),
         "visibility": {"keywords": keywords, "prompts": prompts,
+            "monthly_trend": monthly_keyword_trend(db, client, end),
             "note": "Each keyword uses its newest dated observation on or before the assessment date. The observation date is shown; older readings may be stale. Unmeasured terms are not treated as absent. Multiple tracker engines currently use the newest reading per term."},
         "traffic": {"current": current, "previous": previous,
             "ctr_reference": {"scope": "Desktop · AI Overviews · industry averages supplied by the account lead",

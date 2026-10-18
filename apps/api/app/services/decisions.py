@@ -167,7 +167,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 "keyword": keyword,
                 "target_url": row.target_url if row else None,
                 "note": row.note if row else None,
-                "mapped": row is not None,
+                "mapped": row is not None and (row.source == "confirmed" or (row.source == "auto" and bool(row.target_url))),
                 #: primary | secondary | None. Null is its own answer.
                 "term_role": row.term_role if row else None,
                 #: SE Ranking's own grouping, so the only new judgement is
@@ -187,7 +187,7 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 "difficulty": (
                     float(metric.difficulty) if metric and metric.difficulty else None
                 ),
-                "current_position": rank_position(tracked.current_position),
+                "current_position": rank_position(tracked.current_position) if tracked.current_position is not None and float(tracked.current_position) <= 100 else None,
                 "suggested_target_url": suggested_url,
                 #: Which read it came from. They mean different things: one
                 #: is where the site ranks, the other is what the page is

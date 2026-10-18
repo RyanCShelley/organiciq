@@ -18,6 +18,7 @@ from app.models.baseline import BaselineVersion
 from app.models.client import Client
 from app.schemas import BaselineLockRequest, ClientUpdate
 from app.services import baseline_series, clients as client_service, lead_conversions
+from app.services.decision_measurements import lead_rate_target
 
 INITIAL = "initial"
 REBASELINE_REASONS = {
@@ -112,7 +113,8 @@ def goal_state(db: Session, client: Client) -> dict[str, Any]:
     suggested = None
     if newest is not None:
         suggested = int(newest.snapshot.get("projection", {}).get("suggested_monthly_lead_goal", 0)) or None
-    return {"current": client.monthly_lead_goal, "suggested": suggested, "version": newest.version if newest else None}
+    return {"current": client.monthly_lead_goal, "suggested": suggested, "version": newest.version if newest else None,
+            "target_lead_rate_pct": lead_rate_target(db, client.id)}
 
 
 def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequest) -> dict[str, Any]:
@@ -221,6 +223,15 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         "baseline_projection_json": _projection_record(result, version, window_end, window_start),
     }
     update["monthly_lead_goal"] = int(goal_to_set)
+    if request.target_lead_rate_pct is not None:
+        from app.models.decision import DecisionThreshold
+        rate_goal = db.query(DecisionThreshold).filter_by(client_id=client.id).one_or_none()
+        if rate_goal is None:
+            rate_goal = DecisionThreshold(client_id=client.id, thresholds={})
+            db.add(rate_goal)
+        rate_goal.thresholds = {**(rate_goal.thresholds or {}), "target_lead_rate_pct": request.target_lead_rate_pct}
+        # Keep the chosen target with the frozen version as well as live settings.
+        row.snapshot = {**row.snapshot, "target_lead_rate_pct": request.target_lead_rate_pct}
     client_service.update_client(db, client, ClientUpdate(**update))
 
     return {
@@ -229,4 +240,5 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         "monthly_lead_goal": client.monthly_lead_goal,
         "suggested_monthly_lead_goal": suggested_goal,
         "goal_set_by_lock": request.monthly_lead_goal is None,
+        "target_lead_rate_pct": lead_rate_target(db, client.id),
     }

@@ -9,6 +9,7 @@ import {
   listBaselineVersionsAction,
   lockBaselineAction,
   setBaselineGoalAction,
+  setBaselineRateGoalAction,
   setLeadConversionsAction,
   type BaselineBand,
   type BaselineEventCandidates,
@@ -70,6 +71,7 @@ export function BaselineBuilder({
   const [reasonCode, setReasonCode] = useState("relaunch");
   const [reasonNote, setReasonNote] = useState("");
   const [goal, setGoal] = useState("");
+  const [rateGoal, setRateGoal] = useState("");
   const [syncLeads, setSyncLeads] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -150,6 +152,7 @@ export function BaselineBuilder({
         reasonCode: first ? "initial" : reasonCode,
         reasonNote,
         monthlyLeadGoal: goal.trim() === "" ? null : Number(goal),
+        targetLeadRatePct: rateGoal.trim() === "" ? null : Number(rateGoal),
         syncLeadConversions: leadsDiffer && syncLeads,
       });
       if (!response.ok) {
@@ -230,6 +233,15 @@ export function BaselineBuilder({
         </Alert>
       ) : null}
 
+      <details className="rounded-lg border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-medium">Lead conversion-rate target · {goalInfo?.target_lead_rate_pct != null ? `${goalInfo.target_lead_rate_pct}%` : "not set"}</summary>
+        <p className="mt-2 text-xs text-[var(--text-secondary)]">Set the rate the decision engine should compare with actual lead events per visit. This is separate from the measured baseline and the monthly lead-count goal. Existing baselines do not need to be relocked.</p>
+        <div className="mt-3 flex flex-wrap items-end gap-2"><FieldLabel label="Target rate (%)"><Input type="number" min={0.01} max={100} step={0.01} value={rateGoal} onChange={event => setRateGoal(event.target.value)} placeholder={goalInfo?.target_lead_rate_pct?.toString() ?? "e.g. 3"} /></FieldLabel>
+        <button type="button" className="btn btn-secondary" disabled={pending || !rateGoal.trim()} onClick={() => startTransition(async () => {
+          const response = await setBaselineRateGoalAction(clientId, Number(rateGoal));
+          if (!response.ok) return setError(response.error);
+          await reload(false); setMessage(`Target lead conversion rate set to ${response.saved.target_lead_rate_pct}%.`); router.refresh();
+        })}>Save rate target</button></div>
+      </details>
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldLabel label="Data from">
           <Select value={source} onChange={(event) => setSource(event.target.value as "ga4" | "csv")}>
@@ -484,6 +496,10 @@ export function BaselineBuilder({
                   currentGoal != null ? ` (now ${num(currentGoal)})` : ""
                 }`}
               />
+            </FieldLabel>
+            <FieldLabel label="Target lead conversion rate (%) for the decision engine">
+              <Input type="number" min={0.01} max={100} step={0.01} value={rateGoal} onChange={event => setRateGoal(event.target.value)} placeholder={goalInfo?.target_lead_rate_pct != null ? `Keep current target: ${goalInfo.target_lead_rate_pct}%` : "Choose a target, e.g. 3"} />
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">Measured baseline: {num(result.baseline.lead_rate_pct, 2)}%. Set the rate you want to achieve; a monthly lead-count goal does not set this rate. Blank preserves an existing target.</p>
             </FieldLabel>
             <button
               type="button"

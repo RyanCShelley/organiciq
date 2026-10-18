@@ -78,7 +78,7 @@ export type BaselineEventCandidates = {
   defaults: string[];
   /** What the newest locked baseline counted. */
   locked: { version: number; events: string[] } | null;
-  goal: { current: number | null; suggested: number | null; version: number | null };
+  goal: { current: number | null; suggested: number | null; version: number | null; target_lead_rate_pct?: number | null };
 };
 
 export type BaselineVersionRow = {
@@ -168,6 +168,7 @@ export async function lockBaselineAction(
     reasonCode?: string;
     reasonNote?: string;
     monthlyLeadGoal?: number | null;
+    targetLeadRatePct?: number | null;
     syncLeadConversions?: boolean;
   },
 ) {
@@ -179,6 +180,7 @@ export async function lockBaselineAction(
       monthly_lead_goal: number | null;
       suggested_monthly_lead_goal: number;
       goal_set_by_lock: boolean;
+      target_lead_rate_pct: number | null;
     }>(`/clients/${clientId}/baseline/lock`, {
       method: "POST",
       clientId,
@@ -192,6 +194,7 @@ export async function lockBaselineAction(
         reason_code: input.reasonCode || null,
         reason_note: input.reasonNote || null,
         monthly_lead_goal: input.monthlyLeadGoal ?? null,
+        target_lead_rate_pct: input.targetLeadRatePct ?? null,
         sync_lead_conversions: input.syncLeadConversions ?? false,
       },
     });
@@ -201,6 +204,17 @@ export async function lockBaselineAction(
   } catch (e) {
     return fail(e, "Could not lock the baseline");
   }
+}
+
+export async function setBaselineRateGoalAction(clientId: string, targetRate: number) {
+  try {
+    const saved = await apiFetch<{ target_lead_rate_pct: number }>("/decisions/measurement-settings", {
+      clientId, method: "PUT", body: { target_lead_rate_pct: targetRate },
+    });
+    revalidatePath("/clients", "layout");
+    revalidatePath("/[clientSlug]/decision-engine", "page");
+    return { ok: true as const, saved };
+  } catch (error) { return fail(error, "Could not save the target conversion rate"); }
 }
 
 /** Make these exactly the client's lead conversions, so the baseline and the home screen agree. */

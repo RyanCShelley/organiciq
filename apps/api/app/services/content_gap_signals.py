@@ -117,7 +117,7 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         (row.keyword or "").strip().lower(): row
         for row in db.query(KeywordTarget).filter(
             KeywordTarget.client_id == client.id,
-            KeywordTarget.source == "confirmed",
+            KeywordTarget.source.in_(("confirmed", "auto")),
         )
     }
     serp = load_serp_features(db, client)

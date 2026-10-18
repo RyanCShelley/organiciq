@@ -383,7 +383,9 @@ def fetch_seranking_search(db: Session, job: SyncJob) -> tuple[int, int, int, in
     except Exception:  # noqa: BLE001 — summary optional; do not fail whole sync
         summary_payload = {}
     if isinstance(summary_payload, dict) and summary_payload:
-        metric_date = job.end_date
+        # This endpoint is a current snapshot, even during a historical backfill.
+        # Stamping the requested end date would invent historical visibility.
+        metric_date = date.today()
         db.add(
             StagingSerSiteSummary(
                 job_id=job.id,

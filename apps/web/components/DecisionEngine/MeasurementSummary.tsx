@@ -6,6 +6,7 @@ export type Measurements = {
   source_note?: string;
   visibility: {
     note: string;
+    monthly_trend?: { scope: string; cohort: number; declined: number; improved: number; entered_top_10: number; left_top_10: number; rows: { text: string; previous: number; current: number; previous_date: string; current_date: string }[] };
     keywords: { text: string; priority: boolean; position: number | null; observed_on?: string | null; status: string; target_url: string | null; ranking_url: string | null }[];
     prompts: { text: string; provider: string | null; mentioned: boolean | null; cited: boolean | null; observed_on: string | null }[];
   };
@@ -28,6 +29,10 @@ export function MeasurementSummary({ data, settings }: { data?: Measurements; se
       <p className="mt-1 text-sm">Showing up for a keyword and being mentioned or cited in an AI answer are separate observations.</p>
       {visibility.keywords.length ? <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Keyword</th><th className="p-2">Position</th><th className="p-2">Observed</th><th className="p-2">Actual ranking page</th></tr></thead><tbody>{visibility.keywords.map((term, i) => <tr key={i} className="border-t border-[var(--border)]"><td className="p-2">{term.text}{term.priority ? " · priority" : ""}</td><td className="p-2">{term.status === "not_in_top_100" ? "Not in top 100" : number(term.position)}</td><td className="p-2">{term.observed_on || "Not measured"}</td><td className="break-all p-2">{term.ranking_url || "Not measured"}</td></tr>)}</tbody></table></div> : <p className="mt-2 text-sm">No tracked keywords available.</p>}
       <details className="mt-3 text-sm"><summary className="cursor-pointer">AI prompt observations ({visibility.prompts.length})</summary>{visibility.prompts.length ? visibility.prompts.map((prompt, i) => <p className="mt-2" key={i}>{prompt.text} · {prompt.provider || "Provider unspecified"} · Mentioned: {presence(prompt.mentioned)} · Cited: {presence(prompt.cited)} · {prompt.observed_on || "No observation date"}</p>) : <p className="mt-2">No measured prompt observations.</p>}</details>
+      {visibility.monthly_trend && visibility.monthly_trend.cohort > 0 && <details className="mt-3 text-sm"><summary className="cursor-pointer">Monthly keyword movement · {visibility.monthly_trend.cohort} matched {visibility.monthly_trend.scope} terms</summary>
+        <p className="mt-2">{visibility.monthly_trend.improved} improved and {visibility.monthly_trend.declined} declined by at least 3 positions. {visibility.monthly_trend.entered_top_10} entered the top 10; {visibility.monthly_trend.left_top_10} left it. Both months use the same terms; unmeasured terms are excluded, never treated as zero.</p>
+        <ul className="mt-2 space-y-1">{visibility.monthly_trend.rows.map((row, index) => <li key={index}>{row.text}: {row.previous === 101 ? "Outside top 100" : row.previous} → {row.current === 101 ? "Outside top 100" : row.current} · {row.previous_date} → {row.current_date}</li>)}</ul>
+      </details>}
       <p className="mt-3 text-xs text-[var(--text-secondary)]">{visibility.note}</p>
     </section>
     <section className="rounded-lg border border-[var(--border)] p-4">

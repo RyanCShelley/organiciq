@@ -125,6 +125,7 @@ def _judge(
 
 @dataclass(frozen=True)
 class VisibilitySignals:
+    monthly_keyword_trend: dict[str, Any] = field(default_factory=dict)
     #: Priority-group keywords only. V1 is about the terms the client is
     #: actually judged on, not every term anyone ever tracked.
     priority_keywords: int = 0
@@ -191,18 +192,26 @@ def assess_visibility(
     if signals.visibility_percent is not None and signals.visibility_percent_90d_ago:
         before = signals.visibility_percent_90d_ago
         drop = max(0.0, (before - signals.visibility_percent) / before * 100.0)
-    results.append(
-        _judge(
-            "V2",
-            "Visibility trend",
-            "Visibility lost over 90 days",
-            drop,
-            pass_line=t("v2_visibility_drop_pct", 15.0),
-            direction="max",
-            unit="chg",
-            missing=None if drop is not None else "no visibility history",
+    trend = signals.monthly_keyword_trend
+    if trend.get("cohort", 0) >= 5:
+        results.append(_judge("V2", "Monthly keyword movement", "Matched keywords losing at least 3 positions",
+            trend["declined"] / trend["cohort"] * 100,
+            pass_line=t("v2_monthly_declining_terms_pct", 30), direction="max",
+            display=f"{trend['declined']} of {trend['cohort']} matched terms declined",
+            evidence={"source": "matched_monthly_keyword_history", **trend}))
+    else:
+        results.append(
+            _judge(
+                "V2",
+                "Visibility trend",
+                "Visibility lost over 90 days",
+                drop,
+                pass_line=t("v2_visibility_drop_pct", 15.0),
+                direction="max",
+                unit="chg",
+                missing=None if drop is not None else "no comparable visibility history (90-day score or 5 matched monthly keywords)",
+            )
         )
-    )
 
     # V3 — impression trend.
     impression_drop = None
@@ -286,6 +295,8 @@ def assess_visibility(
 @dataclass(frozen=True)
 class TrafficSignals:
     ctr_context_matched: bool = False
+    ctr_missing: str | None = None
+    ctr_evidence: dict[str, Any] = field(default_factory=dict)
     sessions: float | None = None
     prior_sessions: float | None = None
     #: Clicks the measured CTR curve says the rankings should earn and do not.
@@ -327,7 +338,7 @@ def assess_traffic(
             missed_share,
             pass_line=t("t1_missed_click_pct", 20.0),
             direction="max",
-            missing=("CTR reference is diagnostic only until device and SERP context match the benchmark"
+            missing=signals.ctr_missing or ("CTR reference is diagnostic only until device and SERP context match the benchmark"
                      if missed_share is not None and not signals.ctr_context_matched
                      else None if missed_share is not None else "no measured click opportunity"),
             display=(
@@ -336,7 +347,7 @@ def assess_traffic(
                 if missed_share is not None
                 else None
             ),
-            evidence={"estimated_missed_clicks": signals.missed_clicks, "actual_clicks": signals.actual_clicks, "formula_version": 2},
+            evidence={"estimated_missed_clicks": signals.missed_clicks, "actual_clicks": signals.actual_clicks, "formula_version": 2, **signals.ctr_evidence},
         )
     )
 
@@ -425,7 +436,8 @@ def assess_leads(signals: LeadSignals, *, thresholds: dict[str, Any]) -> list[Te
     results.append(_judge("L1", "Lead conversion rate", "Lead event rate versus target rate",
         signals.lead_rate if signals.conversions_configured else None,
         pass_line=signals.target_lead_rate or 0.0,
-        missing=blocked or (None if signals.target_lead_rate and signals.lead_rate is not None else "no target lead conversion rate or measured sessions"),
+        missing=blocked or ("no target lead conversion rate" if not signals.target_lead_rate else
+                           "no measured lead rate for this period" if signals.lead_rate is None else None),
         evidence={"lead_rate_pct": signals.lead_rate, "target_rate_pct": signals.target_lead_rate,
                   "formula_version": 2}))
 

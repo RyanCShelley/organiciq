@@ -253,3 +253,16 @@ def test_the_event_picker_reports_what_the_newest_baseline_counted_against_the_l
     client.post(f"/clients/{client_a.id}/baseline/lead-conversions", headers=headers, json={"lead_events": ["other"]})
     body = client.get(f"/clients/{client_a.id}/baseline/events", headers=headers).json()
     assert body["locked"] == {"version": 1, "events": ["generate_lead"]} and body["defaults"] == ["other"]
+
+
+def test_baseline_lock_saves_explicit_rate_goal_and_preserves_it_when_omitted(client, db, client_a, admin_user):
+    from app.services.decision_measurements import lead_rate_target
+    headers = client_header(client_a.id, admin_user.email)
+    response = _lock(client, headers, client_a.id, target_lead_rate_pct=3.5)
+    assert response.status_code == 200, response.text
+    assert response.json()["target_lead_rate_pct"] == 3.5
+    assert lead_rate_target(db, client_a.id) == 3.5
+    assert db.query(BaselineVersion).filter_by(client_id=client_a.id, version=1).one().snapshot["target_lead_rate_pct"] == 3.5
+    again = _lock(client, headers, client_a.id, reason_code="correction", reason_note="Confirm source and keep agreed rate")
+    assert again.status_code == 200, again.text
+    assert lead_rate_target(db, client_a.id) == 3.5

@@ -10,13 +10,18 @@ export function metricExplanation(test: BranchTest): { calculation: string; sour
     source: "Confirmed priority keyword targets joined to tracked keyword positions.",
     limitation: "This describes the measured priority subset, not every keyword or AI prompt. A small or incomplete watchlist limits the conclusion.",
   };
+  if (test.id === "V2" && e.source === "matched_monthly_keyword_history") return {
+    calculation: `${e.declined} terms losing at least 3 positions ÷ ${e.cohort} terms observed in both months × 100 = ${pct}`,
+    source: "Dated keyword rankings for a matched cohort across the assessment month and preceding calendar month.",
+    limitation: "At least five paired terms are needed for this diagnostic. The 30% threshold is an engine review rule, not proof of a business constraint. New or unmeasured terms are excluded; see individual movements and impression trends too.",
+  };
   if (test.id === "T1") return {
     calculation: e.formula_version !== 2
       ? "Superseded calculation in this saved run. Rerun the assessment to use the bounded CTR benchmark gap."
       : e.estimated_missed_clicks != null && e.actual_clicks != null
         ? `${e.estimated_missed_clicks} estimated shortfall ÷ (${e.estimated_missed_clicks} shortfall + ${e.actual_clicks} earned clicks) × 100 = ${pct}`
         : "Estimated shortfall ÷ (shortfall + earned clicks) × 100. Underlying counts unavailable.",
-    source: "Search Console clicks and impressions versus a reference CTR curve.",
+    source: e.benchmark ? `Desktop US query/page Search Console observations matched to a dated AI Overview SERP snapshot. ${e.matched_impressions} of ${e.total_query_impressions} query impressions match (${Number(e.coverage_pct ?? 0).toFixed(1)}% coverage).` : "Search Console clicks and impressions versus a reference CTR curve.",
     limitation: "A benchmark diagnostic, not measured missed traffic or a forecast. GA4 sessions measure visits. Query intent, device and SERP features affect CTR; a desktop AI Overview curve is a separate scenario, not a universal expectation.",
   };
   if (test.id === "L1") return {
