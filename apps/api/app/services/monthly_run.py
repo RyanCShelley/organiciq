@@ -409,12 +409,12 @@ def build_record(
     review_targets = ranked + [score_candidate(c) for c in inputs.candidates if c.keyword not in ranked_terms]
     for scored in review_targets:
         page = inputs.pages.get(scored.candidate.target_url)
-        if page is not None:
+        if page is not None and page.page_type != "utility":
             findings.extend(found for rule in VISIBILITY_ACTIONS if (found := rule(scored, page)) is not None)
     for scored in ranked:
         url = scored.candidate.target_url
         page = inputs.pages.get(url) if url else None
-        if page is None:
+        if page is None or page.page_type == "utility":
             # Nothing crawled for this page, so no trigger can be tested
             # against it. V-6 is the exception and needs no page facts.
             continue
@@ -426,13 +426,14 @@ def build_record(
     # their own candidates. Until these existed, a client constrained on
     # Traffic got a plan of Visibility spillover or an empty one — the engine
     # named the problem and then prescribed for a different branch.
+    from app.services.page_eligibility import classify_page_url
     page_candidates = load_page_candidates(db, client, today=today)
     for ranked_pages, actions in (
         (rank_for_traffic(page_candidates), TRAFFIC_ACTIONS),
         (rank_for_leads(page_candidates), LEAD_ACTIONS),
     ):
         for candidate in ranked_pages:
-            if is_excluded(candidate.url, exclusions):
+            if is_excluded(candidate.url, exclusions) or not classify_page_url(candidate.url).eligible_for_growth_action:
                 continue
             findings.extend(found for rule in actions if (found := rule(candidate)) is not None)
             found = prescribe_page(candidate, actions=actions)
@@ -587,6 +588,7 @@ def build_record(
 
     return {
         "review_required": True,
+        "recommendation_version": 2,
         "growth_capacity": allowances.growth_action_allowance,
         "findings": [
             _candidate_row(client, month, Considered(p, reason="Review against the client strategy."), today)

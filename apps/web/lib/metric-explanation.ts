@@ -25,11 +25,13 @@ export function metricExplanation(test: BranchTest): { calculation: string; sour
     limitation: "A benchmark diagnostic, not measured missed traffic or a forecast. GA4 sessions measure visits. Query intent, device and SERP features affect CTR; the supplied desktop study is applied as your planning reference across terms, not a measured expectation for each device, market or SERP.",
   };
   if (test.id === "L1") return {
-    calculation: e.formula_version === 2
+    calculation: e.formula_version === 3
+      ? `Visit-based lead conversion rate ${e.lead_rate_pct ?? "unknown"}% compared with target ${e.target_rate_pct ?? "not configured"}%. Visits with at least one configured lead event ÷ matching visits × 100.`
+      : e.formula_version === 2
       ? `Actual lead event rate ${e.lead_rate_pct ?? "unknown"}% compared with target ${e.target_rate_pct ?? "not configured"}%. Rate = configured lead events ÷ sessions × 100.`
       : "This saved run used lead-count goal pace. It predates the conversion-rate target and should not be read as a conversion rate.",
     source: "Configured GA4 lead events and GA4 sessions, all channels over the same period.",
-    limitation: "Lead events may include repeated submissions. Use unique/qualified leads only when a deduplicated source is available. The target rate is explicitly configured, not inferred from a lead-count goal.",
+    limitation: e.formula_version === 3 ? "Each visit counts once, even with several lead events. This is not a count of unique people or qualified leads. Session-based targets are configured separately from legacy event-rate targets." : "This saved event-based calculation may include repeated submissions. Re-run to use visit-based conversion and its separate target.",
   };
   return { calculation: test.display ?? `${test.metric_label}: ${pct}`, source: "Saved assessment test.", limitation: test.missing ?? "Read this test against its threshold and the source coverage for this run." };
 }

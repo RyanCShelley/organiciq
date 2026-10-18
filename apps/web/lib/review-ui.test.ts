@@ -28,6 +28,8 @@ assert.match(explanation("V1", 25, { in_top_10: 2, priority_keywords: 8 }), /2.*
 assert.match(explanation("T1", 75, { estimated_missed_clicks: 150, actual_clicks: 50, formula_version: 2 }), /150.*150.*50.*75%/);
 assert.match(explanation("L1", 2, { lead_rate_pct: 2, target_rate_pct: 3, formula_version: 2 }), /2%.*3%/);
 assert.match(metricExplanation({ id: "T1", value: 300 } as BranchTest).calculation, /Superseded/);
+assert.match(explanation("L1", 3.13, { lead_rate_pct: 3.13, target_rate_pct: 4, formula_version: 3 }), /Visit-based.*3.13%.*4%/);
+assert.match(metricExplanation({ id: "L1", name: "Lead conversion", metric_label: "Lead conversion rate", value: 3.13, pass_line: 4, direction: "min", unit: "pct", status: "fail", evidence: { formula_version: 3 } }).limitation, /Each visit counts once/);
 console.log("review-ui: merge, inclusion, suggested selection and calculation explanations passed");
 
 const bundled = { ...original, steps: ["Task one", "Task two", "Task three"] };

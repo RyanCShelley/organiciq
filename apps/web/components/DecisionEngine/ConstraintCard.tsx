@@ -105,7 +105,7 @@ function BranchTile({
         {branch.tests.map(t => {
           const explanation = metricExplanation(t);
           return <div className="mt-3 space-y-1" key={t.id}>
-            <p className="font-semibold">{t.name} · {t.status === "blocked" ? "Not measured" : (t.id === "T1" || t.id === "L1") && t.evidence?.formula_version !== 2 ? "Superseded calculation" : testValue(t)}</p>
+            <p className="font-semibold">{t.name} · {t.status === "blocked" ? "Not measured" : ((t.id === "T1" && t.evidence?.formula_version !== 2) || (t.id === "L1" && t.evidence?.formula_version !== 3)) ? "Superseded calculation" : testValue(t)}</p>
             <p>{t.status === "blocked" ? t.missing : explanation.calculation}</p>
             <p><strong>Source:</strong> {explanation.source}</p>
             <p><strong>Threshold:</strong> {passLine(t)}. This is an engine rule, not a proven business constraint.</p>

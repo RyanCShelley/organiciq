@@ -19,6 +19,9 @@ page rather than being an action that silently never appears.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from dataclasses import dataclass
 from typing import Callable
 
@@ -116,7 +119,10 @@ def _mentions(term: str, text: str | None) -> bool:
     """
     if not text:
         return False
-    return term.strip().lower() in text.strip().lower()
+    def words(value):
+        return re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", value).casefold())
+    needle, haystack = words(term), words(text)
+    return bool(needle) and any(haystack[i:i + len(needle)] == needle for i in range(len(haystack) - len(needle) + 1))
 
 
 # ── Visibility ──────────────────────────────────────────────────────────────
@@ -485,9 +491,7 @@ EXTRACTIVE_FEATURES = {
 VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | None], ...] = (
     v6_rehoming,
     v1_term_in_high_value_spots,
-    # Beside V-1, not after it: the two never both fire, because a term is
-    # either the page's primary or one of its secondaries.
-    v8_secondary_term_section,
+    # A missing exact-match secondary heading alone does not prove a content gap.
     v2_answer_block,
     # Before the rest: the answers are already written, so this is fifteen
     # minutes of markup against a page rewrite. Cheapest first where the
@@ -497,7 +501,7 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
     # giving it something to lift beats marking up or linking to a page it
     # cannot quote.
     v5_add_an_extractable_structure,
-    v3_entity_markup,
+    # Optional about/mentions absence alone does not justify an automatic task.
     v4_internal_links,
 )
 
@@ -746,9 +750,20 @@ STAGE_WORDS = {
 }
 
 
+# A prioritization floor, not a claim of statistical significance. Visibility
+# work on strategic low-traffic pages remains available independently.
+MIN_SESSIONS_FOR_LEAD_ACTION = 50
+
+
+def _lead_page_eligible(page: PageCandidate) -> bool:
+    from app.services.page_eligibility import classify_page_url
+    return (page.crawl_readable and page.sessions >= MIN_SESSIONS_FOR_LEAD_ACTION
+            and classify_page_url(page.url).eligible_for_growth_action)
+
+
 def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
     """A page people land on with no in-content way forward."""
-    if page.stage is None or page.stage == "bofu" or page.routes_onward:
+    if not _lead_page_eligible(page) or page.stage is None or page.stage == "bofu" or page.routes_onward:
         return None
     # The destination does not need a route to a destination.
     if page.is_conversion_page or not page.matched_offers:
@@ -785,9 +800,11 @@ def l1_route_to_the_next_step(page: PageCandidate) -> Prescription | None:
 
 def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
     """The page routes onward and never asks."""
-    if page.stage is None or page.conversion_elements is None:
+    if not _lead_page_eligible(page) or page.stage is None or page.conversion_elements is None:
         return None
     if page.conversion_elements > 0:
+        return None
+    if page.stage == "tofu" and not page.matched_offers:
         return None
     return Prescription(
         action_id="L-2",
@@ -821,15 +838,13 @@ def l2_add_a_call_to_action(page: PageCandidate) -> Prescription | None:
 
 def l3_match_the_offer_to_the_reader(page: PageCandidate) -> Prescription | None:
     """Every route out goes somewhere the reader is not ready for."""
-    if page.stage is None or not page.routes_onward or not page.matched_offers:
+    if not _lead_page_eligible(page) or page.stage is None or not page.routes_onward or not page.matched_offers:
         return None
     if page.is_conversion_page:
         return None
-    # "generic" is an offer nobody gave a stage. It suits any reader by
-    # definition — `matched_offers` already counts it as a match — so a page
-    # linking to one is not pointing its reader somewhere wrong. Without this
-    # L-3 would tell somebody to link to the page they already link to.
-    fits = set(STAGE_FIT.get(page.stage, ())) | {"generic"}
+    if "generic" in page.linked_offer_stages:
+        return None  # Unknown intent is not proof that an existing route is wrong.
+    fits = set(STAGE_FIT.get(page.stage, ()))
     if page.linked_offer_stages & fits:
         return None
     linked = ", ".join(sorted(page.linked_offer_stages)) or "none"

@@ -102,6 +102,8 @@ class PageCandidate:
     #: Confirmed funnel stage. None means nobody has said, and no lead action
     #: fires on a guess.
     stage: str | None = None
+    #: A successful first-party crawl captured this page and its link evidence.
+    crawl_readable: bool = False
     #: In-content, non-template links from this page to a declared conversion
     #: page, by that page's stage.
     linked_offer_stages: frozenset[str] = frozenset()
