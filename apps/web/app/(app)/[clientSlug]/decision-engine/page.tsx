@@ -226,8 +226,8 @@ export default async function DecisionEnginePage({
         </div></details>
       </div>
 
-      {(record.recommendation_version ?? 1) < 2 ? <Alert variant="warning">
-        These recommendations were saved under earlier rules. Re-run this month’s assessment under Assessment history &amp; controls before choosing new work. Updated rules check traffic, offer fit and crawl evidence. Existing approved work stays in its history.
+      {(record.recommendation_version ?? 1) < 3 ? <Alert variant="warning">
+        These recommendations were saved under earlier rules. Re-run this month’s assessment under Assessment history &amp; controls before choosing new work. Updated rules check traffic, offer fit and crawl evidence, and exclude exact-phrase-only title tasks. Existing approved work stays in its history.
       </Alert> : null}
       <MonthlyReviewOverview record={record} targetRate={measurementSettings?.target_lead_rate_pct ?? null} suggestedFocus={review?.suggested_focus ?? record.engine_constraint ?? record.constraint} />
       <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Explore the evidence · keywords, channels, lead rate and calculation details</summary><div className="mt-4">

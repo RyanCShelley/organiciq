@@ -1,20 +1,9 @@
-"""The action catalog: what to actually do about a scored target.
+"""Evidence-based growth actions with stable rule identities.
 
-Twelve actions with stable ids. Within a branch, the first action whose
-trigger fires for a target is the one prescribed — so a page missing the term
-from its title gets V-1 rather than V-4, because putting the term on the page
-comes before pointing links at it.
-
-Every action names a page, says what "done" looks like, and carries the
-metric it will be judged on and when. "Improve the content" is the sentence
-this module exists to stop producing: a prescription nobody can tell you have
-finished is a prescription nobody finishes.
-
-Two of the twelve cannot fire yet. V-5 and T-2 both need the full SERP
-feature list — which features a query shows, not just the ones the client
-already holds — and that is a pull we do not make. They are defined here with
-their trigger and skipped with a named reason, so the gap is visible on the
-page rather than being an action that silently never appears.
+Automatic actions use the active catalogs below. Legacy rule functions remain
+available for historical records and explicit evaluation; their existence does
+not make them automatic recommendations. Missing exact wording or optional
+entity properties alone does not establish an actionable gap.
 """
 
 from __future__ import annotations
@@ -486,11 +475,10 @@ EXTRACTIVE_FEATURES = {
 }
 
 
-#: In order. The first whose trigger fires is the one prescribed: putting the
-#: term on the page comes before pointing links at it.
+#: Active automatic visibility actions, in priority order.
 VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | None], ...] = (
     v6_rehoming,
-    v1_term_in_high_value_spots,
+    # V-1 and V-8 are legacy: exact-phrase absence alone is not a content gap.
     # A missing exact-match secondary heading alone does not prove a content gap.
     v2_answer_block,
     # Before the rest: the answers are already written, so this is fifteen

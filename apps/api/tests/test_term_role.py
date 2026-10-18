@@ -108,7 +108,7 @@ def test_exactly_one_of_the_two_fires(role: str | None):
     assert sum(1 for f in found if f is not None) == (0 if role is None else 1)
 
 
-def test_the_catalog_picks_the_right_one():
-    assert prescribe(_target("primary"), _bare_page()).action_id == "V-1"
+def test_roles_do_not_make_missing_exact_wording_automatic_work():
+    assert prescribe(_target("primary"), _bare_page()) is None
     # A secondary phrase missing from a heading is not proof of a missing passage.
     assert prescribe(_target("secondary"), _bare_page()) is None
