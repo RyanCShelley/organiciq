@@ -4,7 +4,11 @@ Whole-site headline measurements and their baselines keep their original
 scope. Service rows use one disjoint channel classification per observation;
 combining enabled services never adds the whole-site headline a second time.
 """
+from datetime import timedelta
 from sqlalchemy import func
+from app.core.urls import normalize_path_prefix
+from app.models.client import Client
+from app.models.integration import Integration, IntegrationProvider
 from app.models.config import ConversionDefinition, OrganicChannel as Channel
 from app.models.ga4 import Ga4NativeChannelObservation as Observation
 from app.models.job import SyncJob, SyncJobStatus
@@ -21,11 +25,35 @@ def has_native_coverage(db, client_id, period):
     if period is None:
         return False
     start, end = period
-    covered = db.query(SyncJob.id).filter(SyncJob.client_id == client_id, SyncJob.source == "ga4",
-        SyncJob.start_date <= start, SyncJob.end_date >= end, SyncJob.fact_watermark >= end,
+    client = db.get(Client, client_id)
+    integration = db.query(Integration).filter_by(client_id=client_id, provider=IntegrationProvider.GA4).one_or_none()
+    if not client or not integration or not integration.external_property_id:
+        return False
+    scope = {"domain": client.domain, "path_prefix": normalize_path_prefix(client.path_prefix), "timezone": client.timezone}
+    from app.ingestion.ga4.publish import _rules
+    from app.ingestion.ga4.publish_native import native_mapping_definition
+    mapping_version, _ = native_mapping_definition(_rules(db))
+    intervals = db.query(SyncJob.start_date, SyncJob.end_date, SyncJob.fact_watermark).filter(
+        SyncJob.client_id == client_id, SyncJob.source == "ga4",
+        SyncJob.start_date <= end, SyncJob.end_date >= start, SyncJob.fact_watermark >= start,
         SyncJob.status.in_((SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL)),
-        SyncJob.params_json["ga4_extract"]["native_complete"].astext == "true").first()
-    return covered is not None
+        SyncJob.params_json["ga4_extract"]["native_complete"].astext == "true",
+        SyncJob.params_json["ga4_extract"]["property"].astext == integration.external_property_id,
+        SyncJob.params_json["ga4_extract"]["native_mapping_version"].astext == mapping_version,
+        SyncJob.params_json["ga4_extract"]["native_scope"].contains(scope)).order_by(SyncJob.start_date).all()
+    # Daily rolling extracts jointly cover a month. Requiring one month-long
+    # job would falsely withhold every future monthly report after onboarding.
+    cursor = start
+    for observed_start, requested_end, through in intervals:
+        observed_end = min(requested_end, through, end)
+        if observed_end < cursor:
+            continue
+        if observed_start > cursor:
+            return False
+        cursor = observed_end + timedelta(days=1)
+        if cursor > end:
+            return True
+    return False
 
 
 def _window(db, client, period, names):

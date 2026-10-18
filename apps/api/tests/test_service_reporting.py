@@ -14,10 +14,18 @@ DAY = date(2026, 9, 30)
 
 
 def job(db, owner):
+    from app.models.integration import Integration, IntegrationProvider
+    from app.core.urls import normalize_path_prefix
+    integration = db.query(Integration).filter_by(client_id=owner.id, provider=IntegrationProvider.GA4).one()
+    integration.external_property_id = '123'
+    from app.ingestion.ga4.publish import _rules
+    from app.ingestion.ga4.publish_native import native_mapping_definition
+    mapping_version, _ = native_mapping_definition(_rules(db))
     row=SyncJob(client_id=owner.id, source='ga4', start_date=DAY, end_date=DAY,
         status=SyncJobStatus.SUCCESSFUL, fact_watermark=DAY,
         params_json={'ga4_extract': {'complete':True, 'native_complete':True,
-            'start':str(DAY),'end':str(DAY),'traffic_rows':0,'event_rows':0,
+            'start':str(DAY),'end':str(DAY),'property':'123','native_mapping_version':mapping_version,
+            'native_scope':{'domain':owner.domain,'path_prefix':normalize_path_prefix(owner.path_prefix),'timezone':owner.timezone},'traffic_rows':0,'event_rows':0,
             'native_traffic_rows':0,'native_event_rows':0}})
     db.add(row);db.flush();return row
 
@@ -157,3 +165,32 @@ def test_backfills_and_failures_preserve_the_verified_source_cutoff(db,client_a,
     for status,observed in [(ValidationStatus.PASSED,date(2026,8,31)),(ValidationStatus.FAILED,None)]:
         update(db,**args,fact_through=observed,validation_status=status)
         assert db.query(DataWatermark).filter_by(client_id=client_a.id,source=source).one().fact_through_date==through
+
+
+def test_service_coverage_cannot_be_reused_after_site_or_property_changes(db,client_a):
+    from app.models.integration import Integration,IntegrationProvider
+    client_a.service_reporting={'organiciq':True,'ad_accelerator':False}
+    job(db,client_a)
+    assert build_service_reporting(db,client_a,(DAY,DAY),None)['status']=='measured'
+    integration=db.query(Integration).filter_by(client_id=client_a.id,provider=IntegrationProvider.GA4).one()
+    integration.external_property_id='456'
+    assert build_service_reporting(db,client_a,(DAY,DAY),None)['status']=='needs_refresh'
+    integration.external_property_id='123'
+    client_a.path_prefix='/another-brand'
+    assert build_service_reporting(db,client_a,(DAY,DAY),None)['status']=='needs_refresh'
+
+
+def test_daily_native_extracts_cover_a_month_but_a_gap_or_rule_change_does_not(db,client_a):
+    from app.services.service_reporting import has_native_coverage
+    client_a.service_reporting={'organiciq':True,'ad_accelerator':False}
+    first=job(db,client_a);first.start_date=date(2026,9,1);first.end_date=date(2026,9,15);first.fact_watermark=first.end_date
+    second=job(db,client_a);second.start_date=date(2026,9,10)
+    db.flush()
+    assert has_native_coverage(db,client_a.id,(date(2026,9,1),DAY))
+    second.start_date=date(2026,9,17);db.flush()
+    assert not has_native_coverage(db,client_a.id,(date(2026,9,1),DAY))
+    second.start_date=date(2026,9,16);db.flush()
+    assert has_native_coverage(db,client_a.id,(date(2026,9,1),DAY))
+    db.add(ChannelRule(priority=1,active=True,channel=C.AI_REFERRAL,match_host_contains='new-assistant'))
+    db.flush()
+    assert not has_native_coverage(db,client_a.id,(date(2026,9,1),DAY))

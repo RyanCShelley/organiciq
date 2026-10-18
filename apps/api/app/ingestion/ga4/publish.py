@@ -53,7 +53,7 @@ def _merge_on_grain(
 
 
 def _rules(db: Session) -> list[ChannelRule]:
-    return db.query(ChannelRule).filter(ChannelRule.active.is_(True)).order_by(ChannelRule.priority.asc()).all()
+    return db.query(ChannelRule).filter(ChannelRule.active.is_(True)).order_by(ChannelRule.priority.asc(), ChannelRule.id.asc()).all()
 
 
 def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:

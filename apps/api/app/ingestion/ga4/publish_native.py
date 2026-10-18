@@ -10,6 +10,14 @@ from app.models.ga4 import Ga4NativeChannelObservation, StagingGa4Traffic, Stagi
 GRAIN = ("client_id", "date", "normalized_url", "session_source", "session_medium", "session_default_channel_group", "event_name")
 
 
+def native_mapping_definition(rules):
+    rule_definition = [{"channel": r.channel.value, "source": r.match_source, "medium": r.match_medium,
+        "host": r.match_host_contains, "priority": r.priority, "active": r.active} for r in sorted(rules, key=lambda r: (r.priority, str(r.id)))]
+    rule_key = hashlib.sha256(json.dumps(rule_definition, sort_keys=True).encode()).hexdigest()[:12]
+    mapping_version = "ga4-native-v1:" + rule_key
+    return mapping_version, rule_definition
+
+
 def publish_native_channels(db, job, client, rules):
     manifest = (job.params_json or {}).get("ga4_extract") or {}
     if not manifest.get("native_complete"):
@@ -20,12 +28,10 @@ def publish_native_channels(db, job, client, rules):
             or manifest.get("end") != str(job.end_date) or manifest.get("native_traffic_rows") != len(traffic)
             or manifest.get("native_event_rows") != len(events)):
         raise ValueError("Native GA4 report manifest does not match staged rows")
-    rule_definition = [{"channel": r.channel.value, "source": r.match_source, "medium": r.match_medium,
-        "host": r.match_host_contains, "priority": r.priority, "active": r.active} for r in sorted(rules, key=lambda r: (r.priority, str(r.id)))]
-    rule_key = hashlib.sha256(json.dumps(rule_definition, sort_keys=True).encode()).hexdigest()[:12]
-    mapping_version = "ga4-native-v1:" + rule_key
+    mapping_version, rule_definition = native_mapping_definition(rules)
     job.params_json = {**(job.params_json or {}), "ga4_extract": {**manifest,
-        "native_mapping_version": mapping_version, "native_channel_rules": rule_definition}}
+        "native_mapping_version": mapping_version, "native_channel_rules": rule_definition,
+        "native_scope": {"domain": client.domain, "path_prefix": normalize_path_prefix(client.path_prefix), "timezone": client.timezone}}}
     payloads = []
     scope = normalize_path_prefix(client.path_prefix)
     for is_event, rows in ((False, traffic), (True, events)):
