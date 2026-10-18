@@ -64,3 +64,7 @@ assert.match(dataGapGuidance("no target or conversion pages declared", configure
 assert.match(dataGapGuidance("no target lead conversion rate", {target_lead_rate_pct: null, conversion_page_count:0}).title, /Set the target/);
 assert.match(dataGapGuidance("no keyword group is marked priority").next, /No separate priority/);
 assert.match(dataGapGuidance("CTR reference is diagnostic only").next, /does not require an observed AI Overview/);
+
+import {resolveQueryRange} from "./date-range";
+assert.deepEqual(resolveQueryRange(undefined, "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});
+assert.deepEqual(resolveQueryRange("custom", "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});

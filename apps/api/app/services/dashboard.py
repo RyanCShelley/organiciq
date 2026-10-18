@@ -343,6 +343,20 @@ def _effective_range(
     return from_date, effective_to
 
 
+def _comparison_range(from_date, to_date, current, watermark):
+    """Compare the observed prefix with the same days of the requested prior window.
+
+    For Oct 1–17 observed through Oct 14, compare Sep 14–27, not all
+    Sep 14–30. If the prior window is itself incomplete, withhold its delta.
+    """
+    if current is None:
+        return None
+    prior_start, _ = previous_period(from_date, to_date)
+    prior_end = prior_start + (current[1] - current[0])
+    prior = _effective_range(prior_start, prior_end, watermark)
+    return prior if prior == (prior_start, prior_end) else None
+
+
 def _freshness(watermarks: dict[str, DataWatermark]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for source in DASHBOARD_WATERMARK_SOURCES:
@@ -1162,7 +1176,8 @@ def _top_pages(
                 "ga4_sessions": sessions,
                 "ga4_views": views,
                 "ga4_key_events": key_events,
-                # Session-to-key-event rate: the page's actual conversion job.
+                # Legacy response key: lead-event count per 100 sessions, not the
+                # percentage of sessions with a lead. Multiple events can occur per session.
                 "session_key_event_rate": (
                     round((key_events / sessions) * 100, 2) if sessions > 0 else None
                 ),
@@ -1181,13 +1196,13 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     prev_from, prev_to = previous_period(from_date, to_date)
 
     ga4_current = _effective_range(from_date, to_date, watermarks.get("ga4"))
-    ga4_previous = _effective_range(prev_from, prev_to, watermarks.get("ga4"))
+    ga4_previous = _comparison_range(from_date, to_date, ga4_current, watermarks.get("ga4"))
     gsc_current = _effective_range(from_date, to_date, watermarks.get("gsc_pages"))
-    gsc_previous = _effective_range(prev_from, prev_to, watermarks.get("gsc_pages"))
+    gsc_previous = _comparison_range(from_date, to_date, gsc_current, watermarks.get("gsc_pages"))
     ser_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_search"))
-    ser_previous = _effective_range(prev_from, prev_to, watermarks.get("se_ranking_search"))
+    ser_previous = _comparison_range(from_date, to_date, ser_current, watermarks.get("se_ranking_search"))
     ai_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_ai"))
-    ai_previous = _effective_range(prev_from, prev_to, watermarks.get("se_ranking_ai"))
+    ai_previous = _comparison_range(from_date, to_date, ai_current, watermarks.get("se_ranking_ai"))
 
     lead_events = _lead_event_names(db, client.id)
     conversions_configured = len(lead_events) > 0
@@ -1230,7 +1245,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     # The goal in force now, not the twelve-month target: judging a thirty-day
     # review against next September's number makes an on-track client look like
     # a failing one.
-    monthly_goal, goal_checkpoint = current_lead_goal(client)
+    monthly_goal, goal_checkpoint = current_lead_goal(client, on=to_date)
     period_goal, goal_period_days = period_lead_goal(monthly_goal, from_date, to_date)
     progress_pct: float | None = None
     if period_goal and current_leads is not None:
@@ -1284,6 +1299,13 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         },
         "baseline": baseline_payload,
         "freshness": _freshness(watermarks),
+        "effective_periods": {
+            source: {"current": [d.isoformat() for d in current] if current else None,
+                     "previous": [d.isoformat() for d in previous] if previous else None}
+            for source, current, previous in (("ga4", ga4_current, ga4_previous),
+                ("gsc", gsc_current, gsc_previous), ("rankings", ser_current, ser_previous),
+                ("ai", ai_current, ai_previous))
+        },
         "conversions": {
             "configured": conversions_configured,
             "lead_events": lead_events,
@@ -1308,7 +1330,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                 if goal_checkpoint
                 else None
             ),
-            "goal_schedule": schedule_payload(client),
+            "goal_schedule": schedule_payload(client, on=to_date),
             "final_lead_goal": client.monthly_lead_goal,
             "leads_series": leads_series,
         },

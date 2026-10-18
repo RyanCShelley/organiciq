@@ -99,8 +99,8 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       headers: [
         "Page",
         "Sessions",
-        "Key events",
-        "Session to key event %",
+        "Lead events",
+        "Lead events per 100 visits",
         "Views",
         "GSC impressions",
         "GSC clicks",
