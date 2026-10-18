@@ -65,12 +65,12 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     scope = normalize_path_prefix(client.path_prefix)
     traffic = (
         db.query(StagingGa4Traffic)
-        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id)
+        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id, StagingGa4Traffic.report_basis == "legacy")
         .all()
     )
     events = (
         db.query(StagingGa4Event)
-        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id)
+        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id, StagingGa4Event.report_basis == "legacy")
         .all()
     )
 
@@ -179,5 +179,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         )
         db.execute(stmt)
 
+    from app.ingestion.ga4.publish_native import publish_native_channels
+    native_traffic, native_events = publish_native_channels(db, job, client, rules)
     db.commit()
-    return len(traffic_payloads), len(event_payloads)
+    return len(traffic_payloads) + native_traffic, len(event_payloads) + native_events

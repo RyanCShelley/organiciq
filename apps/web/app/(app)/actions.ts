@@ -13,6 +13,9 @@ export async function updateClientSettingsAction(formData: FormData) {
   const clientId = String(formData.get("clientId") || "");
   if (!clientId) return { ok: false as const, error: "Missing client" };
 
+  const serviceChoice = String(formData.get("service_reporting") ?? "");
+  if (formData.has("service_reporting") && !["", "none", "organiciq", "ad_accelerator", "both"].includes(serviceChoice)) return { ok: false as const, error: "Choose a valid agency service." };
+  const services = serviceChoice ? { organiciq: ["organiciq", "both"].includes(serviceChoice), ad_accelerator: ["ad_accelerator", "both"].includes(serviceChoice) } : null;
   const monthlyRaw = String(formData.get("monthly_lead_goal") || "").trim();
   const sheetRaw = String(formData.get("account_sheet_url") || "").trim();
   const startRaw = String(formData.get("start_date") || "").trim();
@@ -104,6 +107,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   const market = marketRaw === "__other" ? undefined : marketRaw || null;
 
   const body = {
+    ...(formData.has("service_reporting") ? { service_reporting: services } : {}),
     client_name: String(formData.get("client_name") || "").trim(),
     domain: String(formData.get("domain") || "").trim(),
     ...(planLocked ? {} : { tier_id: String(formData.get("tier_id") || "").trim() }),

@@ -23,12 +23,19 @@ def lead_rate_target(db, client_id, *, basis="session"):
 
 
 def session_totals(db, client_id, start, end):
-    rows = db.query(FactGa4Traffic.channel, func.sum(FactGa4Traffic.sessions)).filter(
-        FactGa4Traffic.client_id == client_id, FactGa4Traffic.date >= start,
-        FactGa4Traffic.date <= end,
-    ).group_by(FactGa4Traffic.channel).all()
+    from app.models.client import Client
+    from app.models.ga4 import Ga4NativeChannelObservation
+    from app.services.service_reporting import has_native_coverage
+    client = db.get(Client, client_id)
+    native = client and client.service_reporting is not None and has_native_coverage(db, client_id, (start, end))
+    Traffic = Ga4NativeChannelObservation if native else FactGa4Traffic
+    filters = [Traffic.event_name == ""] if native else []
+    rows = db.query(Traffic.channel, func.sum(Traffic.sessions)).filter(
+        Traffic.client_id == client_id, Traffic.date >= start,
+        Traffic.date <= end, *filters,
+    ).group_by(Traffic.channel).all()
     channels = {channel.value: float(total or 0) for channel, total in rows}
-    return {"total": sum(channels.values()) if rows else None, "channels": channels}
+    return {"total": sum(channels.values()) if rows or native else None, "channels": channels}
 
 
 def keyword_readings(db, client_id, end):
@@ -142,7 +149,8 @@ def measure(db, client, *, end: date):
         if measurement.get("sessions") is not None:
             total["detailed_total"] = total["total"]
             total["total"] = measurement["sessions"]
-    return {"version": 3, "start": start.isoformat(), "end": end.isoformat(),
+    from app.services.service_reporting import build_service_reporting
+    return {"service_reporting": build_service_reporting(db, client, (start, end), (prior_start, prior_end)), "version": 3, "start": start.isoformat(), "end": end.isoformat(),
         "prior_start": prior_start.isoformat(), "prior_end": prior_end.isoformat(),
         "visibility": {"keywords": keywords, "prompts": prompts,
             "monthly_trend": monthly_keyword_trend(db, client, end),

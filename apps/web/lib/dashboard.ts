@@ -1,3 +1,11 @@
+export type ServiceReportingMetric = { current: number | null; previous: number | null; change_pct: number | null };
+export type ServiceReportingRow = { key: string; label: string; channels: string[]; sessions: ServiceReportingMetric; lead_events: ServiceReportingMetric };
+export type ServiceReportingData = {
+  status: string; headline_scope: string; rows: ServiceReportingRow[];
+  combined?: ServiceReportingRow; outside_services?: ServiceReportingRow; ai_referrals?: ServiceReportingRow;
+  ai_sources?: {source: string; sessions: number; lead_events: number | null; google_channels: string[]}[]; note?: string;
+};
+
 export type DashboardPeriodMetric = {
   current: number | null;
   previous: number | null;
@@ -39,6 +47,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       previous_to: "",
     },
     effective_periods: data.effective_periods ?? {},
+    service_reporting: data.service_reporting ?? {status: "not_configured", headline_scope: "whole_site", rows: []},
     search_console_sources: data.search_console_sources ?? {properties: [], combined_history: false},
     freshness: Array.isArray(data.freshness) ? data.freshness : [],
     conversions: {
@@ -256,6 +265,7 @@ export type DashboardFreshness = {
 };
 
 export type DashboardResponse = {
+  service_reporting?: ServiceReportingData;
   search_console_sources?: {properties: {property: string; clicks: number; impressions: number; observed_days: number; provenance_known: boolean}[]; combined_history: boolean; note?: string};
   effective_periods?: Record<string, {current: [string, string] | null; previous: [string, string] | null}>;
   period: {

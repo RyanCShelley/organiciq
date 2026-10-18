@@ -101,6 +101,7 @@ export type User = {
 };
 
 export type Client = {
+  service_reporting?: { organiciq: boolean; ad_accelerator: boolean } | null;
   id: string;
   client_name: string;
   slug: string;

@@ -22,6 +22,8 @@ class StagingGa4Traffic(Base):
     landing_page: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     session_medium: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    session_default_channel_group: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    report_basis: Mapped[str] = mapped_column(String(32), nullable=False, default="legacy", server_default="legacy")
     sessions: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     active_users: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     views: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -41,6 +43,8 @@ class StagingGa4Event(Base):
     landing_page: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     session_medium: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    session_default_channel_group: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    report_basis: Mapped[str] = mapped_column(String(32), nullable=False, default="legacy", server_default="legacy")
     event_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     event_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -130,3 +134,29 @@ class Ga4LeadMeasurement(Base):
     definition_key: Mapped[str] = mapped_column(String(64), nullable=False)
     measurement: Mapped[dict] = mapped_column(JSONB, nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Ga4NativeChannelObservation(Base):
+    """Separate GA4 channel report grain; never replaces frozen baseline inputs."""
+    __tablename__ = "ga4_native_channel_observations"
+    __table_args__ = (
+        UniqueConstraint("client_id", "date", "normalized_url", "session_source", "session_medium", "session_default_channel_group", "event_name", name="uq_ga4_native_channel_grain"),
+        Index("ix_ga4_native_channel_client_date", "client_id", "date"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    raw_url: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
+    session_source: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    session_medium: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    session_default_channel_group: Mapped[str] = mapped_column(String(100), nullable=False)
+    channel: Mapped[OrganicChannel] = mapped_column(Enum(OrganicChannel, name="organic_channel", values_callable=lambda x: [e.value for e in x], create_type=False), nullable=False)
+    event_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    sessions: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    active_users: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    views: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    engaged_sessions: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    event_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    channel_rule_version: Mapped[str] = mapped_column(String(32), nullable=False, default="ga4-native-v1", server_default="ga4-native-v1")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

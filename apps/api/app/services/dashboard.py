@@ -28,6 +28,10 @@ CHANNEL_LABELS: dict[OrganicChannel, str] = {
     OrganicChannel.AI_REFERRAL: "AI Referral",
     OrganicChannel.DIRECT_UNATTRIBUTED: "Direct / Unattributed",
     OrganicChannel.PAID_SEARCH: "Paid Search",
+    OrganicChannel.PAID_SOCIAL: "Paid Social",
+    OrganicChannel.DISPLAY: "Display",
+    OrganicChannel.CROSS_NETWORK: "Cross-network",
+    OrganicChannel.OTHER_PAID: "Other Paid",
     OrganicChannel.REFERRAL: "Referral",
     OrganicChannel.SOCIAL: "Social",
     OrganicChannel.EMAIL: "Email",
@@ -641,6 +645,15 @@ def _lead_rate(leads: int | None, sessions: float | None) -> float | None:
     return (leads / sessions) * 100
 
 
+def _channel_models(db, client_id, period):
+    from app.models.ga4 import Ga4NativeChannelObservation
+    from app.services.service_reporting import has_native_coverage
+    client = db.get(Client, client_id)
+    if client and client.service_reporting is not None and has_native_coverage(db, client_id, period):
+        return Ga4NativeChannelObservation, Ga4NativeChannelObservation, [Ga4NativeChannelObservation.event_name == ""]
+    return FactGa4Traffic, FactGa4Event, []
+
+
 def _leads_by_channel(
     db: Session,
     client_id: UUID,
@@ -657,27 +670,29 @@ def _leads_by_channel(
     if not event_names or period is None:
         return []
     start, end = period
+    Traffic, Events, traffic_filters = _channel_models(db, client_id, period)
     rows = (
-        db.query(FactGa4Event.channel, func.coalesce(func.sum(FactGa4Event.event_count), 0))
+        db.query(Events.channel, func.coalesce(func.sum(Events.event_count), 0))
         .filter(
-            FactGa4Event.client_id == client_id,
-            FactGa4Event.date >= start,
-            FactGa4Event.date <= end,
-            FactGa4Event.event_name.in_(event_names),
+            Events.client_id == client_id,
+            Events.date >= start,
+            Events.date <= end,
+            Events.event_name.in_(event_names),
         )
-        .group_by(FactGa4Event.channel)
+        .group_by(Events.channel)
         .all()
     )
     by_channel = {channel: int(total) for channel, total in rows}
 
     session_rows = (
-        db.query(FactGa4Traffic.channel, func.coalesce(func.sum(FactGa4Traffic.sessions), 0))
+        db.query(Traffic.channel, func.coalesce(func.sum(Traffic.sessions), 0))
         .filter(
-            FactGa4Traffic.client_id == client_id,
-            FactGa4Traffic.date >= start,
-            FactGa4Traffic.date <= end,
+            Traffic.client_id == client_id,
+            Traffic.date >= start,
+            Traffic.date <= end,
+            *traffic_filters,
         )
-        .group_by(FactGa4Traffic.channel)
+        .group_by(Traffic.channel)
         .all()
     )
     sessions_by_channel = {channel: float(total or 0) for channel, total in session_rows}
@@ -988,19 +1003,21 @@ def _traffic_by_channel(
     if period is None:
         return []
     start, end = period
+    Traffic, Events, traffic_filters = _channel_models(db, client_id, period)
     rows = (
         db.query(
-            FactGa4Traffic.channel,
-            func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
-            func.coalesce(func.sum(FactGa4Traffic.views), 0),
-            func.sum(FactGa4Traffic.engaged_sessions),
+            Traffic.channel,
+            func.coalesce(func.sum(Traffic.sessions), 0),
+            func.coalesce(func.sum(Traffic.views), 0),
+            func.sum(Traffic.engaged_sessions),
         )
         .filter(
-            FactGa4Traffic.client_id == client_id,
-            FactGa4Traffic.date >= start,
-            FactGa4Traffic.date <= end,
+            Traffic.client_id == client_id,
+            Traffic.date >= start,
+            Traffic.date <= end,
+            *traffic_filters,
         )
-        .group_by(FactGa4Traffic.channel)
+        .group_by(Traffic.channel)
         .all()
     )
 
@@ -1008,16 +1025,16 @@ def _traffic_by_channel(
     if lead_events:
         lead_rows = (
             db.query(
-                FactGa4Event.channel,
-                func.coalesce(func.sum(FactGa4Event.event_count), 0),
+                Events.channel,
+                func.coalesce(func.sum(Events.event_count), 0),
             )
             .filter(
-                FactGa4Event.client_id == client_id,
-                FactGa4Event.date >= start,
-                FactGa4Event.date <= end,
-                FactGa4Event.event_name.in_(lead_events),
+                Events.client_id == client_id,
+                Events.date >= start,
+                Events.date <= end,
+                Events.event_name.in_(lead_events),
             )
-            .group_by(FactGa4Event.channel)
+            .group_by(Events.channel)
             .all()
         )
         conversions_by_channel = {channel: int(total or 0) for channel, total in lead_rows}
@@ -1286,7 +1303,9 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         },
     )
 
+    from app.services.service_reporting import build_service_reporting
     return {
+        "service_reporting": build_service_reporting(db, client, ga4_current, ga4_previous),
         "period": {
             "from": from_date.isoformat(),
             "to": to_date.isoformat(),
