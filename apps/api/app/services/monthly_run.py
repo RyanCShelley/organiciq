@@ -588,7 +588,7 @@ def build_record(
 
     return {
         "review_required": True,
-        "recommendation_version": 2,
+        "recommendation_version": 3,
         "growth_capacity": allowances.growth_action_allowance,
         "findings": [
             _candidate_row(client, month, Considered(p, reason="Review against the client strategy."), today)

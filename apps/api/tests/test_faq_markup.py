@@ -65,10 +65,9 @@ def test_the_done_when_forbids_inventing_answers():
 def test_it_comes_before_the_page_rewrites():
     """Fifteen minutes of markup against a rewrite, on a page that needs
     both — cheapest first where the cheap thing is also the right thing."""
-    # A page with no term in the title *and* an unmarked FAQ: V-1 still wins,
-    # because a page that never says the phrase is the bigger problem.
+    # Missing exact wording does not displace a verified markup opportunity.
     page = _page(title=None, description=None, headings=())
-    assert prescribe(_target(), page).action_id in {"V-1", "V-7"}
+    assert prescribe(_target(), page).action_id == "V-7"
 
     # With the term everywhere, the FAQ is what is left.
     covered = _page(

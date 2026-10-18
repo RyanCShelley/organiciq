@@ -138,11 +138,11 @@ def test_re_homing_comes_before_optimising_the_page():
     assert found is not None and found.action_id == "V-6"
 
 
-def test_the_term_goes_on_the_page_before_links_point_at_it():
+def test_a_verified_link_gap_still_fires_when_exact_wording_is_missing():
     target = _target()
     page = _page(title="Services | X", headings=(), inbound_editorial_links=1, site_median_links=8)
     found = prescribe(target, page)
-    assert found is not None and found.action_id == "V-1"
+    assert found is not None and found.action_id == "V-4"
 
 
 def test_every_action_says_what_done_looks_like():
@@ -150,7 +150,6 @@ def test_every_action_says_what_done_looks_like():
     finishes."""
     cases = [
         (_target(ranking_url="https://x/other"), _page()),
-        (_target(), _page(title="Services | X", headings=())),
         (_target(keyword="what is local seo"), _page(faq_questions=())),
         (_target(), _page(inbound_editorial_links=0, site_median_links=9)),
     ]
@@ -182,9 +181,8 @@ def test_the_actions_that_cannot_fire_say_why():
 
 def test_the_order_is_the_argument():
     assert VISIBILITY_ACTIONS[0] is v6_rehoming
-    assert VISIBILITY_ACTIONS.index(v1_term_in_high_value_spots) < VISIBILITY_ACTIONS.index(
-        v4_internal_links
-    )
+    assert v1_term_in_high_value_spots not in VISIBILITY_ACTIONS
+    assert VISIBILITY_ACTIONS.index(v6_rehoming) < VISIBILITY_ACTIONS.index(v4_internal_links)
 
 
 def test_rules_that_read_the_crawl_stay_silent_on_a_page_it_did_not_read():
@@ -231,3 +229,11 @@ def test_optional_markup_and_exact_secondary_heading_are_not_automatic_work():
 
 def test_phrase_presence_tolerates_html_whitespace_and_punctuation():
     assert v1_term_in_high_value_spots(_target(), _page(title='Local\u00a0SEO — Agency', headings=('Local SEO: agency',))) is None
+
+
+def test_missing_exact_phrase_alone_never_becomes_automatic_work():
+    target = _target()
+    page = _page(title="Services | X", headings=("Our approach",))
+    assert v1_term_in_high_value_spots(target, page) is not None  # legacy evaluation
+    assert all(rule(target, page) is None for rule in VISIBILITY_ACTIONS)
+    assert prescribe(target, page) is None
