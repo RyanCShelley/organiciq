@@ -47,3 +47,17 @@ def test_create_annotation_with_stored_metrics(db, client_a: Client):
     assert summary["deltas"]["leads_change_pct"] == -20.0
     assert summary["suggested_result"] == AnnotationResult.DECLINED.value
     assert row.result == AnnotationResult.DECLINED
+
+
+def test_page_work_measurement_does_not_include_sibling_pages_or_other_clients(db,client_a,client_b):
+    from app.models.ga4 import FactGa4Traffic
+    from app.models.config import OrganicChannel
+    from app.services.annotations import _window_metrics
+    day=date(2026,9,30)
+    for c,url,sessions in [(client_a,'https://clienta.example/services/seo',10),(client_a,'https://clienta.example/services/seo-audit',500),(client_a,'https://clienta.example/',20),(client_b,'https://clienta.example/services/seo',900)]:
+        db.add(FactGa4Traffic(client_id=c.id,date=day,raw_url=url,normalized_url=url,channel=OrganicChannel.ORGANIC_SEARCH,sessions=sessions))
+    db.commit()
+    for page,count in [('https://clienta.example/services/seo',10),('https://clienta.example/',20)]:
+        assert _window_metrics(db,client_a.id,start=day,end=day,page_url=page,lead_events=[])['sessions']==count
+    missing=_window_metrics(db,client_a.id,start=date(2026,1,1),end=date(2026,1,2),page_url=None,lead_events=[])
+    assert missing['sessions'] is None and missing['clicks'] is None

@@ -102,7 +102,7 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
         )
 
     tracked: dict[str, FactSerKeyword] = {}
-    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id):
+    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True)):
         key = (row.keyword or "").strip().lower()
         held = tracked.get(key)
         if key and (held is None or (row.checked_at or 0) > (held.checked_at or 0)):

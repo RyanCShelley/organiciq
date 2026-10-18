@@ -116,7 +116,7 @@ def _managed_sessions(db: Session, client_id: UUID, start: date, end: date) -> f
 def visibility_signals(
     db: Session, client: Client, *, today: date, ai_period: tuple[date, date] | None
 ) -> VisibilitySignals:
-    from app.services.watchlist import read as read_watchlist
+    from app.services.watchlist import automatic_focus as read_watchlist
     from app.services.decision_measurements import keyword_readings
     watch_keywords = [item for item in read_watchlist(db, client)
                       if item["kind"] == "keyword" and item["state"] != "excluded"]

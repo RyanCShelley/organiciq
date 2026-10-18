@@ -12,12 +12,10 @@ import { PlanReviewState, ApprovedWork } from "@/components/DecisionEngine/PlanR
 import { MonthlyReviewOverview } from "@/components/DecisionEngine/MonthlyReviewOverview";
 import { PlanReviewPanel } from "@/components/DecisionEngine/PlanReviewPanel";
 import { actionCount, type PlanReview } from "@/lib/plan-review";
-import { WatchlistPanel, type WatchItem } from "@/components/DecisionEngine/WatchlistPanel";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch } from "@/lib/api";
-import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
 import {
   BRANCH_LABEL,
@@ -34,7 +32,6 @@ import {
   type Workflow,
 } from "@/lib/monthly-record";
 import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
-import { withNavContext } from "@/lib/navigation";
 
 export default async function DecisionEnginePage({
   params,
@@ -90,7 +87,6 @@ export default async function DecisionEnginePage({
     `/decisions/records/${encodeURIComponent(record.month)}/review`, { clientId },
   ).catch(() => null) : null;
   const measurementSettings = await apiFetch<{ target_lead_rate_pct: number | null; conversion_page_count: number }>("/decisions/measurement-settings", { clientId }).catch(() => null);
-  const watchlist = await apiFetch<WatchItem[]>("/decisions/watchlist", { clientId }).catch(() => null);
 
   // The workflow is fetched apart from the record for the same reason it is
   // stored apart: assigning a task must not be able to change what the engine
@@ -118,17 +114,6 @@ export default async function DecisionEnginePage({
       // Leave the plan readable.
     }
   }
-
-  // Content opportunities still works in date ranges, so it is handed the
-  // window this run actually covered rather than a window nobody chose.
-  const windowFrom = record ? `${record.month}-01` : "";
-  const windowTo = record?.data_through ?? windowFrom;
-  const contentOppHref = withNavContext(
-    accountToolHref(selectedClient.slug, "content-opp"),
-    clientId,
-    windowFrom,
-    windowTo,
-  );
 
   if (error) {
     return (
@@ -394,8 +379,7 @@ export default async function DecisionEnginePage({
         </div></details></ApprovedWork>
       ) : null}
 
-      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Supporting information · targets, previous results and data gaps</summary><div className="mt-4 space-y-5">
-      {watchlist ? <WatchlistPanel initial={watchlist} clientId={clientId} slug={selectedClient.slug} /> : <Alert variant="danger">Watchlist could not load.</Alert>}
+      <details className="rounded-lg border border-[var(--border)] p-4 text-sm"><summary className="cursor-pointer font-semibold">Supporting information · previous results and data gaps</summary><div className="mt-4 space-y-5">
 
       <div className="grid gap-4 md:grid-cols-2">
         <section
@@ -444,7 +428,7 @@ export default async function DecisionEnginePage({
                 return <li key={gap.input} className="rounded-lg border border-[var(--border)] p-3 text-sm">
                   <p className="font-semibold">{guidance.title} <span className="text-xs font-normal text-[var(--text-secondary)]">· {guidance.kind}</span></p>
                   <p className="mt-1 text-[var(--text-secondary)]">{guidance.next}</p>
-                  {guidance.tool && <Link className="mt-2 inline-block underline" href={guidance.tool === "client" ? `/clients/${selectedClient.slug}` : `/${selectedClient.slug}/watch-list`}>{guidance.tool === "client" ? "Open client setup" : "Open Watch List"}</Link>}
+                  {guidance.tool && <Link className="mt-2 inline-block underline" href={`/clients/${selectedClient.slug}`}>Open client setup</Link>}
                 </li>;
               })}
             </ul>
@@ -453,12 +437,6 @@ export default async function DecisionEnginePage({
       </div>
 
       </div></details>
-      <Link
-        href={contentOppHref}
-        className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-5 text-[13.5px] font-semibold no-underline"
-      >
-        See content opportunities
-      </Link>
     </section></PlanReviewState>
   );
 }

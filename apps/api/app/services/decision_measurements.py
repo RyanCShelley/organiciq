@@ -9,9 +9,9 @@ from sqlalchemy import func
 
 from app.models.config import ConversionDefinition
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.seranking import FactSerKeyword, FactSerRanking
+from app.models.seranking import FactSerKeyword, FactSerRanking, FactSerAiPrompt, FactSerAiCheck
 from app.services.lead_goals import current_lead_goal
-from app.services.watchlist import read
+from app.services.watchlist import automatic_focus as read
 from app.models.decision import DecisionThreshold
 from app.decisions.ctr_curve import ai_overview_curve
 
@@ -38,13 +38,15 @@ def keyword_readings(db, client_id, end):
             FactSerRanking.date <= end).order_by(FactSerRanking.date.desc()):
         tracked.setdefault((row.keyword or "").strip().lower(), {
             "position": float(row.position) if row.position is not None else None,
-            "ranking_url": row.ranking_url, "observed_on": row.date.isoformat(), "engine": row.site_engine_id})
+            "ranking_url": row.ranking_url, "observed_on": row.date.isoformat(), "engine": row.site_engine_id,
+            "visibility": float(row.visibility) if row.visibility is not None else None})
     for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client_id,
             FactSerKeyword.checked_at <= end):
         key = (row.keyword or "").strip().lower()
         if key not in tracked or row.checked_at.isoformat() > tracked[key]["observed_on"]:
             tracked[key] = {"position": float(row.current_position) if row.current_position is not None else None,
-                "ranking_url": row.ranking_url, "observed_on": row.checked_at.isoformat(), "engine": row.site_engine_id}
+                "ranking_url": row.ranking_url, "observed_on": row.checked_at.isoformat(), "engine": row.site_engine_id,
+                "visibility": float(row.visibility) if row.visibility is not None else None}
     return tracked
 
 
@@ -69,11 +71,24 @@ def monthly_keyword_trend(db, client, end):
         current = b["position"] if 0 < b["position"] <= 100 else 101
         rows.append({"text": item["text"], "previous": previous, "current": current,
             "previous_date": a["observed_on"], "current_date": b["observed_on"]})
-    return {"scope": "watchlist", "cohort": len(rows), "rows": rows,
+    return {"scope": "current_se_ranking_keywords", "cohort": len(rows), "rows": rows,
         "declined": sum(row["current"] - row["previous"] >= 3 for row in rows),
         "improved": sum(row["previous"] - row["current"] >= 3 for row in rows),
         "entered_top_10": sum(row["previous"] > 10 and row["current"] <= 10 for row in rows),
         "left_top_10": sum(row["previous"] <= 10 and row["current"] > 10 for row in rows)}
+
+
+def prompt_readings(db, client_id, end):
+    """Newest dated prompt observation on or before the assessment date."""
+    engines = {r.llm_id: r.engine or r.llm_id for r in db.query(FactSerAiPrompt).filter_by(client_id=client_id)}
+    readings = {}
+    for r in db.query(FactSerAiCheck).filter(FactSerAiCheck.client_id == client_id,
+            FactSerAiCheck.date <= end).order_by(FactSerAiCheck.date.desc()):
+        key = (engines.get(r.llm_id, r.llm_id), r.prompt.strip().lower())
+        readings.setdefault(key, {"observed_on": r.date.isoformat(),
+            "brand_mentioned": r.brand_mentioned, "brand_cited": r.brand_cited,
+            "source": "SE Ranking dated prompt observation", "llm_id": r.llm_id})
+    return readings
 
 
 def measure(db, client, *, end: date):
@@ -85,6 +100,7 @@ def measure(db, client, *, end: date):
     previous = session_totals(db, client.id, prior_start, prior_end)
     tracked = keyword_readings(db, client.id, end)
     keywords, prompts = [], []
+    prompt_history = prompt_readings(db, client.id, end)
     for target in read(db, client):
         if target["state"] == "excluded":
             continue
@@ -99,7 +115,7 @@ def measure(db, client, *, end: date):
                 "ranking_url": row["ranking_url"] if row else None,
                 "observed_on": row["observed_on"] if row else None})
         else:
-            observation = target.get("observation") or {}
+            observation = prompt_history.get((target.get("provider"), target["text"].strip().lower())) or target.get("observation") or {}
             observed = observation.get("observed_on")
             usable = bool(observed and observed[:10] <= end.isoformat())
             prompts.append({"text": target["text"], "provider": target["provider"],

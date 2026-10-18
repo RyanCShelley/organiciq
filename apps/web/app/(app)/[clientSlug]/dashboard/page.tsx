@@ -444,6 +444,16 @@ export default async function DashboardPage({
               />
             </div>
 
+            {data.search_console_sources?.combined_history ? <div className="mt-4 rounded-lg border border-[var(--border)] p-4 text-sm">
+              <h3 className="font-semibold">Search Console · combined domain history</h3>
+              <p className="mt-1 text-[var(--text-secondary)]">Search totals include the domains below. Each source remains separate; these totals describe the migration history.</p>
+              <table className="mt-3 w-full text-left"><thead><tr><th>Property</th><th>Clicks</th><th>Impressions</th></tr></thead>
+                <tbody>{data.search_console_sources.properties.map(source => <tr key={source.property}>
+                  <td className="py-1">{source.property.replace("sc-domain:", "")}</td><td>{formatNum(source.clicks)}</td><td>{formatNum(source.impressions)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div> : null}
+
             {data.traffic.by_channel.length > 0 ? (
               <div className="mt-3.5">
                 <h3 className="mb-2 font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">

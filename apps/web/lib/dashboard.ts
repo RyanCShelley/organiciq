@@ -39,6 +39,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       previous_to: "",
     },
     effective_periods: data.effective_periods ?? {},
+    search_console_sources: data.search_console_sources ?? {properties: [], combined_history: false},
     freshness: Array.isArray(data.freshness) ? data.freshness : [],
     conversions: {
       configured: conversions?.configured === true,
@@ -255,6 +256,7 @@ export type DashboardFreshness = {
 };
 
 export type DashboardResponse = {
+  search_console_sources?: {properties: {property: string; clicks: number; impressions: number; observed_days: number; provenance_known: boolean}[]; combined_history: boolean; note?: string};
   effective_periods?: Record<string, {current: [string, string] | null; previous: [string, string] | null}>;
   period: {
     from: string;

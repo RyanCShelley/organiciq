@@ -18,7 +18,7 @@ def build(db, client, *, today=None):
     today = today or date.today()
     targets = {row.keyword: row for row in db.query(KeywordTarget).filter_by(client_id=client.id)}
     overrides = {row.item_key for row in db.query(WatchTarget).filter_by(client_id=client.id, kind="keyword")}
-    tracked = db.query(FactSerKeyword).filter_by(client_id=client.id).all()
+    tracked = db.query(FactSerKeyword).filter_by(client_id=client.id, is_tracked=True).all()
     terms = {(row.keyword or "").strip().lower() for row in tracked} - {""}
     observations = pages_for_queries(db, client.id, period=(today - timedelta(days=29), today), only=terms)
     subjects = suggestions_for(db, client.id)

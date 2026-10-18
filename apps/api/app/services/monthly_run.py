@@ -444,8 +444,10 @@ def build_record(
         (b for b in Branch if b.value == triage.constraint), None
     )
     from app.services.watchlist import read as read_watchlist
+    from app.services.decision_measurements import prompt_readings
+    prompt_history = prompt_readings(db, client.id, today)
     for watched in read_watchlist(db, client):
-        observation = watched.get("observation") or {}
+        observation = prompt_history.get((watched.get("provider"), watched["text"].strip().lower())) or watched.get("observation") or {}
         observed_on = observation.get("observed_on")
         if (watched["kind"] != "prompt" or watched["state"] != "existing"
                 or not observed_on or observed_on > today.isoformat()

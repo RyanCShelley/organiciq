@@ -4,10 +4,9 @@ Decision 2 scores a keyword-page pair and the catalog decides what to do
 about it. Both are pure functions over explicit inputs; this is the join that
 assembles those inputs from the warehouse.
 
-Candidates come from `keyword_targets` rather than from everything the rank
-tracker follows. That is the point of the map: a term somebody declared a
-page for is a term somebody intends to win, and the engine stops guessing
-which page it meant.
+Candidates use current SE Ranking terms with a confirmed or automatically
+mapped page. Older maps remain reference data rather than expanding the
+automatic focus. The map supplies page ownership, not tracker membership.
 """
 
 from __future__ import annotations
@@ -267,7 +266,11 @@ def load_target_inputs(
     watch_states = {x.item_key: x.state for x in db.query(WatchTarget).filter(
         WatchTarget.client_id == client.id, WatchTarget.kind == "keyword")}
 
+    from app.services.watchlist import automatic_focus
+    focus = {row["text"].strip().lower() for row in automatic_focus(db, client) if row["kind"] == "keyword"}
     for target in targets:
+        if target.keyword.strip().lower() not in focus:
+            continue
         # Exclusions are explicit strategy decisions, not low scores.
         state = watch_states.get(item_key("keyword", target.keyword))
         if state in ("excluded", "planned", "unmapped"):

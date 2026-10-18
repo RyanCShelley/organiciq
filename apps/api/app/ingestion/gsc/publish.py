@@ -69,6 +69,7 @@ def _page_grain_key(payload: dict[str, Any]) -> tuple[Any, ...]:
         payload["normalized_url"],
         payload["country"],
         payload["device"],
+        payload.get("gsc_site_url", ""),
     )
 
 
@@ -80,11 +81,12 @@ def _query_grain_key(payload: dict[str, Any]) -> tuple[Any, ...]:
         payload["normalized_url"],
         payload["country"],
         payload["device"],
+        payload.get("gsc_site_url", ""),
     )
 
 
 def _daily_grain_key(payload: dict[str, Any]) -> tuple[Any, ...]:
-    return (payload["client_id"], payload["date"])
+    return (payload["client_id"], payload["date"], payload.get("gsc_site_url", ""))
 
 
 def _dedupe_payloads(
@@ -169,11 +171,28 @@ def _canonical_page_url(
     return page, normalize_url(page)
 
 
-def _write_daily(db: Session, payloads: list[dict[str, Any]]) -> int:
+def _replace_scope(db, model, job, payloads):
+    """Retire legacy combined rows when source-tagged rows replace this window.
+
+    Full restatement is explicit, used by a controlled rebuild after complete
+    source extraction. Ordinary ingestion never erases an empty source report.
+    """
+    if not payloads:
+        return
+    query = db.query(model).filter(model.client_id == job.client_id,
+        model.date >= job.start_date, model.date <= job.end_date)
+    if not (job.params_json or {}).get("replace_gsc_window"):
+        query = query.filter(model.gsc_site_url == "")
+    query.delete(synchronize_session=False)
+
+
+def _write_daily(db: Session, payloads: list[dict[str, Any]], job: SyncJob | None = None) -> int:
     if not payloads:
         return 0
 
     payloads = _dedupe_payloads(payloads, _daily_grain_key)
+    if job is not None and any(p.get("gsc_site_url") for p in payloads):
+        _replace_scope(db, FactGscDaily, job, payloads)
 
     for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
         stmt = insert(FactGscDaily).values(batch)
@@ -251,7 +270,7 @@ def publish_gsc_daily(db: Session, job: SyncJob) -> int:
     scope = _client_scope(db, job.client_id)
     if scope:
         payloads = _daily_from_scoped_pages(db, job, scope)
-        return _write_daily(db, payloads)
+        return _write_daily(db, payloads, job)
 
     rows = (
         db.query(StagingGscDaily)
@@ -277,10 +296,11 @@ def publish_gsc_daily(db: Session, job: SyncJob) -> int:
                 "ctr": row.ctr or Decimal(0),
                 "average_position": row.average_position or Decimal(0),
                 "is_primary": is_primary,
+                "gsc_site_url": site,
             }
         )
 
-    return _write_daily(db, payloads)
+    return _write_daily(db, payloads, job)
 
 
 def publish_gsc_pages(db: Session, job: SyncJob) -> int:
@@ -313,7 +333,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
             {
                 "client_id": job.client_id,
                 "date": row.date,
-                "raw_url": raw_url,
+                "raw_url": row.page,
                 "normalized_url": normalized_url,
                 "country": row.country or "",
                 "device": row.device or "",
@@ -322,6 +342,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
                 "ctr": row.ctr or Decimal(0),
                 "average_position": row.average_position or Decimal(0),
                 "is_primary": is_primary,
+                "gsc_site_url": site,
             }
         )
 
@@ -329,6 +350,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
         return 0
 
     payloads = _dedupe_payloads(payloads, _page_grain_key)
+    _replace_scope(db, FactGscPage, job, payloads)
 
     for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
         stmt = insert(FactGscPage).values(batch)
@@ -382,7 +404,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
                 "client_id": job.client_id,
                 "date": row.date,
                 "query": query,
-                "raw_url": raw_url,
+                "raw_url": row.page,
                 "normalized_url": normalized_url,
                 "country": row.country or "",
                 "device": row.device or "",
@@ -391,6 +413,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
                 "ctr": row.ctr or Decimal(0),
                 "average_position": row.average_position or Decimal(0),
                 "is_primary": is_primary,
+                "gsc_site_url": site,
             }
         )
 
@@ -398,6 +421,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
         return 0
 
     payloads = _dedupe_payloads(payloads, _query_grain_key)
+    _replace_scope(db, FactGscQueryPage, job, payloads)
 
     for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
         stmt = insert(FactGscQueryPage).values(batch)

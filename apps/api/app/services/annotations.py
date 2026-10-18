@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_url
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client
 from app.models.config import ConversionDefinition
@@ -258,6 +259,16 @@ def _lead_event_names(db: Session, client_id: UUID) -> list[str]:
     return [row[0] for row in rows]
 
 
+def _exact_page_urls(db, client_id, page_url):
+    value = page_url.strip()
+    if value.startswith("/"):
+        client = db.get(Client, client_id)
+        value = f"https://{client.domain.rstrip('/')}" + value
+    normalized = normalize_url(value)
+    # Protocol variants refer to the same page for work measurement; sibling paths do not.
+    return {normalized, normalized.replace("https://", "http://", 1), normalized.replace("http://", "https://", 1)}
+
+
 def _window_metrics(
     db: Session,
     client_id: UUID,
@@ -267,7 +278,9 @@ def _window_metrics(
     page_url: str | None,
     lead_events: list[str],
 ) -> dict[str, float | None]:
+    page_urls = _exact_page_urls(db, client_id, page_url) if page_url else None
     traffic_q = db.query(
+        func.count(FactGa4Traffic.id),
         func.coalesce(func.sum(FactGa4Traffic.sessions), 0),
     ).filter(
         FactGa4Traffic.client_id == client_id,
@@ -275,11 +288,12 @@ def _window_metrics(
         FactGa4Traffic.date <= end,
     )
     if page_url:
-        traffic_q = traffic_q.filter(FactGa4Traffic.normalized_url.contains(_path_hint(page_url)))
-    sessions = float(traffic_q.scalar() or 0)
+        traffic_q = traffic_q.filter(FactGa4Traffic.normalized_url.in_(page_urls))
+    traffic_rows, traffic_sessions = traffic_q.one()
+    sessions = float(traffic_sessions or 0) if traffic_rows else None
 
     leads: float | None = None
-    if lead_events:
+    if lead_events and traffic_rows:
         leads_q = db.query(func.coalesce(func.sum(FactGa4Event.event_count), 0)).filter(
             FactGa4Event.client_id == client_id,
             FactGa4Event.date >= start,
@@ -287,10 +301,11 @@ def _window_metrics(
             FactGa4Event.event_name.in_(lead_events),
         )
         if page_url:
-            leads_q = leads_q.filter(FactGa4Event.normalized_url.contains(_path_hint(page_url)))
+            leads_q = leads_q.filter(FactGa4Event.normalized_url.in_(page_urls))
         leads = float(leads_q.scalar() or 0)
 
     gsc_q = db.query(
+        func.count(FactGscPage.id),
         func.coalesce(func.sum(FactGscPage.impressions), 0),
         func.coalesce(func.sum(FactGscPage.clicks), 0),
     ).filter(
@@ -299,16 +314,16 @@ def _window_metrics(
         FactGscPage.date <= end,
     )
     if page_url:
-        gsc_q = gsc_q.filter(FactGscPage.normalized_url.contains(_path_hint(page_url)))
-    impressions, clicks = gsc_q.one()
+        gsc_q = gsc_q.filter(FactGscPage.normalized_url.in_(page_urls))
+    gsc_rows, impressions, clicks = gsc_q.one()
     lead_rate = (leads / sessions * 100) if leads is not None and sessions else None
 
     return {
         "sessions": sessions,
         "leads": leads,
         "lead_rate": lead_rate,
-        "impressions": float(impressions or 0),
-        "clicks": float(clicks or 0),
+        "impressions": float(impressions or 0) if gsc_rows else None,
+        "clicks": float(clicks or 0) if gsc_rows else None,
     }
 
 
@@ -410,6 +425,8 @@ def measure_annotation_impact(
         "suggested_result": suggested.value,
         "meaningful_change_pct": MEANINGFUL_CHANGE_PCT,
         "frame": "pre_vs_post_window",
+        "lead_rate_basis": "lead_events_per_visit",
+        "interpretation": "Observed changes across windows, not proof that the work caused them.",
     }
     row.impact_summary_json = summary
     if persist:

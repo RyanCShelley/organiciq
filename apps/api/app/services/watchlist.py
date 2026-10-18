@@ -60,3 +60,11 @@ def write(db, client, payload):
         mapped.note = payload.note
     db.commit()
     return read(db, client)
+
+
+def automatic_focus(db, client):
+    """Current tracker terms plus prompt targets; maps remain ownership evidence."""
+    terms = {(row.keyword or "").strip().lower() for row in
+             db.query(FactSerKeyword).filter_by(client_id=client.id, is_tracked=True)}
+    return [row for row in read(db, client)
+            if row["kind"] != "keyword" or row["text"].strip().lower() in terms]
