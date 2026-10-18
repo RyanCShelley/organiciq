@@ -87,12 +87,12 @@ def test_a_test_with_no_input_is_never_a_pass():
 # ── The eleven ──
 
 
-def test_v1_reads_priority_terms_not_every_term():
+def test_v1_without_dated_watchlist_rankings_is_blocked():
     blocked = assess_visibility(
         VisibilitySignals(priority_keywords=0, priority_group_set=False), thresholds=T
     )[0]
     assert blocked.status is Status.BLOCKED
-    assert "priority" in (blocked.missing or "")
+    assert "dated Watch List" in (blocked.missing or "")
 
 
 def test_v2_and_v3_judge_a_fall_not_a_level():

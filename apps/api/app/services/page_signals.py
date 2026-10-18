@@ -20,7 +20,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import REFERENCE_SCENARIO, expected_ctr_percent
 from app.decisions.page_targets import (
     CONTESTED_MIN_IMPRESSIONS,
     CONTESTED_MIN_RIVAL_SHARE,
@@ -495,8 +495,8 @@ def load_page_candidates(
         impressions = page.get("impressions", 0.0)
         lost_query, lost_before, lost_after = shifts.get(url, (None, None, None))
         expected = (
-            expected_ctr_percent(position) / 100.0 * impressions
-            if position and impressions
+            expected_ctr_percent(position, scenario=REFERENCE_SCENARIO) / 100.0 * impressions
+            if position is not None and 1 <= position <= 20 and impressions
             else None
         )
         total_sessions, engaged = sessions.get(url, (0.0, None))
