@@ -22,14 +22,13 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.triage import LeadSignals, TrafficSignals, VisibilitySignals
 from app.models.client import Client
 from app.models.config import ClientConversionPage, ConversionDefinition, OrganicChannel
 from app.models.crawl import FactCrawlInternalLink
 from app.models.decision import KeywordTarget
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscDaily, FactGscPage
+from app.models.gsc import FactGscDaily
 from app.models.seranking import (
     FactSerAiCheck,
     FactSerAiTrackerStats,
@@ -122,7 +121,7 @@ def visibility_signals(
         .filter(
             KeywordTarget.client_id == client.id,
             KeywordTarget.priority.is_(True),
-            KeywordTarget.source == "confirmed",
+            KeywordTarget.source.in_(("confirmed", "auto")),
         )
         .all()
     )
@@ -147,7 +146,7 @@ def visibility_signals(
     }
     from app.core.urls import normalize_url
     all_targets = db.query(KeywordTarget).filter(
-        KeywordTarget.client_id == client.id, KeywordTarget.source == "confirmed",
+        KeywordTarget.client_id == client.id, KeywordTarget.source.in_(("confirmed", "auto")),
     ).all()
     declared_pages = {normalize_url(url) for url in declared_pages}
     mapped_pages = {normalize_url(t.target_url) for t in all_targets if t.target_url}
@@ -213,7 +212,9 @@ def visibility_signals(
             or 0
         )
 
+    from app.services.decision_measurements import monthly_keyword_trend
     return VisibilitySignals(
+        monthly_keyword_trend=monthly_keyword_trend(db, client, today),
         priority_keywords=len(judged),
         priority_in_top_10=in_top_10,
         priority_group_set=bool(priority_terms),
@@ -243,33 +244,8 @@ def visibility_signals(
 def traffic_signals(
     db: Session, client: Client, *, today: date, gsc_period: tuple[date, date] | None
 ) -> TrafficSignals:
-    missed = actual = None
-    if gsc_period is not None:
-        rows = (
-            db.query(
-                func.sum(FactGscPage.impressions).label("impressions"),
-                func.sum(FactGscPage.clicks).label("clicks"),
-                (func.sum(FactGscPage.average_position * FactGscPage.impressions)
-                 / func.nullif(func.sum(FactGscPage.impressions), 0)).label("position"),
-            )
-            .filter(
-                FactGscPage.client_id == client.id,
-                FactGscPage.date >= gsc_period[0],
-                FactGscPage.date <= gsc_period[1],
-            )
-            .group_by(FactGscPage.normalized_url)
-            .all()
-        )
-        missed = 0.0
-        actual = 0.0
-        for impressions, clicks, position in rows:
-            impressions = float(impressions or 0)
-            clicks = float(clicks or 0)
-            actual += clicks
-            if not impressions or position is None:
-                continue
-            expected = expected_ctr_percent(float(position)) / 100.0 * impressions
-            missed += max(0.0, expected - clicks)
+    from app.services.ctr_diagnostic import read as read_ctr
+    ctr = read_ctr(db, client.id, *(gsc_period or (today - timedelta(days=27), today)))
 
     recent_end = today
     recent_start = recent_end - timedelta(days=TREND_DAYS - 1)
@@ -339,8 +315,8 @@ def traffic_signals(
     organic_before = all_before["channels"].get("organic_search")
     return TrafficSignals(
         sessions=all_now["total"], prior_sessions=all_before["total"],
-        missed_clicks=missed,
-        actual_clicks=actual,
+        missed_clicks=ctr["missed_clicks"], actual_clicks=ctr["actual_clicks"],
+        ctr_context_matched=ctr["matched"], ctr_missing=ctr["missing"], ctr_evidence=ctr["evidence"],
         impressions_change_pct=change(
             impressions(recent_start, recent_end), impressions(prior_start, prior_end)
         ),

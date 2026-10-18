@@ -19,8 +19,8 @@ def read(db, client):
         mapped = maps.get(text)
         key = item_key("keyword", text)
         rows[("keyword", key)] = dict(kind="keyword", item_key=key, text=text, provider=None,
-            state="existing" if mapped and mapped.target_url else "unmapped",
-            target_url=mapped.target_url if mapped else None, priority=bool(mapped and mapped.priority),
+            state="existing" if mapped and mapped.target_url and mapped.source in ("confirmed", "auto") else "unmapped",
+            target_url=mapped.target_url if mapped and mapped.source in ("confirmed", "auto") else None, priority=bool(mapped and mapped.priority),
             note=mapped.note if mapped else None, observation={})
     for prompt in db.query(FactSerAiPrompt).filter(FactSerAiPrompt.client_id == client.id):
         provider = prompt.engine or prompt.llm_id
@@ -53,6 +53,8 @@ def write(db, client, payload):
         if mapped is None:
             mapped = KeywordTarget(client_id=client.id, keyword=term, source="confirmed")
             db.add(mapped)
+        mapped.source = "confirmed"
+        mapped.confidence = None
         mapped.target_url = payload.target_url if payload.state == "existing" else None
         mapped.priority = payload.priority and payload.state != "excluded"
         mapped.note = payload.note

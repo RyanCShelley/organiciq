@@ -345,3 +345,25 @@ def test_fetch_maps_competitor_metrics_by_domain(db, client_a, monkeypatch):
     assert by_id["101"].visibility == Decimal("57.01")
     assert by_id["102"].visibility == Decimal("16.26")
     get_settings.cache_clear()
+
+
+def test_historical_backfill_does_not_backdate_current_site_summary(db, client_a, monkeypatch):
+    from contextlib import ExitStack
+    from app.ingestion.seranking.fetch import fetch_seranking_search
+    from app.models.seranking import StagingSerSiteSummary
+    monkeypatch.setenv("SE_RANKING_API_KEY", "test-key")
+    get_settings.cache_clear()
+    _connect_ser(db, client_a)
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="se_ranking_search",
+        start_date=date(2026, 1, 1), end_date=date(2026, 1, 31), status=SyncJobStatus.QUEUED)
+    db.add(job)
+    db.commit()
+    with ExitStack() as stack:
+        for method in ("list_search_engines", "list_keyword_groups", "list_keywords", "list_positions", "list_competitors"):
+            stack.enter_context(patch(f"app.ingestion.seranking.fetch.ser_client.{method}", return_value=[]))
+        stack.enter_context(patch("app.ingestion.seranking.fetch.ser_client.site_summary", return_value={"visibility_percent": 12}))
+        fetch_seranking_search(db, job)
+    row = db.query(StagingSerSiteSummary).filter_by(job_id=job.id).one()
+    assert row.metric_date == date.today()
+    assert row.metric_date != job.end_date
+    get_settings.cache_clear()

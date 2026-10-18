@@ -212,7 +212,7 @@ def load_target_inputs(
         db.query(KeywordTarget)
         .filter(
             KeywordTarget.client_id == client.id,
-            KeywordTarget.source == "confirmed",
+            KeywordTarget.source.in_(("confirmed", "auto")),
         )
         .all()
     )

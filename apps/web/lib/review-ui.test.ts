@@ -1,3 +1,4 @@
+import { visibilitySummary } from "./visibility-summary";
 import assert from "node:assert/strict";
 import { mergeBrief, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
@@ -46,3 +47,10 @@ assert.ok(normalized.every(item => item.steps.length === 1));
 assert.equal(actionCount(normalized), 4);
 const locked = toggleAction([bundled], bundled, "Task two", 1, [bundled.action_uid]);
 assert.deepEqual(locked, [bundled]);
+
+
+const trackedTerms = Array.from({length: 20}, (_, i) => ({ text: `term ${i}`, priority: false, position: i === 0 ? 1 : null, status: i === 0 ? "top_10" : "not_in_top_100", target_url: null, ranking_url: null }));
+assert.equal(visibilitySummary(trackedTerms).value, "1 of 20");
+assert.match(visibilitySummary(trackedTerms).note ?? "", /No priority keywords selected/);
+assert.equal(visibilitySummary([]).value, "No tracked keywords");
+assert.equal(visibilitySummary([{...trackedTerms[0], status:"not_measured", position:null}]).value, "No dated rankings");

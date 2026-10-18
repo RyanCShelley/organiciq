@@ -317,6 +317,7 @@ class BaselineLockRequest(BaseModel):
     reason_note: str | None = Field(default=None, max_length=2000)
     #: The plan-end goal. Absent means the 12-month figure from this baseline's own projection.
     monthly_lead_goal: int | None = Field(default=None, ge=0)
+    target_lead_rate_pct: float | None = Field(default=None, gt=0, le=100)
     #: Agree to make the chosen events the client's lead conversions, which the home
     #: screen, alerts and results count, when they differ from what is set now.
     sync_lead_conversions: bool = False

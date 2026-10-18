@@ -734,7 +734,10 @@ def save_record(
     days elapsed in the month somebody happens to be sitting in.
     """
     today = as_of(month, today=today) if month else (today or date.today())
+    from app.services.automatic_keyword_map import build as build_map
+    map_summary = build_map(db, client)
     record = build_record(db, client, today=today)
+    record["mapping_summary"] = map_summary
     month = record["month"]
 
     existing = (

@@ -1,3 +1,4 @@
+import { dataGapGuidance } from "@/lib/data-gap-guidance";
 import { TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
@@ -427,22 +428,22 @@ export default async function DecisionEnginePage({
             Data that limited this run
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[var(--text-secondary)]">
-            Rules needing these did not fire. Fixing them raises confidence.
+            These diagnostics have setup, coverage or history limits. Each note explains the next step; a history or reference limit is not a finding that the site needs fixing.
           </p>
           {record.data_gaps.length === 0 ? (
             <p className="mt-3 text-[13px] text-[var(--text-tertiary)]">
               Nothing was missing.
             </p>
           ) : (
-            <ul className="mt-3 flex flex-wrap gap-2">
-              {record.data_gaps.map((gap) => (
-                <li
-                  key={gap.input}
-                  className="rounded-full bg-[#FDF1E3] px-3 py-1 text-[12px] font-medium text-[#8A4B08]"
-                >
-                  {gap.input}
-                </li>
-              ))}
+            <ul className="mt-3 space-y-3">
+              {record.data_gaps.map(gap => {
+                const guidance = dataGapGuidance(gap.input);
+                return <li key={gap.input} className="rounded-lg border border-[var(--border)] p-3 text-sm">
+                  <p className="font-semibold">{guidance.title} <span className="text-xs font-normal text-[var(--text-secondary)]">· {guidance.kind}</span></p>
+                  <p className="mt-1 text-[var(--text-secondary)]">{guidance.next}</p>
+                  {guidance.tool && <Link className="mt-2 inline-block underline" href={guidance.tool === "client" ? `/clients/${selectedClient.slug}` : `/${selectedClient.slug}/watch-list`}>{guidance.tool === "client" ? "Open client setup" : "Open Watch List"}</Link>}
+                </li>;
+              })}
             </ul>
           )}
         </section>

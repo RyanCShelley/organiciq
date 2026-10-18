@@ -129,16 +129,10 @@ class Decision(Base):
 
 
 class KeywordTarget(Base):
-    """Which page is meant to own a term.
+    """Page ownership built from evidence, with explicit user decisions winning.
 
-    The playbook's first source for "which page should rank for this", and
-    the one thing no amount of data could supply: Search Console reports
-    where Google currently shows a page, which on a term the client does
-    not rank for is either nothing or the wrong page. Matching titles was
-    tried and chose a neighbouring service page.
-
-    So a person says it once, and every finding about that term stops
-    guessing.
+    Ranking observations and intended ownership remain distinct. Automatic
+    supported matches may be used; ambiguous proposals wait for review.
     """
 
     __tablename__ = "keyword_targets"
@@ -151,7 +145,7 @@ class KeywordTarget(Base):
             name="ck_keyword_targets_term_role",
         ),
         CheckConstraint(
-            "source IN ('confirmed', 'suggested')",
+            "source IN ('confirmed', 'suggested', 'auto')",
             name="ck_keyword_targets_source",
         ),
     )
@@ -177,9 +171,8 @@ class KeywordTarget(Base):
     #: Whether this is one of the terms the client is actually judged on.
     #: V1 reads "priority-group keywords" and nothing marked a group before.
     priority: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    #: confirmed | suggested. The engine reads confirmed rows only — a
-    #: proposal from the embedding matcher is a proposal until somebody
-    #: agrees with it.
+    #: confirmed = explicit user decision, auto = supported engine mapping,
+    #: suggested = unresolved proposal. Automatic refresh never changes overrides.
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
     #: How sure the suggester was, for ordering a review queue. Never read
     #: by a rule.
