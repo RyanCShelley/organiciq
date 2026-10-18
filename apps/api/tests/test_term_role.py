@@ -110,4 +110,5 @@ def test_exactly_one_of_the_two_fires(role: str | None):
 
 def test_the_catalog_picks_the_right_one():
     assert prescribe(_target("primary"), _bare_page()).action_id == "V-1"
-    assert prescribe(_target("secondary"), _bare_page()).action_id == "V-8"
+    # A secondary phrase missing from a heading is not proof of a missing passage.
+    assert prescribe(_target("secondary"), _bare_page()) is None

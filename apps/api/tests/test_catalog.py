@@ -152,7 +152,6 @@ def test_every_action_says_what_done_looks_like():
         (_target(ranking_url="https://x/other"), _page()),
         (_target(), _page(title="Services | X", headings=())),
         (_target(keyword="what is local seo"), _page(faq_questions=())),
-        (_target(), _page(entity_properties=frozenset())),
         (_target(), _page(inbound_editorial_links=0, site_median_links=9)),
     ]
     for target, page in cases:
@@ -221,3 +220,14 @@ def test_a_target_typed_http_or_www_is_the_page_that_ranks():
     assert same.rehoming is False
     other = _target(target_url="https://x.com/local-seo", ranking_url="https://x.com/blog")
     assert other.rehoming is True
+
+
+def test_optional_markup_and_exact_secondary_heading_are_not_automatic_work():
+    from app.decisions.catalog import VISIBILITY_ACTIONS, v8_secondary_term_section
+    assert v3_entity_markup not in VISIBILITY_ACTIONS
+    assert v8_secondary_term_section not in VISIBILITY_ACTIONS
+    assert prescribe(_target(), _page(entity_properties=frozenset())) is None
+
+
+def test_phrase_presence_tolerates_html_whitespace_and_punctuation():
+    assert v1_term_in_high_value_spots(_target(), _page(title='Local\u00a0SEO — Agency', headings=('Local SEO: agency',))) is None

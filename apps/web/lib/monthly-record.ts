@@ -65,6 +65,7 @@ export type Candidate = RecordAction & {
 export type MonthlyRecord = {
   measurements?: import("@/components/DecisionEngine/MeasurementSummary").Measurements;
   review_required?: boolean;
+  recommendation_version?: number;
   plan_review?: { approved_at: string | null };
   client: string;
   client_name?: string;
