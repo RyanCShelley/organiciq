@@ -70,7 +70,7 @@ export function SlotCard({
         <div className="min-w-0 flex-1 basis-[420px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-              Slot {action.slot}{yours ? " · your pick" : ""}
+              {action.family ? action.steps && action.steps.length > 1 ? `Delivery brief ${action.slot} · ${action.steps.length} actions` : `Action ${action.slot}` : `Slot ${action.slot}`}{yours ? " · your pick" : ""}
             </span>
             <span
               className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
@@ -117,7 +117,7 @@ export function SlotCard({
           <dt className="text-[var(--text-tertiary)]">Measured by</dt>
           <dd className="font-semibold">{action.metric}</dd>
           <dt className="text-[var(--text-tertiary)]">Check on</dt>
-          <dd className="font-semibold">{formatDay(action.check_on)}</dd>
+          <dd className="font-semibold">{action.check_after_days ? `${action.check_after_days} days after shipment` : formatDay(action.check_on)}</dd>
         </dl>
       </div>
 
@@ -163,6 +163,7 @@ export function SlotCard({
         </div>
       ) : null}
 
+      {action.evidence?.length ? <details className="mt-4 text-sm"><summary className="cursor-pointer font-semibold">Evidence and limitations</summary><ul className="mt-2 list-disc space-y-1 pl-5">{action.evidence.map((line, index) => <li key={index}>{line}</li>)}</ul></details> : null}
       {children ? (
         <div className="mt-4 border-t border-[var(--border)] pt-4">{children}</div>
       ) : null}

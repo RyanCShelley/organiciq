@@ -262,8 +262,16 @@ def load_target_inputs(
     candidates: list[Candidate] = []
     pages: dict[str, PageFacts] = {}
     excluded: list[dict[str, str]] = []
+    from app.models.watch_target import WatchTarget
+    from app.services.watchlist import item_key
+    watch_states = {x.item_key: x.state for x in db.query(WatchTarget).filter(
+        WatchTarget.client_id == client.id, WatchTarget.kind == "keyword")}
 
     for target in targets:
+        # Exclusions are explicit strategy decisions, not low scores.
+        state = watch_states.get(item_key("keyword", target.keyword))
+        if state in ("excluded", "planned", "unmapped"):
+            continue
         url = (target.target_url or "").strip()
         if url:
             skip = is_excluded(url, exclusions)
@@ -287,7 +295,9 @@ def load_target_inputs(
                 position=_rank(getattr(tracked_row, "current_position", None))
                 if tracked_row
                 else None,
-                volume=float(metric.volume) if metric and metric.volume else None,
+                volume=float(metric.volume) if metric and metric.volume is not None else (
+                    float(tracked_row.volume) if tracked_row and tracked_row.volume is not None else None
+                ),
                 difficulty=float(metric.difficulty)
                 if metric and metric.difficulty
                 else None,

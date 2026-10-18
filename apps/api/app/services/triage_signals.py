@@ -145,15 +145,23 @@ def visibility_signals(
         )
         if (p.normalized_url or "").strip()
     }
+    from app.core.urls import normalize_url
+    all_targets = db.query(KeywordTarget).filter(
+        KeywordTarget.client_id == client.id, KeywordTarget.source == "confirmed",
+    ).all()
+    declared_pages = {normalize_url(url) for url in declared_pages}
+    mapped_pages = {normalize_url(t.target_url) for t in all_targets if t.target_url}
+    # Reach can only be assessed for mapped pages; unmapped is a setup gap.
+    assessed_pages = declared_pages & mapped_pages
     reached: set[str] = set()
     for term, row in tracked.items():
         position = _rank(row.current_position)
         if position is None or position > 20:
             continue
-        target = next((t.target_url for t in targets if t.keyword == term), None)
-        if target:
-            reached.add(target.strip())
-    without_reach = len(declared_pages - reached)
+        target = next((t.target_url for t in all_targets if t.keyword == term), None)
+        if target and row.ranking_url and normalize_url(row.ranking_url) == normalize_url(target):
+            reached.add(normalize_url(target))
+    without_reach = len(assessed_pages - reached)
 
     # V2 — SE Ranking's own visibility score, now against ninety days ago.
     latest_summary = (
@@ -161,6 +169,7 @@ def visibility_signals(
         .filter(
             FactSerSiteSummary.client_id == client.id,
             FactSerSiteSummary.visibility_percent.isnot(None),
+            FactSerSiteSummary.metric_date <= today,
         )
         .order_by(FactSerSiteSummary.metric_date.desc())
         .first()
@@ -187,7 +196,7 @@ def visibility_signals(
     # V5 — the AI tracker's own presence figure, and share of voice over time.
     stats = (
         db.query(FactSerAiTrackerStats)
-        .filter(FactSerAiTrackerStats.client_id == client.id)
+        .filter(FactSerAiTrackerStats.client_id == client.id, FactSerAiTrackerStats.metric_date <= today)
         .order_by(FactSerAiTrackerStats.metric_date.desc())
         .first()
     )
@@ -219,9 +228,9 @@ def visibility_signals(
         ),
         impressions_28d=impressions(recent_start, recent_end),
         impressions_prior_28d=impressions(prior_start, prior_end),
-        priority_pages=len(declared_pages),
+        priority_pages=len(assessed_pages),
         priority_pages_without_reach=without_reach,
-        priority_pages_declared=bool(declared_pages),
+        priority_pages_declared=bool(assessed_pages),
         ai_mention_pct=(
             float(stats.mention_presence_pct)
             if stats and stats.mention_presence_pct is not None
@@ -240,7 +249,8 @@ def traffic_signals(
             db.query(
                 func.sum(FactGscPage.impressions).label("impressions"),
                 func.sum(FactGscPage.clicks).label("clicks"),
-                func.avg(FactGscPage.average_position).label("position"),
+                (func.sum(FactGscPage.average_position * FactGscPage.impressions)
+                 / func.nullif(func.sum(FactGscPage.impressions), 0)).label("position"),
             )
             .filter(
                 FactGscPage.client_id == client.id,
@@ -283,9 +293,6 @@ def traffic_signals(
         )
         return float(total) if total else None
 
-    sessions_now = _managed_sessions(db, client.id, recent_start, recent_end)
-    sessions_before = _managed_sessions(db, client.id, prior_start, prior_end)
-
     # T3 — engaged rate on managed sessions, and the client's own median.
     engaged_rate = None
     totals = (
@@ -323,13 +330,21 @@ def traffic_signals(
     if six_months and float(six_months[0] or 0) > 0:
         median_rate = float(six_months[1] or 0) / float(six_months[0]) * 100.0
 
+    # T0 uses all measured visits. T2 keeps an organic-search-only session
+    # comparison because its other half is Search Console impressions.
+    from app.services.decision_measurements import session_totals
+    all_now = session_totals(db, client.id, recent_start, recent_end)
+    all_before = session_totals(db, client.id, prior_start, prior_end)
+    organic_now = all_now["channels"].get("organic_search")
+    organic_before = all_before["channels"].get("organic_search")
     return TrafficSignals(
+        sessions=all_now["total"], prior_sessions=all_before["total"],
         missed_clicks=missed,
         actual_clicks=actual,
         impressions_change_pct=change(
             impressions(recent_start, recent_end), impressions(prior_start, prior_end)
         ),
-        sessions_change_pct=change(sessions_now, sessions_before),
+        sessions_change_pct=change(organic_now, organic_before),
         engaged_rate=engaged_rate,
         engaged_rate_median=median_rate,
     )
@@ -469,17 +484,17 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
         days_in_month = calendar.monthrange(today.year, today.month)[1]
         goal_to_date = monthly_goal * today.day / days_in_month
 
-    lead_rate = None
-    if configured and leads_mtd is not None:
-        sessions = _managed_sessions(db, client.id, month_start, today)
-        if sessions:
-            lead_rate = leads_mtd / sessions * 100.0
+    # Rate numerator and denominator use the same all-channel scope and period.
+    from app.services.decision_measurements import measure
+    measured = measure(db, client, end=today)["leads"]
+    lead_rate = measured["rate_pct"]
 
     baseline = getattr(client, "baseline_lead_rate_pct", None)
 
     tofu_share, next_step_blocked_by = _next_step(db, client, month_start, today)
 
     return LeadSignals(
+        target_lead_rate=measured["target_rate_pct"],
         conversions_configured=configured,
         leads_month_to_date=leads_mtd,
         goal_to_date=goal_to_date,

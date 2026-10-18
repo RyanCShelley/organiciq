@@ -31,6 +31,7 @@ from app.models.seranking import (
     StagingSerSiteSummary,
 )
 from app.models.user import User, UserClient, UserRole
+from app.models.watch_target import WatchTarget
 
 __all__ = [
     "BaselineVersion",

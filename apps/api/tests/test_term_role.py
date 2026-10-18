@@ -57,10 +57,10 @@ def test_a_primary_term_earns_the_title():
     assert "title" in found.done_when
 
 
-def test_a_term_with_no_role_is_treated_as_primary():
+def test_a_term_with_no_role_does_not_authorize_a_title_rewrite():
     # Every client mapped before roles existed has none, and a page whose
     # term is missing from its title is still the finding.
-    assert v1_term_in_high_value_spots(_target(None), _bare_page()) is not None
+    assert v1_term_in_high_value_spots(_target(None), _bare_page()) is None
 
 
 # ── Secondary ───────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ def test_exactly_one_of_the_two_fires(role: str | None):
         action(_target(role), _bare_page())
         for action in (v1_term_in_high_value_spots, v8_secondary_term_section)
     ]
-    assert sum(1 for f in found if f is not None) == 1
+    assert sum(1 for f in found if f is not None) == (0 if role is None else 1)
 
 
 def test_the_catalog_picks_the_right_one():

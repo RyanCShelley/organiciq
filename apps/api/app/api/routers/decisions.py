@@ -13,11 +13,14 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.core.settings import get_settings
 from app.integrations import teamwork
+from app.schemas.plan_review import MeasurementSettings
 from app.services import page_stage
 from app.services import portfolio as portfolio_service
 from app.services.triage_signals import NEXT_STEP_COVERAGE_FLOOR
 from app.models.client import Client
 from app.models.decision import EngineAction, ExcludedPage
+from app.schemas.plan_review import PlanReviewUpdate, PlanApproval
+from app.schemas.watchlist import WatchTargetUpdate
 from app.schemas import (
     EngineActionAssign,
     EngineActionInPlan,
@@ -37,6 +40,26 @@ from app.services.monthly_run import _previous_month, month_key, save_record
 logger = logging.getLogger("organiciq.decisions")
 
 router = APIRouter(prefix="/decisions", tags=["decisions"])
+
+@router.get("/watchlist")
+def get_watchlist(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    from app.services.watchlist import read
+    return read(db, client)
+
+
+@router.put("/watchlist")
+def put_watchlist(
+    payload: WatchTargetUpdate,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    from app.services.watchlist import write
+    return write(db, client, payload)
 
 
 @router.get("/keyword-page-map")
@@ -122,6 +145,33 @@ def list_monthly_records(
     ]
 
 
+@router.get("/measurement-settings")
+def get_measurement_settings(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.services.decision_measurements import lead_rate_target
+    return {"target_lead_rate_pct": lead_rate_target(db, client.id)}
+
+
+@router.put("/measurement-settings")
+def put_measurement_settings(
+    payload: "MeasurementSettings",
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.models.decision import DecisionThreshold
+    row = db.query(DecisionThreshold).filter_by(client_id=client.id).with_for_update().one_or_none()
+    if row is None:
+        row = DecisionThreshold(client_id=client.id, thresholds={})
+        db.add(row)
+    row.thresholds = {**(row.thresholds or {}), "target_lead_rate_pct": payload.target_lead_rate_pct}
+    db.commit()
+    return {"target_lead_rate_pct": payload.target_lead_rate_pct}
+
+
 @router.get("/records/{month}")
 def get_monthly_record(
     month: str,
@@ -142,7 +192,70 @@ def get_monthly_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No saved run for {month}.",
         )
-    return row.record
+    from app.decisions.planning import effective_record
+    result = effective_record(row.record)
+    if "measurements" not in result:
+        # Production already has saved assessments. Populate their new display
+        # from stored facts without rerunning integrations or rewriting history.
+        import calendar
+        from app.services.decision_measurements import measure
+        year, month_number = map(int, row.month.split("-"))
+        end = date(year, month_number, calendar.monthrange(year, month_number)[1])
+        result["measurements"] = measure(db, client, end=end)
+        result["measurements"]["source_note"] = "Measured from currently stored facts for this assessment period. Saved recommendations and approval history are unchanged."
+    return result
+
+
+@router.get("/records/{month}/review")
+def get_plan_review(
+    month: str,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.services import plan_review
+    row = engine_action_service.load_record(db, client, month)
+    if row is None:
+        raise HTTPException(404, "No saved run for this month.")
+    return plan_review.view(row)
+
+
+@router.put("/records/{month}/review")
+def put_plan_review(
+    month: str, payload: PlanReviewUpdate,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.services import plan_review
+    row = plan_review.locked_record(db, client, month)
+    if row is None:
+        raise HTTPException(404, "No saved run for this month.")
+    try:
+        return plan_review.save(db, row, payload, user)
+    except plan_review.ReviewConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/records/{month}/review/approve")
+def approve_plan_review(
+    month: str, payload: PlanApproval,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    from app.services import plan_review
+    row = plan_review.locked_record(db, client, month)
+    if row is None:
+        raise HTTPException(404, "No saved run for this month.")
+    try:
+        return plan_review.approve(db, row, payload.revision, user)
+    except plan_review.ReviewConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/records/run", status_code=status.HTTP_201_CREATED)
@@ -185,13 +298,15 @@ def run_monthly(
 
 
 def _slot_or_404(db: Session, client: Client, month: str, uid: str):
-    record = engine_action_service.load_record(db, client, month)
+    from app.services.plan_review import locked_record
+    record = locked_record(db, client, month)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No saved run for {month}.",
         )
-    slots = engine_action_service.slots_in_record(record.record)
+    from app.services.plan_review import workflow_record
+    slots = engine_action_service.slots_in_record(workflow_record(record.record))
     slot = slots.get(uid)
     if slot is None:
         # Without this the endpoint is an open write to a table keyed by a
@@ -201,6 +316,13 @@ def _slot_or_404(db: Session, client: Client, month: str, uid: str):
             detail=f"{uid} is not a slot in the {month} run.",
         )
     return record, slot
+
+
+def _require_reviewed_growth(record, slot):
+    if slot.kind == "action" and (record.record.get("review_required") or record.record.get("plan_review")):
+        review = record.record.get("plan_review") or {}
+        if not review.get("approved_at") or slot.uid not in {x["action_uid"] for x in review.get("items", [])}:
+            raise HTTPException(422, "Approve the reviewed plan before assigning or delivering growth work.")
 
 
 @router.get("/records/{month}/workflow")
@@ -221,7 +343,8 @@ def get_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No saved run for {month}.",
         )
-    slots = engine_action_service.slots_in_record(record.record)
+    from app.services.plan_review import workflow_record
+    slots = engine_action_service.slots_in_record(workflow_record(record.record))
     rows = engine_action_service.list_workflow(db, client, month)
     return {
         "month": month,
@@ -291,7 +414,8 @@ def assign_slot(
 ) -> dict:
     from app.models.user import User
 
-    _, slot = _slot_or_404(db, client, month, uid)
+    record, slot = _slot_or_404(db, client, month, uid)
+    _require_reviewed_growth(record, slot)
     email = (payload.assignee_email or "").strip().lower() or None
     account = (
         db.query(User).filter(func.lower(User.email) == email).one_or_none()
@@ -327,7 +451,34 @@ def set_slot_in_plan(
     larger project this month. Sending `null` hands the decision back rather
     than freezing whatever the engine last said.
     """
-    _, slot = _slot_or_404(db, client, month, uid)
+    record, slot = _slot_or_404(db, client, month, uid)
+    if slot.kind == "action" and record.record.get("plan_review"):
+        raise HTTPException(422, "Edit the reviewed plan to change selected growth work.")
+    if slot.kind in ("update", "content"):
+        from app.decisions.planning import page_identity
+        data = record.record
+        pool, candidate_pool, allowance_key = (
+            ("updates", "update_candidates", "update_slots") if slot.kind == "update"
+            else ("new_content", "content_candidates", "content_slots")
+        )
+        defaults = {x["action_uid"] for x in data.get(pool, [])}
+        selecting = payload.in_plan if payload.in_plan is not None else uid in defaults
+        if selecting:
+            review = data.get("plan_review") or {}
+            approved = review if review.get("approved_at") else next(iter(reversed(review.get("versions", []))), {})
+            if slot.target_url and page_identity(slot.target_url) in {page_identity(x["target_url"]) for x in approved.get("items", [])}:
+                raise HTTPException(422, "This page already has an approved growth brief. Combine the work in the reviewed plan.")
+            states = {x.uid: x for x in engine_action_service.list_workflow(db, client, month)}
+            active = set()
+            for item in [*data.get(pool, []), *data.get(candidate_pool, [])]:
+                item_uid = item["action_uid"]
+                state = states.get(item_uid)
+                chosen = state.in_plan if state and state.in_plan is not None else item_uid in defaults
+                if chosen and (not state or state.status != "skipped"):
+                    active.add(item_uid)
+            active.add(uid)
+            if allowance_key in data and len(active) > data[allowance_key]:
+                raise HTTPException(422, "Remove another item before exceeding this pool's allowance.")
     row = engine_action_service.set_in_plan(
         db, client, slot, month, in_plan=payload.in_plan, reason=payload.reason
     )
@@ -369,7 +520,8 @@ def ship_slot(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Record when the work went live, which is what the results loop reads."""
-    _, slot = _slot_or_404(db, client, month, uid)
+    record, slot = _slot_or_404(db, client, month, uid)
+    _require_reviewed_growth(record, slot)
     row = engine_action_service.mark_shipped(
         db, client, slot, month, on=payload.shipped_on
     )
@@ -391,6 +543,7 @@ def send_slot(
     exists rather than creating a twin.
     """
     record, slot = _slot_or_404(db, client, month, uid)
+    _require_reviewed_growth(record, slot)
     existing = (
         db.query(EngineAction)
         .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
@@ -409,6 +562,12 @@ def send_slot(
         effort_min=slot.effort_min,
         record_url=f"{get_settings().web_app_url}/{client.slug}/decision-engine?run={month}",
     )
+    if slot.steps:
+        description += "\n\nChecklist\n" + "\n".join(f"{i + 1}. {step}" for i, step in enumerate(slot.steps))
+    if slot.evidence:
+        description += "\n\nEvidence and limitations\n" + "\n".join(slot.evidence)
+    if slot.check_after_days:
+        description += f"\n\nEvaluate {slot.check_after_days} days after recorded shipment."
     # Whoever holds the slot here should hold the task there. Matched on
     # email rather than through a mapping somebody has to maintain — the
     # addresses are the same in both systems. No match means the task is
