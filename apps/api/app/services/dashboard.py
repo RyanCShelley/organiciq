@@ -597,11 +597,17 @@ def _daily_ai_presence_series(
             mention_top3[day] = float(row.mention_top3_pct)
         if row.link_top3_pct is not None:
             link_top3[day] = float(row.link_top3_pct)
+    # A missing observation is not zero visibility. The compact chart cannot
+    # represent gaps, so show it only for a completely observed period.
+    days = (end - start).days + 1
     return {
-        "mention_presence": _fill_daily(period, mention, forward_fill=True),
-        "link_presence": _fill_daily(period, link, forward_fill=True),
-        "mention_top3": _fill_daily(period, mention_top3, forward_fill=True),
-        "link_top3": _fill_daily(period, link_top3, forward_fill=True),
+        key: _fill_daily(period, readings) if len(readings) == days else []
+        for key, readings in {
+            "mention_presence": mention,
+            "link_presence": link,
+            "mention_top3": mention_top3,
+            "link_top3": link_top3,
+        }.items()
     }
 
 
@@ -764,49 +770,28 @@ def _gsc_weighted_position(
     return avg_position
 
 
-def _tracked_keyword_position(
-    db: Session,
-    client_id: UUID,
-    period: tuple[date, date] | None,
-) -> float | None:
+def _period_keyword_readings(db, client_id, period):
+    """Current cohort, with observations dated inside the selected period."""
     if period is None:
-        return None
+        return []
+    from app.services.decision_measurements import keyword_readings
     start, end = period
-    avg = (
-        db.query(func.avg(FactSerKeyword.current_position))
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-            FactSerKeyword.current_position.isnot(None),
-            FactSerKeyword.current_position > 0,
-        )
-        .scalar()
-    )
-    return _to_float(avg)
+    terms = {(row.keyword or "").strip().lower() for row in
+             db.query(FactSerKeyword).filter_by(client_id=client_id, is_tracked=True)}
+    return [reading for term, reading in keyword_readings(db, client_id, end).items()
+            if term in terms and reading["observed_on"] >= start.isoformat()]
 
 
-def _tracked_search_visibility(
-    db: Session,
-    client_id: UUID,
-    period: tuple[date, date] | None,
-) -> float | None:
-    if period is None:
-        return None
-    start, end = period
-    avg = (
-        db.query(func.avg(FactSerKeyword.visibility))
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-            FactSerKeyword.visibility.isnot(None),
-        )
-        .scalar()
-    )
-    return _to_float(avg)
+def _tracked_keyword_position(db, client_id, period):
+    values = [row["position"] for row in _period_keyword_readings(db, client_id, period)
+              if row["position"] is not None and 0 < row["position"] <= 100]
+    return sum(values) / len(values) if values else None
+
+
+def _tracked_search_visibility(db, client_id, period):
+    values = [row["visibility"] for row in _period_keyword_readings(db, client_id, period)
+              if row.get("visibility") is not None]
+    return sum(values) / len(values) if values else None
 
 
 def _ser_visibility_score(value: Decimal | float | int | None) -> float | None:
@@ -911,20 +896,12 @@ def _keyword_distribution(
     empty = {"top_3": 0, "top_10": 0, "top_20": 0, "beyond_20": 0, "not_ranking": 0}
     if period is None:
         return empty
-    start, end = period
-    rows = (
-        db.query(FactSerKeyword.current_position)
-        .filter(
-            FactSerKeyword.client_id == client_id,
-            FactSerKeyword.checked_at.isnot(None),
-            FactSerKeyword.checked_at >= start,
-            FactSerKeyword.checked_at <= end,
-        )
-        .all()
-    )
     buckets = empty.copy()
-    for (position,) in rows:
-        if position is None or position <= 0:
+    for row in _period_keyword_readings(db, client_id, period):
+        position = row["position"]
+        if position is None:
+            continue
+        if position <= 0 or position > 100:
             buckets["not_ranking"] += 1
         elif position <= 3:
             buckets["top_3"] += 1
@@ -1191,6 +1168,21 @@ def _top_pages(
     return pages[:limit]
 
 
+def _gsc_source_breakdown(db, client_id, period):
+    if period is None:
+        return {"properties": [], "combined_history": False}
+    start, end = period
+    rows = db.query(FactGscDaily.gsc_site_url, func.sum(FactGscDaily.clicks),
+        func.sum(FactGscDaily.impressions), func.sum(FactGscDaily.average_position * FactGscDaily.impressions),
+        func.count(func.distinct(FactGscDaily.date))).filter(FactGscDaily.client_id == client_id,
+            FactGscDaily.date >= start, FactGscDaily.date <= end).group_by(FactGscDaily.gsc_site_url).all()
+    properties = [{"property": site or "Legacy / source not recorded", "clicks": float(clicks or 0),
+        "impressions": float(impressions or 0), "average_position": float(weighted / impressions) if impressions else None,
+        "observed_days": days, "provenance_known": bool(site)} for site, clicks, impressions, weighted, days in rows]
+    return {"properties": properties, "combined_history": sum(item["provenance_known"] for item in properties) > 1,
+        "note": "Combined history sums the configured Search Console properties. Original domains are shown separately; canonical page aliases are used for page-level engine evidence. Search Console page/query reports have different coverage from property totals."}
+
+
 def build_dashboard(db: Session, client: Client, from_date: date, to_date: date) -> dict[str, Any]:
     watermarks = _load_watermarks(db, client.id)
     prev_from, prev_to = previous_period(from_date, to_date)
@@ -1302,6 +1294,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "previous_to": prev_to.isoformat(),
         },
         "baseline": baseline_payload,
+        "search_console_sources": _gsc_source_breakdown(db, client.id, gsc_current),
         "freshness": _freshness(watermarks),
         "effective_periods": {
             source: {"current": [d.isoformat() for d in current] if current else None,

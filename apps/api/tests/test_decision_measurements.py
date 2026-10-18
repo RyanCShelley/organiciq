@@ -45,3 +45,38 @@ def test_keyword_visibility_uses_dated_observations_without_future_leakage(db, c
     assert rows["priority service"]["ranking_url"] == "https://example.com/service"
     assert rows["priority service"]["observed_on"] == "2026-09-29"
     assert rows["unmeasured service"]["status"] == "not_measured"
+
+
+def test_prompt_history_is_used_for_past_assessments_without_future_or_client_leakage(db, client_a, client_b):
+    from app.models.seranking import FactSerAiPrompt, FactSerAiCheck
+    for c in (client_a,client_b):
+        db.add(FactSerAiPrompt(client_id=c.id,llm_id='engine',prompt_id='p',engine='chatgpt',prompt='Which service?',checked_at=date(2026,10,18),brand_mentioned=False,brand_cited=False))
+    for c,day,mentioned,cited in [(client_a,date(2026,9,30),True,True),(client_a,date(2026,10,18),False,False),(client_b,date(2026,9,30),False,False)]:
+        db.add(FactSerAiCheck(client_id=c.id,llm_id='engine',prompt_id='p',prompt='Which service?',date=day,brand_mentioned=mentioned,brand_cited=cited))
+    db.commit()
+    row=measure(db,client_a,end=date(2026,9,30))['visibility']['prompts'][0]
+    assert row['observed_on']=='2026-09-30' and row['mentioned'] is True and row['cited'] is True
+    row=measure(db,client_a,end=date(2026,8,31))['visibility']['prompts'][0]
+    assert row['observed_on'] is None and row['mentioned'] is None and row['cited'] is None
+
+
+def test_automatic_focus_excludes_legacy_maps_and_inactive_tracker_terms(db, client_a, client_b):
+    from app.models.decision import KeywordTarget
+    from app.models.seranking import FactSerKeyword, FactSerRanking
+    from app.services.watchlist import automatic_focus, read
+
+    day = date(2026, 9, 30)
+    for client, term, tracked in [(client_a, "current", True), (client_a, "retired", False),
+                                   (client_b, "another client", True)]:
+        db.add(FactSerKeyword(client_id=client.id, site_engine_id="engine", keyword_id=term,
+                              keyword=term, is_tracked=tracked, checked_at=day, current_position=5))
+    for term in ["current", "retired", "map only"]:
+        db.add(KeywordTarget(client_id=client_a.id, keyword=term, source="confirmed",
+                             target_url="https://example.com/service"))
+    db.add(FactSerRanking(client_id=client_a.id, site_engine_id="engine", keyword_id="retired",
+                          keyword="retired", date=day, position=3))
+    db.commit()
+    assert {row["text"] for row in automatic_focus(db, client_a)} == {"current"}
+    assert {row["text"] for row in read(db, client_a)} == {"current", "retired", "map only"}
+    assert [row["text"] for row in measure(db, client_a, end=day)["visibility"]["keywords"]] == ["current"]
+    assert db.query(FactSerRanking).filter_by(client_id=client_a.id, keyword="retired").count() == 1

@@ -19,6 +19,7 @@ from app.decisions.targets import score_candidate
 from app.models.client import Client
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
 from app.models.decision import KeywordTarget
+from app.models.seranking import FactSerKeyword
 from app.services.target_signals import load_target_inputs
 
 TERM = "pool leak detection"
@@ -45,6 +46,7 @@ def _row(client, normalized, **kw):
 
 
 def _target(db: Session, client: Client, url: str) -> None:
+    db.add(FactSerKeyword(client_id=client.id, site_engine_id="test", keyword_id="term", keyword=TERM, is_tracked=True))
     db.add(
         KeywordTarget(
             client_id=client.id,

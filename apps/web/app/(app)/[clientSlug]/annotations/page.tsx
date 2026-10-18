@@ -35,34 +35,17 @@ export default async function AnnotationsPage({
       {clientId && !error ? (
         <div className="space-y-[var(--section-gap)]">
           <section className="workspace-section">
-            <SectionHeader
-              title="Upload history"
-              description="Import annotations you’ve already completed so Decision Engine and Dashboard have causal context."
-            />
-            <div className="workspace-panel">
-              <AnnotationImportPanel clientId={clientId} />
-            </div>
+            <SectionHeader title="Completed work" description={`${rows.length} entries. Marking an engine task shipped adds it here. Results describe observed changes, not proof of causation.`} />
+            <div className="workspace-panel"><AnnotationsTable rows={rows} clientId={clientId} /></div>
           </section>
-
-          <section className="workspace-section">
-            <SectionHeader
-              title="Add annotation"
-              description="Log a new change. Set a measurement window to auto-compare pre vs post from GA4/GSC."
-            />
-            <div className="workspace-panel">
-              <AnnotationCreateForm clientId={clientId} />
-            </div>
-          </section>
-
-          <section className="workspace-section">
-            <SectionHeader
-              title="Completed work"
-              description={`${rows.length} entr${rows.length === 1 ? "y" : "ies"}. Marking a recommendation done adds it here; add a note to any of them.`}
-            />
-            <div className="workspace-panel">
-              <AnnotationsTable rows={rows} clientId={clientId} />
-            </div>
-          </section>
+          <details className="workspace-section">
+            <summary className="cursor-pointer font-semibold">Log completed work</summary>
+            <div className="workspace-panel"><AnnotationCreateForm clientId={clientId} /></div>
+          </details>
+          <details className="workspace-section">
+            <summary className="cursor-pointer font-semibold">Import past completed work</summary>
+            <div className="workspace-panel"><AnnotationImportPanel clientId={clientId} /></div>
+          </details>
         </div>
       ) : null}
     </section>

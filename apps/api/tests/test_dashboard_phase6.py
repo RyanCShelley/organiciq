@@ -737,3 +737,51 @@ def test_leads_by_channel_handles_missing_goal(db, client_a):
     )
 
     assert rows[0]["goal_contribution_pct"] is None
+
+
+def test_gsc_domain_history_keeps_overlapping_dates_separate(db, client_a, client_b):
+    from app.services.dashboard import _gsc_source_breakdown
+
+    day = date(2026, 9, 1)
+    for client, site, clicks, impressions in [
+        (client_a, "sc-domain:example.com", 36, 31281),
+        (client_a, "sc-domain:example.net", 95, 171077),
+        (client_b, "sc-domain:unrelated.com", 999, 999),
+    ]:
+        db.add(FactGscDaily(client_id=client.id, date=day, gsc_site_url=site,
+                            clicks=clicks, impressions=impressions, average_position=10))
+    db.flush()
+    result = _gsc_source_breakdown(db, client_a.id, (day, day))
+    assert result["combined_history"] is True
+    assert {item["property"]: item["clicks"] for item in result["properties"]} == {
+        "sc-domain:example.com": 36, "sc-domain:example.net": 95,
+    }
+    assert sum(item["clicks"] for item in result["properties"]) == 131
+    assert sum(item["impressions"] for item in result["properties"]) == 202358
+
+
+def test_ai_chart_does_not_invent_observations(db, client_a):
+    from app.services.dashboard import _daily_ai_presence_series
+
+    day = date(2026, 9, 1)
+    db.add(FactSerAiTrackerStats(client_id=client_a.id, metric_date=day,
+                                mention_presence_pct=0))
+    db.flush()
+    assert _daily_ai_presence_series(db, client_a.id, (day, day))["mention_presence"] == [0]
+    assert _daily_ai_presence_series(db, client_a.id, (day, day + timedelta(days=1)))["mention_presence"] == []
+
+
+def test_historical_dashboard_uses_dated_readings_for_current_cohort(db, client_a):
+    from app.models.seranking import FactSerRanking
+    from app.services.dashboard import _keyword_distribution, _tracked_keyword_position
+    september = date(2026, 9, 30)
+    for term, active, old, current in [("current", True, 8, 2), ("retired", False, 1, 1)]:
+        db.add(FactSerKeyword(client_id=client_a.id, site_engine_id="engine", keyword_id=term,
+            keyword=term, is_tracked=active, checked_at=date(2026, 10, 18), current_position=current))
+        db.add(FactSerRanking(client_id=client_a.id, site_engine_id="engine", keyword_id=term,
+            keyword=term, date=september, position=old))
+    db.flush()
+    period = (date(2026, 9, 1), september)
+    assert _tracked_keyword_position(db, client_a.id, period) == 8
+    assert _keyword_distribution(db, client_a.id, period) == {
+        "top_3": 0, "top_10": 1, "top_20": 0, "beyond_20": 0, "not_ranking": 0}
