@@ -13,7 +13,7 @@ export type Brief = {
   why: string; done_when: string; steps: string[]; evidence: string[];
   finding_ids: string[]; effort_min: number; metric: string;
   metric_key: string; check_after_days: number; check_on?: string | null;
-  score?: number; flags?: string[];
+  score?: number; flags?: string[]; interventions?: Brief[];
 };
 
 export type PlanReview = {
@@ -40,6 +40,8 @@ export const actionCount = (items: { steps?: string[] }[]) => items.reduce((n, i
 
 /** One selectable intervention, with its own assignment and Teamwork identity. */
 export function individualAction(group: Brief, step: string, index: number): Brief {
+  const intervention = group.interventions?.find(item => item.steps.length === 1 && item.steps[0] === step);
+  if (intervention) return { ...intervention, title: step.length > 150 ? `${step.slice(0, 147)}…` : step };
   return { ...group, action_uid: `${group.action_uid.slice(0, 105)}-task-${index}`,
     title: step.length > 150 ? `${step.slice(0, 147)}…` : step,
     steps: [step], done_when: step,
