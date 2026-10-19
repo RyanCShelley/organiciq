@@ -16,10 +16,18 @@ def locked_record(db, client, month):
     ).with_for_update().one_or_none()
 
 
-def view(record):
+def view(record, db=None):
     data = record.record
     review = deepcopy(data.get("plan_review") or initial_review(data))
-    return {**review, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
+    limits = []
+    if db is not None:
+        from app.services.recommendation_guard import blockers
+        rows = data.get("findings", data.get("candidates") or data.get("actions") or [])
+        blocked = blockers(db, record, rows)
+        limits = [{"title": rows[i].get("title"), "target_url": rows[i].get("target_url"), "reason": reason}
+                  for i, reason in blocked.items()]
+        data = {**data, "findings": [row for i, row in enumerate(rows) if i not in blocked]}
+    return {**review, "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
             "suggested_focus": data.get("constraint"),
             "setup_findings": [x for x in data.get("findings", data.get("candidates", [])) if x.get("id") == "V-6"]}
 
@@ -64,7 +72,7 @@ def save(db, record, payload, user):
     data["plan_review"] = review
     record.record = data
     db.commit()
-    return view(record)
+    return view(record, db)
 
 
 def approve(db, record, revision, user):
@@ -73,8 +81,12 @@ def approve(db, record, revision, user):
     if revision != review["revision"]:
         raise ReviewConflict("This plan changed. Reload before approving.")
     if review.get("approved_at"):
-        return view(record)
+        return view(record, db)
     validate_plan(review, data.get("growth_capacity", data["action_slots"]))
+    from app.services.recommendation_guard import blockers
+    blocked = blockers(db, record, review["items"])
+    if blocked:
+        raise ValueError(next(iter(blocked.values())))
     from app.models.decision import EngineAction
     states = {x.uid: x for x in db.query(EngineAction).filter(EngineAction.client_id == record.client_id, EngineAction.month == record.month)}
     reserved = set()
@@ -99,7 +111,7 @@ def approve(db, record, revision, user):
     data["plan_review"] = review
     record.record = data
     db.commit()
-    return view(record)
+    return view(record, db)
 
 
 def workflow_record(data):

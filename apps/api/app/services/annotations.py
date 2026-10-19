@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any
 from uuid import UUID
 
@@ -362,6 +363,7 @@ def measure_annotation_impact(
     row: Annotation,
     *,
     persist: bool = True,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Light causal frame: compare baseline vs post-action windows from facts or stored metrics."""
     lead_events = _lead_event_names(db, client.id)
@@ -371,6 +373,35 @@ def measure_annotation_impact(
     completed = row.completed_at or row.date
     measure_start = row.measurement_start_date
     measure_end = row.measurement_end_date
+
+    waiting_reason = None
+    today = today or datetime.now(ZoneInfo(client.timezone or "UTC")).date()
+    if measure_end and measure_end > today:
+        waiting_reason = "Waiting for the measurement window to finish."
+    elif measure_start and measure_end and measure_end >= measure_start and (not baseline or not post):
+        from app.services.measurement_coverage import covers
+        days = (measure_end - measure_start).days + 1
+        pre_end = completed - timedelta(days=1)
+        pre_start = pre_end - timedelta(days=days - 1)
+        missing = [source for source in ("ga4", "gsc_pages")
+                   if (not baseline and not covers(db, client.id, source, pre_start, pre_end))
+                   or (not post and not covers(db, client.id, source, measure_start, measure_end))]
+        if missing:
+            waiting_reason = "Waiting for complete comparison-period data: " + ", ".join(missing) + "."
+    if waiting_reason:
+        suggested = AnnotationResult.NOT_YET_MEASURED if measure_end and measure_end > today else AnnotationResult.NOT_ENOUGH_DATA
+        if row.result in (None, AnnotationResult.NOT_YET_MEASURED, AnnotationResult.NOT_ENOUGH_DATA):
+            row.result = suggested
+        # Do not cache partial automatic windows as final outcomes.
+        summary = {"baseline": baseline, "post": {}, "deltas": {},
+                   "suggested_result": suggested.value, "measurement_note": waiting_reason,
+                   "frame": "pre_vs_post_window", "lead_rate_basis": "lead_events_per_visit",
+                   "interpretation": "Observed changes are not proof that the work caused them."}
+        row.impact_summary_json = summary
+        if persist:
+            db.commit()
+            db.refresh(row)
+        return summary
 
     if measure_start and measure_end and measure_end >= measure_start:
         days = (measure_end - measure_start).days + 1

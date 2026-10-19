@@ -249,3 +249,70 @@ def test_existing_assessment_gets_measurement_view_without_rewriting_history(db,
     assert "older findings retain their original measurement basis" in result.json()["measurements"]["source_note"]
     db.refresh(row)
     assert row.record == before
+
+
+def test_launch_review_delivery_completion_and_results_end_to_end(db,client,client_a,admin_user,monkeypatch):
+    from app.models.annotation import Annotation
+    from app.models.gsc import FactGscPage
+    from app.models.job import SyncJob,SyncJobStatus
+    from app.models.integration import Integration,IntegrationProvider
+    from app.services.annotations import measure_annotation_impact
+    row=seed(db,client_a)
+    headers=client_header(client_a.id,admin_user.email)
+    item={**brief(), 'id':'T-1', 'metric':'Page clicks', 'metric_key':'page_clicks'}
+    for day,clicks in [(date(2026,9,30),100),(date(2026,10,29),200)]:
+        db.add(FactGscPage(client_id=client_a.id,date=day,raw_url=item['target_url'],normalized_url=item['target_url'],clicks=clicks,impressions=1000))
+    db.query(Integration).filter_by(client_id=client_a.id,provider=IntegrationProvider.GSC).one().external_property_id='sc-domain:clienta.example'
+    for source in ('ga4','gsc_pages'):
+        db.add(SyncJob(client_id=client_a.id,source=source,start_date=date(2026,8,1),end_date=date(2026,10,29),fact_watermark=date(2026,10,29),status=SyncJobStatus.SUCCESSFUL))
+    db.commit()
+    sent=[]
+    def send(**kwargs):
+        sent.append(kwargs);return {'id':'test-task','url':'https://example.com/task'}
+    monkeypatch.setattr('app.integrations.teamwork.create_task',send)
+    path=f'/decisions/records/{MONTH}'
+    assert client.put(path+'/review',headers=headers,json=payload([item])).status_code==200
+    assert client.post(path+'/review/approve',headers=headers,json={'revision':1}).status_code==200
+    assert client.post(path+'/slots/manual-one/assign',headers=headers,json={'assignee_email':admin_user.email}).status_code==200
+    assert client.post(path+'/slots/manual-one/send',headers=headers).status_code==200
+    assert client.post(path+'/slots/manual-one/send',headers=headers).status_code==200
+    assert len(sent)==1 and item['steps'][0] in sent[0]['description']
+    assert client.post(path+'/slots/manual-one/shipped',headers=headers,json={'shipped_on':'2026-10-01'}).status_code==200
+    annotation=db.query(Annotation).filter_by(client_id=client_a.id,engine_uid='manual-one').one()
+    assert check_due(db,client_a,today=date(2026,10,28))==[]
+    judged=check_due(db,client_a,today=date(2026,10,29))
+    assert len(judged)==1 and judged[0].result=='improved'
+    impact=measure_annotation_impact(db,client_a,annotation,today=date(2026,10,29))
+    assert impact['deltas']['clicks_change_pct']==100
+
+
+def test_concurrent_sends_create_one_external_task(db,client,client_a,admin_user,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+    from time import sleep
+    from sqlalchemy.orm import sessionmaker
+    app = client.app
+    get_db = next(key for key in app.dependency_overrides if key.__name__ == "get_db")
+    seed(db,client_a)
+    headers=client_header(client_a.id,admin_user.email)
+    path=f'/decisions/records/{MONTH}'
+    assert client.put(path+'/review',headers=headers,json=payload()).status_code==200
+    assert client.post(path+'/review/approve',headers=headers,json={'revision':1}).status_code==200
+    calls=[];guard=Lock()
+    def send(**kwargs):
+        with guard:calls.append(kwargs)
+        sleep(0.1)
+        return {'id':'one-task','url':'https://example.com/task'}
+    monkeypatch.setattr('app.integrations.teamwork.create_task',send)
+    sessions=sessionmaker(bind=db.get_bind())
+    def independent_db():
+        with sessions() as session:yield session
+    previous=app.dependency_overrides[get_db]
+    app.dependency_overrides[get_db]=independent_db
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses=list(pool.map(lambda _:client.post(path+'/slots/manual-one/send',headers=headers),range(2)))
+        assert [r.status_code for r in responses]==[200,200]
+        assert len(calls)==1
+    finally:
+        app.dependency_overrides[get_db]=previous

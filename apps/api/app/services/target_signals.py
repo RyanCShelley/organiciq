@@ -121,6 +121,7 @@ class TargetInputs:
     #: so the record can say a target was skipped on purpose rather than
     #: leaving a silent absence.
     excluded: list[dict[str, str]]
+    crawl_date: date | None = None
 
 
 def _rank(value: object) -> float | None:
@@ -367,4 +368,4 @@ def load_target_inputs(
                 page_type=(classify_page_url(url).page_type.value if url else None),
             )
 
-    return TargetInputs(candidates=candidates, pages=pages, excluded=excluded)
+    return TargetInputs(candidates=candidates, pages=pages, excluded=excluded, crawl_date=snapshot_date)

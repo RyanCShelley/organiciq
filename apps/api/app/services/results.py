@@ -436,7 +436,7 @@ def capture_before(
             metric_key_for(action),
             url=action.get("target_url"),
             term=action.get("term"),
-            as_of=as_of,
+            as_of=existing.shipped_on - timedelta(days=1) if existing and existing.shipped_on else as_of,
         )
         # Measure first, then write. Creating the row up front left a junk
         # row behind for every action whose metric could not be read.
@@ -486,6 +486,22 @@ def check_due(
             if row is not None and row.after_value is not None:
                 continue
             metric_key = metric_key_for(action)
+            # A due date is not evidence that the provider finished the window.
+            # GSC in particular commonly trails the calendar by several days.
+            from app.models.integration import Integration, IntegrationProvider
+            from app.services.measurement_coverage import covers
+            sources = {"page_clicks": ("gsc_pages", IntegrationProvider.GSC),
+                       "page_impressions": ("gsc_pages", IntegrationProvider.GSC),
+                       "page_position": ("gsc_pages", IntegrationProvider.GSC),
+                       "engagement_rate": ("ga4", IntegrationProvider.GA4),
+                       "page_lead_rate": ("ga4", IntegrationProvider.GA4)}
+            source, provider = sources.get(metric_key, (None, None))
+            if source:
+                integration = db.query(Integration).filter_by(client_id=client.id, provider=provider).one_or_none()
+                if integration and integration.external_property_id:
+                    start, end = _window(today)
+                    if not covers(db, client.id, source, start, end):
+                        continue
             reading = measure(
                 db,
                 client,
@@ -648,6 +664,11 @@ def maybe_check_results(db: Session) -> bool:
             # every metric is readable as-of a date.
             captured += capture_before(db, client, record)
         judged += len(check_due(db, client, today=today))
+        # Automatic Completed Work refresh is opt-in with service reporting.
+        # Unfinished clients keep their existing on-demand workflow.
+        if client.service_reporting is not None:
+            from app.services.annotations import remeasure_all
+            remeasure_all(db, client)
 
     checkpoint.last_run_date = today
     checkpoint.updated_at = now

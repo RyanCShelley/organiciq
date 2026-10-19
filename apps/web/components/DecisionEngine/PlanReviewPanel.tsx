@@ -59,6 +59,7 @@ export function PlanReviewPanel({ initial, clientId, slug, month, lockedUids = [
       <p className="text-sm">{actionCount(review.items)} / {review.capacity} actions · {dirty ? "Unsaved changes" : review.approved_at ? `Approved version ${review.revision}` : "Draft"}</p>
     </div>
     <nav aria-label="Monthly review steps" className="flex flex-wrap gap-2">{["Set direction", "Choose actions", "Review & approve"].map((label, index) => <button key={label} className={`${buttonClass} ${stage === index + 1 ? "bg-[var(--brand-teal-deep)] text-white" : ""}`} aria-current={stage === index + 1 ? "step" : undefined} onClick={() => setStage(index + 1)}>{index + 1}. {label}</button>)}</nav>
+    {review.page_evidence_note && <p className="text-xs text-[var(--text-secondary)]">{review.page_evidence_note}</p>}
     {message && <p role="status" className="rounded-lg border border-[var(--brand-teal-deep)] bg-[var(--surface-muted)] p-3 text-sm">{message}</p>}
     {stage === 1 && <div className="space-y-4">
     <p className="text-sm text-[var(--text-secondary)]">After reviewing last month and speaking with the client, decide where this month’s work should focus.</p>
@@ -101,6 +102,7 @@ export function PlanReviewPanel({ initial, clientId, slug, month, lockedUids = [
           <ul className="mt-2 list-disc space-y-1 pl-5">{group.evidence.filter(Boolean).map((line, i) => <li key={i}>{line}</li>)}</ul>
         </details>
       </article>)}
+      {!!review.recommendation_limits?.length && <details className="mt-3 text-sm"><summary className="cursor-pointer">Work withheld from new recommendations ({review.recommendation_limits.length})</summary><ul className="mt-2 space-y-2">{review.recommendation_limits.map((item, i) => <li key={i}><strong>{item.title}</strong><p className="break-all">{item.target_url}</p><p>{item.reason}</p></li>)}</ul></details>}
       {review.proposals.length === 0 && <p className="mt-2 text-sm">No supported recommendations in this run. You can add a custom action below.</p>}
       <div className="mt-4 flex flex-wrap gap-2"><button className={buttonClass} onClick={manual}>Add a custom action</button><button className={`${buttonClass} bg-[var(--brand-teal-deep)] text-white`} onClick={() => setStage(3)}>Review {actionCount(review.items)} selected actions →</button></div>
     </div>}

@@ -14,7 +14,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Callable
 
-from app.decisions.page_targets import PageCandidate
+from app.decisions.page_targets import PageCandidate, LinkDonor
 from app.decisions.slots import Prescription
 from app.decisions.targets import ScoredCandidate
 from app.decisions.triage import Branch
@@ -73,6 +73,7 @@ class PageFacts:
     #: The site's median, so "under-linked" is relative to this site.
     site_median_links: float = 0.0
     page_type: str | None = None
+    link_donors: tuple[LinkDonor, ...] = ()
 
     @property
     def readable(self) -> bool:
@@ -302,7 +303,7 @@ def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription |
 
 def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """Fewer in-content links than the site's own median."""
-    if not page.readable:
+    if not page.readable or not page.link_donors:
         return None
     if page.site_median_links <= 0:
         return None
@@ -321,15 +322,15 @@ def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription 
             f"against a site median of {page.site_median_links:.0f}. Navigation "
             "does not count: it is on every page and says nothing about this one."
         ),
-        done_when=(
-            "Two or three in-content links from related pages, with the term "
-            "or a variant as the anchor."
-        ),
+        done_when="The named donor links are live in relevant body passages and point to the target page.",
+        steps=tuple(f'On {donor.url}, add an in-content link to {page.url} where the passage discusses “{donor.anchor}”. Use a natural anchor and confirm the passage is relevant before publishing.'
+                    for donor in page.link_donors),
         metric="Term position",
         metric_key="term_position",
         evidence=(
             f"facts_crawl_internal_links: {page.inbound_editorial_links} editorial "
             f"inbound, site median {page.site_median_links:.0f}",
+            *(f"Shared query: {d.anchor}; donor: {d.url}; donor clicks: {d.clicks:g}. No existing editorial link was observed." for d in page.link_donors),
         ),
     )
 
@@ -378,7 +379,7 @@ def v7_mark_up_the_faq(
     headings are there, and an engine assembling a response has to infer
     from prose what FAQPage would have told it outright. No new content.
     """
-    if page.has_faq_schema or not page.has_faq_section:
+    if not page.readable or page.has_faq_schema or not page.has_faq_section:
         return None
     return Prescription(
         action_id="V-7",
@@ -390,16 +391,17 @@ def v7_mark_up_the_faq(
         effort_min=15,
         why=(
             "The page carries a section headed as frequently asked questions "
-            "and no FAQPage markup. The answers are already written; nothing "
-            "tells an engine assembling a response that they are answers."
+            "and no FAQPage markup. Verify the visible question-and-answer pairs "
+            "before adding matching structured data. This does not guarantee "
+            "a rich result, ranking improvement or AI citation."
         ),
         done_when=(
             "FAQPage markup lists every question in that section with the "
             "answer the page already gives, word for word, and nothing that "
             "is not on the page."
         ),
-        metric="Brand mention or citation",
-        metric_key="ai_presence",
+        metric="Validated FAQ markup matching the visible questions and answers",
+        metric_key="decision",
         evidence=(
             "facts_crawl_page_snapshots: a heading announcing an FAQ",
             "facts_crawl_page_schema: no FAQPage block",
@@ -438,7 +440,7 @@ def v5_add_an_extractable_structure(
     feature = sorted(lifted)[0]
     return Prescription(
         action_id="V-5",
-        title=f"Add something liftable under the heading for “{term}”",
+        title=f"Review the answer format for “{term}”",
         branch=Branch.VISIBILITY,
         target_url=page.url,
         term=term,
@@ -480,7 +482,8 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
     v6_rehoming,
     # V-1 and V-8 are legacy: exact-phrase absence alone is not a content gap.
     # A missing exact-match secondary heading alone does not prove a content gap.
-    v2_answer_block,
+    # Missing question headings do not establish missing answers.
+    # v2_answer_block remains available for historical records only.
     # Before the rest: the answers are already written, so this is fifteen
     # minutes of markup against a page rewrite. Cheapest first where the
     # cheap thing is also the right thing.

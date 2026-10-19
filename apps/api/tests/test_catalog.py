@@ -20,6 +20,7 @@ from app.decisions.catalog import (
     v6_rehoming,
 )
 from app.decisions.targets import Candidate, score_candidate
+from app.decisions.page_targets import LinkDonor
 
 
 def _target(**kw):
@@ -41,6 +42,7 @@ def _page(**kw) -> PageFacts:
         entity_properties=frozenset({"about"}),
         inbound_editorial_links=10,
         site_median_links=5.0,
+        link_donors=(LinkDonor("https://x/related", "local seo agency", 10),),
     )
     base.update(kw)
     return PageFacts(**base)
@@ -150,7 +152,7 @@ def test_every_action_says_what_done_looks_like():
     finishes."""
     cases = [
         (_target(ranking_url="https://x/other"), _page()),
-        (_target(keyword="what is local seo"), _page(faq_questions=())),
+        (_target(), _page(has_faq_section=True)),
         (_target(), _page(inbound_editorial_links=0, site_median_links=9)),
     ]
     for target, page in cases:
@@ -237,3 +239,9 @@ def test_missing_exact_phrase_alone_never_becomes_automatic_work():
     assert v1_term_in_high_value_spots(target, page) is not None  # legacy evaluation
     assert all(rule(target, page) is None for rule in VISIBILITY_ACTIONS)
     assert prescribe(target, page) is None
+
+
+def test_low_inbound_count_alone_is_not_an_executable_link_recommendation():
+    assert v4_internal_links(_target(), _page(inbound_editorial_links=0, site_median_links=8, link_donors=())) is None
+    found=v4_internal_links(_target(), _page(inbound_editorial_links=0, site_median_links=8))
+    assert 'https://x/related' in found.steps[0] and 'https://x/local-seo' in found.steps[0]

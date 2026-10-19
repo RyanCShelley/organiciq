@@ -265,6 +265,8 @@ def _log_shipped(
         "page_url": slot.target_url or None,
         "success_metric": slot.metric,
         "teamwork_task_id": row.teamwork_task_id,
+        "measurement_start_date": on + timedelta(days=1),
+        "measurement_end_date": on + timedelta(days=slot.check_after_days or 28),
     }
     if existing is None:
         db.add(Annotation(client_id=client.id, engine_uid=slot.uid, **fields))

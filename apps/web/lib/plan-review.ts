@@ -21,6 +21,8 @@ export type PlanReview = {
   approved_at: string | null; approved_by: string | null;
   versions: { revision: number; approved_at: string; approved_by: string }[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
+  page_evidence_note?: string | null;
+  recommendation_limits?: { title: string; target_url: string; reason: string }[];
   setup_findings: { title: string; why: string; target_url: string }[];
 };
 
