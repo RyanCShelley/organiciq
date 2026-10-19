@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.decisions.planning import effective_record, initial_review, page_identity, proposals, validate_plan
 from app.models.decision import MonthlyRecord
+from app.decisions.review_opportunities import review_opportunities
 
 
 class ReviewConflict(ValueError):
@@ -28,7 +29,7 @@ def view(record, db=None):
                   for i, reason in blocked.items()]
         data = {**data, "findings": [row for i, row in enumerate(rows) if i not in blocked]}
     return {**review, "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
-            "suggested_focus": data.get("constraint"),
+            "suggested_focus": data.get("constraint"), "review_opportunities": review_opportunities(data),
             "setup_findings": [x for x in data.get("findings", data.get("candidates", [])) if x.get("id") == "V-6"]}
 
 

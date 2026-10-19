@@ -20,6 +20,7 @@ export type PlanReview = {
   revision: number; strategy: string; focus: string; reason: string; items: Brief[];
   approved_at: string | null; approved_by: string | null;
   versions: { revision: number; approved_at: string; approved_by: string; retired_at?: string }[];
+  review_opportunities?: ReviewOpportunity[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
   page_evidence_note?: string | null;
   recommendation_limits?: { title: string; target_url: string; reason: string }[];
@@ -94,4 +95,50 @@ export function suggestedPlan(proposals: Brief[], focus: string, capacity: numbe
 export function actionDisplayTitle(item: {id: string; title: string}): string {
  const labels: Record<string,string> = {"T-1":"Review the search title and description","T-2":"Review the search result format","T-3":"Review the page opening","V-3":"Add relevant entity markup","V-4":"Add contextual internal links","V-7":"Mark up the existing FAQ"};
  return labels[item.id] ?? item.title;
+}
+
+/** A source-backed observation; not a selectable execution task. */
+export type ReviewOpportunity = {
+  uid: string;
+  kind: string;
+  title: string;
+  summary: string;
+  evidence: string[];
+  review_checks: string[];
+  target_url: string;
+  term: string | null;
+  assessment_month: string;
+  screening_rule: string;
+  limitation: string;
+};
+
+export function opportunityDraft(
+  opportunity: ReviewOpportunity,
+  uid: string,
+): Brief {
+  const done =
+    "Record the verified cause, affected pages and next decision; explain when no site change is warranted.";
+  return {
+    action_uid: uid,
+    id: "MANUAL",
+    family: "investigation",
+    title: opportunity.title.replace(/^Review /, "Investigate "),
+    branch: opportunity.kind === "traffic_decline" ? "traffic" : "visibility",
+    target_url: opportunity.target_url,
+    term: opportunity.term,
+    why: `${opportunity.summary} ${opportunity.limitation}`,
+    done_when: done,
+    steps: [done],
+    evidence: [
+      ...opportunity.evidence,
+      opportunity.screening_rule,
+      ...opportunity.review_checks,
+    ],
+    finding_ids: [],
+    flags: [`review-opportunity:${opportunity.uid}`],
+    effort_min: 45,
+    metric: "Documented finding and next decision",
+    metric_key: "decision",
+    check_after_days: 7,
+  };
 }

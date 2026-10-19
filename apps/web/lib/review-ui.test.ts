@@ -1,6 +1,6 @@
 import { visibilitySummary } from "./visibility-summary";
 import assert from "node:assert/strict";
-import { actionDisplayTitle, mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
+import { actionDisplayTitle, opportunityDraft, mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
 import type { BranchTest } from "./monthly-record";
 
@@ -84,3 +84,32 @@ assert.deepEqual(resolveQueryRange("custom", "2026-09-01", "2026-09-30"), {from:
 assert.equal(actionDisplayTitle({id:"V-7",title:"FAQPage markup lists every visible question"}), "Mark up the existing FAQ");
 assert.equal(actionDisplayTitle({id:"V-3",title:"Schema about / mentions properties"}), "Add relevant entity markup");
 assert.equal(actionDisplayTitle({id:"MANUAL",title:"Client-approved custom work"}), "Client-approved custom work");
+
+// An observation does not enter the task count until a person explicitly drafts it.
+const opportunity = {
+  uid: "review-test",
+  kind: "traffic_decline",
+  title: "Review the decline in site visits",
+  summary: "Visits fell from 1000 to 400.",
+  evidence: ["Exact-period comparison"],
+  review_checks: ["Verify tracking before choosing a fix."],
+  target_url: "",
+  term: null,
+  assessment_month: "2026-09",
+  screening_rule: "Substantial matched-period decline",
+  limitation: "Not a confirmed page defect.",
+};
+const candidate = opportunityDraft(opportunity, "manual-test");
+assert.equal(actionCount([]), 0);
+assert.equal(actionCount([candidate]), 1);
+assert.equal(candidate.metric_key, "decision");
+assert.equal(candidate.id, "MANUAL");
+assert.equal(candidate.branch, "traffic");
+assert.equal(candidate.target_url, ""); // Human must choose the actual page/scope.
+assert.deepEqual(candidate.finding_ids, []);
+assert.deepEqual(candidate.flags, ["review-opportunity:review-test"]);
+assert.equal(candidate.steps.length, 1);
+assert.match(candidate.why, /Not a confirmed page defect/);
+assert.equal(opportunity.target_url, "");
+
+assert.ok(candidate.evidence.includes(opportunity.screening_rule));
