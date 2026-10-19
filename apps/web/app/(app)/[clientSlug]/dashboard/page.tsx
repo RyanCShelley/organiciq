@@ -40,7 +40,9 @@ export default async function DashboardPage({
   if (!data) return <Alert variant="danger">{failure}</Alert>;
   return (
     <MonthlyDashboard
+      key={`${client.id}:${from}:${to}`}
       data={data}
+      clientName={client.client_name}
       engineHref={`/${client.slug}/decision-engine?${context}&run=${reviewMonth}`}
       settingsHref={`/clients/${client.slug}?${context}`}
     />
