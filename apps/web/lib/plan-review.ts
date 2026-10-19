@@ -92,6 +92,6 @@ export function suggestedPlan(proposals: Brief[], focus: string, capacity: numbe
 
 /** Concise display copy; persisted task scope and delivery identity stay unchanged. */
 export function actionDisplayTitle(item: {id: string; title: string}): string {
- const labels: Record<string,string> = {"T-1":"Review the search title and description","T-2":"Review the search result format","T-3":"Review the page opening","V-3":"Mark up the existing FAQ","V-4":"Add contextual internal links","V-7":"Add relevant entity markup"};
+ const labels: Record<string,string> = {"T-1":"Review the search title and description","T-2":"Review the search result format","T-3":"Review the page opening","V-3":"Add relevant entity markup","V-4":"Add contextual internal links","V-7":"Mark up the existing FAQ"};
  return labels[item.id] ?? item.title;
 }

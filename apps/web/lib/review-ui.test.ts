@@ -1,6 +1,6 @@
 import { visibilitySummary } from "./visibility-summary";
 import assert from "node:assert/strict";
-import { mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
+import { actionDisplayTitle, mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
 import type { BranchTest } from "./monthly-record";
 
@@ -78,3 +78,9 @@ assert.deepEqual(resolveQueryRange("custom", "2026-09-01", "2026-09-30"), {from:
   assert.equal(selected.action_uid, "opening");
   assert.equal(selected.metric_key, "engagement_rate");
 }
+
+// An approved V-7 is FAQ markup, while V-3 concerns entity properties.
+// Brief titles can be completion specifications; labels must retain the rule's actual task.
+assert.equal(actionDisplayTitle({id:"V-7",title:"FAQPage markup lists every visible question"}), "Mark up the existing FAQ");
+assert.equal(actionDisplayTitle({id:"V-3",title:"Schema about / mentions properties"}), "Add relevant entity markup");
+assert.equal(actionDisplayTitle({id:"MANUAL",title:"Client-approved custom work"}), "Client-approved custom work");
