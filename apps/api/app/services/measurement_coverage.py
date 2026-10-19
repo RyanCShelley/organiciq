@@ -21,3 +21,20 @@ def covers(db, client_id, source, start, end):
         if cursor > end:
             return True
     return False
+
+
+def metric_ready(db, client_id, metric_key, as_of):
+    from app.models.integration import Integration, IntegrationProvider
+    sources = {'page_clicks': ('gsc_pages', IntegrationProvider.GSC),
+               'page_impressions': ('gsc_pages', IntegrationProvider.GSC),
+               'page_position': ('gsc_pages', IntegrationProvider.GSC),
+               'engagement_rate': ('ga4', IntegrationProvider.GA4),
+               'page_lead_rate': ('ga4', IntegrationProvider.GA4)}
+    if metric_key not in sources:
+        return True
+    source, provider = sources[metric_key]
+    integration = db.query(Integration).filter_by(client_id=client_id, provider=provider).one_or_none()
+    # Manually imported readings have no configured provider extraction.
+    if not integration or not integration.external_property_id:
+        return True
+    return covers(db, client_id, source, as_of - timedelta(days=27), as_of)

@@ -133,3 +133,15 @@ def test_v5_leaves_a_page_with_no_matching_heading_to_v2():
     # Nothing on the page asks the question. That is V-2's finding — adding
     # a table under a heading that does not exist is not an instruction.
     assert _v5(_target(), _page(SectionFacts(heading="About us"))) is None
+
+
+def test_existing_structure_under_nested_heading_is_part_of_parent_answer():
+    page=_page(SectionFacts(heading=TERM,level=1),SectionFacts(heading='A practical framework',level=2,has_list=True))
+    assert _v5(_target(),page) is None
+
+
+def test_unrelated_sibling_structure_does_not_fill_the_answer_gap():
+    page=_page(SectionFacts(heading=TERM,level=2),SectionFacts(heading='Other topic',level=2,has_list=True))
+    found=_v5(_target(),page)
+    assert found is not None and found.metric_key=='decision'
+    assert 'Record no change' in found.done_when

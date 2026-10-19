@@ -28,6 +28,7 @@ class SectionFacts:
     has_table: bool = False
     has_list: bool = False
     has_stat: bool = False
+    level: int = 2
 
     @property
     def extractable(self) -> bool:
@@ -434,8 +435,19 @@ def v5_add_an_extractable_structure(
     # No heading asks the query: that is V-2's finding, not this one.
     if not matching:
         return None
-    if any(s.extractable for s in matching):
-        return None
+    # A heading's answer includes its nested subheadings. Checking only the
+    # opening paragraph made an H1 look unstructured even when its H2s
+    # already supplied the relevant lists or tables.
+    for index, section in enumerate(page.sections):
+        if section not in matching:
+            continue
+        scope = [section]
+        for child in page.sections[index + 1:]:
+            if child.level <= section.level:
+                break
+            scope.append(child)
+        if any(part.extractable for part in scope):
+            return None
 
     feature = sorted(lifted)[0]
     return Prescription(
@@ -453,12 +465,13 @@ def v5_add_an_extractable_structure(
             "A direct prose answer may already be sufficient; verify the gap first."
         ),
         done_when=(
-            "The reviewed brief names the missing answer, chooses a direct answer, "
-            "comparison table or steps that fit the question, and lists verified "
-            "facts and sources. The approved section is live."
+            "Review whether the existing prose already answers the question. "
+            "Record no change if it does. Otherwise name the verified answer "
+            "gap, select a suitable format and supporting facts, and publish "
+            "only the justified change."
         ),
-        metric="Term position; prompt citations require a separate observed check",
-        metric_key="term_position",
+        metric="Documented answer-format review and selected next step",
+        metric_key="decision",
         evidence=(
             f"facts_serp_features: {feature} present",
             f"facts_crawl_page_snapshots: no table, list or figure under "

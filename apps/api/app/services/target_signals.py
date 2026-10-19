@@ -343,6 +343,7 @@ def load_target_inputs(
                             has_table=bool(sec.get("has_table")),
                             has_list=bool(sec.get("has_list")),
                             has_stat=bool(sec.get("has_stat")),
+                            level=int(sec.get("level") or 2),
                         )
                         for sec in raw_sections
                     )

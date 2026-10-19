@@ -148,7 +148,12 @@ def _term_position(
         .order_by(FactSerRanking.date.desc())
         .first()
     )
+    if row is not None and row[1] < as_of - timedelta(days=7):
+        return Measurement(None, "the latest tracked ranking is more than seven days behind the measurement date")
     if row is None:
+        from app.services.measurement_coverage import metric_ready
+        if not metric_ready(db, client_id, "page_position", as_of):
+            return Measurement(None, "Search Console has not completed the comparison window")
         # Not tracked: a page written for a query Search Console showed the
         # site for is judged on where Search Console shows it.
         return _query_position(db, client_id, term, as_of)
@@ -337,6 +342,9 @@ def measure(
     as_of: date,
 ) -> Measurement:
     """One metric, as it read on `as_of`."""
+    from app.services.measurement_coverage import metric_ready
+    if not metric_ready(db, client.id, metric_key, as_of):
+        return Measurement(None, "the provider has not completed the comparison window")
     if metric_key in NOT_MEASURED:
         return Measurement(None, "this action settles a decision rather than moving a metric")
     if metric_key == "term_position":
@@ -486,22 +494,6 @@ def check_due(
             if row is not None and row.after_value is not None:
                 continue
             metric_key = metric_key_for(action)
-            # A due date is not evidence that the provider finished the window.
-            # GSC in particular commonly trails the calendar by several days.
-            from app.models.integration import Integration, IntegrationProvider
-            from app.services.measurement_coverage import covers
-            sources = {"page_clicks": ("gsc_pages", IntegrationProvider.GSC),
-                       "page_impressions": ("gsc_pages", IntegrationProvider.GSC),
-                       "page_position": ("gsc_pages", IntegrationProvider.GSC),
-                       "engagement_rate": ("ga4", IntegrationProvider.GA4),
-                       "page_lead_rate": ("ga4", IntegrationProvider.GA4)}
-            source, provider = sources.get(metric_key, (None, None))
-            if source:
-                integration = db.query(Integration).filter_by(client_id=client.id, provider=provider).one_or_none()
-                if integration and integration.external_property_id:
-                    start, end = _window(today)
-                    if not covers(db, client.id, source, start, end):
-                        continue
             reading = measure(
                 db,
                 client,

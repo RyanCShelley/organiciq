@@ -64,7 +64,12 @@ export function PlanReviewPanel({ initial, clientId, slug, month, lockedUids = [
     {stage === 1 && <div className="space-y-4">
     <p className="text-sm text-[var(--text-secondary)]">After reviewing last month and speaking with the client, decide where this month’s work should focus.</p>
     <label className="block max-w-md text-sm font-semibold">This month’s focus
-      <select className={inputClass} value={review.focus} onChange={e => update({ focus: e.target.value })}>
+      <select className={inputClass} value={review.focus} onChange={e => {
+        const focus = e.target.value;
+        update({ focus });
+        const next = review.proposals.find(item => item.branch === focus);
+        if (next) setFamily(next.family);
+      }}>
         <option value="">Choose after reviewing</option>
         <option value="visibility">Visibility</option><option value="traffic">Traffic</option><option value="leads">Leads</option>
         <option value="continue_strategy">Continue current strategy</option><option value="insufficient_evidence">Insufficient evidence</option>
@@ -84,6 +89,7 @@ export function PlanReviewPanel({ initial, clientId, slug, month, lockedUids = [
         if (!count) return null;
         return <button key={key} onClick={() => setFamily(key)} aria-pressed={family === key} className={`rounded-lg border p-3 text-left text-sm ${family === key ? "border-[var(--brand-teal-deep)] bg-[var(--surface-muted)] font-semibold" : "border-[var(--border)]"}`}>{label}<span className="mt-1 block text-xs font-normal text-[var(--text-secondary)]">{count} page {count === 1 ? "opportunity" : "opportunities"}</span></button>;
       })}</div>
+      {["visibility", "traffic", "leads"].includes(review.focus) && !review.proposals.some(item => item.branch === review.focus) && <p className="mt-3 text-sm">There are no supported {review.focus} actions in this run. You can review the other opportunities or add a custom action based on the client strategy.</p>}
       {review.proposals.filter(group => group.family === family).map(group => <article key={group.action_uid} className="mt-3 rounded-lg border border-[var(--border)] p-4">
         <h4 className="text-sm font-semibold">{ACTION_FAMILIES[group.family]}</h4>
         <p className="break-all text-sm">{group.target_url}</p>
