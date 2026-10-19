@@ -1,34 +1,37 @@
 "use client";
-
+import React, { useState, useId } from "react";
 import Link from "next/link";
-import { useState } from "react";
-import type { DashboardResponse } from "@/lib/dashboard";
-import { ProgressPanel } from "./ProgressPanel";
-import { Sparkline } from "./Sparkline";
-
-const number = (value: number | null | undefined) =>
-  value == null
+import type { DashboardResponse, RankingReading } from "@/lib/dashboard";
+import "./MonthlyDashboard.css";
+const fmt = (n: number | null | undefined, d = 0) =>
+  n == null
     ? "Not measured"
-    : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-const position = (value?: number | null) =>
-  value == null
-    ? "Not measured"
-    : value <= 0 || value > 100
-      ? "Outside top 100"
-      : number(value);
-const yes = (value: boolean | null) =>
-  value == null ? "Unknown" : value ? "Yes" : "No";
-const panel =
-  "rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5";
-const muted = "text-sm text-[var(--text-secondary)]";
-function change(
-  now: number | null | undefined,
-  before: number | null | undefined,
-) {
-  if (now == null || before == null) return "No comparable previous period";
-  if (!before) return now ? `${number(now)} added from zero` : "Unchanged";
-  const delta = ((now - before) / before) * 100;
-  return `${Math.abs(delta).toFixed(1)}% ${delta < 0 ? "lower" : delta > 0 ? "higher" : "change"} vs previous period`;
+    : Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
+const pct = (n: number | null | undefined) =>
+  n == null ? "Not measured" : `${fmt(n, 2)}%`;
+const delta = (a: number | null | undefined, b: number | null | undefined) =>
+  a == null || b == null
+    ? "No comparison"
+    : b === 0
+      ? a === 0
+        ? "No change"
+        : `${fmt(a)} added from zero`
+      : `${a >= b ? "+" : ""}${fmt(((a - b) / b) * 100, 1)}%`;
+const colors = ["#0b8077", "#64ad9d", "#9acac0", "#c7ded7", "#e3e9e6"];
+function Change({
+  a,
+  b,
+}: {
+  a: number | null | undefined;
+  b: number | null | undefined;
+}) {
+  return (
+    <span
+      className={`change ${a == null || b == null ? "neutral" : a > b ? "up" : a < b ? "down" : "neutral"}`}
+    >
+      {delta(a, b)}
+    </span>
+  );
 }
 function Table({
   heads,
@@ -38,560 +41,863 @@ function Table({
   rows: React.ReactNode[][];
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+    <div className="tablewrap">
+      <table>
         <thead>
           <tr>
             {heads.map((h) => (
-              <th
-                key={h}
-                className="border-b border-[var(--border)] py-3 pr-4 font-medium text-[var(--text-secondary)]"
-              >
-                {h}
-              </th>
+              <th key={h}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
-              {r.map((c, j) => (
-                <td
-                  key={j}
-                  className="border-b border-[var(--border)] py-3 pr-4 align-top break-words"
-                >
-                  {c}
-                </td>
+              {r.map((v, j) => (
+                <td key={j}>{v}</td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
       {!rows.length && (
-        <p className={muted + " py-4"}>
-          No dated observations available for this period.
-        </p>
+        <p className="note">No observations available for this period.</p>
       )}
     </div>
   );
 }
-function Trend({
+function Chart({
+  title,
   current,
   previous,
-  label,
+  dates,
+  unit = "visits",
 }: {
+  title: string;
   current: number[];
   previous: number[];
-  label: string;
+  dates: string[];
+  unit?: string;
 }) {
-  if (current.length < 2)
-    return (
-      <p className={muted + " py-8"}>
-        Not enough dated observations to draw this trend.
-      </p>
-    );
-  const maximum = Math.max(1, ...current, ...previous),
-    width = 640,
-    height = 180;
-  const path = (values: number[]) =>
-    values
-      .map(
-        (value, i) =>
-          `${i ? "L" : "M"}${40 + (i / Math.max(1, Math.max(current.length, previous.length) - 1)) * 580},${150 - (value / maximum) * 130}`,
-      )
-      .join(" ");
+  const gradientId = useId();
+  const [hover, setHover] = useState<number | null>(null);
+  const max = Math.max(1, ...current, ...previous);
+  const ceiling = Math.ceil(max / 5) * 5;
+  const x = (i: number) =>
+      52 +
+      (i / Math.max(1, Math.max(current.length, previous.length) - 1)) * 360,
+    y = (v: number) => 230 - (v / ceiling) * 185;
+  const path = (v: number[]) =>
+    v.map((n, i) => `${i ? "L" : "M"}${x(i)},${y(n)}`).join(" ");
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="my-5 w-full"
-      role="img"
-      aria-label={label}
-    >
-      <title>{label}</title>
-      <line x1="40" x2="620" y1="150" y2="150" stroke="var(--border)" />
-      {previous.length > 1 && (
-        <path
-          d={path(previous)}
-          fill="none"
-          stroke="var(--text-secondary)"
-          strokeWidth="2"
-          strokeDasharray="5 4"
-        />
+    <article className="card">
+      <div className="cardtop">
+        <h3>{title}</h3>
+        <div className="legend">
+          <span>● Current</span>
+          {previous.length > 0 && <span className="prior">● Previous</span>}
+        </div>
+      </div>
+      <div className="chartread">
+        {hover == null ? (
+          <>
+            <b>
+              {fmt(current.length ? current.reduce((a, b) => a + b, 0) : null)}
+            </b>
+            <small>{unit} in daily detail</small>
+          </>
+        ) : (
+          <>
+            <b>{fmt(current[hover])}</b>
+            <small>
+              {dates[hover]} · previous: {fmt(previous[hover])}
+            </small>
+          </>
+        )}
+      </div>
+      <svg
+        className="chart"
+        viewBox="0 0 440 280"
+        role="img"
+        aria-label={`${title}, current and previous periods`}
+        onMouseLeave={() => setHover(null)}
+      >
+        {[0, 1, 2, 3, 4].map((i) => (
+          <g key={i}>
+            <line
+              x1="52"
+              x2="412"
+              y1={y((i * ceiling) / 4)}
+              y2={y((i * ceiling) / 4)}
+              stroke="#e6ece9"
+              strokeDasharray="3 4"
+            />
+            <text x="43" y={y((i * ceiling) / 4) + 4} textAnchor="end">
+              {fmt((i * ceiling) / 4)}
+            </text>
+          </g>
+        ))}
+        {current.length > 1 && (
+          <path
+            d={`${path(current)} L${x(current.length - 1)},230 L52,230 Z`}
+            fill={`url(#${gradientId})`}
+          />
+        )}
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop stopColor="#0b8077" stopOpacity=".18" />
+            <stop offset="1" stopColor="#0b8077" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {previous.length > 1 && (
+          <path
+            d={path(previous)}
+            fill="none"
+            stroke="#a7b6bd"
+            strokeWidth="2"
+            strokeDasharray="5 5"
+          />
+        )}
+        {current.length > 1 && (
+          <path
+            d={path(current)}
+            fill="none"
+            stroke="#0b8077"
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+          />
+        )}
+        {[
+          0,
+          Math.round((current.length - 1) * 0.25),
+          Math.round((current.length - 1) * 0.5),
+          Math.round((current.length - 1) * 0.75),
+          current.length - 1,
+        ]
+          .filter((n, i, a) => n >= 0 && a.indexOf(n) === i)
+          .map((i) => (
+            <text key={i} x={x(i)} y="262" textAnchor="middle">
+              {dates[i]?.slice(5) ?? `Day ${i + 1}`}
+            </text>
+          ))}
+        {current.map((v, i) => (
+          <rect
+            key={i}
+            x={x(i) - 11}
+            y="30"
+            width="22"
+            height="205"
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+          >
+            <title>
+              {dates[i]}: {v}; previous {previous[i] ?? "not measured"}
+            </title>
+          </rect>
+        ))}
+        {hover != null && (
+          <g pointerEvents="none">
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1="30"
+              y2="230"
+              stroke="#7b9991"
+            />
+            <circle cx={x(hover)} cy={y(current[hover])} r="4" fill="#0b8077" />
+          </g>
+        )}
+      </svg>
+      {!current.length && (
+        <p className="note">No daily observations available for this period.</p>
       )}
-      <path
-        d={path(current)}
-        fill="none"
-        stroke="var(--brand-teal)"
-        strokeWidth="2.5"
-      />
-      <g fill="var(--text-secondary)" fontSize="12">
-        <text x="0" y="25">
-          {number(maximum)}
-        </text>
-        <text x="20" y="153">
-          0
-        </text>
-        <text x="40" y="175">
-          Day 1
-        </text>
-        <text x="620" y="175" textAnchor="end">
-          Day {Math.max(current.length, previous.length)}
-        </text>
-      </g>
-    </svg>
+    </article>
+  );
+}
+function Metric({
+  label,
+  value,
+  sub,
+  a,
+  b,
+  series = [],
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  a?: number | null;
+  b?: number | null;
+  series?: number[];
+}) {
+  return (
+    <article className="card metric">
+      <div className="eyebrow">{label}</div>
+      <div className="metricvalue">{value}</div>
+      <div className="metricfoot">
+        <Change a={a} b={b} />
+        <span>{sub}</span>
+      </div>
+      {series.length > 1 && (
+        <svg viewBox="0 0 220 30" className="spark" aria-hidden="true">
+          <polyline
+            points={series
+              .map(
+                (v, i) =>
+                  `${(i / (series.length - 1)) * 220},${28 - (v / Math.max(1, ...series)) * 24}`,
+              )
+              .join(" ")}
+            fill="none"
+            stroke="#0b8077"
+            strokeWidth="1.8"
+          />
+        </svg>
+      )}
+    </article>
   );
 }
 export function MonthlyDashboard({
-  data,
+  data: d,
+  clientName = "Performance overview",
   engineHref,
   settingsHref,
 }: {
   data: DashboardResponse;
+  clientName?: string;
   engineHref: string;
   settingsHref: string;
 }) {
-  const [explore, setExplore] = useState<string | null>(null);
-  const [metric, setMetric] = useState("visibility");
-  const details = data.exploration,
-    visibility = details?.visibility;
+  const [detail, setDetail] = useState(""),
+    [pageSort, setPageSort] = useState("leads");
+  const v = d.exploration?.visibility;
   const sessions =
-    data.traffic.ga4_reported_sessions?.current != null
-      ? data.traffic.ga4_reported_sessions
-      : data.traffic.ga4_sessions;
-  const previousChannels = new Map(
-    details?.previous_channels?.map((row) => [row.channel, row]),
-  );
-  const channelKeys = [
-    ...new Set([
-      ...data.traffic.by_channel.map((row) => row.channel),
-      ...previousChannels.keys(),
-    ]),
+      d.traffic.ga4_reported_sessions?.current != null
+        ? d.traffic.ga4_reported_sessions
+        : d.traffic.ga4_sessions,
+    rate = d.conversions.session_lead_rate;
+  const terms = v?.keywords ?? [];
+  const validPos = (r: RankingReading | null) =>
+    r && r.position > 0 && r.position <= 100 ? r.position : 101;
+  const distribution = [
+    terms.filter((r) => r.current && validPos(r.current) <= 3).length,
+    terms.filter(
+      (r) => r.current && validPos(r.current) > 3 && validPos(r.current) <= 10,
+    ).length,
+    terms.filter(
+      (r) => r.current && validPos(r.current) > 10 && validPos(r.current) <= 20,
+    ).length,
+    terms.filter(
+      (r) =>
+        r.current && validPos(r.current) > 20 && validPos(r.current) <= 100,
+    ).length,
+    terms.filter((r) => r.current && validPos(r.current) > 100).length,
   ];
-  const currentChannels = new Map(
-    data.traffic.by_channel.map((row) => [row.channel, row]),
+  const matched = terms.filter((r) => r.current && r.previous);
+  const improved = matched.filter(
+      (r) => validPos(r.current) < validPos(r.previous),
+    ),
+    declined = matched.filter(
+      (r) => validPos(r.current) > validPos(r.previous),
+    );
+  const previous = new Map(
+    d.exploration?.previous_channels?.map((r) => [r.channel, r]),
   );
-  const toggle = (key: string) => setExplore(explore === key ? null : key);
-  const ga4 = data.effective_periods?.ga4;
-  const rankingPeriod = data.effective_periods?.rankings;
+  const channels = d.traffic.by_channel;
+  const known = channels.filter((r) => r.bounce_rate != null),
+    knownVisits = known.reduce((a, r) => a + r.sessions, 0);
+  const bounce = knownVisits
+    ? known.reduce((a, r) => a + r.sessions * r.bounce_rate!, 0) / knownVisits
+    : null;
+  const promptRows = d.exploration?.prompts ?? [],
+    mentionRows = promptRows.filter((r) => r.mentioned != null),
+    citationRows = promptRows.filter((r) => r.cited != null);
+  const providers = [
+    ...new Set((d.exploration?.prompts ?? []).map((r) => r.provider)),
+  ].map((provider) => {
+    const rows = (d.exploration?.prompts ?? []).filter(
+        (r) => r.provider === provider,
+      ),
+      m = rows.filter((r) => r.mentioned != null),
+      c = rows.filter((r) => r.cited != null);
+    return [
+      provider,
+      `${m.filter((r) => r.mentioned).length} / ${m.length}`,
+      `${c.filter((r) => r.cited).length} / ${c.length}`,
+      rows.length,
+    ];
+  });
+  const pages = [...d.traffic.top_pages].sort((a, b) =>
+    pageSort === "visits"
+      ? b.ga4_sessions - a.ga4_sessions
+      : b.ga4_key_events - a.ga4_key_events,
+  );
+  const currentStart = d.effective_periods?.ga4?.current?.[0] ?? d.period.from;
+  const dates = d.traffic.ga4_sessions.series.map((_, i) => {
+    const day = new Date(currentStart + "T12:00:00Z");
+    day.setUTCDate(day.getUTCDate() + i);
+    return day.toISOString().slice(0, 10);
+  });
+  let offset = 0;
+  const toggle = (key: string) => setDetail(detail === key ? "" : key);
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="kpi-report">
+      <header>
         <div>
-          <h2 className="text-xl font-bold">Visibility, traffic & leads</h2>
-          <p className={muted}>
-            {data.period.from} – {data.period.to} · Whole site
+          <div className="eyebrow">PERFORMANCE OVERVIEW</div>
+          <h1>{clientName}</h1>
+          <p>
+            How visible are we, who is arriving, and are those visits turning
+            into leads?
           </p>
-          {ga4?.current && ga4.current[1] !== data.period.to && (
-            <p className={muted} role="status">
-              Visits and leads cover {ga4.current.join(" – ")}; the comparison
-              uses the same number of days.
-            </p>
-          )}
         </div>
-        <Link className="btn btn-primary" href={engineHref}>
-          Review this month →
-        </Link>
+        <div className="headeractions">
+          <div className="period">
+            {d.period.from} – {d.period.to}
+            <small>
+              Compared with {d.period.previous_from} – {d.period.previous_to}
+            </small>
+          </div>
+          <Link className="reviewlink" href={engineHref}>
+            Review this month →
+          </Link>
+        </div>
+      </header>
+      {d.effective_periods?.ga4?.current?.[1] &&
+        d.effective_periods.ga4.current[1] !== d.period.to && (
+          <p className="coverage-note" role="status">
+            Visits and leads cover {d.effective_periods.ga4.current.join(" – ")}
+            ; the previous period uses the same number of days.
+          </p>
+        )}
+      <div className="summarygrid">
+        <Metric
+          label="Visibility · top 10"
+          value={
+            (v?.measured ?? 0)
+              ? pct((100 * (v?.top_10 ?? 0)) / (v?.measured ?? 0))
+              : "Not measured"
+          }
+          sub={`${v?.top_10 ?? 0} of ${v?.measured ?? 0} measured terms`}
+        />
+        <Metric
+          label="Traffic · site visits"
+          value={fmt(sessions.current)}
+          sub="vs previous period"
+          a={sessions.current}
+          b={sessions.previous}
+          series={d.traffic.ga4_sessions.series}
+        />
+        <Metric
+          label="Engagement"
+          value={bounce == null ? "Not measured" : pct(100 - bounce)}
+          sub="Channel-based engagement rate"
+        />
+        <Metric
+          label="Visits generating a lead"
+          value={fmt(d.conversions.lead_sessions?.current)}
+          sub={`${pct(rate?.current)} conversion rate`}
+          a={d.conversions.lead_sessions?.current}
+          b={d.conversions.lead_sessions?.previous}
+        />
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <section className={panel}>
-          <h3>Visibility</h3>
-          <p className="mt-2 text-3xl font-bold">
-            {visibility?.measured
-              ? `${visibility.top_10} / ${visibility.measured}`
-              : "Not measured"}
-          </p>
-          <p className={muted}>Measured tracked keywords in the top 10</p>
-          <p className={muted}>
-            {visibility
-              ? `${visibility.measured} of ${visibility.tracked} tracked terms measured`
-              : "Dated keyword detail unavailable"}
-          </p>
-          <div className="my-5">
-            <p className={muted}>AI brand mentions · separate measure</p>
-            <strong>
-              {number(data.visibility.ai.mention_presence.current)}
-              {data.visibility.ai.mention_presence.current != null ? "%" : ""}
-            </strong>
-            <p className={muted}>
-              {number(data.visibility.ai.prompt_count)} tracked prompts
+      <section id="visibility">
+        <div className="sectiontitle">
+          <div>
+            <span className="step">01</span>
+            <h2>Where are we showing up?</h2>
+            <p>
+              Search rankings and AI answers are separate measures of
+              visibility.
             </p>
           </div>
           <button
-            className="text-sm text-[var(--brand-teal)] underline"
-            aria-expanded={explore === "visibility"}
+            className="textbutton"
+            aria-expanded={detail === "visibility"}
             onClick={() => toggle("visibility")}
           >
-            Explore visibility
+            {detail === "visibility" ? "Close detail" : "Explore visibility →"}
           </button>
-        </section>
-        <section className={panel}>
-          <h3>Traffic</h3>
-          <p className="mt-2 text-3xl font-bold">{number(sessions?.current)}</p>
-          <p className={muted}>Site visits · GA4 sessions</p>
-          <p className={muted}>
-            {change(sessions?.current, sessions?.previous)}
-          </p>
-          <Sparkline
-            values={data.traffic.ga4_sessions.series}
-            width={200}
-            height={65}
-            className="my-4 max-w-full"
+        </div>
+        <div className="twocol">
+          <article className="card">
+            <div className="cardtop">
+              <h3>Search ranking coverage</h3>
+              <span className="tag">{v?.measured ?? 0} measured terms</span>
+            </div>
+            <div className="distribution">
+              <div className="donut">
+                <svg
+                  viewBox="0 0 120 120"
+                  role="img"
+                  aria-label="Distribution of measured keyword rankings"
+                >
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="45"
+                    stroke="#edf1ef"
+                    strokeWidth="14"
+                    fill="none"
+                  />
+                  {distribution.map((count, i) => {
+                    const start = offset;
+                    offset += (count / Math.max(1, v?.measured ?? 0)) * 100;
+                    return (
+                      <circle
+                        key={i}
+                        cx="60"
+                        cy="60"
+                        r="45"
+                        fill="none"
+                        stroke={colors[i]}
+                        strokeWidth="14"
+                        pathLength="100"
+                        strokeDasharray={`${(count / Math.max(1, v?.measured ?? 0)) * 100} ${100 - (count / Math.max(1, v?.measured ?? 0)) * 100}`}
+                        strokeDashoffset={-start}
+                        transform="rotate(-90 60 60)"
+                      />
+                    );
+                  })}
+                  <text
+                    x="60"
+                    y="60"
+                    textAnchor="middle"
+                    style={{ fontSize: 20, fontWeight: 700, fill: "#243d43" }}
+                  >
+                    {(v?.measured ?? 0)
+                      ? `${fmt((100 * (v?.top_10 ?? 0)) / (v?.measured ?? 0), 1)}%`
+                      : "—"}
+                  </text>
+                  <text
+                    x="60"
+                    y="75"
+                    textAnchor="middle"
+                    style={{ fontSize: 7, fill: "#7a8c8e" }}
+                  >
+                    in the top 10
+                  </text>
+                </svg>
+              </div>
+              <ul>
+                {[
+                  "Top 3",
+                  "Positions 4–10",
+                  "Positions 11–20",
+                  "Positions 21–100",
+                  "Outside top 100",
+                ].map((label, i) => (
+                  <li key={label}>
+                    <i style={{ background: colors[i] }} />
+                    {label}
+                    <b>{distribution[i]}</b>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <p className="note">
+              {(v?.matched ?? 0)
+                ? `${((((v?.matched_current_top_10 ?? 0) - (v?.matched_previous_top_10 ?? 0)) * 100) / (v?.matched ?? 0)).toFixed(1)} percentage-point change in top-10 coverage across comparable terms`
+                : "Previous-period coverage comparison unavailable"}
+            </p>
+            <div className="ministats">
+              <span>
+                <b>{matched.length ? improved.length : "—"}</b> improving
+              </span>
+              <span>
+                <b>{matched.length ? declined.length : "—"}</b> declining
+              </span>
+              <span>
+                <b>{matched.length}</b> comparable terms
+              </span>
+            </div>
+            <p className="note">
+              {(v?.tracked ?? 0) - (v?.measured ?? 0)} unmeasured terms
+              excluded. Movement uses the same dated terms in both periods.
+            </p>
+          </article>
+          <article className="card">
+            <div className="cardtop">
+              <h3>AI mentions & citations</h3>
+              <span className="tag">
+                {d.visibility.ai.prompt_count} tracked prompts
+              </span>
+            </div>
+            <div className="aistats">
+              <div>
+                <b>
+                  {pct(
+                    mentionRows.length
+                      ? (100 * mentionRows.filter((r) => r.mentioned).length) /
+                          mentionRows.length
+                      : null,
+                  )}
+                </b>
+                <span>Brand mention presence</span>
+              </div>
+              <div>
+                <b>
+                  {pct(
+                    citationRows.length
+                      ? (100 * citationRows.filter((r) => r.cited).length) /
+                          citationRows.length
+                      : null,
+                  )}
+                </b>
+                <span>Citation / link presence</span>
+              </div>
+            </div>
+            <Table
+              heads={["Provider", "Mentioned", "Cited", "Checks"]}
+              rows={providers}
+            />
+            <p className="note">
+              Rates use the dated checks shown here, excluding unknown
+              responses. Bot visits are not mentions or citations.
+            </p>
+          </article>
+        </div>
+        <article className="card movers">
+          <h3>Keyword movement worth reviewing</h3>
+          <Table
+            heads={["Keyword", "Previous", "Current", "Movement"]}
+            rows={[...improved, ...declined]
+              .sort(
+                (a, b) =>
+                  Math.abs(validPos(b.current) - validPos(b.previous)) -
+                  Math.abs(validPos(a.current) - validPos(a.previous)),
+              )
+              .slice(0, 5)
+              .map((r) => [
+                r.term,
+                validPos(r.previous) === 101
+                  ? "Outside top 100"
+                  : r.previous?.position,
+                validPos(r.current) === 101
+                  ? "Outside top 100"
+                  : r.current?.position,
+                <span
+                  key={r.term}
+                  className={
+                    validPos(r.current) < validPos(r.previous) ? "up" : "down"
+                  }
+                >
+                  {validPos(r.current) < validPos(r.previous)
+                    ? "Improved"
+                    : "Declined"}
+                </span>,
+              ])}
           />
+          {!matched.length && (
+            <p className="note">
+              Current rankings are available; this client has no comparable
+              prior-period keyword cohort.
+            </p>
+          )}
+        </article>
+        {detail === "visibility" && (
+          <article className="card detail">
+            <h3>All tracked keywords</h3>
+            <Table
+              heads={[
+                "Keyword / ranking page",
+                "Previous",
+                "Current",
+                "Observed",
+              ]}
+              rows={terms.map((r) => [
+                <>
+                  {r.term}
+                  <small className="pageurl">
+                    {r.current?.ranking_url ?? "No ranking URL"}
+                  </small>
+                </>,
+                r.previous
+                  ? validPos(r.previous) === 101
+                    ? "Outside top 100"
+                    : fmt(r.previous?.position)
+                  : "Not measured",
+                r.current
+                  ? validPos(r.current) === 101
+                    ? "Outside top 100"
+                    : fmt(r.current?.position)
+                  : "Not measured",
+                r.current?.observed_on ?? "—",
+              ])}
+            />
+            <h3>Prompt observations</h3>
+            <Table
+              heads={["Prompt", "Provider", "Mentioned", "Cited"]}
+              rows={(d.exploration?.prompts ?? []).map((r) => [
+                r.prompt,
+                r.provider,
+                r.mentioned == null ? "Unknown" : r.mentioned ? "Yes" : "No",
+                r.cited == null ? "Unknown" : r.cited ? "Yes" : "No",
+              ])}
+            />
+          </article>
+        )}
+      </section>
+      <section id="traffic">
+        <div className="sectiontitle">
+          <div>
+            <span className="step">02</span>
+            <h2>What is bringing people here?</h2>
+            <p>See the trend, then the channels contributing to it.</p>
+          </div>
           <button
-            className="text-sm text-[var(--brand-teal)] underline"
-            aria-expanded={explore === "traffic"}
+            className="textbutton"
+            aria-expanded={detail === "traffic"}
             onClick={() => toggle("traffic")}
           >
-            Explore traffic
+            {detail === "traffic" ? "Close detail" : "Explore traffic →"}
           </button>
-        </section>
-        <section className={panel}>
-          <h3>Leads</h3>
-          <p className="mt-2 text-3xl font-bold">
-            {number(data.conversions.leads.current)}
-          </p>
-          <p className={muted}>Configured lead events</p>
-          <p className={muted}>
-            {change(
-              data.conversions.leads.current,
-              data.conversions.leads.previous,
-            )}
-          </p>
-          <Sparkline
-            values={data.conversions.leads.series}
-            width={200}
-            height={65}
-            className="my-4 max-w-full"
+        </div>
+        <div className="twocol">
+          <Chart
+            title="Visits over the period"
+            current={d.traffic.ga4_sessions.series}
+            previous={d.exploration?.previous_sessions_series ?? []}
+            dates={dates}
           />
-          <p className={muted}>
-            Visit-based conversion:{" "}
-            {number(data.conversions.session_lead_rate?.current)}
-            {data.conversions.session_lead_rate?.current != null ? "%" : ""}
-          </p>
+          <article className="card">
+            <h3>Traffic by channel</h3>
+            <Table
+              heads={["Channel", "Visits", "Previous", "Change"]}
+              rows={[...channels]
+                .sort((a, b) => b.sessions - a.sessions)
+                .map((r) => [
+                  r.label,
+                  fmt(r.sessions),
+                  fmt(previous.get(r.channel)?.sessions),
+                  <Change
+                    key={r.channel}
+                    a={r.sessions}
+                    b={previous.get(r.channel)?.sessions}
+                  />,
+                ])}
+            />
+          </article>
+        </div>
+        <p className="note">
+          Charts and channel tables use daily detail; totals can differ slightly
+          from exact-period site visits above. AI referrals are counted once.
+        </p>
+        {detail === "traffic" && (
+          <article className="card detail">
+            <h3>Identified AI referral sources</h3>
+            <Table
+              heads={["Source", "Visits", "Google channel"]}
+              rows={(d.service_reporting?.ai_sources ?? []).map((r) => [
+                r.source,
+                fmt(r.sessions),
+                r.google_channels?.join(", ") ?? "—",
+              ])}
+            />
+            <h3>Most visited pages</h3>
+            <Table
+              heads={["Page", "Visits", "Views"]}
+              rows={[...pages]
+                .sort((a, b) => b.ga4_sessions - a.ga4_sessions)
+                .slice(0, 10)
+                .map((r) => [r.page, fmt(r.ga4_sessions), fmt(r.ga4_views)])}
+            />
+            <p className="note">
+              Historical page comparisons are not available in this report; page
+              gains and losses are not inferred.
+            </p>
+          </article>
+        )}
+      </section>
+      <section id="leads">
+        <div className="sectiontitle">
+          <div>
+            <span className="step">03</span>
+            <h2>Is that traffic useful?</h2>
+            <p>
+              Engagement gives context. Lead-producing visits show the business
+              outcome.
+            </p>
+          </div>
           <button
-            className="mt-2 text-sm text-[var(--brand-teal)] underline"
-            aria-expanded={explore === "leads"}
+            className="textbutton"
+            aria-expanded={detail === "leads"}
             onClick={() => toggle("leads")}
           >
-            Explore leads & conversion
+            {detail === "leads"
+              ? "Close detail"
+              : "Explore engagement & leads →"}
           </button>
-        </section>
-      </div>
-      {explore && (
-        <section className={panel} aria-live="polite">
-          <div className="flex justify-between gap-4">
-            <h3 className="font-semibold">
-              {explore === "visibility"
-                ? "What is ranking—and where the brand is mentioned"
-                : explore === "traffic"
-                  ? "Which traffic is growing—and which is falling"
-                  : "Which pages produce lead events"}
-            </h3>
-            <button
-              className="text-sm underline"
-              onClick={() => setExplore(null)}
-            >
-              Close breakdown
-            </button>
-          </div>
-          {explore === "visibility" && (
-            <div className="mt-4 space-y-5">
-              <Table
-                heads={[
-                  "Tracked term / ranking page",
-                  "Previous → current position",
-                  "Observed",
-                ]}
-                rows={(visibility?.keywords ?? []).map((row) => [
-                  <span key={row.term}>
-                    {row.term}
-                    <span className="block break-all text-xs text-[var(--text-secondary)]">
-                      {row.current?.ranking_url ?? "Ranking page unavailable"}
-                    </span>
-                  </span>,
-                  `${position(row.previous?.position)} → ${position(row.current?.position)}`,
-                  row.current?.observed_on ?? "Not measured",
-                ])}
-              />
-              <h4 className="font-semibold">AI prompt observations</h4>
-              <Table
-                heads={[
-                  "Prompt",
-                  "Provider / date",
-                  "Brand mentioned",
-                  "Brand cited",
-                ]}
-                rows={(details?.prompts ?? []).map((row) => [
-                  row.prompt,
-                  `${row.provider} · ${row.observed_on}`,
-                  yes(row.mentioned),
-                  yes(row.cited),
-                ])}
-              />
-              <p className={muted}>
-                Mentions and citations are separate observations. Missing
-                provider or period data is unknown.
-              </p>
-            </div>
-          )}
-          {explore === "traffic" && (
-            <div className="mt-4 space-y-3">
-              <p className={muted}>
-                GA4 observed channel traffic. Detailed channel totals can differ
-                slightly from exact-period site visits. Inclusion in a service
-                does not prove agency attribution.
-              </p>
-              <Table
-                heads={[
-                  "Channel",
-                  "Previous visits",
-                  "Current visits",
-                  "Change",
-                ]}
-                rows={channelKeys.map((key) => {
-                  const row = currentChannels.get(key);
-                  const before =
-                    details?.previous_channels == null
-                      ? null
-                      : (previousChannels.get(key)?.sessions ?? 0);
-                  const now = row?.sessions ?? 0;
-                  return [
-                    row?.label ?? previousChannels.get(key)?.label ?? key,
-                    number(before),
-                    number(now),
-                    change(now, before),
-                  ];
-                })}
-              />
-              <h4 className="font-semibold">Identifiable AI sources</h4>
-              <Table
-                heads={["Source", "Visits", "Google channel"]}
-                rows={(data.service_reporting?.ai_sources ?? []).map((row) => [
-                  row.source,
-                  number(row.sessions),
-                  row.google_channels.join(", "),
-                ])}
-              />
-              <p className={muted}>
-                AI referrals are included once in channel totals. Direct visits
-                without a recorded source remain unattributed.
-              </p>
-            </div>
-          )}
-          {explore === "leads" && (
-            <div className="mt-4 space-y-3">
-              <p>
-                {number(data.conversions.session_measurement?.lead_sessions)}{" "}
-                visits produced a lead /{" "}
-                {number(data.conversions.session_measurement?.sessions)} visits.
-                Each converting visit counts once.
-              </p>
-              <p className={muted}>
-                Site visit-based rate:{" "}
-                {data.conversions.session_lead_rate?.current == null
-                  ? "Not measured"
-                  : `${number(data.conversions.session_lead_rate.current)}%`}{" "}
-                · Previous:{" "}
-                {data.conversions.session_lead_rate?.previous == null
-                  ? "Not measured"
-                  : `${number(data.conversions.session_lead_rate.previous)}%`}
-                . Lead events per 100 visits:{" "}
-                {number(data.conversions.lead_rate.current)}.
-              </p>
-              <Table
-                heads={["Page", "Visits", "Lead events", "Events / 100 visits"]}
-                rows={
-                  ga4?.current
-                    ? data.traffic.top_pages.map((row) => [
-                        row.page,
-                        number(row.ga4_sessions),
-                        data.conversions.configured
-                          ? number(row.ga4_key_events)
-                          : "Lead events not configured",
-                        data.conversions.configured
-                          ? number(row.session_key_event_rate)
-                          : "Not measured",
-                      ])
-                    : []
-                }
-              />
-              <p className={muted}>
-                Page-level data measures lead events, not unique converting
-                visits. Low rates on informational pages are not automatically
-                conversion problems; consider intent and sample size. This is a
-                ranked page sample, not every page.
-              </p>
-              <Link className="text-sm underline" href={settingsHref}>
-                Review lead definitions and target
-              </Link>
-            </div>
-          )}
-        </section>
-      )}
-      <section className={panel}>
-        <h3 className="font-semibold">Performance over the period</h3>
-        <div className="my-3 flex flex-wrap gap-2">
-          {[
-            ["visibility", "Visibility"],
-            ["traffic", "Visits"],
-            ["leads", "Lead events"],
-            ["conversion", "Lead conversion"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`btn ${metric === key ? "btn-primary" : "btn-ghost"}`}
-              aria-pressed={metric === key}
-              onClick={() => setMetric(key)}
-            >
-              {label}
-            </button>
-          ))}
         </div>
-        {metric === "visibility" ? (
-          <div className="space-y-3 py-4">
-            {visibility?.matched ? (
-              <>
-                <p className="text-2xl font-semibold">
-                  {visibility.matched_previous_top_10} / {visibility.matched} →{" "}
-                  {visibility.matched_current_top_10} / {visibility.matched}
-                </p>
-                <p className={muted}>
-                  Same measured keywords in the top 10 ·{" "}
-                  {(
-                    (100 *
-                      (visibility.matched_current_top_10 -
-                        visibility.matched_previous_top_10)) /
-                    visibility.matched
-                  ).toFixed(1)}{" "}
-                  percentage-point change
-                </p>
-                <div className="space-y-3">
-                  {[
-                    ["Previous", visibility.matched_previous_top_10],
-                    ["Current", visibility.matched_current_top_10],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="w-20 text-sm">{label}</span>
-                      <div className="h-3 flex-1 bg-[var(--surface-muted)]">
-                        <div
-                          className="h-3 bg-[var(--brand-teal)]"
-                          style={{
-                            width: `${(Number(value) / visibility.matched) * 100}%`,
-                          }}
-                        />
-                      </div>
-                      <span>{number(Number(value))}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className={muted}>
-                  Previous:{" "}
-                  {rankingPeriod?.previous?.join(" – ") ?? "Unavailable"} ·
-                  Current:{" "}
-                  {rankingPeriod?.current?.join(" – ") ?? "Unavailable"}.
-                  Endpoint observations; no daily ranking history is inferred.
-                </p>
-              </>
-            ) : (
-              <p className={muted}>
-                No comparable keyword cohort in both periods. Current visibility
-                remains available above.
-              </p>
-            )}
-          </div>
-        ) : metric === "conversion" ? (
-          <div className="space-y-3 py-5">
-            <p className="text-2xl font-semibold">
-              {data.conversions.session_lead_rate?.previous == null
-                ? "Not measured"
-                : `${number(data.conversions.session_lead_rate.previous)}%`}{" "}
-              →{" "}
-              {data.conversions.session_lead_rate?.current == null
-                ? "Not measured"
-                : `${number(data.conversions.session_lead_rate.current)}%`}
+        <div className="twocol">
+          <Chart
+            title="Lead events over the period"
+            current={d.conversions.leads.series}
+            previous={d.exploration?.previous_leads_series ?? []}
+            dates={dates}
+            unit="lead events"
+          />
+          <article className="card">
+            <h3>From visits to leads</h3>
+            <div className="funnel">
+              <div>
+                <span>Site visits</span>
+                <b>{fmt(sessions.current)}</b>
+              </div>
+              <div>
+                <span>Visits generating at least one lead</span>
+                <b>{fmt(d.conversions.lead_sessions?.current)}</b>
+              </div>
+              <div className="emphasis">
+                <span>Visit-based lead conversion</span>
+                <b>{pct(rate?.current)}</b>
+              </div>
+            </div>
+            <div className="ministats">
+              <span>
+                Previous <b>{pct(rate?.previous)}</b>
+              </span>
+              <span>
+                Target <b>{pct(d.conversions.session_rate_target_pct)}</b>
+              </span>
+            </div>
+            <p className="note">
+              {fmt(d.conversions.leads.current)} lead events across{" "}
+              {fmt(d.conversions.lead_sessions?.current)} converting visits.
+              Multiple events can occur in one visit.
             </p>
-            <p className={muted}>
-              Previous → current · Visits with at least one configured lead
-              event ÷ matching visits. These are exact-period rates; daily
-              unique converting-visit history is not available.
-            </p>
+          </article>
+        </div>
+        <article className="card movers">
+          <div className="cardtop">
+            <h3>Pages contributing visits & lead events</h3>
+            <select
+              aria-label="Sort pages"
+              value={pageSort}
+              onChange={(e) => setPageSort(e.target.value)}
+            >
+              <option value="leads">Most lead events</option>
+              <option value="visits">Most visits</option>
+            </select>
           </div>
-        ) : (
-          <>
-            <Trend
-              current={
-                metric === "traffic"
-                  ? data.traffic.ga4_sessions.series
-                  : data.conversions.leads.series
-              }
-              previous={
-                (metric === "traffic"
-                  ? details?.previous_sessions_series
-                  : details?.previous_leads_series) ?? []
-              }
-              label={`Daily ${metric === "traffic" ? "visits" : "lead events"}, current and previous periods`}
+          <Table
+            heads={["Page", "Visits", "Lead events", "Events / 100 visits"]}
+            rows={pages
+              .slice(0, detail === "leads" ? 20 : 5)
+              .map((r) => [
+                <span key={r.page} className="pageurl">{r.page}</span>,
+                fmt(r.ga4_sessions),
+                fmt(r.ga4_key_events),
+                fmt(r.session_key_event_rate, 2),
+              ])}
+          />
+          <p className="note">
+            Page rates count lead events, not unique converting visits.
+            Informational pages are not automatically conversion problems.
+            Page-level engagement is not available in this report.
+          </p>
+        </article>
+        {detail === "leads" && (
+          <article className="card detail">
+            <h3>Engagement by channel</h3>
+            <Table
+              heads={["Channel", "Visits", "Engagement rate", "Bounce rate"]}
+              rows={channels.map((r) => [
+                r.label,
+                fmt(r.sessions),
+                r.bounce_rate == null
+                  ? "Not measured"
+                  : pct(100 - r.bounce_rate),
+                pct(r.bounce_rate),
+              ])}
             />
-            <p className={muted}>
-              Daily {metric === "traffic" ? "detailed visits" : "lead events"} ·
-              Solid: {ga4?.current?.join(" – ") ?? "unavailable"} · Dashed:{" "}
-              {ga4?.previous?.join(" – ") ?? "unavailable"}. Visits in detailed
-              daily reports can differ slightly from exact-period headline
-              totals.
+            <p className="note">
+              Summary engagement is weighted across measured channel sessions.
+              Session duration and interaction details are not available here.
             </p>
-          </>
+            <h3>Configured lead events</h3>
+            <p>{d.conversions.lead_events.join(" · ")}</p>
+            <p>
+              Search CTR: {pct(d.traffic.gsc_ctr.current)} · previous{" "}
+              {pct(d.traffic.gsc_ctr.previous)}
+            </p>
+          </article>
         )}
       </section>
-      <section className={panel}>
-        <h3 className="font-semibold">Service contribution</h3>
-        <p className={muted}>
-          Part of the whole-site totals; observed traffic is not proof of agency
-          impact.
-        </p>
+      <article className="card service">
+        <h3>Service contribution</h3>
         <Table
           heads={["Service", "Visits", "Lead events"]}
-          rows={(data.service_reporting?.rows ?? []).map((row) => [
-            row.label,
-            number(row.sessions.current),
-            number(row.lead_events.current),
+          rows={(d.service_reporting?.rows ?? []).map((r) => [
+            r.label,
+            fmt(r.sessions.current),
+            fmt(r.lead_events.current),
           ])}
         />
-      </section>
-      <details className={panel}>
-        <summary className="cursor-pointer font-semibold">
-          Quarterly progress · starting baseline
-        </summary>
-        <div className="mt-5">
-          <ProgressPanel baseline={data.baseline} editHref={settingsHref} />
+        <p className="note">
+          Part of site totals; observed traffic is not proof of agency impact.
+        </p>
+      </article>
+      <section>
+        <div className="sectiontitle">
+          <div>
+            <span className="step">04</span>
+            <h2>Progress since we started</h2>
+            <p>
+              Starting baseline for quarterly review, separate from the
+              previous-period comparisons above.
+            </p>
+          </div>
         </div>
-      </details>
-      <details className={panel}>
-        <summary className="cursor-pointer font-semibold">
-          Sources, freshness & reporting scope
-        </summary>
-        <p className={muted + " mt-3"}>{data.service_reporting?.note}</p>
-        <Table
-          heads={["Source", "Facts through", "Validation"]}
-          rows={data.freshness.map((row) => [
-            row.source,
-            row.fact_through ?? "Unavailable",
-            row.validation ?? "Unknown",
-          ])}
-        />
-        {data.search_console_sources?.combined_history && (
-          <p className={muted}>
-            Combined Search Console history · configured properties shown
-            separately below.
+        <article className="card">
+          <div className="cardtop">
+            <h3>Baseline comparison</h3>
+            <Link className="textbutton" href={settingsHref}>
+              Review baseline settings →
+            </Link>
+            <span className="tag">
+              {d.baseline.period_start} – {d.baseline.period_end}
+            </span>
+          </div>
+          <Table
+            heads={["Metric", "Starting baseline", "Current period", "Change"]}
+            rows={[
+              [
+                "Monthly visits",
+                fmt(d.baseline.monthly_sessions),
+                fmt(d.baseline.vs_current.sessions.current),
+                <Change
+                  key="sessions"
+                  a={d.baseline.vs_current.sessions.current}
+                  b={d.baseline.monthly_sessions}
+                />,
+              ],
+              [
+                "Monthly lead events",
+                fmt(d.baseline.monthly_leads),
+                fmt(d.baseline.vs_current.leads.current),
+                <Change
+                  key="leads"
+                  a={d.baseline.vs_current.leads.current}
+                  b={d.baseline.monthly_leads}
+                />,
+              ],
+              [
+                "Lead event rate · legacy baseline",
+                pct(d.baseline.lead_rate),
+                pct(d.baseline.vs_current.lead_rate?.current),
+                <Change
+                  key="rate"
+                  a={d.baseline.vs_current.lead_rate?.current}
+                  b={d.baseline.lead_rate}
+                />,
+              ],
+            ]}
+          />
+          <p className="note">
+            The saved baseline uses lead events per visit. It is not compared
+            with the newer visit-based conversion rate.
           </p>
-        )}
-        <Table
-          heads={["Search Console property", "Clicks", "Impressions"]}
-          rows={(data.search_console_sources?.properties ?? []).map((row) => [
-            row.property,
-            number(row.clicks),
-            number(row.impressions),
-          ])}
-        />
-      </details>
+        </article>
+      </section>
     </div>
   );
 }
