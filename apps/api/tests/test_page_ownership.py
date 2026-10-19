@@ -124,3 +124,9 @@ def test_alias_cycles_do_not_create_owners():
     a,b=page('/a','Managed cloud services'),page('/b','Managed cloud services')
     a.canonical_url=b.normalized_url;b.canonical_url=a.normalized_url
     assert not index(a,b).eligible
+
+
+def test_complete_title_topic_is_not_hidden_by_narrower_h1():
+    p=page('/b2b-content-marketing','Content Marketing')
+    p.title='B2B Content Marketing Services for Growing Businesses'
+    assert choose('b2b content marketing services',index(p),today=DAY).url==p.normalized_url

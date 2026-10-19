@@ -168,9 +168,10 @@ def choose(term, index, *, subject=None, gsc=(), rankings=(), current=(), today=
     for url, page in index.eligible.items():
         options = [(len(core & tokens(text)) / len(core), len(core & tokens(text)) / max(len(tokens(text)), 1))
                    for text in primary_options(page)]
-        coverage, precision = max(options, key=lambda values: .40 * values[0] + .45 * values[1])
-        if coverage < .80:
+        options = [values for values in options if values[0] >= .80]
+        if not options:
             continue
+        coverage, precision = max(options, key=lambda values: .40 * values[0] + .45 * values[1])
         scope = location_tokens(page)
         reasons = []
         path = urlsplit(url).path
