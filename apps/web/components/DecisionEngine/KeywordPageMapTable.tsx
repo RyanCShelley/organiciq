@@ -23,8 +23,10 @@ export type KeywordMapRow = {
   current_position: number | null;
   suggested_target_url: string | null;
   /** Which read it came from: where the site ranks, or what a page is about. */
-  suggested_from?: "search_console" | "subject" | null;
+  suggested_from?: "search_console" | "subject" | "ownership" | null;
   suggested_margin?: number | null;
+  suggested_reason?: string | null;
+  suggested_status?: "mapped" | "gap" | "conflict" | null;
   suggested_impressions: number | null;
   suggested_instead_of: string | null;
 };
@@ -145,7 +147,7 @@ function Row({
   origin: string | null;
 }) {
   // Held as it is shown — a path for this site — and expanded on save.
-  const [pageUrl, setPageUrl] = useState(forDisplay(row.target_url ?? "", origin));
+  const [pageUrl, setPageUrl] = useState(forDisplay(row.source === "suggested" ? "" : row.target_url ?? "", origin));
   const [role, setRole] = useState(row.term_role ?? "");
   const [priority, setPriority] = useState(row.priority);
   const [saved, setSaved] = useState<"idle" | "ok" | "error">("idle");
@@ -279,7 +281,9 @@ function Row({
             {/* The two reads mean different things and a person deciding
                 should know which they are looking at: one is where the site
                 ranks today, the other is what a page is about. */}
-            {row.suggested_from === "subject" ? (
+            {row.suggested_from === "ownership" ? (
+              <>Recommended owner: {forDisplay(row.suggested_target_url ?? "", origin)} — use this.</>
+            ) : row.suggested_from === "subject" ? (
               <>
                 Closest page by subject: {forDisplay(row.suggested_target_url ?? "", origin)}
                 {" "}— use this. Nothing ranks for this term yet.
@@ -297,6 +301,11 @@ function Row({
               </>
             )}
           </button>
+        ) : null}
+        {!row.mapped && row.suggested_reason ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            {row.suggested_reason}
+          </p>
         ) : null}
         {saved === "error" && message ? (
           <div className="mt-1 text-xs text-[var(--danger)]">{message}</div>
