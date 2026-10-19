@@ -52,6 +52,8 @@ export function SlotActionBar({
   const [copied, setCopied] = useState(false);
   const [askingSkip, setAskingSkip] = useState(false);
   const [reason, setReason] = useState("");
+  const [completing, setCompleting] = useState(false);
+  const [completionDate, setCompletionDate] = useState(new Date().toLocaleDateString("en-CA", {timeZone:"America/New_York"}));
 
   const [assignee, setAssignee] = useState(state?.assignee_email ?? "");
   const [due, setDue] = useState(state?.due ?? "");
@@ -155,7 +157,7 @@ export function SlotActionBar({
 
       <div className="flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor={`assignee-${action.action_uid}`}>
-          Assign slot {action.slot}
+          Owner for {action.title}
         </label>
         <select
           id={`assignee-${action.action_uid}`}
@@ -181,7 +183,7 @@ export function SlotActionBar({
         </select>
 
         <label className="sr-only" htmlFor={`due-${action.action_uid}`}>
-          Due date for slot {action.slot}
+          Due date for {action.title}
         </label>
         <input
           id={`due-${action.action_uid}`}
@@ -208,7 +210,7 @@ export function SlotActionBar({
           <button
             type="button"
             className={BUTTON}
-            disabled={pending}
+            disabled={pending || !assignee || !due || Boolean(state?.stale)}
             onClick={() =>
               run(() => sendSlotAction({ clientId, slug, month, uid: action.action_uid }))
             }
@@ -253,28 +255,15 @@ export function SlotActionBar({
             href={`/${slug}/annotations`}
             className="text-[12.5px] text-[var(--brand-teal-hover)] underline"
           >
-            In completed work
+            In Work & Results
           </Link>
-        ) : (
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={pending}
-            onClick={() =>
-              run(() =>
-                shipSlotAction({
-                  clientId,
-                  slug,
-                  month,
-                  uid: action.action_uid,
-                  shippedOn: new Date().toISOString().slice(0, 10),
-                }),
-              )
-            }
-          >
-            Mark done
-          </button>
-        )}
+        ) : completing ? (
+          <form className="flex flex-wrap items-center gap-2" onSubmit={event=>{event.preventDefault();run(async()=>{const result=await shipSlotAction({clientId,slug,month,uid:action.action_uid,shippedOn:completionDate});if(result.ok)setCompleting(false);return result;});}}>
+            <label className="text-sm">Completed on<input required className={FIELD} type="date" value={completionDate} onChange={e=>setCompletionDate(e.target.value)}/></label>
+            <button className={BUTTON} disabled={pending} type="submit">Save completion</button><button className={BUTTON} type="button" onClick={()=>setCompleting(false)}>Cancel</button>
+          </form>
+        ) : <button type="button" className={BUTTON} disabled={pending} onClick={()=>setCompleting(true)}>Mark completed</button>}
+
 
         {askingSkip ? null : (
           <button

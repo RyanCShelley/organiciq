@@ -267,6 +267,7 @@ class AnnotationUpdate(BaseModel):
 
 
 class AnnotationOut(ORMModel):
+    engine_uid: str | None = None
     id: UUID
     client_id: UUID
     decision_id: UUID | None

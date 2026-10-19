@@ -26,7 +26,7 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
       items: [
         { href: tool("dashboard"), label: "Dashboard", exact: true },
         { href: tool("decision-engine"), label: "Decision Engine" },
-        { href: tool("annotations"), label: "Completed work" },
+        { href: tool("annotations"), label: "Work & Results" },
         { href: settingsHref, label: "Client settings" },
       ],
     },
@@ -90,6 +90,7 @@ export function withNavContext(
   }
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  if (from && to) params.set("range", "custom");
   if (extra?.tab) params.set("tab", extra.tab);
   const qs = params.toString();
   return qs ? `${href}?${qs}` : href;

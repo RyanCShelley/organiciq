@@ -15,7 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { LogoWordmark } from "@/components/brand/Logo";
@@ -37,7 +37,7 @@ const ACCOUNT_ICONS: Record<string, LucideIcon> = {
   "Watch List": Eye,
   "Content Opp": FileSearch,
   "Decision Engine": Gauge,
-  "Completed work": ClipboardCheck,
+  "Work & Results": ClipboardCheck,
   // Anything unmapped falls back to Settings2, so a missing entry here reads as
   // a second "Client settings" in the sidebar.
   "Site crawl": Monitor,
@@ -56,8 +56,8 @@ const PLATFORM_ICONS: Record<string, LucideIcon> = {
 export function SidebarNav({
   clients,
   clientId,
-  from,
-  to,
+  from: initialFrom,
+  to: initialTo,
   userEmail,
   signOutAction,
 }: {
@@ -69,6 +69,9 @@ export function SidebarNav({
   signOutAction: () => Promise<void>;
 }) {
   const pathname = usePathname();
+  const search = useSearchParams();
+  const from = search.get("from") ?? initialFrom;
+  const to = search.get("to") ?? initialTo;
   // Only steers where the logo goes. It used to hide the client switcher and
   // every client link, which is what made the platform pages a dead end.
   const onPlatformPage = isPlatformContext(pathname);
@@ -166,7 +169,7 @@ export function SidebarNav({
               return (
                 <li key={item.href}>
                   <Link
-                    href={withNavContext(item.href, clientId, from, to)}
+                    href={withNavContext(item.href, effectiveClientId, from, to)}
                     className={cn(
                       "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
                       active

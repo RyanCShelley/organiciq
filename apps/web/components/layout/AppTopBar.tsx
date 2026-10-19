@@ -141,7 +141,7 @@ export function AppTopBar({
               </>
             ) : null}
 
-            <select
+            {canExport ? <span className="text-xs text-[var(--text-secondary)]">vs previous period</span> : <select
               aria-label="Compare mode"
               className="period-select"
               value={compareMode}
@@ -155,7 +155,7 @@ export function AppTopBar({
                   {option.label}
                 </option>
               ))}
-            </select>
+            </select>}
           </>
         ) : null}
 
