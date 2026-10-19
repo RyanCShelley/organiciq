@@ -1,7 +1,7 @@
 "use client";
 
 import { Download } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import {
   COMPARE_OPTIONS,
@@ -13,7 +13,7 @@ import {
   type RangeKey,
 } from "@/lib/workspace-params";
 import { resolvePageChrome } from "@/lib/page-chrome";
-import { clientSlugFromPath } from "@/lib/navigation";
+import { navigationClient } from "@/lib/navigation";
 import type { Client } from "@/lib/api";
 
 /**
@@ -50,10 +50,14 @@ export function AppTopBar({
   to: string;
 }) {
   const pathname = usePathname();
+  const search = useSearchParams();
+  const effectiveClientId =
+    navigationClient(clients, pathname, search.get("clientId"), clientId)?.id ??
+    "";
   const { title, description } = resolvePageChrome(pathname);
   const { pending, activeFrom, activeTo, rangeKey, compareMode, apply } =
     useWorkspaceParams({
-      clientId,
+      clientId: effectiveClientId,
       from,
       to,
       persistDefault: true,
@@ -62,11 +66,7 @@ export function AppTopBar({
   const showPeriod = supportsPeriod(pathname);
 
   // Export the client in the URL, not the cookie default the layout passes down.
-  const pathSlug = clientSlugFromPath(pathname);
-  const exportClientId =
-    (pathSlug
-      ? clients.find((client) => client.slug === pathSlug)?.id
-      : null) ?? clientId;
+  const exportClientId = effectiveClientId;
   const canExport = supportsExport(pathname) && Boolean(exportClientId);
 
   const exportHref = `/api/export/dashboard?clientId=${encodeURIComponent(
@@ -141,21 +141,27 @@ export function AppTopBar({
               </>
             ) : null}
 
-            {canExport ? <span className="text-xs text-[var(--text-secondary)]">vs previous period</span> : <select
-              aria-label="Compare mode"
-              className="period-select"
-              value={compareMode}
-              disabled={pending}
-              onChange={(event) =>
-                apply({ compare: event.target.value as CompareMode })
-              }
-            >
-              {COMPARE_OPTIONS.map((option) => (
-                <option key={option.key} value={option.key}>
-                  {option.label}
-                </option>
-              ))}
-            </select>}
+            {canExport ? (
+              <span className="text-xs text-[var(--text-secondary)]">
+                vs previous period
+              </span>
+            ) : (
+              <select
+                aria-label="Compare mode"
+                className="period-select"
+                value={compareMode}
+                disabled={pending}
+                onChange={(event) =>
+                  apply({ compare: event.target.value as CompareMode })
+                }
+              >
+                {COMPARE_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </>
         ) : null}
 

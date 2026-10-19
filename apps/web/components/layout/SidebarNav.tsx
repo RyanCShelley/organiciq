@@ -20,7 +20,7 @@ import { Suspense } from "react";
 
 import { LogoWordmark } from "@/components/brand/Logo";
 import { ClientSwitcher } from "@/components/layout/ClientSwitcher";
-import { ACCOUNT_TOOL_PATH, accountToolHref } from "@/lib/account-routes";
+import { accountToolHref } from "@/lib/account-routes";
 import type { Client } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/cn";
@@ -30,6 +30,7 @@ import {
   isNavActive,
   isPlatformContext,
   withNavContext,
+  navigationClient,
 } from "@/lib/navigation";
 
 const ACCOUNT_ICONS: Record<string, LucideIcon> = {
@@ -75,21 +76,17 @@ export function SidebarNav({
   // Only steers where the logo goes. It used to hide the client switcher and
   // every client link, which is what made the platform pages a dead end.
   const onPlatformPage = isPlatformContext(pathname);
-  const accountToolMatch = pathname.match(
-    ACCOUNT_TOOL_PATH,
-  );
-  const clientsWorkspaceMatch = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
-  const pathSlug = accountToolMatch?.[1] || clientsWorkspaceMatch?.[1];
-  const pathClient = pathSlug
-    ? clients.find((client) => client.slug === pathSlug)
-    : undefined;
-  const effectiveClientId = pathClient?.id || clientId;
+  const effectiveClientId =
+    navigationClient(clients, pathname, search.get("clientId"), clientId)?.id ??
+    "";
   const selected = clients.find((client) => client.id === effectiveClientId);
   const groups = accountNavGroups(selected?.slug ?? "");
   const logoHref = onPlatformPage
     ? withNavContext("/clients", effectiveClientId, from, to)
     : withNavContext(
-        selected?.slug ? accountToolHref(selected.slug, "dashboard") : "/dashboard",
+        selected?.slug
+          ? accountToolHref(selected.slug, "dashboard")
+          : "/dashboard",
         effectiveClientId,
         from,
         to,
@@ -98,7 +95,11 @@ export function SidebarNav({
   return (
     <aside className="sticky top-0 flex h-screen w-[var(--sidebar-width)] shrink-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)]">
       <div className="border-b border-[var(--sidebar-border)] px-[18px] pb-3.5 pt-[18px]">
-        <Link href={logoHref} className="inline-flex flex-col" aria-label={`${BRAND.logoWordmark} home`}>
+        <Link
+          href={logoHref}
+          className="inline-flex flex-col"
+          aria-label={`${BRAND.logoWordmark} home`}
+        >
           <LogoWordmark inverse className="text-[19px] font-black" />
           <span className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--sidebar-fg-muted)]">
             {BRAND.companyName}
@@ -114,7 +115,11 @@ export function SidebarNav({
         <p className="mb-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sidebar-fg-muted)]">
           Client
         </p>
-        <Suspense fallback={<div className="h-11 rounded-[10px] bg-[var(--sidebar-field)]" />}>
+        <Suspense
+          fallback={
+            <div className="h-11 rounded-[10px] bg-[var(--sidebar-field)]" />
+          }
+        >
           <ClientSwitcher
             clients={clients}
             clientId={effectiveClientId}
@@ -138,9 +143,15 @@ export function SidebarNav({
                 return (
                   <li key={`${item.label}-${item.href}-${item.tab ?? ""}`}>
                     <Link
-                      href={withNavContext(item.href, effectiveClientId, from, to, {
-                        tab: item.tab,
-                      })}
+                      href={withNavContext(
+                        item.href,
+                        effectiveClientId,
+                        from,
+                        to,
+                        {
+                          tab: item.tab,
+                        },
+                      )}
                       className={cn(
                         "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
                         active
@@ -148,7 +159,11 @@ export function SidebarNav({
                           : "text-white hover:bg-[var(--sidebar-field)]",
                       )}
                     >
-                      <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                      <Icon
+                        className="h-4 w-4 shrink-0"
+                        strokeWidth={2}
+                        aria-hidden
+                      />
                       <span>{item.label}</span>
                     </Link>
                   </li>
@@ -169,7 +184,12 @@ export function SidebarNav({
               return (
                 <li key={item.href}>
                   <Link
-                    href={withNavContext(item.href, effectiveClientId, from, to)}
+                    href={withNavContext(
+                      item.href,
+                      effectiveClientId,
+                      from,
+                      to,
+                    )}
                     className={cn(
                       "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] leading-tight transition-colors duration-[120ms]",
                       active
@@ -177,7 +197,11 @@ export function SidebarNav({
                         : "text-white hover:bg-[var(--sidebar-field)]",
                     )}
                   >
-                    <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                    <Icon
+                      className="h-4 w-4 shrink-0"
+                      strokeWidth={2}
+                      aria-hidden
+                    />
                     <span>{item.label}</span>
                   </Link>
                 </li>
