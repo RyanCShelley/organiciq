@@ -110,6 +110,7 @@ def _slot_row(client, month: str, slot, today: date) -> dict:
         # check months later uses the key the action was prescribed with,
         # not whatever the catalog says by then.
         "metric_key": slot.prescription.metric_key,
+        "check_after_days": slot.prescription.check_after_days or CHECK_AFTER_DAYS,
         "check_on": (
             today
             + timedelta(days=slot.prescription.check_after_days or CHECK_AFTER_DAYS)
@@ -143,6 +144,7 @@ def _candidate_row(client, month: str, considered, today: date) -> dict:
         "steps": list(considered.prescription.steps),
         "metric": considered.prescription.metric,
         "metric_key": considered.prescription.metric_key,
+        "check_after_days": considered.prescription.check_after_days or CHECK_AFTER_DAYS,
         "check_on": (
             today
             + timedelta(

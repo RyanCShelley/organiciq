@@ -19,7 +19,7 @@ export type Brief = {
 export type PlanReview = {
   revision: number; strategy: string; focus: string; reason: string; items: Brief[];
   approved_at: string | null; approved_by: string | null;
-  versions: { revision: number; approved_at: string; approved_by: string }[];
+  versions: { revision: number; approved_at: string; approved_by: string; retired_at?: string }[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
   page_evidence_note?: string | null;
   recommendation_limits?: { title: string; target_url: string; reason: string }[];

@@ -156,6 +156,6 @@ export function PlanReviewPanel({ initial, clientId, slug, month, lockedUids = [
       <button className={`${buttonClass} bg-[var(--brand-teal-deep)] text-white`} disabled={pending || actionCount(review.items) > review.capacity || (!dirty && Boolean(review.approved_at))} onClick={() => save(true)}>Approve {actionCount(review.items)} actions</button>
     </div>
     </div>}
-    {review.versions.length > 0 && <details><summary className="cursor-pointer text-sm">Approved history ({review.versions.length})</summary>{review.versions.map(v => <p className="mt-1 text-sm" key={v.revision}>Version {v.revision} · {v.approved_at} · {v.approved_by}</p>)}</details>}
+    {review.versions.length > 0 && <details><summary className="cursor-pointer text-sm">Approved history ({review.versions.length})</summary>{review.versions.map(v => <p className="mt-1 text-sm" key={v.revision}>Version {v.revision}{v.retired_at ? " · Retired" : ""} · {v.approved_at} · {v.approved_by}</p>)}</details>}
   </section>;
 }

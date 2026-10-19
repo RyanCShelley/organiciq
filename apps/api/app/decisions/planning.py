@@ -59,6 +59,7 @@ def proposals(data: dict) -> list[dict]:
             task.update(family=family,
                         action_uid="brief-task-" + sha256(repr((data.get("month"), key, step)).encode()).hexdigest()[:24],
                         steps=[step], done_when=step, finding_ids=[row.get("id")],
+                        check_after_days=row.get("check_after_days") or 28,
                         effort_min=max(5, int(row.get("effort_min", 60)) // max(1, len(row.get("steps") or [step]))))
             item["interventions"].append(task)
     return list(grouped.values())
