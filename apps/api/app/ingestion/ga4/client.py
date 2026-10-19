@@ -101,13 +101,29 @@ def run_report(
             if metadata.get("dataLossFromOtherRow") or metadata.get("subjectToThresholding") or metadata.get("samplingMetadatas"):
                 raise RuntimeError("GA4 report is subject to sampling, thresholding or aggregation loss; a complete replacement could not be verified")
             count = data.get("rowCount")
+            # A zero-match aggregate can omit both repeated headers and the
+            # default rowCount. Observed on selected lead-event session reports:
+            # {kind: "analyticsData#runReport", metadata: {timeZone: ..., ...}}.
+            # Accept only that identifiable aggregate envelope, not an empty
+            # body, a truncated report, or a dimensioned replacement extract.
+            empty_sessions_aggregate = (
+                not dimensions and metrics == ["sessions"]
+                and data.get("kind") == "analyticsData#runReport"
+                and set(data) == {"kind", "metadata"}
+                and isinstance(metadata.get("timeZone"), str)
+                and bool(metadata["timeZone"].strip())
+                and not metadata.get("emptyReason")
+                and not metadata.get("dataTruncationReasons")
+            )
             # Protobuf JSON may omit scalar defaults. An empty successful report
             # with the exact requested headers establishes a zero row count;
             # an empty/malformed body alone does not.
             if (
                 count is None and not data.get("rows") and offset == 0
-                and [header.get("name") for header in data.get("dimensionHeaders", [])] == dimensions
-                and [header.get("name") for header in data.get("metricHeaders", [])] == metrics
+                and (empty_sessions_aggregate or (
+                    [header.get("name") for header in data.get("dimensionHeaders", [])] == dimensions
+                    and [header.get("name") for header in data.get("metricHeaders", [])] == metrics
+                ))
                 and metrics
             ):
                 count = 0
