@@ -3,6 +3,22 @@ import {
   accountToolFromPath,
   accountToolHref,
 } from "@/lib/account-routes";
+import type { Client } from "@/lib/api";
+
+/** Explicit URL context wins over the layout's potentially stale cookie. */
+export function navigationClient(
+  clients: Pick<Client, "id" | "slug">[],
+  pathname: string,
+  queryClientId: string | null,
+  defaultClientId: string,
+) {
+  const path = clientSlugFromPath(pathname);
+  return (
+    clients.find((client) => client.slug === path || client.id === path) ??
+    clients.find((client) => client.id === queryClientId) ??
+    clients.find((client) => client.id === defaultClientId)
+  );
+}
 
 export type NavItem = {
   href: string;
@@ -19,7 +35,8 @@ export type NavGroup = {
 
 export function accountNavGroups(clientSlug: string): NavGroup[] {
   const settingsHref = clientSlug ? `/clients/${clientSlug}` : "/clients";
-  const tool = (path: string) => (clientSlug ? accountToolHref(clientSlug, path) : `/${path}`);
+  const tool = (path: string) =>
+    clientSlug ? accountToolHref(clientSlug, path) : `/${path}`;
   return [
     {
       label: "Account",
@@ -51,7 +68,9 @@ export const ACCOUNT_TOOL_SEGMENTS = ACCOUNT_TOOLS;
  */
 export function clientSlugFromPath(pathname: string): string | null {
   const tools = ACCOUNT_TOOL_SEGMENTS.join("|");
-  const accountTool = pathname.match(new RegExp(`^/([^/]+)/(?:${tools})(?:/|$)`));
+  const accountTool = pathname.match(
+    new RegExp(`^/([^/]+)/(?:${tools})(?:/|$)`),
+  );
   if (accountTool) return accountTool[1];
   const workspace = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
   if (workspace) return workspace[1];
@@ -66,7 +85,11 @@ export function isPlatformContext(pathname: string): boolean {
   return false;
 }
 
-export function isNavActive(pathname: string, href: string, exact = false): boolean {
+export function isNavActive(
+  pathname: string,
+  href: string,
+  exact = false,
+): boolean {
   if (exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
