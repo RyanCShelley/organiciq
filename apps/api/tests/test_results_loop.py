@@ -540,3 +540,23 @@ def test_last_months_results_name_the_pool_each_belongs_to(db: Session, client_a
     _pool_record(db, client_a, "updates")
     rows = previous_results(db, client_a, "2026-10", previous=SEPT)
     assert [r["kind"] for r in rows] == ["update"]
+
+
+def test_partial_provider_window_is_not_frozen_as_a_shipment_baseline(db,client_a):
+    from app.models.gsc import FactGscPage
+    from app.models.integration import Integration,IntegrationProvider
+    from app.models.job import SyncJob,SyncJobStatus
+    db.query(Integration).filter_by(client_id=client_a.id,provider=IntegrationProvider.GSC).one().external_property_id='sc-domain:x.test'
+    db.add(FactGscPage(client_id=client_a.id,date=PRESCRIBED-timedelta(days=1),raw_url='https://x.test/seo',normalized_url='https://x.test/seo',clicks=100,impressions=1000))
+    job=SyncJob(client_id=client_a.id,source='gsc_pages',start_date=PRESCRIBED-timedelta(days=40),end_date=PRESCRIBED,fact_watermark=PRESCRIBED-timedelta(days=1),status=SyncJobStatus.PARTIAL)
+    db.add(job);db.commit()
+    assert measure(db,client_a,'page_clicks',url='https://x.test/seo',as_of=PRESCRIBED).value is None
+    job.fact_watermark=PRESCRIBED;db.commit()
+    assert measure(db,client_a,'page_clicks',url='https://x.test/seo',as_of=PRESCRIBED).value==100
+
+
+def test_old_ranking_is_not_a_current_results_reading(db,client_a):
+    db.add(FactSerRanking(client_id=client_a.id,site_engine_id='test',keyword_id='keyword',date=PRESCRIBED-timedelta(days=10),keyword='seo agency',position=5))
+    db.commit()
+    result=measure(db,client_a,'term_position',term='seo agency',as_of=PRESCRIBED)
+    assert result.value is None and not result.unranked
