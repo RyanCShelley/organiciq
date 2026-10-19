@@ -33,18 +33,18 @@ function metricCell(value: unknown): string {
   return String(value);
 }
 
-export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; clientId: string }) {
+export function AnnotationsTable({ rows, clientId, results = false }: { rows: AnnotationRow[]; clientId: string; results?: boolean }) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-[var(--text-secondary)]">
-        No annotations yet. Upload historical work or add one above.
+        No completed work yet. Review recommendations or log completed work below.
       </p>
     );
   }
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[960px] border-collapse text-sm">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-[0.04em] text-[var(--text-tertiary)]">
             <th className="px-2 py-2 font-semibold">Date</th>
@@ -94,7 +94,7 @@ export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; cl
                   ) : null}
                   <AnnotationNote clientId={clientId} id={row.id} notes={row.notes} />
                 </td>
-                <td className="px-2 py-3">
+                <td className="px-2 py-3"><details open={results}><summary className="cursor-pointer text-sm">{row.measurement_end_date ? `Measurement through ${row.measurement_end_date}` : "Measurement details"}</summary>
                   {row.impact_summary_json?.measurement_note && <p className="mb-2 text-xs text-[var(--text-secondary)]">{row.impact_summary_json.measurement_note}</p>}
                   {!row.measurement_start_date && !baseline?.sessions && !post?.sessions ? (
                     <div className="text-xs text-[var(--text-tertiary)]">Not measured yet</div>
@@ -127,7 +127,7 @@ export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; cl
                     )}
                   </div>
                   )}
-                </td>
+                </details></td>
                 <td className="px-2 py-3">
                   <Badge variant={resultVariant(row.result)}>{resultLabel(row.result)}</Badge>
                 </td>

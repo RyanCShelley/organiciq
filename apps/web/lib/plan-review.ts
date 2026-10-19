@@ -41,7 +41,7 @@ export const actionCount = (items: { steps?: string[] }[]) => items.reduce((n, i
 /** One selectable intervention, with its own assignment and Teamwork identity. */
 export function individualAction(group: Brief, step: string, index: number): Brief {
   const intervention = group.interventions?.find(item => item.steps.length === 1 && item.steps[0] === step);
-  if (intervention) return { ...intervention, title: step.length > 150 ? `${step.slice(0, 147)}…` : step };
+  if (intervention) return { ...intervention };
   return { ...group, action_uid: `${group.action_uid.slice(0, 105)}-task-${index}`,
     title: step.length > 150 ? `${step.slice(0, 147)}…` : step,
     steps: [step], done_when: step,
@@ -88,4 +88,10 @@ export function suggestedPlan(proposals: Brief[], focus: string, capacity: numbe
     }
   }
   return selected;
+}
+
+/** Concise display copy; persisted task scope and delivery identity stay unchanged. */
+export function actionDisplayTitle(item: {id: string; title: string}): string {
+ const labels: Record<string,string> = {"T-1":"Review the search title and description","T-2":"Review the search result format","T-3":"Review the page opening","V-3":"Mark up the existing FAQ","V-4":"Add contextual internal links","V-7":"Add relevant entity markup"};
+ return labels[item.id] ?? item.title;
 }

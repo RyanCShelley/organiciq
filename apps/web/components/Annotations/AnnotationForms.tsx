@@ -31,7 +31,7 @@ export function AnnotationCreateForm({ clientId }: { clientId: string }) {
         startTransition(async () => {
           const result = await createAnnotationAction(formData);
           if (result.ok) {
-            setMessage("Annotation saved.");
+            setMessage("Completed work saved.");
             formRef.current?.reset();
           } else {
             setError(result.error);
@@ -43,53 +43,22 @@ export function AnnotationCreateForm({ clientId }: { clientId: string }) {
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <FieldLabel label="Date">
-          <Input name="date" type="date" required />
-        </FieldLabel>
-        <FieldLabel label="Type">
-          <Select name="annotation_type" defaultValue="growth_action" required>
-            {ANNOTATION_TYPES.map((row) => (
-              <option key={row.value} value={row.value}>
-                {row.label}
-              </option>
-            ))}
-          </Select>
-        </FieldLabel>
-        <FieldLabel label="Growth Action">
-          <Select name="growth_action" defaultValue="">
-            {GROWTH_ACTIONS.map((row) => (
-              <option key={row.value || "none"} value={row.value}>
-                {row.label}
-              </option>
-            ))}
-          </Select>
-        </FieldLabel>
-        <FieldLabel label="Page URL" className="sm:col-span-2 lg:col-span-3">
-          <Input name="page_url" type="url" placeholder="https://…" />
-        </FieldLabel>
-        <FieldLabel label="Description" className="sm:col-span-2 lg:col-span-3">
-          <Input name="description" required placeholder="What changed?" />
-        </FieldLabel>
-        <FieldLabel label="Success metric">
-          <Input name="success_metric" placeholder="e.g. CTR recovery" />
-        </FieldLabel>
-        <FieldLabel label="Completed">
-          <Input name="completed_at" type="date" />
-        </FieldLabel>
-        <FieldLabel label="Measure from">
-          <Input name="measurement_start_date" type="date" />
-        </FieldLabel>
-        <FieldLabel label="Measure to">
-          <Input name="measurement_end_date" type="date" />
-        </FieldLabel>
-        <FieldLabel label="Notes" className="sm:col-span-2 lg:col-span-3">
-          <Input name="notes" placeholder="Optional context" />
-        </FieldLabel>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FieldLabel label="Completed on"><Input name="completed_at" type="date" required /></FieldLabel>
+        <FieldLabel label="Page URL"><Input name="page_url" type="url" placeholder="https://…" /></FieldLabel>
+        <FieldLabel label="What changed?" className="sm:col-span-2"><Input name="description" required /></FieldLabel>
+        <FieldLabel label="Outcome to check"><Input name="success_metric" placeholder="e.g. Search clicks" /></FieldLabel>
+        <FieldLabel label="Notes (optional)"><Input name="notes" /></FieldLabel>
       </div>
+      <details><summary className="cursor-pointer text-sm">Advanced · type and measurement window</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <FieldLabel label="Type"><Select name="annotation_type" defaultValue="growth_action">{ANNOTATION_TYPES.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</Select></FieldLabel>
+        <FieldLabel label="Growth action category"><Select name="growth_action" defaultValue="">{GROWTH_ACTIONS.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</Select></FieldLabel>
+        <FieldLabel label="Measure from"><Input name="measurement_start_date" type="date" /></FieldLabel>
+        <FieldLabel label="Measure to"><Input name="measurement_end_date" type="date" /></FieldLabel>
+      </div><p className="mt-2 text-sm text-[var(--text-secondary)]">Set a measurement window when appropriate. Manual entries are not automatically matched to an engine intervention.</p></details>
 
       <button type="submit" className="btn btn-primary" disabled={pending}>
-        {pending ? "Saving…" : "Add annotation"}
+        {pending ? "Saving…" : "Log completed work"}
       </button>
     </form>
   );

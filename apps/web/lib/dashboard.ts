@@ -1,3 +1,10 @@
+export type RankingReading = {position: number; ranking_url: string | null; observed_on: string};
+export type DashboardExploration = {
+ visibility: {tracked: number; measured: number; top_10: number; matched: number; matched_current_top_10: number; matched_previous_top_10: number; keywords: {term: string; current: RankingReading | null; previous: RankingReading | null}[]};
+ prompts: {prompt: string; provider: string; observed_on: string; mentioned: boolean | null; cited: boolean | null}[];
+ previous_channels: DashboardResponse['traffic']['by_channel'] | null;
+ previous_sessions_series: number[]; previous_leads_series: number[];
+};
 export type ServiceReportingMetric = { current: number | null; previous: number | null; change_pct: number | null };
 export type ServiceReportingRow = { key: string; label: string; channels: string[]; sessions: ServiceReportingMetric; lead_events: ServiceReportingMetric };
 export type ServiceReportingData = {
@@ -47,6 +54,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       previous_to: "",
     },
     effective_periods: data.effective_periods ?? {},
+    exploration: data.exploration,
     service_reporting: data.service_reporting ?? {status: "not_configured", headline_scope: "whole_site", rows: []},
     search_console_sources: data.search_console_sources ?? {properties: [], combined_history: false},
     freshness: Array.isArray(data.freshness) ? data.freshness : [],
@@ -265,6 +273,7 @@ export type DashboardFreshness = {
 };
 
 export type DashboardResponse = {
+  exploration?: DashboardExploration;
   service_reporting?: ServiceReportingData;
   search_console_sources?: {properties: {property: string; clicks: number; impressions: number; observed_days: number; provenance_known: boolean}[]; combined_history: boolean; note?: string};
   effective_periods?: Record<string, {current: [string, string] | null; previous: [string, string] | null}>;

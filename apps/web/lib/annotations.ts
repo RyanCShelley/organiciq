@@ -25,6 +25,7 @@ export const GROWTH_ACTIONS = [
 ] as const;
 
 export type AnnotationRow = {
+  engine_uid?: string | null;
   id: string;
   date: string;
   annotation_type: string;

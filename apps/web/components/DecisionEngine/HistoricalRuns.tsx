@@ -24,7 +24,7 @@ export function HistoricalRuns({
       <select
         className="min-h-[36px] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text-primary)]"
         value={selected}
-        onChange={(event) => router.push(`/${slug}/decision-engine?run=${event.target.value}`)}
+        onChange={(event) => { const query = new URLSearchParams(window.location.search); query.set("run", event.target.value); router.push(`/${slug}/decision-engine?${query}`); }}
       >
         {runs.map((run) => (
           <option key={run.month} value={run.month}>

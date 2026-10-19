@@ -367,5 +367,8 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
         "teamwork_task_id": row.teamwork_task_id,
         "teamwork_task_url": row.teamwork_task_url,
         "assigned_action_id": row.action_id,
+        "before_value": float(row.before_value) if row.before_value is not None else None,
+        "after_value": float(row.after_value) if row.after_value is not None else None,
+        "result": row.result,
         "stale": stale,
     }

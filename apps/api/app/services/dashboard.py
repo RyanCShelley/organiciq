@@ -1304,7 +1304,16 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     )
 
     from app.services.service_reporting import build_service_reporting
+    from app.services.dashboard_exploration import visibility_detail, prompt_detail
+    prior_channels = _traffic_by_channel(db, client.id, ga4_previous, lead_events)
     return {
+        "exploration": {
+            "visibility": visibility_detail(db, client.id, ser_current, ser_previous),
+            "prompts": prompt_detail(db, client.id, ai_current),
+            "previous_channels": prior_channels if ga4_previous else None,
+            "previous_sessions_series": _daily_ga4_traffic_series(db, client.id, ga4_previous)[0],
+            "previous_leads_series": _daily_leads_series(db, client.id, lead_events, ga4_previous),
+        },
         "service_reporting": build_service_reporting(db, client, ga4_current, ga4_previous),
         "period": {
             "from": from_date.isoformat(),

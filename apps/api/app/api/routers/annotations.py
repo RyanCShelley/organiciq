@@ -24,6 +24,7 @@ router = APIRouter(prefix="/annotations", tags=["annotations"])
 
 def _serialize(row) -> AnnotationOut:
     return AnnotationOut(
+        engine_uid=row.engine_uid,
         id=row.id,
         client_id=row.client_id,
         decision_id=row.decision_id,
