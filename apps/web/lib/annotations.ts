@@ -42,6 +42,7 @@ export type AnnotationRow = {
   impact_summary_json: {
     deltas?: Record<string, number | null>;
     suggested_result?: string;
+    measurement_note?: string;
     baseline?: Record<string, number | null>;
     post?: Record<string, number | null>;
   };

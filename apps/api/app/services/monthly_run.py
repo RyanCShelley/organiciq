@@ -400,6 +400,22 @@ def build_record(
 
     # ── Decisions 2 and 3 ───────────────────────────────────────────────
     inputs = load_target_inputs(db, client, exclusions=exclusions)
+    # Internal-link work needs named, readable donors rather than a median
+    # alone. The same source evidence powers retainer and growth suggestions.
+    from dataclasses import replace
+    from app.decisions.page_targets import LinkDonor
+    from app.services.link_gaps import link_gaps
+    from app.services.page_signals import brand_terms, is_navigational
+    from app.services.page_eligibility import classify_page_url
+    page_candidates = load_page_candidates(db, client, today=today)
+    readable_pages = {p.url for p in page_candidates if p.crawl_readable and classify_page_url(p.url).eligible_for_growth_action}
+    donor_gaps = link_gaps(db, client.id, period=gsc_period, targets=set(inputs.pages))
+    brand = brand_terms(client)
+    for url, page in inputs.pages.items():
+        donors = tuple(LinkDonor(g.source_url, g.shared_query, g.source_clicks, g.source_refdomains)
+                       for g in donor_gaps.get(url, []) if g.source_url in readable_pages
+                       and not is_navigational(g.shared_query, brand))
+        inputs.pages[url] = replace(page, link_donors=donors)
     ranked = rank_candidates(inputs.candidates, thresholds=thresholds)
     prescriptions = []
     findings = []
@@ -427,7 +443,6 @@ def build_record(
     # Traffic got a plan of Visibility spillover or an empty one — the engine
     # named the problem and then prescribed for a different branch.
     from app.services.page_eligibility import classify_page_url
-    page_candidates = load_page_candidates(db, client, today=today)
     for ranked_pages, actions in (
         (rank_for_traffic(page_candidates), TRAFFIC_ACTIONS),
         (rank_for_leads(page_candidates), LEAD_ACTIONS),
@@ -590,7 +605,9 @@ def build_record(
 
     return {
         "review_required": True,
-        "recommendation_version": 3,
+        "recommendation_version": 4,
+        "page_evidence_note": (f"Performance is assessed through {today.isoformat()}. Page checks use the successful crawl from {inputs.crawl_date.isoformat()}; inspect the current page before publishing changes."
+                               if inputs.crawl_date else "Page inspection is unavailable. Content-dependent recommendations are withheld."),
         "growth_capacity": allowances.growth_action_allowance,
         "findings": [
             _candidate_row(client, month, Considered(p, reason="Review against the client strategy."), today)
@@ -841,25 +858,42 @@ def maybe_run_month(db: Session, *, today: date | None = None) -> bool:
         db.rollback()
         return False
 
-    # Claim the month before running anything, so a crash partway through
-    # does not restart the whole portfolio on the next loop.
-    checkpoint.last_run_date = today
-    checkpoint.updated_at = now
+    # Save completion per client. A failed client must retry without rerunning
+    # clients that already completed, and the global month is only done when
+    # every eligible client succeeded.
     db.commit()
-
     month = _previous_month(month_key(today))
     ran = 0
     skipped = 0
+    failed = 0
     for client in db.query(Client).filter(Client.status.in_(WORKED_STATUSES)).all():
         if not _has_data(db, client):
             skipped += 1
             continue
+        key = f"{RUN_CHECKPOINT}:{client.id}"
+        done = db.query(SchedulerCheckpoint).filter_by(name=key).one_or_none()
+        if done and done.last_run_date and (done.last_run_date.year, done.last_run_date.month) == (today.year, today.month):
+            continue
         try:
             save_record(db, client, month=month, today=today)
+            done = db.query(SchedulerCheckpoint).filter_by(name=key).one_or_none()
+            if done is None:
+                done = SchedulerCheckpoint(name=key)
+                db.add(done)
+            done.last_run_date = today
+            done.updated_at = now
+            db.commit()
             ran += 1
         except Exception:  # noqa: BLE001 — one bad client must not stop the rest
             db.rollback()
+            failed += 1
             logger.exception("Monthly run failed for %s", client.slug)
+
+    if not failed:
+        checkpoint = db.query(SchedulerCheckpoint).filter_by(name=RUN_CHECKPOINT).one()
+        checkpoint.last_run_date = today
+        checkpoint.updated_at = now
+        db.commit()
 
     logger.info(
         "Monthly run for %s: %d client(s) run, %d skipped for want of data",

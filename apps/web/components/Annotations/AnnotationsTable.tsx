@@ -95,6 +95,7 @@ export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; cl
                   <AnnotationNote clientId={clientId} id={row.id} notes={row.notes} />
                 </td>
                 <td className="px-2 py-3">
+                  {row.impact_summary_json?.measurement_note && <p className="mb-2 text-xs text-[var(--text-secondary)]">{row.impact_summary_json.measurement_note}</p>}
                   {!row.measurement_start_date && !baseline?.sessions && !post?.sessions ? (
                     <div className="text-xs text-[var(--text-tertiary)]">Not measured yet</div>
                   ) : (
@@ -106,7 +107,7 @@ export function AnnotationsTable({ rows, clientId }: { rows: AnnotationRow[]; cl
                       </span>
                     </div>
                     <div>
-                      Leads {metricCell(baseline?.leads)} → {metricCell(post?.leads)}{" "}
+                      Lead events {metricCell(baseline?.leads)} → {metricCell(post?.leads)}{" "}
                       <span className="font-medium text-[var(--text-primary)]">
                         ({formatDelta(deltas.leads_change_pct as number | null | undefined)})
                       </span>
