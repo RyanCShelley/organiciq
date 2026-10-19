@@ -6,6 +6,7 @@ import { savePlanReviewAction } from "@/app/(app)/[clientSlug]/decision-engine/a
 import {
   ACTION_FAMILIES,
   actionDisplayTitle,
+  opportunityDraft,
   actionCount,
   selectedAction,
   toggleAction,
@@ -107,6 +108,10 @@ export function PlanReviewPanel({
     setChangedUid(item.action_uid);
     setStage(3);
   };
+  const opportunitySelected = (uid: string) =>
+    review.items.some((item) =>
+      item.flags?.includes(`review-opportunity:${uid}`),
+    );
   const manual = () =>
     add({
       action_uid: `manual-${crypto.randomUUID()}`,
@@ -343,6 +348,78 @@ export function PlanReviewPanel({
       )}
       {stage === 2 && (!review.approved_at || dirty || editingApproved) && (
         <div className="border-t border-[var(--border)] pt-4">
+          {!!initial.review_opportunities?.length && (
+            <section
+              className="mb-6 rounded-lg bg-[var(--surface-muted)] p-4"
+              aria-label="Review opportunities"
+            >
+              <h3 className="font-semibold">
+                Review opportunities ({initial.review_opportunities.length})
+              </h3>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Observations from the saved {month} assessment, not confirmed
+                page defects. They do not count as selected actions. Choose
+                whether an investigation is useful before deciding a fix.
+              </p>
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                {initial.review_opportunities.map((opportunity) => (
+                  <article
+                    key={opportunity.uid}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-sm"
+                  >
+                    <h4 className="font-semibold">{opportunity.title}</h4>
+                    <p className="mt-2">{opportunity.summary}</p>
+                    <details className="my-3">
+                      <summary className="cursor-pointer">
+                        Evidence & what to review
+                      </summary>
+                      <ul className="mt-2 list-disc space-y-1 pl-4">
+                        {opportunity.evidence.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 font-medium">Why this appeared</p>
+                      <p>{opportunity.screening_rule}</p>
+                      <p className="mt-2 font-medium">Before choosing work</p>
+                      <ul className="list-disc space-y-1 pl-4">
+                        {opportunity.review_checks.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-[var(--text-secondary)]">
+                        {opportunity.limitation}
+                      </p>
+                    </details>
+                    <button
+                      className={buttonClass}
+                      disabled={
+                        pending ||
+                        opportunitySelected(opportunity.uid) ||
+                        actionCount(review.items) >= review.capacity
+                      }
+                      onClick={() =>
+                        add(
+                          opportunityDraft(
+                            opportunity,
+                            `manual-${crypto.randomUUID()}`,
+                          ),
+                        )
+                      }
+                    >
+                      Draft an investigation
+                    </button>
+                    <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                      {opportunitySelected(opportunity.uid)
+                        ? "An investigation for this opportunity is already in your selection."
+                        : actionCount(review.items) >= review.capacity
+                          ? "The current action allowance is full."
+                          : "Adds one local draft action. Confirm a target page and review it before saving or approving."}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <h3 className="font-semibold">Choose individual actions</h3>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Select supported actions once. Use the optional filters to narrow
@@ -475,8 +552,8 @@ export function PlanReviewPanel({
           )}
           {review.proposals.length === 0 && (
             <p className="mt-2 text-sm">
-              No supported recommendations in this run. You can add a custom
-              action below.
+              No verified page fixes in this run. Review the opportunities above
+              when available, or add a custom action below.
             </p>
           )}
           <div className="sticky bottom-3 z-10 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -501,7 +578,8 @@ export function PlanReviewPanel({
             id="selected-plan"
             className="scroll-mt-6 border-t border-[var(--border)] pt-4 font-semibold"
           >
-            Selected work · {actionCount(review.items)} actions
+            Selected work · {actionCount(review.items)}{" "}
+            {actionCount(review.items) === 1 ? "action" : "actions"}
           </h3>
           <p className="text-sm text-[var(--text-secondary)]">
             This is a summary of the actions checked above. Reorder work if
@@ -555,13 +633,14 @@ export function PlanReviewPanel({
                 </div>
                 {changedUid === item.action_uid && (
                   <p className="text-sm font-semibold">
-                    Updated in this draft · {item.steps.length} steps ·{" "}
+                    Updated in this draft · {item.steps.length}{" "}
+                    {item.steps.length === 1 ? "step" : "steps"} ·{" "}
                     {item.evidence.length} evidence lines
                   </p>
                 )}
                 <p className="break-all text-sm">
                   {item.target_url ||
-                    "Choose a target page in Edit action details."}
+                    "Choose the target page below before saving."}
                 </p>
                 <p className="whitespace-pre-line text-sm">{item.why}</p>
                 <ol className="list-decimal space-y-1 pl-5 text-sm">
@@ -586,9 +665,11 @@ export function PlanReviewPanel({
                     ))}
                   </ul>
                 </details>
-                <details>
+                <details open={changedUid === item.action_uid}>
                   <summary className="cursor-pointer text-sm font-semibold">
-                    Edit action details (optional)
+                    {item.target_url
+                      ? "Edit action details (optional)"
+                      : "Choose target page & review action"}
                   </summary>
                   <div className="mt-3 space-y-3">
                     <label className="block text-sm">
@@ -783,7 +864,8 @@ export function PlanReviewPanel({
               }
               onClick={() => save(true)}
             >
-              Approve {actionCount(review.items)} actions
+              Approve {actionCount(review.items)}{" "}
+              {actionCount(review.items) === 1 ? "action" : "actions"}
             </button>
           </div>
         </div>
