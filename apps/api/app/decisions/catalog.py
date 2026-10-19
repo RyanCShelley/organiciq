@@ -537,7 +537,7 @@ SNIPPET_MAX_POSITION = 3.0
 MIN_IMPRESSIONS = 100.0
 
 #: Enough sessions for an engagement rate to mean anything.
-MIN_SESSIONS_FOR_ENGAGEMENT = 50.0
+MIN_SESSIONS_FOR_ENGAGEMENT = 150.0
 
 
 def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
@@ -598,7 +598,7 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
         return None
     return Prescription(
         action_id="T-3",
-        title="Rewrite the opening for the reader the page actually draws",
+        title="Review engagement and visitor intent",
         branch=Branch.TRAFFIC,
         target_url=page.url,
         term=page.top_query,
@@ -612,12 +612,13 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
             "and opening before deciding whether a rewrite is the right intervention."
         ),
         done_when=(
-            "The H1 and the first two paragraphs answer the query the page "
-            "draws, in the words of the customer it is for, with the old "
-            "opening logged."
+            "Compare channel and device mix, visitor intent and lead outcomes. "
+            "Record whether the engagement gap needs a page change, a tracking "
+            "fix or no intervention. Rewrite the opening only if a content "
+            "mismatch is verified."
         ),
-        metric="Engaged session rate",
-        metric_key="engagement_rate",
+        metric="Documented cause and selected next step",
+        metric_key="decision",
         evidence=(
             f"facts_ga4_traffic: {page.sessions:.0f} sessions, "
             f"{rate * 100:.0f}% engaged",
