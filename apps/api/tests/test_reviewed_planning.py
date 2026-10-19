@@ -316,3 +316,19 @@ def test_concurrent_sends_create_one_external_task(db,client,client_a,admin_user
         assert len(calls)==1
     finally:
         app.dependency_overrides[get_db]=previous
+
+
+def test_grouped_interventions_retain_their_own_measurements_and_stable_identities():
+    title={**brief(), 'id':'T-1','steps':['Rewrite the title.'],'metric_key':'page_clicks','metric':'Page clicks'}
+    opening={**brief('other'),'id':'T-3','steps':['Rewrite the opening.'],'metric_key':'engagement_rate','metric':'Engagement'}
+    a=proposals({'month':MONTH,'findings':[title,opening]})[0]
+    assert len(a['steps'])==2
+    assert [(i['id'],i['metric_key']) for i in a['interventions']]==[('T-1','page_clicks'),('T-3','engagement_rate')]
+    b=proposals({'month':MONTH,'findings':[opening,title]})[0]
+    assert {i['action_uid'] for i in a['interventions']}=={i['action_uid'] for i in b['interventions']}
+
+
+def test_retired_approval_remains_history_and_is_not_measured_as_active_work():
+    selected=brief("retired")
+    data={"actions":[],"plan_review":{"approved_at":None,"items":[],"versions":[{"items":[selected],"retired_at":"2026-10-18T20:00:00Z"}]}}
+    assert list(_slotted(data))==[]

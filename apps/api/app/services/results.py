@@ -397,7 +397,7 @@ def _slotted(data: dict[str, Any]):
     for kind, key in SLOTTED_POOLS:
         if kind == "action" and data.get("plan_review"):
             review = data["plan_review"]
-            snapshot = review if review.get("approved_at") else next(iter(reversed(review.get("versions", []))), {})
+            snapshot = review if review.get("approved_at") else next((v for v in reversed(review.get("versions", [])) if not v.get("retired_at")), {})
             actions = snapshot.get("items", [])
         elif kind == "action" and data.get("review_required"):
             actions = []

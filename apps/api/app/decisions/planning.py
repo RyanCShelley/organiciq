@@ -45,13 +45,23 @@ def proposals(data: dict) -> list[dict]:
             item.update(
                 family=family, title=FAMILIES[family], slot=None,
                 action_uid="brief-" + sha256(repr((data.get("month"), key)).encode()).hexdigest()[:24],
-                finding_ids=[], evidence=[], steps=[],
+                finding_ids=[], evidence=[], steps=[], interventions=[],
             )
             grouped[key] = item
         item = grouped[key]
         item["finding_ids"] = list(dict.fromkeys([*item["finding_ids"], row.get("id")]))
         item["evidence"] = list(dict.fromkeys([*item["evidence"], *row.get("evidence", []), row.get("why", "")]))
-        item["steps"] = list(dict.fromkeys([*item["steps"], *(row.get("steps") or [row.get("done_when", "")])]))
+        for step in row.get("steps") or [row.get("done_when", "")]:
+            if step in item["steps"]:
+                continue
+            item["steps"].append(step)
+            task = deepcopy(row)
+            task.update(family=family,
+                        action_uid="brief-task-" + sha256(repr((data.get("month"), key, step)).encode()).hexdigest()[:24],
+                        steps=[step], done_when=step, finding_ids=[row.get("id")],
+                        check_after_days=row.get("check_after_days") or 28,
+                        effort_min=max(5, int(row.get("effort_min", 60)) // max(1, len(row.get("steps") or [step]))))
+            item["interventions"].append(task)
     return list(grouped.values())
 
 

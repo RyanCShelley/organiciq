@@ -1,6 +1,6 @@
 import { visibilitySummary } from "./visibility-summary";
 import assert from "node:assert/strict";
-import { mergeBrief, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
+import { mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
 import type { BranchTest } from "./monthly-record";
 
@@ -70,3 +70,11 @@ assert.match(dataGapGuidance("CTR reference is diagnostic only").next, /does not
 import {resolveQueryRange} from "./date-range";
 assert.deepEqual(resolveQueryRange(undefined, "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});
 assert.deepEqual(resolveQueryRange("custom", "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});
+
+{
+  const base = { action_uid: "group", id: "T-1", family: "priority_page", title: "Page work", branch: "traffic", target_url: "https://example.com/", term: null, why: "Evidence", done_when: "Done", steps: ["Title", "Opening"], evidence: [], finding_ids: [], effort_min: 60, metric: "Clicks", metric_key: "page_clicks", check_after_days: 28 } as Brief;
+  const opening = { ...base, action_uid: "opening", id: "T-3", steps: ["Opening"], metric_key: "engagement_rate", metric: "Engagement" };
+  const selected = individualAction({ ...base, interventions: [opening] }, "Opening", 1);
+  assert.equal(selected.action_uid, "opening");
+  assert.equal(selected.metric_key, "engagement_rate");
+}
