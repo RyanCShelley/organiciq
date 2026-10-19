@@ -194,3 +194,22 @@ def test_mapping_history_uses_only_current_tracker_cohort(db,client_a,monkeypatc
     db.flush()
     assert build(db,client_a,today=DAY)['mapped']==1
     assert db.query(KeywordTarget).filter_by(client_id=client_a.id,keyword='managed cloud services').one().target_url==b
+
+
+def test_map_editor_uses_intent_qualified_owner_not_highest_impression_article(db,client_a,monkeypatch):
+    from datetime import timedelta
+    from app.services.decisions import keyword_page_map_view
+    monkeypatch.setattr('app.services.automatic_keyword_map.active_crawl_source',lambda:'site_crawl')
+    today=date.today()
+    owner=page(db,client_a,'managed-it','Managed IT Services')
+    wrong=page(db,client_a,'what-are-managed-it-services','What Are Managed IT Services?')
+    for p in db.query(FactCrawlPageSnapshot).filter_by(client_id=client_a.id):p.snapshot_date=today
+    keyword(db,client_a,'managed it services',url=wrong)
+    for offset in (0,4,8):
+        db.add(FactGscQueryPage(client_id=client_a.id,date=today-timedelta(days=offset),query='managed it services',raw_url=wrong,normalized_url=wrong,impressions=10000,clicks=100,average_position=1))
+    db.flush()
+    row=keyword_page_map_view(db,client_a.id)['keywords'][0]
+    assert row['suggested_target_url']==owner
+    assert row['suggested_from']=='ownership'
+    assert row['observed_page_url']==wrong
+    assert row['suggested_impressions'] is None
