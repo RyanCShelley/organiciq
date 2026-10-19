@@ -26,7 +26,7 @@ def page(db, client, path, title):
     return url
 
 
-def test_auto_map_preserves_overrides_and_retains_uncertainty(db, client_a, monkeypatch):
+def test_auto_map_preserves_overrides_and_rejects_unrelated_subject_match(db, client_a, monkeypatch):
     monkeypatch.setattr("app.services.automatic_keyword_map.active_crawl_source", lambda: "site_crawl")
     first = page(db, client_a, "pump", "Industrial pump repair")
     second = page(db, client_a, "cloud", "Managed cloud services")
@@ -38,7 +38,9 @@ def test_auto_map_preserves_overrides_and_retains_uncertainty(db, client_a, monk
         score=.9, margin=.3, model="test", computed_on=DAY))
     db.flush()
     result = build(db, client_a, today=DAY)
-    assert result == {"mapped": 1, "preserved": 1, "gaps": 0, "conflicts": 1}
+    assert result == {"mapped": 2, "preserved": 1, "gaps": 0, "conflicts": 0}
+    cloud = db.query(KeywordTarget).filter_by(client_id=client_a.id, keyword="managed cloud services").one()
+    assert cloud.target_url == second  # unrelated pump subject cannot veto cloud ownership
     mapped = db.query(KeywordTarget).filter_by(client_id=client_a.id, keyword="industrial pump repair").one()
     assert mapped.source == "auto" and mapped.target_url == first
     assert mapped.term_role is None  # page ownership does not invent strategic primacy
@@ -157,3 +159,38 @@ def test_page_action_uses_same_reference_and_supported_positions(db, client_a):
     pages = {p.url: p for p in load_page_candidates(db, client_a, today=DAY)}
     assert pages[f'https://{client_a.domain}/service'].expected_clicks == pytest.approx(2 * expected_ctr_percent(2, scenario=REFERENCE_SCENARIO))
     assert pages[f'https://{client_a.domain}/outside-reference'].expected_clicks is None
+
+
+def test_auto_map_downgrades_ambiguous_ownership_and_preserves_watch_overrides(db, client_a, monkeypatch):
+    from app.models.watch_target import WatchTarget
+    from app.services.watchlist import item_key
+    monkeypatch.setattr('app.services.automatic_keyword_map.active_crawl_source',lambda:'site_crawl')
+    a=page(db,client_a,'a','Managed cloud services')
+    b=page(db,client_a,'b','Managed cloud services')
+    keyword(db,client_a,'managed cloud services',url=a)
+    old=KeywordTarget(client_id=client_a.id,keyword='managed cloud services',target_url=a,source='auto')
+    db.add(old)
+    keyword(db,client_a,'excluded service',url=b)
+    db.add(WatchTarget(client_id=client_a.id,kind='keyword',item_key=item_key('keyword','excluded service'),text='excluded service',state='excluded'))
+    db.flush()
+    result=build(db,client_a,today=DAY)
+    assert result['conflicts']==1 and result['preserved']==1
+    assert old.source=='suggested' and old.target_url==a
+    assert 'withheld' in old.note
+
+
+def test_mapping_history_uses_only_current_tracker_cohort(db,client_a,monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setattr('app.services.automatic_keyword_map.active_crawl_source',lambda:'site_crawl')
+    a=page(db,client_a,'a','Managed cloud services')
+    b=page(db,client_a,'b','Managed cloud services')
+    keyword(db,client_a,'managed cloud services')
+    for offset in (0,4,8):
+        db.add(FactSerRanking(client_id=client_a.id,site_engine_id='retired-market',keyword_id='old',keyword='managed cloud services',date=DAY-timedelta(days=offset),position=1,ranking_url=a))
+    db.flush()
+    assert build(db,client_a,today=DAY)['conflicts']==1
+    for offset in (0,4,8):
+        db.add(FactSerRanking(client_id=client_a.id,site_engine_id='test',keyword_id='managed cloud services',keyword='managed cloud services',date=DAY-timedelta(days=offset),position=1,ranking_url=b))
+    db.flush()
+    assert build(db,client_a,today=DAY)['mapped']==1
+    assert db.query(KeywordTarget).filter_by(client_id=client_a.id,keyword='managed cloud services').one().target_url==b
