@@ -162,6 +162,8 @@ def measure(db, client, *, end: date):
             "source": "GA4 sessions, all channels. The headline uses the exact-period provider total when available; detailed channel estimates can sum differently. Direct remains unattributed, not proof of agency influence."},
         "leads": {"count": leads, "sessions": sessions,
             "rate_pct": session_measurement["conversion_rate_pct"],
+            "previous_rate_pct": prior_measurement["conversion_rate_pct"],
+            "previous_session_measurement": prior_measurement,
             "lead_sessions": session_measurement["lead_sessions"], "session_measurement": session_measurement,
             "event_rate_pct": leads / sessions * 100 if leads is not None and sessions else None,
             "monthly_goal": goal, "goal_checkpoint": checkpoint.month if checkpoint else None,
