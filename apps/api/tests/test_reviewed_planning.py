@@ -68,6 +68,22 @@ def test_review_rejects_stale_writes_and_capacity(db, client, client_a, admin_us
     assert client.post(path + "/approve", headers=headers, json={"revision": 2}).status_code == 422
 
 
+def test_recreated_assessment_has_a_new_browser_draft_identity(db, client, client_a, admin_user):
+    first = seed(db, client_a)
+    headers = client_header(client_a.id, admin_user.email)
+    path = f"/decisions/records/{MONTH}/review"
+    before = client.get(path, headers=headers).json()
+    assert before["assessment_id"] == str(first.id)
+    assert client.get(path, headers=headers).json()["assessment_id"] == before["assessment_id"]
+    db.delete(first)
+    db.commit()
+    second = seed(db, client_a)
+    after = client.get(path, headers=headers).json()
+    assert after["revision"] == before["revision"] == 0
+    assert after["assessment_id"] == str(second.id)
+    assert after["assessment_id"] != before["assessment_id"]
+
+
 def test_duplicate_intervention_is_refused_but_distinct_work_on_a_page_is_allowed():
     import pytest
     with pytest.raises(ValueError, match="same action"):
