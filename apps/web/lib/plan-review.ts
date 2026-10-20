@@ -23,6 +23,7 @@ export type PlanReview = {
   review_opportunities?: ReviewOpportunity[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
   page_evidence_note?: string | null;
+  crawl_evidence_limit?: string | null;
   recommendation_limits?: { title: string; target_url: string; reason: string }[];
   setup_findings: { title: string; why: string; target_url: string }[];
 };

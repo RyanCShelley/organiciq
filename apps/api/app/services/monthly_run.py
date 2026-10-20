@@ -63,6 +63,7 @@ from app.services.incident_signals import read_incident_signals
 from app.services.page_signals import load_page_candidates
 from app.services.results import capture_before, previous_results
 from app.services.target_signals import load_target_inputs
+from app.services.crawl_source import crawl_evidence_limit, supported_without_crawl
 from app.services.triage_signals import lead_signals, traffic_signals, visibility_signals
 from app.services.decision_measurements import measure as measure_outcomes
 
@@ -402,6 +403,9 @@ def build_record(
 
     # ── Decisions 2 and 3 ───────────────────────────────────────────────
     inputs = load_target_inputs(db, client, exclusions=exclusions)
+    # Use actual generation time rather than the historical assessment end.
+    # Retaining a good snapshot after a blocked crawl must not make it current.
+    crawl_limit = crawl_evidence_limit(inputs.crawl_date)
     # Internal-link work needs named, readable donors rather than a median
     # alone. The same source evidence powers retainer and growth suggestions.
     from dataclasses import replace
@@ -482,6 +486,9 @@ def build_record(
                       f"Observation: {observation}", "This observation does not establish that an on-site edit will win a citation."),
             steps=("Review the captured answer and cited sources.", "Choose and specify the answer or source improvement using verified facts.", "Recheck the same prompt and engine after the change."),
         ))
+    if crawl_limit:
+        findings = [p for p in findings if supported_without_crawl(p)]
+        prescriptions = [p for p in prescriptions if supported_without_crawl(p)]
     by_branch: dict[Branch, list] = {}
     for prescription in prescriptions:
         by_branch.setdefault(prescription.branch, []).append(prescription)
@@ -524,12 +531,12 @@ def build_record(
         prescriptions=[
             found
             for candidate in rank_for_updates(page_candidates)
-            if not is_excluded(candidate.url, exclusions)
+            if not crawl_limit and not is_excluded(candidate.url, exclusions)
             and (found := prescribe_page(candidate, actions=UPDATE_ACTIONS)) is not None
         ],
         reserved_urls=taken,
         empty_reason=(
-            "No page has lost enough ground to be worth a refresh this month."
+            crawl_limit or "No page has lost enough ground to be worth a refresh this month."
             if open_this_month
             else closed_reason
         ),
@@ -585,7 +592,9 @@ def build_record(
         ))
     # One prize scale for both: searches a month the page could compete for.
     content_prescriptions.sort(key=lambda p: (-p.score, p.term or ""))
-    empty_content = gap_scan.explain_empty()
+    if crawl_limit:
+        content_prescriptions = [p for p in content_prescriptions if supported_without_crawl(p)]
+    empty_content = crawl_limit or gap_scan.explain_empty()
     if not gap_scan.blocked and demand_scan.summary:
         d = demand_scan.summary
         empty_content += (
@@ -607,8 +616,9 @@ def build_record(
 
     return {
         "review_required": True,
+        "crawl_evidence_limit": crawl_limit,
         "recommendation_version": 4,
-        "page_evidence_note": (f"Performance is assessed through {today.isoformat()}. Page checks use the successful crawl from {inputs.crawl_date.isoformat()}; inspect the current page before publishing changes."
+        "page_evidence_note": crawl_limit or (f"Performance is assessed through {today.isoformat()}. Page checks use the successful crawl from {inputs.crawl_date.isoformat()}; inspect the current page before publishing changes."
                                if inputs.crawl_date else "Page inspection is unavailable. Content-dependent recommendations are withheld."),
         "growth_capacity": allowances.growth_action_allowance,
         "findings": [

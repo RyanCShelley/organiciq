@@ -348,6 +348,11 @@ export function PlanReviewPanel({
       )}
       {stage === 2 && (!review.approved_at || dirty || editingApproved) && (
         <div className="border-t border-[var(--border)] pt-4">
+          {initial.crawl_evidence_limit && (
+            <p role="status" className="mb-4 rounded-lg bg-[var(--surface-muted)] p-4 text-sm">
+              {initial.crawl_evidence_limit}
+            </p>
+          )}
           {!!initial.review_opportunities?.length && (
             <section
               className="mb-6 rounded-lg bg-[var(--surface-muted)] p-4"
