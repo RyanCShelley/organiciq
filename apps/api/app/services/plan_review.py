@@ -28,7 +28,7 @@ def view(record, db=None):
         limits = [{"title": rows[i].get("title"), "target_url": rows[i].get("target_url"), "reason": reason}
                   for i, reason in blocked.items()]
         data = {**data, "findings": [row for i, row in enumerate(rows) if i not in blocked]}
-    return {**review, "crawl_evidence_limit": data.get("crawl_evidence_limit"), "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
+    return {**review, "assessment_id": str(record.id), "crawl_evidence_limit": data.get("crawl_evidence_limit"), "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
             "suggested_focus": data.get("constraint"), "review_opportunities": review_opportunities(data),
             "setup_findings": [x for x in data.get("findings", data.get("candidates", [])) if x.get("id") == "V-6"]}
 

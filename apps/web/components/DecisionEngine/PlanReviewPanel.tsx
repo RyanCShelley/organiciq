@@ -7,6 +7,7 @@ import {
   ACTION_FAMILIES,
   actionDisplayTitle,
   opportunityDraft,
+  planDraftKey,
   actionCount,
   selectedAction,
   toggleAction,
@@ -45,7 +46,7 @@ export function PlanReviewPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const draftKey = `organiciq:plan:${clientId}:${month}:${initial.revision}`;
+  const draftKey = planDraftKey(clientId, month, initial);
   const [restoredDraft, setRestoredDraft] = useState(false);
   useEffect(() => {
     try {
@@ -55,7 +56,7 @@ export function PlanReviewPanel({
         Array.isArray(draft.items) &&
         draft.revision === initial.revision
       ) {
-        // Restore only a draft from this exact client/month/server revision.
+        // A recreated assessment must not recover a pre-reset browser draft.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setReview({ ...initial, ...draft });
         setDirty(true);

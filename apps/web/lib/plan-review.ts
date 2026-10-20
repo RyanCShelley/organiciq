@@ -17,6 +17,7 @@ export type Brief = {
 };
 
 export type PlanReview = {
+  assessment_id?: string;
   revision: number; strategy: string; focus: string; reason: string; items: Brief[];
   approved_at: string | null; approved_by: string | null;
   versions: { revision: number; approved_at: string; approved_by: string; retired_at?: string }[];
@@ -27,6 +28,10 @@ export type PlanReview = {
   recommendation_limits?: { title: string; target_url: string; reason: string }[];
   setup_findings: { title: string; why: string; target_url: string }[];
 };
+
+export function planDraftKey(clientId: string, month: string, review: Pick<PlanReview, "assessment_id" | "revision">): string {
+  return `organiciq:plan:v2:${clientId}:${month}:${review.assessment_id ?? "preview"}:${review.revision}`;
+}
 
 export function samePage(left: string, right: string): boolean {
   const key = (value: string) => { try { const url = new URL(value); return `${url.hostname.replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`.toLowerCase(); } catch { return value; } };

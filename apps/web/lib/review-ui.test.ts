@@ -3,6 +3,18 @@ import assert from "node:assert/strict";
 import { actionDisplayTitle, opportunityDraft, mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
 import type { BranchTest } from "./monthly-record";
+import { planDraftKey } from "./plan-review";
+
+{
+  const prior = { assessment_id: "before-reset", revision: 0 };
+  const fresh = { assessment_id: "after-reset", revision: 0 };
+  const storage = new Map([[planDraftKey("client", "2026-09", prior), ["old task"]]]);
+  assert.equal(storage.get(planDraftKey("client", "2026-09", fresh)), undefined);
+  assert.deepEqual(storage.get(planDraftKey("client", "2026-09", prior)), ["old task"]);
+  assert.notEqual(planDraftKey("other-client", "2026-09", prior), planDraftKey("client", "2026-09", prior));
+  assert.notEqual(planDraftKey("client", "2026-10", prior), planDraftKey("client", "2026-09", prior));
+  assert.notEqual(planDraftKey("client", "2026-09", { ...prior, revision: 1 }), planDraftKey("client", "2026-09", prior));
+}
 
 const row = (uid: string, ids: string[], steps: string[]): Brief => ({
   action_uid: uid, id: ids[0], family: "priority_page", title: "Improve page",
