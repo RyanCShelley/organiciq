@@ -353,22 +353,21 @@ export function MonthlyDashboard({
           <div className="period">
             {d.period.from} – {d.period.to}
             <small>
-              Comparison: {d.period.previous_from} – {d.period.previous_to}
+              Compared with {d.period.previous_from} – {d.period.previous_to}
             </small>
           </div>
-          {d.effective_periods?.ga4?.current?.[1] &&
-            d.effective_periods.ga4.current[1] !== d.period.to && (
-              <small className="note">
-                Visits and leads available through{" "}
-                {d.effective_periods.ga4.current[1]}; their comparison uses the
-                same number of days.
-              </small>
-            )}
           <Link className="reviewlink" href={engineHref}>
             Review this month →
           </Link>
         </div>
       </header>
+      {d.effective_periods?.ga4?.current?.[1] &&
+        d.effective_periods.ga4.current[1] !== d.period.to && (
+          <p className="coverage-note" role="status">
+            Visits and leads cover {d.effective_periods.ga4.current.join(" – ")}
+            ; the previous period uses the same number of days.
+          </p>
+        )}
       <div className="summarygrid">
         <Metric
           label="Visibility · top 10"
@@ -382,7 +381,7 @@ export function MonthlyDashboard({
         <Metric
           label="Traffic · site visits"
           value={fmt(sessions.current)}
-          sub="Change in site visits"
+          sub="vs previous period"
           a={sessions.current}
           b={sessions.previous}
           series={d.traffic.ga4_sessions.series}
@@ -641,7 +640,7 @@ export function MonthlyDashboard({
         <div className="sectiontitle">
           <div>
             <span className="step">02</span>
-            <h2>Where are people coming from?</h2>
+            <h2>What is bringing people here?</h2>
             <p>See the trend, then the channels contributing to it.</p>
           </div>
           <button
@@ -712,7 +711,7 @@ export function MonthlyDashboard({
         <div className="sectiontitle">
           <div>
             <span className="step">03</span>
-            <h2>Does the traffic engage?</h2>
+            <h2>Is that traffic useful?</h2>
             <p>
               Engagement gives context. Lead-producing visits show the business
               outcome.
@@ -781,14 +780,14 @@ export function MonthlyDashboard({
           </div>
           <Table
             heads={["Page", "Visits", "Lead events", "Events / 100 visits"]}
-            rows={pages.slice(0, detail === "leads" ? 20 : 5).map((r) => [
-              <span key={r.page} className="pageurl">
-                {r.page}
-              </span>,
-              fmt(r.ga4_sessions),
-              fmt(r.ga4_key_events),
-              fmt(r.session_key_event_rate, 2),
-            ])}
+            rows={pages
+              .slice(0, detail === "leads" ? 20 : 5)
+              .map((r) => [
+                <span key={r.page} className="pageurl">{r.page}</span>,
+                fmt(r.ga4_sessions),
+                fmt(r.ga4_key_events),
+                fmt(r.session_key_event_rate, 2),
+              ])}
           />
           <p className="note">
             Page rates count lead events, not unique converting visits.
@@ -823,15 +822,6 @@ export function MonthlyDashboard({
           </article>
         )}
       </section>
-      <section>
-        <div className="sectiontitle">
-          <div>
-            <span className="step">04</span>
-            <h2>OrganicIQ’s impact</h2>
-            <p>Service contribution and progress since we started.</p>
-          </div>
-        </div>
-      </section>
       <article className="card service">
         <h3>Service contribution</h3>
         <Table
@@ -849,7 +839,8 @@ export function MonthlyDashboard({
       <section>
         <div className="sectiontitle">
           <div>
-            <h3>Progress since we started</h3>
+            <span className="step">04</span>
+            <h2>Progress since we started</h2>
             <p>
               Starting baseline for quarterly review, separate from the
               previous-period comparisons above.
