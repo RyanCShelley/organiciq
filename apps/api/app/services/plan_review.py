@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from app.decisions.planning import effective_record, initial_review, page_identity, proposals, validate_plan
 from app.models.decision import MonthlyRecord
 from app.decisions.review_opportunities import review_opportunities
+from app.decisions.action_reasoning import connect
 
 
 class ReviewConflict(ValueError):
@@ -28,8 +29,8 @@ def view(record, db=None):
         limits = [{"title": rows[i].get("title"), "target_url": rows[i].get("target_url"), "reason": reason}
                   for i, reason in blocked.items()]
         data = {**data, "findings": [row for i, row in enumerate(rows) if i not in blocked]}
-    return {**review, "assessment_id": str(record.id), "crawl_evidence_limit": data.get("crawl_evidence_limit"), "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
-            "suggested_focus": data.get("constraint"), "review_opportunities": review_opportunities(data),
+    return {**review, "assessment_id": str(record.id), "crawl_evidence_limit": data.get("crawl_evidence_limit"), "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": connect(proposals(data), data), "capacity": data.get("growth_capacity", data["action_slots"]),
+            "suggested_focus": data.get("constraint"), "suggested_reason": data.get("reason_text"), "review_opportunities": review_opportunities(data),
             "setup_findings": [x for x in data.get("findings", data.get("candidates", [])) if x.get("id") == "V-6"]}
 
 
@@ -69,7 +70,7 @@ def save(db, record, payload, user):
                 raise ValueError("An assigned, sent or shipped brief cannot be rewritten. Unassign it or add a new brief for new scope.")
     review = {**old, **payload.model_dump(mode="json"), "revision": old["revision"] + 1,
               "approved_at": None, "approved_by": None,
-              "edited_by": str(user.email)}
+              "edited_by": str(user.email), "items": connect(items, data)}
     data["plan_review"] = review
     record.record = data
     db.commit()

@@ -84,3 +84,25 @@ def test_automatic_focus_excludes_legacy_maps_and_inactive_tracker_terms(db, cli
     signals = visibility_signals(db, client_a, today=day, ai_period=None)
     assert signals.priority_keywords == 1
     assert signals.priority_in_top_10 == 1
+
+
+def test_saved_comparison_uses_prior_visit_conversion_not_event_rate(db, client_a, monkeypatch):
+    calls = []
+    def measurement(db, client, start, end):
+        calls.append((start, end))
+        current = start == date(2026, 9, 1)
+        return {"conversion_rate_pct": 3.13 if current else 4.63,
+                "lead_sessions": 38 if current else 58,
+                "sessions": 1215 if current else 1253, "status": "measured"}
+    monkeypatch.setattr("app.services.lead_measurements.session_lead_measurement", measurement)
+    result = measure(db, client_a, end=date(2026, 9, 30))
+    assert calls == [(date(2026, 9, 1), date(2026, 9, 30)), (date(2026, 8, 2), date(2026, 8, 31))]
+    assert result["leads"]["previous_rate_pct"] == 4.63
+    assert result["leads"]["rate_pct"] == 3.13
+    assert result["traffic"]["previous"]["total"] == 1253
+    assert result["leads"]["count"] is None
+
+
+def test_missing_prior_visit_rate_remains_unknown(db, client_a):
+    result = measure(db, client_a, end=date(2026, 9, 30))
+    assert result["leads"]["previous_rate_pct"] is None
