@@ -23,7 +23,7 @@ def test_traffic_review_is_not_a_prescribed_fix_or_approved_task():
     assert 'does not prove SEO impact' in rows[0]['review_checks'][1]
     assert not {'action_uid','steps','approved_at'} & rows[0].keys()
     assert data==before
-    review=view(SimpleNamespace(record=data))
+    review=view(SimpleNamespace(id='assessment-one', record=data))
     assert review['items']==[] and review['proposals']==[] and review['approved_at'] is None
     assert review['review_opportunities']==rows
     assert review['capacity']==3 and data==before
@@ -74,9 +74,9 @@ def test_limited_reach_does_not_turn_unknown_or_stale_rankings_into_failure():
 def test_existing_approval_is_retained_and_opportunity_identity_is_stable():
     data=assessment();data['plan_review']={'revision':7,'items':[], 'approved_at':'2026-10-19','versions':[{'revision':7}]}
     before=deepcopy(data)
-    result=view(SimpleNamespace(record=data))
+    result=view(SimpleNamespace(id='assessment-one', record=data))
     assert result['approved_at']=='2026-10-19' and result['revision']==7
-    assert result['review_opportunities'][0]['uid']==view(SimpleNamespace(record=data))['review_opportunities'][0]['uid']
+    assert result['review_opportunities'][0]['uid']==view(SimpleNamespace(id='assessment-one', record=data))['review_opportunities'][0]['uid']
     assert data==before
 
 
