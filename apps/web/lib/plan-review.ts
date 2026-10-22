@@ -7,7 +7,14 @@ export const ACTION_FAMILIES: Record<string, string> = {
   investigation: "Investigate a material change",
 };
 
+export type ActionReasoning = {
+  status: "supported" | "unresolved";
+  findings: { uid: string | null; rule_id: string; page: string; term: string | null; observation: string; evidence: string[] }[];
+  why_this_action: string; outcome: string; limitation: string;
+};
+
 export type Brief = {
+  reasoning?: ActionReasoning;
   action_uid: string; id: string; family: string; title: string;
   branch: string; target_url: string; term: string | null;
   why: string; done_when: string; steps: string[]; evidence: string[];
@@ -23,6 +30,7 @@ export type PlanReview = {
   versions: { revision: number; approved_at: string; approved_by: string; retired_at?: string }[];
   review_opportunities?: ReviewOpportunity[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
+  suggested_reason?: string | null;
   page_evidence_note?: string | null;
   crawl_evidence_limit?: string | null;
   recommendation_limits?: { title: string; target_url: string; reason: string }[];
