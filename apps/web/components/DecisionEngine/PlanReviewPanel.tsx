@@ -21,6 +21,21 @@ const inputClass =
 const buttonClass =
   "rounded-md border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-50";
 
+function TargetPageLink({ url }: { url: string | null | undefined }) {
+  if (!url) return <>Choose a target page</>;
+  if (!/^https?:\/\//i.test(url)) return <>{url}</>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[var(--brand-teal)] underline underline-offset-2 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      {url}
+    </a>
+  );
+}
+
 export function PlanReviewPanel({
   initial,
   clientId,
@@ -289,11 +304,11 @@ export function PlanReviewPanel({
                       <strong className="mt-1 block">
                         {actionDisplayTitle(item)}
                       </strong>
-                      <span className="mt-2 block break-all text-xs text-[var(--text-secondary)]">
-                        {item.target_url}
-                      </span>
                     </span>
                   </label>
+                  <p className="mt-2 break-all pl-8 text-xs">
+                    <TargetPageLink url={item.target_url} />
+                  </p>
                   <div className="pl-8">
                     <h4>Finding on this page</h4>
                     {supported ? (
@@ -367,7 +382,7 @@ export function PlanReviewPanel({
                     {index + 1}. {actionDisplayTitle(item)}
                   </h4>
                   <p className="break-all">
-                    {item.target_url || "Choose a target page"}
+                    <TargetPageLink url={item.target_url} />
                   </p>
                   <h4>Linked finding</h4>
                   <p>{item.why}</p>
@@ -462,7 +477,7 @@ export function PlanReviewPanel({
             >
               <strong className="text-sm">{actionDisplayTitle(item)}</strong>
               <p className="mt-1 break-all text-xs text-[var(--text-secondary)]">
-                {item.target_url}
+                <TargetPageLink url={item.target_url} />
               </p>
               <p className="mt-2 text-xs">
                 Finding:{" "}
