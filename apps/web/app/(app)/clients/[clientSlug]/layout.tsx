@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { ClientWorkspaceHeader } from "@/components/ClientWorkspaceNav";
+import { ClientWorkspaceHeader, ClientSettingsShell } from "@/components/ClientWorkspaceNav";
 import { loadClientByParam } from "@/lib/context";
 
 export default async function ClientWorkspaceLayout({
@@ -17,7 +17,7 @@ export default async function ClientWorkspaceLayout({
   return (
     <div>
       <ClientWorkspaceHeader clientName={client.client_name} domain={client.domain} />
-      {children}
+      <ClientSettingsShell clientSlug={client.slug}>{children}</ClientSettingsShell>
     </div>
   );
 }

@@ -60,7 +60,9 @@ export function AppTopBar({
       clientId: effectiveClientId,
       from,
       to,
-      persistDefault: true,
+      // Settings do not read reporting dates. Replacing their URL during
+      // hydration can race the first click and discard local form/view state.
+      persistDefault: !pathname.startsWith("/clients/"),
     });
   const isCustom = rangeKey === "custom";
   const showPeriod = supportsPeriod(pathname);

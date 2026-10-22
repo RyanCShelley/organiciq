@@ -117,6 +117,7 @@ export function SyncAll90DaysPanel({
   hasGa4Property,
   hasSerankingProject,
   hasDomain,
+  compact = false,
 }: {
   clientId: string;
   hasGscProperty: boolean;
@@ -124,6 +125,7 @@ export function SyncAll90DaysPanel({
   hasSerankingProject: boolean;
   /** The crawl needs no integration — only somewhere to start. */
   hasDomain: boolean;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
@@ -289,14 +291,14 @@ export function SyncAll90DaysPanel({
 
   return (
     <div className="mt-6 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 p-4">
-      <h2 className="text-lg font-medium">Sync data</h2>
-      <p className="mt-1 text-sm text-[var(--muted)]">
+      <h2 className="text-lg font-medium">{compact ? "Initial sync & retry" : "Sync data"}</h2>
+      {!compact ? <p className="mt-1 text-sm text-[var(--muted)]">
         Pull the last <strong>90 days</strong> for all mapped sources and crawl the site, or sync
         one provider so you do not call Google when you only need SE Ranking
         {mapped.length ? ` (mapped: ${mapped.join(", ")})` : ""}. The crawl reads the site as it is
         today, not ninety days of it. After the first backfill, the platform auto-syncs the last
         few days every morning and re-crawls weekly.
-      </p>
+      </p> : <p className="mt-1 text-sm text-[var(--text-secondary)]">Saved properties sync automatically. Start or retry the full initial pull, including the current site crawl. Detailed jobs and data health remain in Platform.</p>}
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -304,10 +306,10 @@ export function SyncAll90DaysPanel({
           onClick={() => syncSources(allSources, "all sources")}
           className="btn btn-primary disabled:opacity-50"
         >
-          {pending ? "Starting sync…" : active ? "Sync in progress…" : "Sync all (90 days)"}
+          {pending ? "Starting sync…" : active ? "Sync in progress…" : compact ? "Start / retry initial sync" : "Sync all (90 days)"}
         </button>
         {providerButtons.map(({ provider, enabled }) =>
-          enabled ? (
+          enabled && !compact ? (
             <button
               key={provider}
               type="button"
@@ -321,7 +323,7 @@ export function SyncAll90DaysPanel({
             </button>
           ) : null,
         )}
-        {active ? (
+        {active && !compact ? (
           <button
             type="button"
             disabled={pending}

@@ -1,5 +1,6 @@
 "use client";
 
+import { pageIdentity } from "@/lib/client-setup";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
@@ -139,6 +140,7 @@ function Row({
   clientId,
   clientSlug,
   pages,
+  origin,
 }: {
   row: KeywordMapRow;
   clientId: string;
@@ -164,7 +166,8 @@ function Row({
     data.set("clientId", clientId);
     data.set("clientSlug", clientSlug);
     data.set("keyword", row.keyword);
-    data.set("target_url", next?.url ?? forSaving(pageUrl, origin));
+    data.set("target_url", forSaving(next?.url ?? pageUrl, origin));
+    data.set("note", row.note ?? "");
     data.set("term_role", next?.role ?? role);
     data.set("priority", String(next?.priority ?? priority));
     // The group is SE Ranking's, not a judgement, and it rides along so a
@@ -332,7 +335,9 @@ export function KeywordPageMapTable({
   pages,
   clientId,
   clientSlug,
+  initialSearch = "",
 }: {
+  initialSearch?: string;
   rows: KeywordMapRow[];
   pages: string[];
   clientId: string;
@@ -342,8 +347,8 @@ export function KeywordPageMapTable({
   const [matching, startMatching] = useTransition();
   const [matchNote, setMatchNote] = useState<string | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [onlyUnmapped, setOnlyUnmapped] = useState(true);
+  const [query, setQuery] = useState(initialSearch);
+  const [onlyUnmapped, setOnlyUnmapped] = useState(!initialSearch);
   const [onlyPriority, setOnlyPriority] = useState(false);
   const [group, setGroup] = useState("");
   // Volume first: the question this table is usually opened with is "what
@@ -382,10 +387,10 @@ export function KeywordPageMapTable({
       if (onlyPriority && !row.priority) return false;
       if (group && row.group_name !== group) return false;
       if (!needle) return true;
-      return (
-        row.keyword.toLowerCase().includes(needle) ||
-        (row.target_url ?? "").toLowerCase().includes(needle)
-      );
+      if (/^https?:\/\//i.test(query.trim())) {
+        return row.target_url != null && pageIdentity(row.target_url) === pageIdentity(query.trim());
+      }
+      return row.keyword.toLowerCase().includes(needle) || (row.target_url ?? "").toLowerCase().includes(needle);
     });
   }, [rows, query, onlyUnmapped, onlyPriority, group]);
 
@@ -551,7 +556,7 @@ export function KeywordPageMapTable({
       {visible.length === 0 ? (
         <p className="text-sm text-[var(--text-secondary)]">
           {rows.length === 0
-            ? "No tracked keywords yet. Add them to the watchlist and they appear here."
+            ? "No tracked keywords yet. Select the SE Ranking project in Connections and sync its current terms."
             : "Nothing matches that filter."}
         </p>
       ) : (

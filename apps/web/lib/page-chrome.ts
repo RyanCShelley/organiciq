@@ -8,11 +8,18 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
   }
 
   if (pathname.startsWith("/clients/")) {
+    for (const [segment, title, description] of [
+      ["setup", "Client setup", "Connect, configure and review the first assessment."],
+      ["keyword-map", "Pages & Keywords", "Page ownership, stages and conversion destinations."],
+      ["competitors", "Competitors", "The sites competing for this client’s customers."],
+      ["advanced", "Advanced Settings", "Source scope, crawl settings and engine exclusions."],
+      ["team", "Team Access", "Manage this client’s team."],
+    ]) { if (pathname.endsWith(`/${segment}`)) return { title, description }; }
     if (pathname.includes("/conversions")) {
-      return { title: "Conversions", description: "GA4 events that count as a lead." };
+      return { title: "Conversions & Goals", description: "Saved lead definitions, destinations and growth targets." };
     }
     if (pathname.includes("/integrations")) {
-      return { title: "Integrations", description: "Property mapping per data source." };
+      return { title: "Connections", description: "Connect sources and select client properties." };
     }
     if (pathname.includes("/data-health")) {
       return {
@@ -26,7 +33,7 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
     return {
       title: "Client settings",
       description:
-        "Account record for tier allowances, contract date, lead goal, conversions, and strategy sheet.",
+        "General information and growth engine configuration.",
     };
   }
 
