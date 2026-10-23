@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 
 import {
   assignSlotAction,
@@ -37,6 +37,7 @@ export function SlotActionBar({
   month,
   teamworkReady,
   approved = true,
+  onAssignmentSaved,
 }: {
   action: RecordAction;
   state: SlotState | undefined;
@@ -46,6 +47,7 @@ export function SlotActionBar({
   month: string;
   teamworkReady: boolean;
   approved?: boolean;
+  onAssignmentSaved?: (due: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +59,9 @@ export function SlotActionBar({
 
   const [assignee, setAssignee] = useState(state?.assignee_email ?? "");
   const [due, setDue] = useState(state?.due ?? "");
+  const dueField = useRef<HTMLInputElement>(null);
+  const [assignmentSaved, setAssignmentSaved] = useState(false);
+  const assignmentDirty = assignee !== (state?.assignee_email ?? "") || due !== (state?.due ?? "");
   const shippedOn = state?.shipped_on ?? null;
 
   const status = state?.status ?? "planned";
@@ -71,8 +76,8 @@ export function SlotActionBar({
   }
 
   function saveAssignment(nextAssignee: string, nextDue: string) {
-    run(() =>
-      assignSlotAction({
+    run(async () => {
+      const result = await assignSlotAction({
         clientId,
         slug,
         month,
@@ -81,8 +86,13 @@ export function SlotActionBar({
         assigneeName:
           assignees.find((a) => a.email === nextAssignee)?.name ?? null,
         due: nextDue || null,
-      }),
-    );
+      });
+      if (result.ok) {
+        setAssignmentSaved(true);
+        onAssignmentSaved?.(nextDue);
+      }
+      return result;
+    });
   }
 
   /** What would go into Teamwork, for the days the API is not wired up. */
@@ -166,7 +176,7 @@ export function SlotActionBar({
           disabled={pending}
           onChange={(e) => {
             setAssignee(e.target.value);
-            saveAssignment(e.target.value, due);
+            setAssignmentSaved(false);
           }}
         >
           <option value="">Unassigned</option>
@@ -189,13 +199,26 @@ export function SlotActionBar({
           id={`due-${action.action_uid}`}
           type="date"
           className={FIELD}
-          value={due}
+          ref={dueField}
+          defaultValue={state?.due ?? ""}
           disabled={pending}
           onChange={(e) => {
             setDue(e.target.value);
-            saveAssignment(assignee, e.target.value);
+            setAssignmentSaved(false);
           }}
         />
+
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={pending || Boolean(state?.stale)}
+          onClick={() => {
+            const nextDue = dueField.current?.value ?? "";
+            setDue(nextDue);
+            saveAssignment(assignee, nextDue);
+          }}
+        >Save assignment</button>
+        {assignmentSaved ? <span role="status">Assignment saved.</span> : assignmentDirty ? <span>Unsaved assignment changes</span> : null}
 
         {sentUrl ? (
           <a
@@ -210,9 +233,14 @@ export function SlotActionBar({
           <button
             type="button"
             className={BUTTON}
-            disabled={pending || !assignee || !due || Boolean(state?.stale)}
+            disabled={pending || !state?.assignee_email || !state?.due || assignmentDirty || Boolean(state?.stale)}
             onClick={() =>
-              run(() => sendSlotAction({ clientId, slug, month, uid: action.action_uid }))
+              run(() => {
+                if ((dueField.current?.value ?? "") !== (state?.due ?? "")) {
+                  return Promise.resolve({ok: false, error: "Save the assignment changes before sending."});
+                }
+                return sendSlotAction({ clientId, slug, month, uid: action.action_uid });
+              })
             }
           >
             {pending ? "Sending…" : "Send to Teamwork"}

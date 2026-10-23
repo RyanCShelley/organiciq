@@ -12,10 +12,15 @@ that says why it is empty.
 
 from __future__ import annotations
 
+import re
 import statistics
 from datetime import date, timedelta
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 from uuid import UUID
+
+from app.decisions.planning import page_identity
+from app.services.page_ownership import location_tokens, tokens
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -56,6 +61,50 @@ MIN_PAGES_FOR_MEDIAN = 5
 
 #: Which offers suit a reader at each stage, matching the catalog's own rule.
 from app.decisions.catalog import STAGE_FIT  # noqa: E402
+
+
+def rank_offers(
+    url: str, stage: str | None, offers: list[ClientConversionPage],
+    crawl: dict[str, FactCrawlPageSnapshot],
+) -> tuple[str, ...]:
+    """Choose an intent-compatible destination; uncertainty is not a URL tie-break.
+
+    A configured primary is a general fallback, not permission to ignore an
+    explicit location/industry mismatch or send TOFU readers to a BOFU form.
+    Non-primary destinations require readable page evidence.
+    """
+    fits = STAGE_FIT.get(stage or "", ())
+    source = crawl.get(url)
+    source_text = tokens(url + " " + (source.title or "") + " " + " ".join(
+        str(section.get("heading") or "") for section in (source.sections or [])
+        if isinstance(section, dict) and section.get("level") in (1, 2)
+    )) if source else tokens(url)
+    source_location = location_tokens(source) if source else set()
+    ranked = []
+    for offer in offers:
+        target = offer.normalized_url
+        if offer.stage not in fits or page_identity(target) == page_identity(url):
+            continue
+        snapshot = crawl.get(target)
+        readable = bool(snapshot and snapshot.status_code and 200 <= snapshot.status_code < 300
+                        and snapshot.sections is not None)
+        if (snapshot and not readable) or (not readable and not offer.is_primary):
+            continue
+        scope_page = snapshot or SimpleNamespace(normalized_url=target, title=offer.label, sections=[])
+        scope = location_tokens(scope_page)
+        sector = re.search(r'/industries/([^/]+)', urlsplit(target).path)
+        audience = tokens(sector.group(1)) if sector else set()
+        if (scope and not scope <= source_location) or (audience and not audience <= source_text):
+            continue
+        # Prefer a matching specialist destination, then the configured primary.
+        score = (bool(scope or audience), bool(offer.is_primary))
+        ranked.append((score, target))
+    if not ranked:
+        return ()
+    best = max(score for score, _ in ranked)
+    winners = {target for score, target in ranked if score == best}
+    # Several equally eligible destinations do not justify picking alphabetically.
+    return tuple(winners) if len(winners) == 1 else ()
 
 
 def brand_terms(client: Client) -> set[str]:
@@ -266,13 +315,22 @@ def _contested_terms(
         .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
         .all()
     )
-    by_query: dict[str, list[tuple[str, float, float | None]]] = {}
+    # Protocol/www/query variants are one page, not competing content.
+    grouped: dict[tuple[str, str], dict] = {}
     for query, url, impressions, weighted in rows:
         impressions = float(impressions or 0)
         if impressions <= 0 or not is_addressable(url):
             continue
+        key = (query, page_identity(url))
+        item = grouped.setdefault(key, {"url": url, "impressions": 0.0, "weighted": 0.0})
+        item["impressions"] += impressions
+        item["weighted"] += float(weighted or 0)
+        if url.startswith("https://"):
+            item["url"] = url
+    by_query: dict[str, list[tuple[str, float, float | None]]] = {}
+    for (query, _), item in grouped.items():
         by_query.setdefault(query, []).append(
-            (url, impressions, float(weighted or 0) / impressions)
+            (item["url"], item["impressions"], item["weighted"] / item["impressions"])
         )
 
     found: dict[str, list[ContestedTerm]] = {}
@@ -417,13 +475,12 @@ def load_page_candidates(
 
     # Links in from a body, not from a menu. The count on the snapshot is
     # the same figure, but a page missing from the newest crawl has none.
-    offers = {
-        (row.normalized_url or "").strip(): (row.stage or "").strip().lower() or None
-        for row in db.query(ClientConversionPage).filter(
-            ClientConversionPage.client_id == client.id
-        )
-        if (row.normalized_url or "").strip()
-    }
+    offer_rows = list(db.query(ClientConversionPage).filter(
+        ClientConversionPage.client_id == client.id
+    ))
+    offers = {row.normalized_url: (row.stage or "").strip().lower() or None
+              for row in offer_rows if (row.normalized_url or "").strip()}
+
 
     # Every in-content, non-template edge from a page to a declared offer.
     routes: dict[str, set[str]] = {}
@@ -501,7 +558,6 @@ def load_page_candidates(
         total_sessions, engaged = sessions.get(url, (0.0, None))
         snapshot = crawl.get(url)
         stage = stages.get(url)
-        fits = STAGE_FIT.get(stage or "", ())
         out.append(
             PageCandidate(
                 url=url,
@@ -527,13 +583,7 @@ def load_page_candidates(
                 # Never itself. SMA's declared conversion page is its
                 # homepage, so the top lead action told the homepage to add
                 # an in-content link to the homepage.
-                matched_offers=tuple(
-                    sorted(
-                        u
-                        for u, s in offers.items()
-                        if s in fits and u != url
-                    )
-                ),
+                matched_offers=rank_offers(url, stage, offer_rows, crawl),
                 is_conversion_page=url in offers,
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None

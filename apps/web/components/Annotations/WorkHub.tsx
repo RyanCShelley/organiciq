@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import {
@@ -36,8 +36,8 @@ export function WorkHub({
   engineHref: string;
 }) {
   const [tab, setTab] = useState("active"),
-    [owner, setOwner] = useState(""),
-    [due, setDue] = useState("");
+    [owner, setOwner] = useState("");
+  const assignmentDue = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<string[]>([]),
     [message, setMessage] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
@@ -48,7 +48,8 @@ export function WorkHub({
   const key = (row: WorkItem) => `${row.month}:${row.action.action_uid}`;
   const completed = items.filter((row) => Boolean(row.state?.shipped_on));
   const chosen = active.filter((row) => selection.includes(key(row)));
-  const bulk = (send: boolean) =>
+  const bulk = (send: boolean) => {
+    const due = assignmentDue.current?.value || null;
     startTransition(async () => {
       const result = await runWorkBatch(
         chosen.map((row) => ({
@@ -84,6 +85,7 @@ export function WorkHub({
       setMessage(result.messages);
       router.refresh();
     });
+  };
   return (
     <div className="space-y-5">
       <nav className="flex flex-wrap gap-2" aria-label="Work views">
@@ -141,8 +143,9 @@ export function WorkHub({
                   <input
                     className="mt-1 block rounded border border-[var(--border)] bg-[var(--surface)] p-2"
                     type="date"
-                    value={due}
-                    onChange={(e) => setDue(e.target.value)}
+                    ref={assignmentDue}
+                    aria-label="Assignment due date"
+                    disabled={pending}
                   />
                 </label>
                 <button
@@ -241,6 +244,7 @@ export function WorkHub({
                     month={row.month}
                     teamworkReady={row.teamworkReady}
                     approved={row.approved}
+                    onAssignmentSaved={(savedDue) => setMessage([`${actionDisplayTitle(row.action)}: assignment saved${savedDue ? ` · due ${savedDue}` : " · no due date"}`])}
                   />
                 </article>
               ))}
