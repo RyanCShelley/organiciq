@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import { normalizeDashboardResponse } from "./dashboard";
+import { engagementRate, pointChange, promptComparison } from "./dashboard-comparisons";
+const prompt = (id: string, mentioned: boolean | null, provider = "chatgpt") => ({ prompt_id: id, prompt: id, provider, observed_on: "2026-09-30", mentioned, cited: mentioned });
+const result = promptComparison([prompt("same", true), prompt("new", true), prompt("unknown", null)], [prompt("same", false), prompt("old", false), prompt("unknown", true)], "mentioned");
+assert.deepEqual(result, { count: 1, current: 100, previous: 0 });
+assert.deepEqual(promptComparison([prompt("same", true)], [prompt("same", false, "gemini")], "mentioned"), { count: 0, current: null, previous: null });
+assert.equal(pointChange(4, 3), "+1 pp"); assert.equal(pointChange(3, null), "No comparison"); assert.equal(pointChange(0, 0), "0 pp");
+assert.equal(engagementRate([{ channel: "a", label: "A", sessions: 100, views: 100, conversions: 0, bounce_rate: 20 }, { channel: "b", label: "B", sessions: 300, views: 300, conversions: 0, bounce_rate: 60 }]), 50);
+assert.equal(engagementRate([]), null);
+const response = normalizeDashboardResponse({ traffic: { top_pages: [{ page: "/", ga4_sessions: 10 }, { page: "/new", ga4_sessions: 20, previous_ga4_sessions: 0 }] } });
+assert.equal(response.traffic.top_pages[0].previous_ga4_sessions, null);
+assert.equal(response.traffic.top_pages[1].previous_ga4_sessions, 0);
+console.log("dashboard-comparisons: matched cohorts, point changes, weighted engagement and unknown-versus-zero history passed");
