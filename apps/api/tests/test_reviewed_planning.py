@@ -348,3 +348,44 @@ def test_retired_approval_remains_history_and_is_not_measured_as_active_work():
     selected=brief("retired")
     data={"actions":[],"plan_review":{"approved_at":None,"items":[],"versions":[{"items":[selected],"retired_at":"2026-10-18T20:00:00Z"}]}}
     assert list(_slotted(data))==[]
+
+
+import pytest
+
+
+@pytest.mark.parametrize("pool", ["updates", "update_candidates", "new_content", "content_candidates"])
+@pytest.mark.parametrize("workflow", [None, {}, {"in_plan": False}, {"in_plan": True, "status": "skipped"}])
+def test_uncommitted_retainer_proposals_do_not_reserve_growth_pages(db, client, client_a, admin_user, pool, workflow):
+    row = seed(db, client_a)
+    row.record = {**row.record, pool: [{**brief("retainer"), "slot": 1}]}
+    if workflow is not None:
+        db.add(EngineAction(uid="retainer", client_id=client_a.id, month=MONTH, kind="update", **workflow))
+    db.commit()
+    headers = client_header(client_a.id, admin_user.email)
+    path = f"/decisions/records/{MONTH}/review"
+    assert client.put(path, headers=headers, json=payload()).status_code == 200
+    response = client.post(path + "/approve", headers=headers, json={"revision": 1})
+    assert response.status_code == 200, response.text
+    assert response.json()["approved_at"]
+
+
+@pytest.mark.parametrize("workflow", [
+    {"in_plan": True}, {"status": "assigned"}, {"status": "done"},
+    {"assignee_email": "owner@example.com", "in_plan": False},
+    {"sent_at": datetime.now(timezone.utc), "status": "skipped"},
+    {"teamwork_task_id": "existing-task", "in_plan": False},
+    {"shipped_on": date(2026, 10, 1), "in_plan": False},
+])
+def test_selected_or_committed_retainer_work_still_reserves_page(db, client, client_a, admin_user, workflow):
+    row = seed(db, client_a)
+    row.record = {**row.record, "content_candidates": [{**brief("retainer"), "steps": ["Refresh a different content section."], "slot": None}]}
+    db.add(EngineAction(uid="retainer", client_id=client_a.id, month=MONTH, kind="content", **workflow))
+    db.commit()
+    headers = client_header(client_a.id, admin_user.email)
+    path = f"/decisions/records/{MONTH}/review"
+    assert client.put(path, headers=headers, json=payload()).status_code == 200
+    response = client.post(path + "/approve", headers=headers, json={"revision": 1})
+    assert response.status_code == 422
+    assert "already has retainer work" in response.text
+    db.refresh(row)
+    assert not row.record["plan_review"]["approved_at"]
