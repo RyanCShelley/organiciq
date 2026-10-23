@@ -120,7 +120,16 @@ def list_conversion_pages(
         .order_by(ClientConversionPage.is_primary.desc(), ClientConversionPage.label.asc())
         .all()
     )
-    return [ConversionPageOut.model_validate(r) for r in rows]
+    from app.services.page_stage import confirmed_stages
+    from app.services.conversion_stage import resolve
+    confirmed = confirmed_stages(db, client.id)
+    result = []
+    for row in rows:
+        effective, source = resolve(row, confirmed)
+        result.append(ConversionPageOut.model_validate(row).model_copy(
+            update={"effective_stage": effective, "stage_source": source}
+        ))
+    return result
 
 
 @router.put("/conversion-pages", response_model=list[ConversionPageOut])
