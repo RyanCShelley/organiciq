@@ -26,6 +26,6 @@ def prompt_detail(db, client_id, period):
     latest = {}
     for row in db.query(FactSerAiCheck).filter(FactSerAiCheck.client_id == client_id,
             FactSerAiCheck.date >= period[0], FactSerAiCheck.date <= period[1]).order_by(FactSerAiCheck.date.desc()):
-        latest.setdefault((row.llm_id, row.prompt_id), {'prompt': row.prompt, 'provider': engines.get(row.llm_id, row.llm_id),
+        latest.setdefault((row.llm_id, row.prompt_id), {'prompt_id': str(row.prompt_id), 'prompt': row.prompt, 'provider': engines.get(row.llm_id, row.llm_id),
             'observed_on': row.date.isoformat(), 'mentioned': row.brand_mentioned, 'cited': row.brand_cited})
     return list(latest.values())

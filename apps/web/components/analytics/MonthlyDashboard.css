@@ -486,3 +486,13 @@
   outline: 2px solid #0b8077;
   outline-offset: 3px;
 }
+
+.kpi-report .comparison-value { display: grid; justify-items: start; gap: 3px; }
+.kpi-report .comparison-value strong { font-size: inherit; font-variant-numeric: tabular-nums; }
+.kpi-report .comparison-value small, .kpi-report .comparison-note { font-size: 10px; color: #718380; }
+.kpi-report .comparison-value .change { width: fit-content; }
+.kpi-report .funnel .comparison-value { justify-items: end; text-align: right; }
+.kpi-report .aistats .change { display: inline-block; margin-top: 5px; }
+.kpi-report .aistats .comparison-note { display: block; margin-top: 4px; }
+.kpi-report td:not(:first-child) .comparison-value { justify-items: end; }
+.kpi-report .funnel .comparison-value strong { font-size: 18px; }

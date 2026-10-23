@@ -647,7 +647,6 @@ def _lead_rate(leads: int | None, sessions: float | None) -> float | None:
 
 def _channel_models(db, client_id, period):
     from app.models.ga4 import Ga4NativeChannelObservation
-    from app.services.service_reporting import has_native_coverage
     client = db.get(Client, client_id)
     if client and client.service_reporting is not None and has_native_coverage(db, client_id, period):
         return Ga4NativeChannelObservation, Ga4NativeChannelObservation, [Ga4NativeChannelObservation.event_name == ""]
@@ -1081,7 +1080,8 @@ def _top_pages(
     ga4_period: tuple[date, date] | None,
     *,
     lead_events: list[str] | None = None,
-    limit: int = 10,
+    limit: int | None = 10,
+    previous_ga4_period: tuple[date, date] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Pages ranked by contribution to leads, traffic and visibility.
@@ -1154,6 +1154,12 @@ def _top_pages(
     total_sessions = sum(sessions for sessions, _ in ga4_traffic.values())
     total_impressions = sum(impressions for impressions, _ in gsc_by_url.values())
 
+    # Do not limit the previous cohort: a current top page may have ranked
+    # below the old top ten. An absent page is zero only when the caller has
+    # verified complete source coverage for both equal-length periods.
+    prior = {row["page"]: row for row in _top_pages(
+        db, client_id, None, previous_ga4_period, lead_events=lead_events, limit=None
+    )} if previous_ga4_period else {}
     pages: list[dict[str, Any]] = []
     for url in urls:
         sessions, views = ga4_traffic.get(url, (0.0, 0.0))
@@ -1169,6 +1175,10 @@ def _top_pages(
                 "page": url,
                 "ga4_sessions": sessions,
                 "ga4_views": views,
+                "previous_ga4_sessions": prior.get(url, {}).get("ga4_sessions", 0.0) if previous_ga4_period else None,
+                "previous_ga4_views": prior.get(url, {}).get("ga4_views", 0.0) if previous_ga4_period else None,
+                "previous_ga4_key_events": prior.get(url, {}).get("ga4_key_events", 0.0) if previous_ga4_period and lead_events else None,
+                "previous_session_key_event_rate": prior.get(url, {}).get("session_key_event_rate") if previous_ga4_period and lead_events else None,
                 "ga4_key_events": key_events,
                 # Legacy response key: lead-event count per 100 sessions, not the
                 # percentage of sessions with a lead. Multiple events can occur per session.
@@ -1182,7 +1192,7 @@ def _top_pages(
         )
 
     pages.sort(key=lambda row: (row["rank_score"], row["ga4_sessions"]), reverse=True)
-    return pages[:limit]
+    return pages if limit is None else pages[:limit]
 
 
 def _gsc_source_breakdown(db, client_id, period):
@@ -1303,13 +1313,15 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         },
     )
 
-    from app.services.service_reporting import build_service_reporting
+    from app.services.service_reporting import build_service_reporting, has_native_coverage
     from app.services.dashboard_exploration import visibility_detail, prompt_detail
     prior_channels = _traffic_by_channel(db, client.id, ga4_previous, lead_events)
+    page_comparison_ready = has_native_coverage(db, client.id, ga4_current) and has_native_coverage(db, client.id, ga4_previous)
     return {
         "exploration": {
             "visibility": visibility_detail(db, client.id, ser_current, ser_previous),
             "prompts": prompt_detail(db, client.id, ai_current),
+            "previous_prompts": prompt_detail(db, client.id, ai_previous),
             "previous_channels": prior_channels if ga4_previous else None,
             "previous_sessions_series": _daily_ga4_traffic_series(db, client.id, ga4_previous)[0],
             "previous_leads_series": _daily_leads_series(db, client.id, lead_events, ga4_previous),
@@ -1428,7 +1440,8 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             ),
             "by_channel": _traffic_by_channel(db, client.id, ga4_current, lead_events),
             "top_pages": _top_pages(
-                db, client.id, gsc_current, ga4_current, lead_events=lead_events
+                db, client.id, gsc_current, ga4_current, lead_events=lead_events,
+                previous_ga4_period=ga4_previous if page_comparison_ready else None
             ),
         },
     }
