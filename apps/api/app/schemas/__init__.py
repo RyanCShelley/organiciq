@@ -574,6 +574,8 @@ class ConversionPageOut(ORMModel):
     label: str
     stage: str | None = None
     is_primary: bool = False
+    effective_stage: str | None = None
+    stage_source: str = "unknown"
 
 
 class KeywordTargetEntry(BaseModel):

@@ -12,6 +12,8 @@ export type ConversionPage = {
   normalized_url: string;
   label: string;
   stage: string | null;
+  effective_stage?: string | null;
+  stage_source?: string;
   is_primary: boolean;
 };
 
@@ -73,7 +75,7 @@ export function ConversionPagesPanel({
           // stage matches nothing, so two is a silent coin toss.
           return patch.is_primary ? { ...row, is_primary: false } : row;
         }
-        return { ...row, ...patch };
+        return { ...row, ...patch, ...(patch.normalized_url !== undefined ? {effective_stage: null, stage_source: "unknown"} : {}) };
       }),
     );
   }
@@ -149,10 +151,15 @@ export function ConversionPagesPanel({
               >
                 {STAGES.map((stage) => (
                   <option key={stage.value} value={stage.value}>
-                    {stage.label}
+                    {stage.value === "" && row.stage_source === "confirmed_page" && row.effective_stage
+                      ? `Use confirmed page stage — ${STAGES.find((item) => item.value === row.effective_stage)?.label ?? row.effective_stage}`
+                      : stage.label}
                   </option>
                 ))}
               </Select>
+              {!row.stage && row.stage_source === "confirmed_page" ? (
+                <span className="mt-1 block text-xs text-[var(--text-secondary)]">Uses the stage already confirmed in Pages &amp; Keywords. Choose a different stage here only to override it.</span>
+              ) : null}
             </label>
             <div className="flex items-end gap-4 whitespace-nowrap pb-1 sm:col-span-3 lg:col-span-1">
               <label className="flex min-h-[44px] items-center gap-2 text-[13px] text-[var(--text-secondary)]">

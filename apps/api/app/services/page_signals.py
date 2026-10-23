@@ -46,6 +46,7 @@ from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.services.link_gaps import link_gaps
 from app.services.page_stage import confirmed_stages
+from app.services.conversion_stage import resolve as resolve_conversion_stage
 from app.services.serp_features import load as load_serp_features
 from app.services.triage_signals import MANAGED_CHANNELS
 
@@ -66,6 +67,7 @@ from app.decisions.catalog import STAGE_FIT  # noqa: E402
 def rank_offers(
     url: str, stage: str | None, offers: list[ClientConversionPage],
     crawl: dict[str, FactCrawlPageSnapshot],
+    confirmed: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Choose an intent-compatible destination; uncertainty is not a URL tie-break.
 
@@ -83,7 +85,8 @@ def rank_offers(
     ranked = []
     for offer in offers:
         target = offer.normalized_url
-        if offer.stage not in fits or page_identity(target) == page_identity(url):
+        effective_stage, _ = resolve_conversion_stage(offer, confirmed or {})
+        if effective_stage not in fits or page_identity(target) == page_identity(url):
             continue
         snapshot = crawl.get(target)
         readable = bool(snapshot and snapshot.status_code and 200 <= snapshot.status_code < 300
@@ -478,7 +481,7 @@ def load_page_candidates(
     offer_rows = list(db.query(ClientConversionPage).filter(
         ClientConversionPage.client_id == client.id
     ))
-    offers = {row.normalized_url: (row.stage or "").strip().lower() or None
+    offers = {row.normalized_url: resolve_conversion_stage(row, stages)[0]
               for row in offer_rows if (row.normalized_url or "").strip()}
 
 
@@ -583,7 +586,7 @@ def load_page_candidates(
                 # Never itself. SMA's declared conversion page is its
                 # homepage, so the top lead action told the homepage to add
                 # an in-content link to the homepage.
-                matched_offers=rank_offers(url, stage, offer_rows, crawl),
+                matched_offers=rank_offers(url, stage, offer_rows, crawl, stages),
                 is_conversion_page=url in offers,
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None
