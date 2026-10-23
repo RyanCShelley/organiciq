@@ -1,8 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 
+import { pageIdentity } from "@/lib/client-setup";
+import type { KeywordMapRow } from "@/components/DecisionEngine/KeywordPageMapTable";
+import type { ConversionPage } from "@/components/ConversionPagesPanel";
 import { Alert } from "@/components/ui/Alert";
 
 export type PageStageRow = {
@@ -59,9 +62,15 @@ function path(url: string): string {
 export function PageStagesPanel({
   clientId,
   initial,
+  keywords = [],
+  conversions = [],
+  onEditKeywords,
 }: {
   clientId: string;
   initial: PageStagePayload;
+  keywords?: KeywordMapRow[];
+  conversions?: ConversionPage[];
+  onEditKeywords?: (url: string) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -69,7 +78,15 @@ export function PageStagesPanel({
   const [note, setNote] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
 
+  const [search, setSearch] = useState("");
+  const [needsReview, setNeedsReview] = useState(false);
+  const [limit, setLimit] = useState(10);
   const rows = initial.pages;
+  const matchingRows = rows.filter(row => {
+    const terms = keywords.filter(k => k.target_url && pageIdentity(k.target_url) === pageIdentity(row.normalized_url));
+    const needle = search.toLowerCase();
+    return (!needsReview || !row.confirmed) && (!needle || `${row.title ?? ""} ${row.normalized_url} ${terms.map(k => k.keyword).join(" ")}`.toLowerCase().includes(needle));
+  });
   const coverage = initial.coverage;
 
   /** What a row would be confirmed as: an edit, else the confirmed stage, else the suggestion. */
@@ -77,14 +94,7 @@ export function PageStagesPanel({
     return edits[row.normalized_url] ?? row.stage ?? row.suggested_stage ?? "";
   }
 
-  const pendingCount = useMemo(
-    () =>
-      rows.filter((row) => {
-        const value = chosen(row);
-        return value && (!row.confirmed || value !== row.stage);
-      }).length,
-    [rows, edits],
-  );
+  const pendingCount = rows.filter(row => { const value = chosen(row); return value && (!row.confirmed || value !== row.stage); }).length;
 
   const coveragePct = coverage.sessions
     ? (coverage.confirmed_sessions / coverage.sessions) * 100
@@ -188,7 +198,7 @@ export function PageStagesPanel({
             disabled={pending}
             className="inline-flex min-h-[36px] items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 text-[13px] font-semibold disabled:opacity-60"
           >
-            Take the confident ones
+            Use all high-confidence suggestions
           </button>
           <button
             type="button"
@@ -196,7 +206,7 @@ export function PageStagesPanel({
             disabled={pending || pendingCount === 0}
             className="inline-flex min-h-[36px] items-center rounded-lg border border-[var(--brand-teal-deep)] bg-[var(--surface)] px-3.5 text-[13px] font-semibold disabled:opacity-60"
           >
-            Confirm {pendingCount || ""}
+            Save {pendingCount || ""} stage changes
           </button>
         </div>
       </div>
@@ -209,10 +219,17 @@ export function PageStagesPanel({
         </p>
       ) : null}
 
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="min-w-56 flex-1 text-xs">Search pages or assigned keywords<input className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm" value={search} onChange={e => { setSearch(e.target.value); setLimit(10); }} /></label>
+        <label className="flex gap-2 text-sm"><input type="checkbox" checked={needsReview} onChange={e => { setNeedsReview(e.target.checked); setLimit(10); }} />Unconfirmed stages only</label>
+        <p className="text-xs text-[var(--text-secondary)]">{Math.min(limit, matchingRows.length)} of {matchingRows.length} pages</p>
+      </div>
       <ul>
-        {rows.map((row) => {
+        {matchingRows.slice(0, limit).map((row) => {
           const value = chosen(row);
           const changed = value && (!row.confirmed || value !== row.stage);
+          const terms = keywords.filter(k => k.target_url && pageIdentity(k.target_url) === pageIdentity(row.normalized_url));
+          const destination = conversions.find(p => pageIdentity(p.normalized_url) === pageIdentity(row.normalized_url));
           return (
             <li
               key={row.normalized_url}
@@ -241,6 +258,11 @@ export function PageStagesPanel({
                 <p className="mt-0.5 break-words font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
                   {path(row.normalized_url)} · {Math.round(row.sessions)} sessions
                 </p>
+                {onEditKeywords ? <div className="mt-2 space-y-1 text-xs">
+                  <p>Assigned keywords: {terms.length ? `${terms.slice(0, 4).map(t => t.keyword).join(", ")}${terms.length > 4 ? ` · +${terms.length - 4} more` : ""}` : "None confirmed"}</p>
+                  {destination ? <p>Declared conversion page: {destination.label}</p> : null}
+                  <button type="button" className="font-semibold text-[var(--brand-teal)] underline" onClick={() => onEditKeywords(row.normalized_url)}>Review keyword ownership</button>
+                </div> : null}
                 {/* The model's reason, so disagreeing with it is possible. */}
                 {row.rationale ? (
                   <p className="mt-1 text-[12.5px] italic text-[var(--text-secondary)]">
@@ -276,6 +298,8 @@ export function PageStagesPanel({
           );
         })}
       </ul>
+      {!matchingRows.length ? <p className="text-sm text-[var(--text-secondary)]">No pages match these filters.</p> : null}
+      {matchingRows.length > limit ? <button type="button" className="btn btn-secondary" onClick={() => setLimit(limit + 10)}>Show 10 more pages</button> : null}
     </div>
   );
 }

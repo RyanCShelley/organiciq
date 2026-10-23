@@ -1,161 +1,21 @@
 import Link from "next/link";
-
-import { ClientSettingsForm } from "@/components/ClientSettingsForm";
-import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
-import { ClientTeamPanel } from "@/components/ClientTeamPanel";
-import {
-  ExcludedPagesPanel,
-  type ExcludedPage,
-} from "@/components/ExcludedPagesPanel";
-import {
-  SetupChecklist,
-  type SetupState,
-} from "@/components/SetupChecklist";
+import { ClientAccountSection } from "@/components/ClientAccountSection";
+import type { SetupState } from "@/components/SetupChecklist";
 import { Alert } from "@/components/ui/Alert";
-import { SectionHeader } from "@/components/ui/SectionHeader";
-import {
-  apiFetch,
-  type Client,
-  type ConversionDefinition,
-  type Tier,
-  type User,
-} from "@/lib/api";
-import type { ClientTeamMember } from "@/app/(app)/team-actions";
+import { apiFetch } from "@/lib/api";
 import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
+import { setupProgress } from "@/lib/client-setup";
 
-export default async function ClientSettingsPage({
-  params,
-}: {
-  params: Promise<{ clientSlug: string }>;
-}) {
+export default async function ClientSettingsPage({ params }: { params: Promise<{ clientSlug: string }> }) {
   const { clientSlug } = await params;
   const client = await requireWorkspaceClient(clientSlug);
-  const clientId = client.id;
-
-  let tiers: Tier[] = [];
-  let conversions: ConversionDefinition[] = [];
-  let team: ClientTeamMember[] = [];
-  let users: User[] = [];
-  // These endpoints are admin-only; a 403 means "cannot manage", not an error.
-  let canManageTeam = true;
-  let loadError: string | null = null;
   let setup: SetupState | null = null;
-  let excluded: ExcludedPage[] = [];
-
-  try {
-    const freshClient = await apiFetch<Client>(`/clients/${clientId}`, { clientId });
-    Object.assign(client, freshClient);
-  } catch (e) {
-    loadError = e instanceof Error ? e.message : "Failed to load client settings";
-  }
-
-  // Admin-only. Fetched on its own: when it was one of the three loads above, a
-  // staff member's 403 here threw away the client record and the conversions
-  // too, and the whole form came up broken.
-  let conversionsReadable = true;
-  try {
-    conversions = await apiFetch<ConversionDefinition[]>("/admin/conversion-definitions", {
-      clientId,
-    });
-  } catch {
-    // Not readable by staff; absent is not the same as "none defined".
-    conversionsReadable = false;
-  }
-
-  // Who may change the plan is the API's call (admins only); asking it is
-  // the only reliable way to know, since staff can read tiers but not edit.
-  const canEditPlanPromise = apiFetch<{ role: string }>("/auth/me", { clientId })
-    .then((me) => me.role === "sma_admin")
-    .catch(() => false);
-  try {
-    tiers = await apiFetch<Tier[]>("/admin/tiers");
-  } catch {
-    tiers = [];
-  }
-  const canEditPlan = await canEditPlanPromise;
-
-  try {
-    excluded = await apiFetch<ExcludedPage[]>("/decisions/excluded-pages", { clientId });
-  } catch {
-    excluded = [];
-  }
-
-  try {
-    setup = await apiFetch<SetupState>(`/clients/${clientId}/setup`, { clientId });
-  } catch {
-    // The checklist is a guide, not the page. Losing it costs nothing else.
-    setup = null;
-  }
-
-  try {
-    [team, users] = await Promise.all([
-      apiFetch<ClientTeamMember[]>(`/admin/clients/${clientId}/team`, { clientId }),
-      apiFetch<User[]>("/admin/users", { clientId }),
-    ]);
-  } catch {
-    canManageTeam = false;
-  }
-
-  return (
-    <section>
-      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug)} />
-
-      {loadError ? <Alert variant="danger">{loadError}</Alert> : null}
-
-      <div className="space-y-[var(--section-gap)]">
-        {/* First, because it is the only thing on this page that says what to
-            do rather than offering another field to fill in. */}
-        {setup ? (
-          <section className="workspace-section">
-            <SectionHeader
-              title="Setup"
-              description="In order, because each step reads what the one before it produced. Measured now, not remembered."
-            />
-            <div className="workspace-panel">
-              <SetupChecklist state={setup} clientSlug={client.slug} />
-            </div>
-          </section>
-        ) : null}
-
-        <section className="workspace-section">
-          <SectionHeader title="Account record" description="Core fields for this Organic IQ client." />
-          <div className="workspace-panel">
-            <ClientSettingsForm
-              client={client}
-              tiers={tiers}
-              canEditPlan={canEditPlan}
-            />
-          </div>
-        </section>
-
-        <section className="workspace-section">
-          <SectionHeader
-            title="Pages the engine leaves alone"
-            description="Sections you are not working on. The engine will not prescribe growth actions for these, and the reason stays on the record so a decision taken in March is legible in September."
-          />
-          <div className="workspace-panel">
-            <ExcludedPagesPanel clientId={clientId} initial={excluded} />
-          </div>
-        </section>
-
-        <section className="workspace-section">
-          <SectionHeader
-            title="Team access"
-            description="Who can see this client. Team members see nothing until they are added here; admins see every client."
-          />
-          <div className="workspace-panel">
-            <ClientTeamPanel
-              clientId={clientId}
-              clientName={client.client_name}
-              team={team}
-              users={users}
-              canManage={canManageTeam}
-            />
-          </div>
-        </section>
-
-      </div>
-    </section>
-  );
+  try { setup = await apiFetch<SetupState>(`/clients/${client.id}/setup`, { clientId: client.id }); } catch { /* The account stays editable if readiness cannot be checked. */ }
+  const progress = setup ? setupProgress(setup) : null;
+  return <section className="space-y-6">
+    {progress && !progress.complete ? <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-semibold">Finish client setup</h2><p className="text-sm text-[var(--text-secondary)]">{progress.done} of {progress.total} setup stages complete. Continue from the saved configuration.</p></div><Link className="btn btn-primary" href={`${clientHref(client.slug, "setup")}?step=${progress.next}`}>Continue setup</Link></div> : null}
+    {!setup ? <Alert variant="warning">Setup status could not be checked. Your saved settings remain available.</Alert> : null}
+    <ClientAccountSection client={client} />
+  </section>;
 }

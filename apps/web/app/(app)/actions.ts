@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { apiFetch } from "@/lib/api";
+import { isSettingsSection, settingsPatch } from "@/lib/client-settings";
 import { signOut } from "@/lib/auth";
 
 export async function signOutAction() {
@@ -12,6 +13,9 @@ export async function signOutAction() {
 export async function updateClientSettingsAction(formData: FormData) {
   const clientId = String(formData.get("clientId") || "");
   if (!clientId) return { ok: false as const, error: "Missing client" };
+
+  const section = String(formData.get("settings_section") || "");
+  if (!isSettingsSection(section)) return { ok: false as const, error: "Unknown settings section. Reload the page and try again." };
 
   const serviceChoice = String(formData.get("service_reporting") ?? "");
   if (formData.has("service_reporting") && !["", "none", "organiciq", "ad_accelerator", "both"].includes(serviceChoice)) return { ok: false as const, error: "Choose a valid agency service." };
@@ -86,7 +90,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   if (crawlPageLimit != null && (crawlPageLimit < 1 || crawlPageLimit > 5000)) {
     return { ok: false as const, error: "Crawl page limit must be between 1 and 5,000." };
   }
-  if (isEnterprise) {
+  if (isEnterprise && section === "general" && !planLocked) {
     if (
       customKeyword == null ||
       customContent == null ||
@@ -138,7 +142,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     lead_goal_overrides: leadGoalOverrides,
   };
 
-  if (!body.client_name || !body.domain || (!planLocked && !("tier_id" in body && body.tier_id))) {
+  if (section === "general" && (!body.client_name || !body.domain || (!planLocked && !("tier_id" in body && body.tier_id)))) {
     return { ok: false as const, error: "Name, domain, and tier are required." };
   }
   if (body.monthly_lead_goal != null && Number.isNaN(body.monthly_lead_goal)) {
@@ -149,7 +153,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     await apiFetch(`/clients/${clientId}`, {
       method: "PATCH",
       clientId,
-      body,
+      body: settingsPatch(body, section),
     });
   } catch (e) {
     return {

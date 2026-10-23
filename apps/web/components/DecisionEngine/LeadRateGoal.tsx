@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { saveLeadRateGoalAction } from "@/app/(app)/[clientSlug]/decision-engine/actions";
 
-export function LeadRateGoal({ initial, actual, clientId, slug }: { initial: number | null; actual: number | null; clientId: string; slug: string }) {
+export function LeadRateGoal({ initial, actual, clientId, slug, expanded = false }: { expanded?: boolean; initial: number | null; actual: number | null; clientId: string; slug: string }) {
   const [target, setTarget] = useState(initial);
   const [input, setInput] = useState(initial?.toString() ?? "");
   const [message, setMessage] = useState("");
@@ -10,7 +10,7 @@ export function LeadRateGoal({ initial, actual, clientId, slug }: { initial: num
   return <div className="mt-3 rounded-md bg-[var(--surface-muted)] p-3 text-sm">
     <p className="font-semibold">Current target conversion rate: {target == null ? "Not configured" : `${target}%`}</p>
     <p className="mt-1">{actual == null || target == null ? "A measured rate and a target rate are needed to judge performance." : `${actual.toFixed(2)}% actual versus ${target}% target · ${(actual / target * 100).toFixed(0)}% of rate goal (${actual >= target ? "at or above target" : "below target"}).`}</p>
-    <details className="mt-2"><summary className="cursor-pointer">Set target conversion rate</summary>
+    <details className="mt-2" open={expanded || undefined}><summary className="cursor-pointer">Set target conversion rate</summary>
       <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={event => {
         event.preventDefault(); startTransition(async () => {
           const value = input.trim() ? Number(input) : null;

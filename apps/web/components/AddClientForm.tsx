@@ -40,7 +40,7 @@ export function AddClientForm({ tiers }: { tiers: Tier[] }) {
           <h2 className="section-title">Add client</h2>
           <p className="mt-1 text-[12.5px] text-[var(--text-tertiary)]">
             Name, domain and tier are required. Everything else is editable in Client
-            settings once the workspace exists.
+            settings as you continue through setup.
           </p>
         </div>
         <button
@@ -78,7 +78,7 @@ export function AddClientForm({ tiers }: { tiers: Tier[] }) {
             }
             setOpen(false);
             // Land in the new workspace — integrations are the next step.
-            router.push(`/clients/${result.slug}/integrations`);
+            router.push(`/clients/${result.slug}/setup?step=0`);
             router.refresh();
           });
         }}

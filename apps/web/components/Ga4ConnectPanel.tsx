@@ -1,5 +1,6 @@
 "use client";
 
+import { syncSelectedProperty } from "@/lib/setup-sync";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -71,12 +72,14 @@ export function Ga4ConnectPanel({
       body: JSON.stringify({ clientId, property_id: selected }),
     });
     const text = await res.text();
-    setPending(false);
     if (!res.ok) {
+      setPending(false);
       setMessage(text || "Failed to save property");
       return;
     }
-    setMessage("GA4 property saved — use Sync GA4 below to pull data.");
+    const syncError = await syncSelectedProperty(clientId, ["ga4"]);
+    setMessage(syncError ?? "GA4 property saved. Initial data sync started or already running.");
+    setPending(false);
     router.refresh();
   }
 
@@ -95,7 +98,7 @@ export function Ga4ConnectPanel({
           onClick={connectGoogle}
           className="btn btn-primary btn-sm disabled:opacity-50"
         >
-          {connected ? "Reconnect Google" : "Connect Google"}
+          {connected ? "Reconnect Google" : "Connect GA4"}
         </button>
         {connected ? (
           <button

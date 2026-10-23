@@ -52,11 +52,11 @@ from app.models.seranking import FactSerKeyword
 LINKS = {
     "account": ("workspace", ""),
     "sources": ("workspace", "integrations"),
-    "pull": ("workspace", "jobs"),
+    "pull": ("workspace", "integrations"),
     "leads": ("workspace", "conversions"),
-    "baseline": ("workspace", ""),
+    "baseline": ("workspace", "conversions"),
     "conversion_pages": ("workspace", "conversions"),
-    "page_stages": ("workspace", "conversions"),
+    "page_stages": ("workspace", "keyword-map"),
     "keyword_targets": ("workspace", "keyword-map"),
     "first_run": ("tool", "decision-engine"),
 }
@@ -108,7 +108,7 @@ def setup_steps(db: Session, client: Client) -> list[Step]:
     steps.append(
         Step(
             key="account",
-            title="Account record",
+            title="General Information",
             detail=f"{client.client_name} · {client.domain}",
             done=bool(client.client_name and client.domain and client.tier_id),
         )
@@ -119,7 +119,7 @@ def setup_steps(db: Session, client: Client) -> list[Step]:
         db.query(Integration).filter(Integration.client_id == client.id).all()
     )
     connected = [
-        i for i in integrations if i.connection_status == ConnectionStatus.CONNECTED
+        i for i in integrations if i.connection_status == ConnectionStatus.CONNECTED and i.external_property_id
     ]
     connected_names = sorted(i.provider.value for i in connected)
     steps.append(
@@ -129,7 +129,7 @@ def setup_steps(db: Session, client: Client) -> list[Step]:
             detail=(
                 ", ".join(connected_names) if connected_names else "none connected yet"
             ),
-            done=len(connected) >= 3,
+            done={"ga4", "gsc", "se_ranking"}.issubset(connected_names),
         )
     )
 

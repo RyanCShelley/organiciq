@@ -1,10 +1,8 @@
-import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { DataTable } from "@/components/analytics/DataTable";
 import { StatusBadge } from "@/components/analytics/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type DataHealthRow } from "@/lib/api";
-import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
 
 export default async function ClientDataHealthPage({
@@ -29,7 +27,6 @@ export default async function ClientDataHealthPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "data-health")} />
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
