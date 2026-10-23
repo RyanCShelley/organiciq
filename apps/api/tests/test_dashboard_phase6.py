@@ -785,3 +785,37 @@ def test_historical_dashboard_uses_dated_readings_for_current_cohort(db, client_
     assert _tracked_keyword_position(db, client_a.id, period) == 8
     assert _keyword_distribution(db, client_a.id, period) == {
         "top_3": 0, "top_10": 1, "top_20": 0, "beyond_20": 0, "not_ranking": 0}
+
+
+def test_page_comparison_reads_the_entire_previous_cohort(db, client_a):
+    from app.services.dashboard import _top_pages
+    current = (date(2026, 9, 1), date(2026, 9, 30))
+    previous = (date(2026, 8, 2), date(2026, 8, 31))
+    target = "https://example.com/rising"
+    _ga4_page(db, client_a.id, url=target, day=current[0], sessions=100, views=150)
+    _ga4_lead(db, client_a.id, url=target, day=current[0], count=5)
+    _ga4_page(db, client_a.id, url=target, day=previous[0], sessions=2, views=3)
+    _ga4_lead(db, client_a.id, url=target, day=previous[0], count=1)
+    for i in range(12):
+        _ga4_page(db, client_a.id, url=f"https://example.com/old-{i}", day=previous[0], sessions=500, views=600)
+    db.commit()
+    row = _top_pages(db, client_a.id, None, current, lead_events=["generate_lead"], limit=1, previous_ga4_period=previous)[0]
+    assert row["page"] == target
+    assert row["previous_ga4_sessions"] == 2
+    assert row["previous_ga4_key_events"] == 1
+    assert row["previous_session_key_event_rate"] == 50
+
+
+def test_page_comparison_missing_coverage_is_not_a_zero(db, client_a):
+    from app.services.dashboard import _top_pages
+    window = (date(2026, 9, 1), date(2026, 9, 30))
+    _ga4_page(db, client_a.id, url="https://example.com/new", day=window[0], sessions=10, views=10)
+    db.commit()
+    row = _top_pages(db, client_a.id, None, window, lead_events=["generate_lead"])[0]
+    assert row["previous_ga4_sessions"] is None
+    assert row["previous_ga4_key_events"] is None
+    # Only a verified, complete prior window allows a missing page to be zero.
+    row = _top_pages(db, client_a.id, None, window, lead_events=["generate_lead"], previous_ga4_period=(date(2026, 8, 2), date(2026, 8, 31)))[0]
+    assert row["previous_ga4_sessions"] == 0
+    assert row["previous_ga4_key_events"] == 0
+    assert row["previous_session_key_event_rate"] is None
