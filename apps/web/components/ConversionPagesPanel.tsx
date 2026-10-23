@@ -16,7 +16,7 @@ export type ConversionPage = {
 };
 
 const STAGES = [
-  { value: "", label: "Any stage" },
+  { value: "", label: "Stage not set" },
   { value: "tofu", label: "Early — just learning" },
   { value: "mofu", label: "Comparing options" },
   { value: "bofu", label: "Ready to buy" },

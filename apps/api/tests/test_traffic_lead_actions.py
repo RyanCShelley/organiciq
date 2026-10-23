@@ -336,7 +336,9 @@ def test_loader_requires_declared_offer_intent_and_first_party_crawl(db, client_
     db.commit()
     page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
     assert page.crawl_readable and page.matched_offers==() and _l(page) is None
-    destination.stage='mofu';db.flush()
+    destination.stage='mofu'
+    db.add(FactCrawlPageSnapshot(client_id=client_a.id,source=CRAWL_SOURCE_FIRST_PARTY,snapshot_date=today,raw_url=offer,normalized_url=offer,status_code=200,sections=[]))
+    db.flush()
     page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
     assert page.matched_offers==(offer,) and _l(page).action_id=='L-1'
 
