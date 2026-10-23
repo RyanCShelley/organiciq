@@ -1,4 +1,5 @@
 "use client";
+import { engagementRate, promptComparison, pointChange } from "@/lib/dashboard-comparisons";
 import React, { useState, useId } from "react";
 import Link from "next/link";
 import type { DashboardResponse, RankingReading } from "@/lib/dashboard";
@@ -32,6 +33,13 @@ function Change({
       {delta(a, b)}
     </span>
   );
+}
+function PointChange({ a, b, lowerIsBetter = false }: { a: number | null | undefined; b: number | null | undefined; lowerIsBetter?: boolean }) {
+  const direction = a == null || b == null || a === b ? "neutral" : (a > b) !== lowerIsBetter ? "up" : "down";
+  return <span className={`change ${direction}`}>{pointChange(a, b)}</span>;
+}
+function ComparisonValue({ current, previous, rate = false, decimals = 0, showChange = true, lowerIsBetter = false }: { current: number | null | undefined; previous: number | null | undefined; rate?: boolean; decimals?: number; showChange?: boolean; lowerIsBetter?: boolean }) {
+  return <div className="comparison-value"><strong>{rate ? pct(current) : fmt(current, decimals)}</strong><small>Previous {rate ? pct(previous) : fmt(previous, decimals)}</small>{showChange ? rate ? <PointChange a={current} b={previous} lowerIsBetter={lowerIsBetter} /> : <Change a={current} b={previous} /> : null}</div>;
 }
 function Table({
   heads,
@@ -191,7 +199,7 @@ function Chart({
             onMouseEnter={() => setHover(i)}
           >
             <title>
-              {dates[i]}: {v}; previous {previous[i] ?? "not measured"}
+              {`${dates[i]}: ${v}; previous ${previous[i] ?? "not measured"}`}
             </title>
           </rect>
         ))}
@@ -221,6 +229,7 @@ function Metric({
   a,
   b,
   series = [],
+  comparison,
 }: {
   label: string;
   value: string;
@@ -228,13 +237,14 @@ function Metric({
   a?: number | null;
   b?: number | null;
   series?: number[];
+  comparison?: React.ReactNode;
 }) {
   return (
     <article className="card metric">
       <div className="eyebrow">{label}</div>
       <div className="metricvalue">{value}</div>
       <div className="metricfoot">
-        <Change a={a} b={b} />
+        {comparison ?? <Change a={a} b={b} />}
         <span>{sub}</span>
       </div>
       {series.length > 1 && (
@@ -258,12 +268,10 @@ function Metric({
 export function MonthlyDashboard({
   data: d,
   clientName = "Performance overview",
-  engineHref,
   settingsHref,
 }: {
   data: DashboardResponse;
   clientName?: string;
-  engineHref: string;
   settingsHref: string;
 }) {
   const [detail, setDetail] = useState(""),
@@ -302,14 +310,14 @@ export function MonthlyDashboard({
     d.exploration?.previous_channels?.map((r) => [r.channel, r]),
   );
   const channels = d.traffic.by_channel;
-  const known = channels.filter((r) => r.bounce_rate != null),
-    knownVisits = known.reduce((a, r) => a + r.sessions, 0);
-  const bounce = knownVisits
-    ? known.reduce((a, r) => a + r.sessions * r.bounce_rate!, 0) / knownVisits
-    : null;
+  const engagement = engagementRate(channels);
+  const previousEngagement = engagementRate(d.exploration?.previous_channels);
   const promptRows = d.exploration?.prompts ?? [],
     mentionRows = promptRows.filter((r) => r.mentioned != null),
     citationRows = promptRows.filter((r) => r.cited != null);
+  const previousPrompts = d.exploration?.previous_prompts ?? [];
+  const mentionChange = promptComparison(promptRows, previousPrompts, "mentioned");
+  const citationChange = promptComparison(promptRows, previousPrompts, "cited");
   const providers = [
     ...new Set((d.exploration?.prompts ?? []).map((r) => r.provider)),
   ].map((provider) => {
@@ -349,25 +357,6 @@ export function MonthlyDashboard({
             into leads?
           </p>
         </div>
-        <div className="headeractions">
-          <div className="period">
-            {d.period.from} – {d.period.to}
-            <small>
-              Comparison: {d.period.previous_from} – {d.period.previous_to}
-            </small>
-          </div>
-          {d.effective_periods?.ga4?.current?.[1] &&
-            d.effective_periods.ga4.current[1] !== d.period.to && (
-              <small className="note">
-                Visits and leads available through{" "}
-                {d.effective_periods.ga4.current[1]}; their comparison uses the
-                same number of days.
-              </small>
-            )}
-          <Link className="reviewlink" href={engineHref}>
-            Review this month →
-          </Link>
-        </div>
       </header>
       <div className="summarygrid">
         <Metric
@@ -378,6 +367,7 @@ export function MonthlyDashboard({
               : "Not measured"
           }
           sub={`${v?.top_10 ?? 0} of ${v?.measured ?? 0} measured terms`}
+          comparison={<PointChange a={v?.matched ? 100 * v.matched_current_top_10 / v.matched : null} b={v?.matched ? 100 * v.matched_previous_top_10 / v.matched : null} />}
         />
         <Metric
           label="Traffic · site visits"
@@ -389,8 +379,9 @@ export function MonthlyDashboard({
         />
         <Metric
           label="Engagement"
-          value={bounce == null ? "Not measured" : pct(100 - bounce)}
+          value={pct(engagement)}
           sub="Channel-based engagement rate"
+          comparison={<PointChange a={engagement} b={previousEngagement} />}
         />
         <Metric
           label="Visits generating a lead"
@@ -533,6 +524,8 @@ export function MonthlyDashboard({
                   )}
                 </b>
                 <span>Brand mention presence</span>
+                <PointChange a={mentionChange.current} b={mentionChange.previous} />
+                <small className="comparison-note">{mentionChange.count} comparable prompts</small>
               </div>
               <div>
                 <b>
@@ -544,6 +537,8 @@ export function MonthlyDashboard({
                   )}
                 </b>
                 <span>Citation / link presence</span>
+                <PointChange a={citationChange.current} b={citationChange.previous} />
+                <small className="comparison-note">{citationChange.count} comparable prompts</small>
               </div>
             </div>
             <Table
@@ -699,11 +694,10 @@ export function MonthlyDashboard({
               rows={[...pages]
                 .sort((a, b) => b.ga4_sessions - a.ga4_sessions)
                 .slice(0, 10)
-                .map((r) => [r.page, fmt(r.ga4_sessions), fmt(r.ga4_views)])}
+                .map((r) => [r.page, <ComparisonValue key="visits" current={r.ga4_sessions} previous={r.previous_ga4_sessions} />, <ComparisonValue key="views" current={r.ga4_views} previous={r.previous_ga4_views} />])}
             />
             <p className="note">
-              Historical page comparisons are not available in this report; page
-              gains and losses are not inferred.
+              Page comparisons use equal-length observed periods. Missing history is shown as unavailable.
             </p>
           </article>
         )}
@@ -741,21 +735,18 @@ export function MonthlyDashboard({
             <div className="funnel">
               <div>
                 <span>Site visits</span>
-                <b>{fmt(sessions.current)}</b>
+                <ComparisonValue current={sessions.current} previous={sessions.previous} />
               </div>
               <div>
                 <span>Visits generating at least one lead</span>
-                <b>{fmt(d.conversions.lead_sessions?.current)}</b>
+                <ComparisonValue current={d.conversions.lead_sessions?.current} previous={d.conversions.lead_sessions?.previous} />
               </div>
               <div className="emphasis">
                 <span>Visit-based lead conversion</span>
-                <b>{pct(rate?.current)}</b>
+                <ComparisonValue current={rate?.current} previous={rate?.previous} rate />
               </div>
             </div>
             <div className="ministats">
-              <span>
-                Previous <b>{pct(rate?.previous)}</b>
-              </span>
               <span>
                 Target <b>{pct(d.conversions.session_rate_target_pct)}</b>
               </span>
@@ -785,9 +776,9 @@ export function MonthlyDashboard({
               <span key={r.page} className="pageurl">
                 {r.page}
               </span>,
-              fmt(r.ga4_sessions),
-              fmt(r.ga4_key_events),
-              fmt(r.session_key_event_rate, 2),
+              <ComparisonValue key="visits" current={r.ga4_sessions} previous={r.previous_ga4_sessions} />,
+              <ComparisonValue key="events" current={d.conversions.configured ? r.ga4_key_events : null} previous={r.previous_ga4_key_events} />,
+              <ComparisonValue key="rate" current={d.conversions.configured ? r.session_key_event_rate : null} previous={r.previous_session_key_event_rate} decimals={2} showChange={false} />,
             ])}
           />
           <p className="note">
@@ -804,10 +795,8 @@ export function MonthlyDashboard({
               rows={channels.map((r) => [
                 r.label,
                 fmt(r.sessions),
-                r.bounce_rate == null
-                  ? "Not measured"
-                  : pct(100 - r.bounce_rate),
-                pct(r.bounce_rate),
+                <ComparisonValue key="engagement" current={r.bounce_rate == null ? null : 100 - r.bounce_rate} previous={previous.get(r.channel)?.bounce_rate == null ? null : 100 - previous.get(r.channel)!.bounce_rate!} rate />,
+                <ComparisonValue key="bounce" current={r.bounce_rate} previous={previous.get(r.channel)?.bounce_rate} rate lowerIsBetter />,
               ])}
             />
             <p className="note">
@@ -838,8 +827,8 @@ export function MonthlyDashboard({
           heads={["Service", "Visits", "Lead events"]}
           rows={(d.service_reporting?.rows ?? []).map((r) => [
             r.label,
-            fmt(r.sessions.current),
-            fmt(r.lead_events.current),
+            <ComparisonValue key="visits" current={r.sessions.current} previous={r.sessions.previous} />,
+            <ComparisonValue key="events" current={r.lead_events.current} previous={r.lead_events.previous} />,
           ])}
         />
         <p className="note">
@@ -893,7 +882,7 @@ export function MonthlyDashboard({
                 "Lead event rate · legacy baseline",
                 pct(d.baseline.lead_rate),
                 pct(d.baseline.vs_current.lead_rate?.current),
-                <Change
+                <PointChange
                   key="rate"
                   a={d.baseline.vs_current.lead_rate?.current}
                   b={d.baseline.lead_rate}

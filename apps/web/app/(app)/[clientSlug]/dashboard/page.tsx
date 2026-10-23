@@ -1,5 +1,4 @@
 import { MonthlyDashboard } from "@/components/analytics/MonthlyDashboard";
-import { previousMonth } from "@/lib/monthly-record";
 import { Alert } from "@/components/ui/Alert";
 import { apiFetch } from "@/lib/api";
 import { requireAccountClient } from "@/lib/account-routes.server";
@@ -20,11 +19,6 @@ export default async function DashboardPage({
   const client = await requireAccountClient(clientSlug, "dashboard");
   const { from, to } = await resolveDateRange(await searchParams);
   const context = new URLSearchParams({ from, to, range: "custom" });
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const reviewMonth =
-    to.slice(0, 7) < currentMonth
-      ? to.slice(0, 7)
-      : previousMonth(currentMonth);
   let data: DashboardResponse | null = null;
   let failure: string | null = null;
   try {
@@ -43,8 +37,7 @@ export default async function DashboardPage({
       key={`${client.id}:${from}:${to}`}
       data={data}
       clientName={client.client_name}
-      engineHref={`/${client.slug}/decision-engine?${context}&run=${reviewMonth}`}
-      settingsHref={`/clients/${client.slug}?${context}`}
+      settingsHref={`/clients/${client.slug}/conversions`}
     />
   );
 }
