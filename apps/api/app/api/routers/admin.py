@@ -12,6 +12,7 @@ from app.models.config import (
     ChannelRule,
     ClientConversionPage,
     ConversionDefinition,
+    LeadExclusion,
     Topic,
 )
 from app.models.integration import Integration
@@ -32,6 +33,8 @@ from app.schemas import (
     ConversionDefinitionOut,
     ConversionPageIn,
     ConversionPageOut,
+    LeadExclusionIn,
+    LeadExclusionOut,
     TierCreate,
     TierOut,
     TopicCreate,
@@ -106,6 +109,61 @@ def create_conversion_definition(
     db.commit()
     db.refresh(row)
     return ConversionDefinitionOut.model_validate(row)
+
+
+@router.get("/lead-exclusions", response_model=list[LeadExclusionOut])
+def list_lead_exclusions(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[LeadExclusionOut]:
+    rows = (
+        db.query(LeadExclusion)
+        .filter(LeadExclusion.client_id == client.id)
+        .order_by(LeadExclusion.created_at.asc())
+        .all()
+    )
+    return [LeadExclusionOut.model_validate(r) for r in rows]
+
+
+@router.put("/lead-exclusions", response_model=list[LeadExclusionOut])
+def replace_lead_exclusions(
+    payload: list[LeadExclusionIn],
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[LeadExclusionOut]:
+    """Replace the whole list of test-lead rules, as the screen edits it.
+
+    A rule needs a reason and at least one thing to match on: one with
+    neither would either be unreviewable or drop every lead.
+    """
+    cleaned: list[dict] = []
+    for entry in payload:
+        data = {
+            "url_pattern": (entry.url_pattern or "").strip() or None,
+            "event_name": (entry.event_name or "").strip() or None,
+            "session_source": (entry.session_source or "").strip() or None,
+            "date_from": entry.date_from,
+            "date_to": entry.date_to,
+            "reason": entry.reason.strip(),
+        }
+        if not data["reason"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Every exclusion needs a reason.")
+        if not any(data[k] for k in ("url_pattern", "event_name", "session_source", "date_from", "date_to")):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="An exclusion must match on a page, event, source or date, or it would drop every lead.",
+            )
+        if data["date_from"] and data["date_to"] and data["date_from"] > data["date_to"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="date_from is after date_to.")
+        cleaned.append(data)
+
+    db.query(LeadExclusion).filter(LeadExclusion.client_id == client.id).delete(synchronize_session=False)
+    for data in cleaned:
+        db.add(LeadExclusion(client_id=client.id, **data))
+    db.commit()
+    return list_lead_exclusions(client=client, _=_, db=db)
 
 
 @router.get("/conversion-pages", response_model=list[ConversionPageOut])
