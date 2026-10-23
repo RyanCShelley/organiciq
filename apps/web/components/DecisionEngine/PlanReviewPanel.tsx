@@ -47,7 +47,21 @@ export function PlanReviewPanel({
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const draftKey = planDraftKey(clientId, month, initial);
+  const noticeKey = `plan-notice:${clientId}:${month}:${initial.assessment_id}:${initial.revision}`;
   const [restoredDraft, setRestoredDraft] = useState(false);
+  useEffect(() => {
+    const restoreNotice = () => {
+      try {
+        const notice = sessionStorage.getItem(noticeKey);
+        if (notice) setMessage(notice);
+      } catch {}
+    };
+    // A save can refresh the server revision before its action result arrives.
+    // Read on mount and on delivery so either ordering retains the warning.
+    restoreNotice();
+    window.addEventListener("plan-review-notice", restoreNotice);
+    return () => window.removeEventListener("plan-review-notice", restoreNotice);
+  }, [noticeKey]);
   useEffect(() => {
     try {
       const draft = JSON.parse(sessionStorage.getItem(draftKey) ?? "null");
@@ -152,6 +166,14 @@ export function PlanReviewPanel({
         );
         try {
           sessionStorage.removeItem(draftKey);
+          sessionStorage.removeItem(noticeKey);
+          if (result.warning) {
+            sessionStorage.setItem(
+              `plan-notice:${clientId}:${month}:${result.review.assessment_id}:${result.review.revision}`,
+              result.warning,
+            );
+            window.dispatchEvent(new Event("plan-review-notice"));
+          }
         } catch {}
         if (approve && result.review.approved_at && !result.warning) {
           const query = new URLSearchParams(window.location.search);

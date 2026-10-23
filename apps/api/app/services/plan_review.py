@@ -100,8 +100,15 @@ def approve(db, record, revision, user):
                 continue
             seen.add(uid)
             state = states.get(uid)
-            selected = state.in_plan if state and state.in_plan is not None else item.get("slot") is not None
-            if selected and item.get("target_url") and (not state or state.status != "skipped"):
+            # A ranked proposal is not a human commitment. Auto-created planned
+            # rows and suggested slots must not silently reserve a page.
+            committed = state and (
+                state.assignee_email or state.assignee_user_id or state.sent_at
+                or state.teamwork_task_id or state.shipped_on
+                or state.status in {"assigned", "done"}
+            )
+            selected = state and state.in_plan is True and state.status != "skipped"
+            if (committed or selected) and item.get("target_url"):
                 reserved.add(page_identity(item["target_url"]))
     if {page_identity(x["target_url"]) for x in review["items"]} & reserved:
         raise ValueError("A selected page already has retainer work this month. Combine or remove that work first.")
