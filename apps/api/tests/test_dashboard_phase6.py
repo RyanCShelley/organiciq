@@ -819,3 +819,19 @@ def test_page_comparison_missing_coverage_is_not_a_zero(db, client_a):
     assert row["previous_ga4_sessions"] == 0
     assert row["previous_ga4_key_events"] == 0
     assert row["previous_session_key_event_rate"] is None
+
+
+def test_service_reporting_channel_path_loads_coverage_helper(db, client_a, monkeypatch):
+    from app.services.dashboard import _channel_models
+    from app.models.ga4 import Ga4NativeChannelObservation
+    from app.services import service_reporting
+
+    client_a.service_reporting = {"organiciq": True, "ad_accelerator": False}
+    db.flush()
+    monkeypatch.setattr(service_reporting, "has_native_coverage", lambda *args: True)
+    traffic, events, filters = _channel_models(
+        db, client_a.id, (date(2026, 9, 1), date(2026, 9, 30))
+    )
+    assert traffic is Ga4NativeChannelObservation
+    assert events is Ga4NativeChannelObservation
+    assert len(filters) == 1

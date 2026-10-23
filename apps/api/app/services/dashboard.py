@@ -647,6 +647,7 @@ def _lead_rate(leads: int | None, sessions: float | None) -> float | None:
 
 def _channel_models(db, client_id, period):
     from app.models.ga4 import Ga4NativeChannelObservation
+    from app.services.service_reporting import has_native_coverage
     client = db.get(Client, client_id)
     if client and client.service_reporting is not None and has_native_coverage(db, client_id, period):
         return Ga4NativeChannelObservation, Ga4NativeChannelObservation, [Ga4NativeChannelObservation.event_name == ""]
