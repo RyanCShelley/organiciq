@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { V2_SECTIONS } from "@/components/layout/V2Shell";
@@ -23,7 +24,14 @@ export default async function ClientHomePage({
         {client.plan_label ? ` · ${client.plan_label}` : ""}
       </p>
 
-      <div className="mt-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+      <Link
+        href={`/${client.slug}/watchlist`}
+        className="mt-8 block rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm font-semibold hover:border-[var(--brand-teal)]"
+      >
+        Watchlist →
+      </Link>
+
+      <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
         <h2 className="text-sm font-semibold">What is coming to v2</h2>
         <ol className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
           {V2_SECTIONS.map((section) => (
