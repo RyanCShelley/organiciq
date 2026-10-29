@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { updateClientAction } from "@/app/(app)/[clientSlug]/settings/client-actions";
 import * as act from "@/app/(app)/[clientSlug]/settings/connections/actions";
 import { Field, inputClass } from "@/components/ui/form";
+import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
 import type { BingSite, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
@@ -86,35 +87,40 @@ function Picker({
       ) : options.length === 0 ? (
         <p className="mt-2 text-sm text-[var(--text-secondary)]">{empty ?? "Nothing available to choose."}</p>
       ) : (
-        <div className="mt-2 flex gap-3">
-          <select value={choice} onChange={(e) => setChoice(e.target.value)} className={inputClass} aria-label={label}>
-            <option value="">Choose one</option>
-            {options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={pending || !choice}
-            onClick={() =>
-              startTransition(async () => {
-                setError(null);
-                setSaved(false);
-                const label = options.find((o) => o.value === choice)?.label ?? choice;
-                const result = await save(choice, label);
-                if (result.ok) {
-                  setSaved(true);
-                  setOptions(null);
-                  setChoice("");
-                } else setError(result.error);
-              })
-            }
-            className="shrink-0 rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            Save
-          </button>
+        <div className="mt-2 space-y-3">
+          <SearchList options={options} value={choice} onChange={setChoice} label={label} />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={pending || !choice}
+              onClick={() =>
+                startTransition(async () => {
+                  setError(null);
+                  setSaved(false);
+                  const label = options.find((o) => o.value === choice)?.label ?? choice;
+                  const result = await save(choice, label);
+                  if (result.ok) {
+                    setSaved(true);
+                    setOptions(null);
+                    setChoice("");
+                  } else setError(result.error);
+                })
+              }
+              className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Save{choice ? ` “${options.find((o) => o.value === choice)?.label.slice(0, 40) ?? ""}”` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOptions(null);
+                setChoice("");
+              }}
+              className="text-sm text-[var(--text-secondary)] hover:underline"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
       {saved ? <p className="mt-2 text-sm text-[var(--text-secondary)]">Saved.</p> : null}
