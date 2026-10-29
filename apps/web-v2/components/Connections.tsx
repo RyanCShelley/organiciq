@@ -333,6 +333,20 @@ export function ConnectionsPanel({
             actions can be copied but not sent.
           </p>
         )}
+        {connections.teamwork_configured ? (
+          <div className="mb-5">
+            <Picker
+              label="Tasklist"
+              current={connections.teamwork_tasklist_id}
+              load={() => act.loadTeamworkTasklistsAction(client.id)}
+              save={(value) => {
+                setTasklist(value);
+                return updateClientAction(client.id, client.slug, { teamwork_tasklist_id: value });
+              }}
+              empty="This Teamwork token can't see any tasklists."
+            />
+          </div>
+        ) : null}
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -347,7 +361,7 @@ export function ConnectionsPanel({
           }}
         >
           <Field
-            label="Tasklist ID"
+            label={connections.teamwork_configured ? "Or enter a tasklist ID" : "Tasklist ID"}
             hint="The Teamwork tasklist this client's sent growth actions land in. The site and token are shared by every client."
           >
             <input

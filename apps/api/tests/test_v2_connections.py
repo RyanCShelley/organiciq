@@ -177,3 +177,4 @@ def test_a_rejected_seranking_key_says_so_plainly(client, db, client_a, admin_us
     assert response.status_code == 502
     assert "refused the API key" in response.json()["detail"]
     assert "seranking.com" not in response.json()["detail"]
+

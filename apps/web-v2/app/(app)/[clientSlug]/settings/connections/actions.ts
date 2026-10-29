@@ -107,3 +107,24 @@ export async function saveBingAction(clientId: string, slug: string, siteUrl: st
 export async function clearBingAction(clientId: string, slug: string): Promise<ActionResult> {
   return save(slug, "/v2/connections/bing", clientId, undefined, "DELETE");
 }
+
+export async function loadTeamworkTasklistsAction(clientId: string): Promise<OptionsResult> {
+  try {
+    const res = await apiFetch<{
+      configured: boolean;
+      error: string | null;
+      tasklists: { id: string; name: string; project_name: string | null }[];
+    }>("/decisions/teamwork/tasklists", { clientId });
+    if (!res.configured) return { ok: false, error: "Teamwork is not set up on this install." };
+    if (res.error) return { ok: false, error: res.error };
+    return {
+      ok: true,
+      options: res.tasklists.map((t) => ({
+        value: t.id,
+        label: t.project_name ? `${t.project_name} · ${t.name}` : t.name,
+      })),
+    };
+  } catch (error) {
+    return { ok: false, error: message(error, DID_NOT_ANSWER) };
+  }
+}
