@@ -1,0 +1,160 @@
+# Organic IQ rebuild: development plan (DRAFT v1)
+
+Status: draft for review. Nothing here is built. Items marked **OPEN** are not decided and must not be assumed.
+
+Sources: the pasted spec ("Core Synopsis" + four sections), the voice transcript, a read-only audit of this repo (355 commits, last 2026-10-15), and a read of Topic Hub, GEO Grader and llmviz.
+
+## 1. Decisions made
+
+| Decision | Answer |
+|---|---|
+| Current tool | Stays running, untouched, until the new tool is ready to replace it |
+| Rebuild vs overhaul | Neither a full restart nor in-place edits: keep the data layer, replace the decision layer and most screens (audit-based, see 3) |
+| Database | New tool uses the **same Postgres** as the current tool |
+| Topic Hub, GEO Grader, llmviz | **Port the code in** as modules; no separate services |
+| LLM visibility source | **llmviz replaces SE Ranking's AI tracker** in the new tool |
+| GEO score | **Two scores:** AI visibility (what AI answers say about the brand) and site retrieval readiness (what the site offers) |
+| First deliverable | The first usable slice as soon as possible |
+| Decision Engine | Operator picks focus and bucket; no automatic focus selection |
+| Where it lives | **Same repo.** New web app folder (`apps/web-v2`), new API modules, **additive-only migrations in the same alembic chain**. Old engine code stays until the old tool is retired (confirmed) |
+| Users | Ryan only for now, not client-facing; team logs in later with roles; client access to the dashboard is a later goal (roles `client_admin` / `client_viewer` already exist) |
+| Risk tolerance | If the live tool breaks it is not a big deal (single user) |
+| Watchlist buckets | Own table in the new tool, filled by **CSV import** (not from SE Ranking). A Google Sheet connector reading the client's Watchlist tab is wanted as an easier route |
+| LLM prompts | Come from the watchlist's "Paired AI Prompt" column. No llmviz history is migrated |
+| Dashboard | Monthly-report shape **and** adjustable time frames |
+| Scores | SEO health score and GEO health scores are in scope, phases to be compressed where possible |
+| Tiers | Number of focuses per client stays as in the current tool |
+| Leads data | GA4 API has no exits metric or exit-page dimension (verified). Use bounce rate, engagement rate and pages per session per landing page. Form abandon is out of scope |
+| Annotations | Stay inside the tool; periodic upload from the tool's export or the sheet; not connected to the sheet |
+| Content calendar | Added: imported from the account sheet, used for content gaps and update pages; first client is Absolutely Natural |
+| Watchlist "Y" column | Dropped (taken to mean the Why column) |
+| Teamwork | Keep the push |
+| Copilot | Keep, and make it available on every screen, aware of the screen the operator is on |
+| Bing AI data | Removed for now. Bing query, page and traffic stats stay |
+| "Cross Answers" | Is Topic Hub (the tool's old URL); no separate fourth tool |
+
+## 2. Constraints that follow from those decisions
+
+1. **Shared database means additive-only changes.** The live tool and its worker keep running against it. The new tool may add tables and columns but must not rename, drop or change the meaning of anything the current app reads. (**OPEN**: confirm, and decide whether new migrations go in the same alembic chain or a separate one.)
+2. **No double ingestion.** The current worker already pulls GSC, GA4, SE Ranking and the crawl. The new tool reads those fact tables and ingests only new sources (Bing, llmviz, algorithm updates, news).
+3. **The current worker's monthly auto-run keeps writing records** for the old engine. The new tool ignores them.
+4. **Old and new share client, tier and user tables.** Any change to them needs a check against the live app.
+
+## 3. Audit result: what is kept, adapted, dropped, missing
+
+**Keep (reuse as is):** GSC, GA4, SE Ranking and crawler ingestion and fact tables; job queue and worker; clients and tiers; Google sign-in and roles; annotations; keyword map and matcher; Teamwork push; assign/skip/send workflow (`engine_actions`); prescription rules in `decisions/catalog.py` and `update_catalog.py`.
+
+**Adapt:** dashboard (becomes the monthly report); watchlist (needs real buckets, today only SE Ranking's group-name text); content hub (add lifecycle labels and an inlinks page); `constraint_overrides` (nearest existing hook for an operator-chosen focus).
+
+**Drop or replace in the new tool:** `decisions/triage.py` auto-constraint logic, `fill_slots` spillover, `maybe_run_month` auto-run, hysteresis, the legacy `decisions` table.
+
+**Missing entirely:** Bing Webmaster ingestion; algorithm-update data; locked monthly SEO score; GEO scores; clickability score; recap and wins narrative; month-start vs month-end keyword view; inlinks page; winning/decaying/dead labels.
+
+**Debt to avoid copying:** `dashboard.py` is 1,379 lines; the engine is woven through schema and UI; the web app has three unit tests; tests build tables with `create_all` (guarded now by an alembic-diff test); stale docs and a 699 MB `.claude/worktrees` folder.
+
+## 4. Data source status
+
+| Source | Status |
+|---|---|
+| GSC, GA4, SE Ranking, crawler | Ingested today |
+| Bing Webmaster | **No code.** API access exists, no data in it yet. The linked Learn page is the 2019 .NET namespace and lists query, page, traffic, crawl and link classes; it shows **no AI-performance classes**. Bing AI Performance (citations, grounding queries) is **out of scope for now**; the API does not document it. |
+| Google ranking updates | Available: Google's Search Status Dashboard publishes `status.search.google.com/incidents.json` and an Atom feed. 42 incidents 2021 to 2026, latest the September 2026 spam update. Replaces manual annotations for the algorithm overlay. |
+| LLM visibility | llmviz (own Postgres on Railway, `llmviz-backend` on Desktop). Port tables and runner; history migration **OPEN**. |
+| Industry news feed | **Removed from scope.** Stays in Ryan's own Claude prompt outside the tool. |
+
+## 5. Phases (thin slices, each usable on its own)
+
+Order is provisional until the OPEN items below are answered.
+
+**Phase 0: Foundation (small).**
+- New web app shell `apps/web-v2` reusing the existing sign-in and roles; deployed as its own Vercel project against the same API.
+- Migration rule written into the repo (additive only; a test that fails on drop or rename of existing columns).
+- Watchlist tables: bucket (topic), keyword, paired AI prompt, volume, difficulty, intent, flags. Filled by CSV import (handles the merged-cell export) and then a Google Sheet connector reading only the Watchlist tab.
+- Monthly focus record (client, month, focus set within the client's tier allowance, bucket).
+- Copilot shell available on every v2 screen, passing the current screen as context.
+
+**Phase 1: Operator-led Decision Engine (first usable slice).**
+1. Operator picks focus (Visibility / Traffic / Leads) and one watchlist bucket.
+2. Engine returns candidate pages per focus using existing page and signal data:
+   - Visibility: high-volume unranked terms, positions 4 to 20, positions 1 to 10 pushing higher.
+   - Traffic: page traffic down more than 10% month on month or more than 50% over six months.
+   - Leads: high-traffic landing pages with high bounce rate, low engagement rate or few pages per session (the GA4 API has no exit-page data).
+3. Operator selects pages; deep diagnostic reuses the existing rules (internal link boost, answer injection, FAQ, opening rewrite, friction removal) and the existing assign, Teamwork and results flow.
+Gaps to build inside this phase: the 10% and 50% traffic-drop filters, opening-rewrite and friction-removal rules.
+
+**Phase 2: Dashboard as monthly report.** Recap and wins, the three outcomes, conversion sources and engagement, landing pages by channel with visits, key actions and conversion rate, keyword position month start vs month end.
+
+**Phase 3: SEO health score.** Built on the existing crawler: titles, indexation, structured data, 301s, 404s, redirect chains, broken internal links. Locked monthly. Includes the schema checker by page intent.
+
+**Phase 4: Bing Webmaster.** Ingest query, page and traffic stats; add Bing to ranking trends and the CTR optimizer.
+
+**Phase 5: CTR optimizer.** GSC plus Bing impressions, position and CTR for watchlist terms; site-level clickability score tracked monthly.
+
+**Phase 6: LLM visibility.** Port llmviz; two GEO scores (AI visibility from llmviz, site readiness from Topic Hub's readiness score and GEO Grader's crawl signals).
+
+**Phase 7: Content hub.** Lifecycle labels, gap analysis against watchlist subtopics, inlinks page, change log. **Content calendar** (imported from the account sheet, starting with Absolutely Natural): shows what has been created so far, matches planned posts to watchlist terms and crawled pages, and flags content gaps and pages to update. Annotations stay in the tool, with a periodic upload. Port Topic Hub clustering, cannibalization and link recommendations.
+
+**Phase 8: Algorithm overlay.** Google's Search Status Dashboard feed (`incidents.json`) drawn on the trend charts. The industry news feed is out of scope.
+
+## 6. Merge map for the existing tools
+
+| Tool | What goes into the new tool | Phase |
+|---|---|---|
+| llmviz | Query runner, response analysis, share of voice, run deltas, query generator | 6 |
+| GEO Grader | Site crawl signals (schema, FAQ, entity clarity, AI-crawler access), scoring rubric | 3 and 6 |
+| Topic Hub | Clusters, cannibalization, internal-link recommendations, schema audit, readiness score | 6 and 7 |
+| Not carried over | Their separate logins, user tables, key storage, lead-gen funnel and CRM sync | none |
+
+Fix on the way in: llmviz token logging, GEO Grader open analytics route, Topic Hub open `/diagz`. None of these ship in the new tool.
+
+## 7. Questions
+
+### Answered
+Roles, tiers, watchlist source (CSV, own table), Cross Answers = Topic Hub, llmviz history (none), Teamwork and Copilot (keep, Copilot on every screen), Bing fallback, time frames (month vs previous month, quarter, custom range, year over year), industry feed (removed from scope), annotations (stay in the tool), watchlist "Y"/Why column (dropped), content calendar (added), same repo.
+
+### Still OPEN
+None from the decisions so far. Items to verify during the build are listed under each ticket.
+
+### Resolved in this round
+- Post history: the feed is polled on a schedule and **every entry is stored permanently** (URL, title, published date, first seen), with a one-time backfill from the crawl and sitemap.
+- Feed URL: a field in **client settings**, more than one allowed. Every client has a feed.
+- Feed vs crawl: the feed gives the publish date; the crawl is the cross-check. If they disagree, the tool **raises a flag** (not an automatic override).
+- Form abandon: **removed** from scope. Leads focus uses bounce rate, engagement rate and pages per session.
+- Bing AI Performance: **removed for now.** Bing query, page and traffic stats stay.
+- Annotation upload columns: **Date, Update Made, URL, Growth Action.**
+- "Y column" = the Why column: confirmed, dropped.
+
+## 8. Account sheet (Absolutely Natural), as read
+Tabs: Overview, Watchlist, Content Calendar, GBP, Action Annotations.
+
+- **Watchlist (connector reads it):** Topic, Keyword, Volume, Difficulty, Paired AI Prompt, Intent, Current Position, and a notes column. 18 keywords in 5 topics (the topic is the bucket). The **Why column is dropped**. Merged cells in the Intent and Current Position columns misalign a plain CSV export, so the importer must handle them or the sheet needs cleaning.
+- **Content Calendar (connector reads it):** publishing date, title, target keyword, URL, format, article/brief link, type (existing or new content), CTA, topic approval. About 10 planned posts for Nov 2026 to Jan 2027, mixed existing and new. Used to find content gaps and pages to update, and to show what has been created so far for the first client.
+- **Action Annotations:** not connected. Annotations live in the tool. Ryan uploads them periodically from the tool's export or the sheet until a better protocol exists.
+- **GBP and Overview:** not read. Overview holds client contacts and a website login block.
+
+## 9. Build tickets: Phase 0 and Phase 1
+
+Rule for every ticket: additive migrations only, tests in the same change, nothing in the current tool's behaviour changes.
+
+### Phase 0: Foundation
+- **P0-1 Migration guard. BUILT (uncommitted, branch `feat/v2-foundation`).** A test that fails if a migration drops or renames an existing table or column. Done when it passes on today's chain and fails on a deliberate bad migration.
+- **P0-2 `apps/web-v2` shell. BUILT, signed-in view not yet checked (needs a Google sign-in on port 3001).** Next.js app reusing the existing Google sign-in and roles, own Vercel project, same API. Done when a signed-in user lands on an empty client-scoped home.
+- **P0-3 Watchlist tables and CSV import.** Tables for bucket (topic), keyword, volume, difficulty, intent, paired AI prompt, notes, per client. Importer reads the sheet's CSV export including the merged-cell columns (Intent, Current Position). Done when the Absolutely Natural Watchlist imports as 5 buckets and 18 keywords with correct prompts.
+- **P0-4 Sheet connector.** Reads the Watchlist and Content Calendar tabs of a client's account sheet by link. To verify first: which Google credentials/scopes the app has today and whether Sheets read access needs a new scope. Never reads Overview.
+- **P0-5 Client settings: feed URLs.** One or more feed URLs per client in client settings.
+- **P0-6 Monthly focus record.** Client, month, focus set (Visibility, Traffic, Leads) within the client's tier allowance, one watchlist bucket. Reuses tier allowances. Done when a focus can be saved and read back per month.
+- **P0-7 Copilot on v2 screens.** Existing Copilot panel mounted on every v2 screen and sent the current screen and client as context. To verify: what context the current Copilot already accepts.
+
+### Phase 1: Operator-led Decision Engine (first usable slice)
+- **P1-1 Candidate lists (revised twice: after research, then after your direction on list behaviour).** The filters rank and label; they do not exclude. For each focus and bucket the engine returns about **20 ranked candidates, always filled**. Each row is labelled **strong** (passes the strong tests below) or **possible** (weaker or low-volume, with the reason shown, for example "only 40 sessions"). Every row shows its evidence: change against the same period last year, against the site's own trend, and the sessions behind it. Low-volume sites can roll up to bucket or site section. The thresholds below are the line between strong and possible, not between shown and hidden. Ranking is by expected gain.
+  - **Traffic (portfolio-tested; defaults still to approve).** Tested on 50 live GA4 properties, 24 months. Findings: the median site is down 18% to 31% year over year in every month since Nov 2025; only 3.3% of page-months reach 100 organic sessions and 0.4% reach 800; the median site has one page above 100 sessions. Consequences: (1) judge each page against its **own site's trend**, not against zero; (2) page-level tests apply to only a handful of pages per site, so **roll up to watchlist bucket and site level** for everything else; (3) **Sudden:** latest month down 30% or more on a prior month of 100+ sessions (84% of these stayed down, 10% recovered, about 1.3 flags per site per month). **Slow bleed:** last 3 months at least 50% worse than the site's own year-over-year change, on a 3-month baseline of 150+ sessions (about 1.9 flags per site per month, 77% stayed down, 15% recovered). The original "-10% month on month" test flagged 8.6 pages per site per month and is retired.
+  - **Visibility.** Replace the single 4-to-20 band with three: pages in 2 or 3 that could reach 1, pages in 4 to 10 that could reach the top 3, and pages in 11 to 20 that could reach page one. Rank by expected extra clicks (impressions x (target CTR minus current CTR)) using the existing CTR benchmark, with a minimum impressions floor. Unranked high-volume watchlist terms stay as a separate list.
+  - **Leads (portfolio-tested).** Tested on 54 live sites, Jul to Sep 2026. Findings: the median site's organic engagement rate is 68% (middle half 62% to 71%), so published benchmarks of 51% to 62% understate this portfolio; key-event rates per site range from 0.9% to 35.4% (10th to 90th percentile) depending on what each site counts, so a fixed conversion threshold cannot work; 10 of 54 sites record no key events at all; best and worst page engagement within one site differ by a median of 32 points, so within-site comparison has plenty to work with. Design: rank pages with 50+ quarterly sessions by **missed conversions** (sessions x (the site's median conversion rate minus the page's rate)); **strong** = worst quartile of that site on both conversion and engagement with 100+ sessions; **possible** = the rest. Bounce rate is not shown separately (it is 100% minus engagement). Conversions come from the client's conversion definitions in Organic IQ, not GA4's generic key-event flag; a client with none defined cannot use the Leads focus until they are set.
+  - **Tactics by tier (from the Gemini review, to confirm).** Positions 4 to 10: click-through work (titles, metas, schema, aligning headings with intent). Positions 11 to 20: depth, related questions, internal links, backlinks. These map onto the existing prescription rules.
+  - **"Unranked" definition (decided).** A watchlist term with volume where our site ranks beyond 100 or not at all **and** a tracked competitor ranks in the top 10. Competitor positions come from the SE Ranking competitor data already ingested (`facts_ser_competitors`). To verify during the build: which clients have competitors tracked. For a client with none, the list falls back to "watchlist term with volume and no ranking", labelled **possible**, with a note that no competitor was checked.
+  - **Search Console impressions caution.** Impression counts from before Google's reporting change are not comparable with those after it. Use clicks and position, and compare impressions only within the period after the change.
+- **P1-2 Focus and bucket screen.** Operator picks focus and bucket; shows the candidate list from P1-1 with the evidence for each page.
+- **P1-3 Page selection and deep diagnostic.** Operator ticks pages; the existing prescription rules (`catalog.py`, `update_catalog.py`) run on only those pages. Done when a selected page returns a prescription with its reasons.
+- **P1-4 New prescriptions.** Answer injection from the watchlist's paired AI prompts (2 to 3 sentence answer), page-opening rewrite, friction removal for leads pages.
+- **P1-5 Hand-off.** Reuse assign, Teamwork push and the results loop for the selected prescriptions.
+- **P1-6 Tests and a first real run** on Absolutely Natural, comparing the candidate list against what you would have picked by hand.
