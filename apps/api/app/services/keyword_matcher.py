@@ -96,7 +96,7 @@ def _model():
     """
     global _MODEL
     if _MODEL is None:
-        from fastembed import TextEmbedding
+        from app.services.text_embedding import TextEmbedding
 
         _MODEL = TextEmbedding(MODEL_NAME)
     return _MODEL

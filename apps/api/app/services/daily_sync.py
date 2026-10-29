@@ -275,21 +275,17 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     than a month — and only those terms are bought. Adding one keyword used
     to re-price the whole list.
     """
-    from app.ingestion.seranking.pipeline_keyword_metrics import keywords_to_price
-    from app.models.seranking import FactSerKeyword
+    from app.ingestion.dataforseo.keyword_metrics import keywords_to_price
+    from app.integrations import dataforseo
 
+    if not dataforseo.configured():
+        logger.warning("Keyword metrics not enqueued: DataForSEO is not configured")
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
     today = date.today()
-    has_tracked = [
-        client_id for (client_id,) in db.query(FactSerKeyword.client_id).distinct()
-    ]
-    clients = (
-        db.query(Client)
-        .filter(Client.status == ClientStatus.ACTIVE)
-        .filter(Client.id.in_(has_tracked))
-        .all()
-        if has_tracked
-        else []
-    )
+    # Every active client, not only those with a tracked term: the demand a
+    # site has no page for is priced too, and a client with an empty watchlist
+    # is where that matters most.
+    clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
 
     enqueued = skipped = errors = due = 0
     for client in clients:
@@ -305,7 +301,7 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
                 db,
                 client.id,
                 SyncJobCreate(
-                    source="se_ranking_keyword_metrics",
+                    source="dataforseo_keyword_metrics",
                     start_date=today,
                     end_date=today,
                     params={"source": resolve_source(client)},
@@ -317,6 +313,86 @@ def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
         except Exception:  # noqa: BLE001
             errors += 1
             logger.exception("Keyword metrics enqueue failed client=%s", client.id)
+
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
+#: Days to wait after a competitor read that failed before queueing it again.
+COMPETITOR_RETRY_DAYS = 3
+
+
+def enqueue_due_competitor_keywords(db: Session) -> dict[str, int]:
+    """Read each client's closest competitors' rankings, at most monthly.
+
+    About $0.13 a competitor, three competitors a client, billed by DataForSEO. A client
+    whose crawl is too thin to compare against is skipped: the rankings would
+    be bought and then unusable, which is how the SiteGround-blocked clients
+    would otherwise spend credits for nothing.
+    """
+    from app.ingestion.dataforseo.competitor_keywords import competitors_to_pull
+    from app.ingestion.seranking.pipeline_domain import resolve_source
+    from app.integrations import dataforseo
+    from app.models.crawl import FactCrawlPageSnapshot
+    from app.services.content_gap_signals import MIN_CRAWLED_PAGES
+
+    if not dataforseo.configured():
+        logger.warning("Competitor keywords not enqueued: DataForSEO is not configured")
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
+    from app.models.job import SyncJobStatus
+
+    today = date.today()
+    clients = db.query(Client).filter(Client.status == ClientStatus.ACTIVE).all()
+    recent = datetime.now(timezone.utc) - timedelta(days=COMPETITOR_RETRY_DAYS)
+
+    enqueued = skipped = errors = due = 0
+    for client in clients:
+        if not competitors_to_pull(db, client, today=today):
+            continue
+        # A competitor that failed is still due, and a request that timed out
+        # may have been billed: wait a few days rather than pay for it daily.
+        tried_lately = (
+            db.query(SyncJob.id)
+            .filter(
+                SyncJob.client_id == client.id,
+                SyncJob.source.in_(
+                    ("dataforseo_competitor_keywords", "se_ranking_competitor_keywords")
+                ),
+                SyncJob.status.in_((SyncJobStatus.FAILED, SyncJobStatus.PARTIAL)),
+                SyncJob.created_at >= recent,
+            )
+            .first()
+        )
+        if tried_lately:
+            continue
+        crawled = (
+            db.query(FactCrawlPageSnapshot.id)
+            .filter(
+                FactCrawlPageSnapshot.client_id == client.id,
+                FactCrawlPageSnapshot.indexable.is_(True),
+            )
+            .limit(MIN_CRAWLED_PAGES)
+            .count()
+        )
+        if crawled < MIN_CRAWLED_PAGES:
+            continue
+        due += 1
+        try:
+            enqueue_sync_job(
+                db,
+                client.id,
+                SyncJobCreate(
+                    source="dataforseo_competitor_keywords",
+                    start_date=today,
+                    end_date=today,
+                    params={"source": resolve_source(client)},
+                ),
+            )
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("Competitor keywords enqueue failed client=%s", client.id)
 
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
@@ -362,6 +438,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
     stats = enqueue_daily_syncs(db)
     crawl_stats = enqueue_due_site_crawls(db)
     metric_stats = enqueue_due_keyword_metrics(db)
+    competitor_stats = enqueue_due_competitor_keywords(db)
     checkpoint.last_run_date = today
     checkpoint.updated_at = now
     db.commit()
@@ -390,5 +467,13 @@ def maybe_run_daily_sync(db: Session) -> bool:
             metric_stats["enqueued"],
             metric_stats["skipped"],
             metric_stats["errors"],
+        )
+    if competitor_stats["due"]:
+        logger.info(
+            "Competitor keywords due=%s enqueued=%s skipped=%s errors=%s",
+            competitor_stats["due"],
+            competitor_stats["enqueued"],
+            competitor_stats["skipped"],
+            competitor_stats["errors"],
         )
     return True

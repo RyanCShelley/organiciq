@@ -146,9 +146,6 @@ export function OptionsPanel({
                 {chosen ? "In the plan" : "Add"}
               </button>
 
-              <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-                {row.id}
-              </span>
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                   BRANCH_CHIP[row.branch] ?? BRANCH_CHIP.traffic

@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Railway's filesystem is ephemeral, so without this the first person to
 # press "Suggest pages" after every deploy waits on an 87 MB download.
 ENV FASTEMBED_CACHE_PATH=/opt/fastembed
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/all-MiniLM-L6-v2')"
+COPY app/services/text_embedding.py /tmp/text_embedding.py
+RUN python /tmp/text_embedding.py && rm /tmp/text_embedding.py
 
 COPY . .
 

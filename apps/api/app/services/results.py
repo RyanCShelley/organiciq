@@ -34,7 +34,7 @@ from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.decision import EngineAction, MonthlyRecord
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.gsc import FactGscPage
+from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.models.seranking import FactSerAiPresence, FactSerRanking
 from app.services.triage_signals import MANAGED_CHANNELS
 
@@ -99,6 +99,34 @@ def _window(as_of: date) -> tuple[date, date]:
     return as_of - timedelta(days=WINDOW_DAYS - 1), as_of
 
 
+def _query_position(
+    db: Session, client_id: UUID, term: str, as_of: date
+) -> Measurement:
+    """Average position Search Console reported for a query in the window to `as_of`."""
+    start, end = _window(as_of)
+    row = (
+        db.query(
+            func.sum(FactGscQueryPage.impressions),
+            func.sum(FactGscQueryPage.impressions * FactGscQueryPage.average_position),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client_id,
+            func.lower(func.trim(FactGscQueryPage.query)) == term.strip().lower(),
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .one()
+    )
+    impressions = float(row[0] or 0)
+    if impressions <= 0:
+        return Measurement(
+            None,
+            f"no tracked position for “{term}” on or before {as_of}, and Search "
+            "Console showed nothing for it in that window",
+        )
+    return Measurement(round(float(row[1]) / impressions, 1))
+
+
 def _term_position(
     db: Session, client_id: UUID, term: str | None, as_of: date
 ) -> Measurement:
@@ -120,8 +148,15 @@ def _term_position(
         .order_by(FactSerRanking.date.desc())
         .first()
     )
+    if row is not None and row[1] < as_of - timedelta(days=7):
+        return Measurement(None, "the latest tracked ranking is more than seven days behind the measurement date")
     if row is None:
-        return Measurement(None, f"no tracked position for “{term}” on or before {as_of}")
+        from app.services.measurement_coverage import metric_ready
+        if not metric_ready(db, client_id, "page_position", as_of):
+            return Measurement(None, "Search Console has not completed the comparison window")
+        # Not tracked: a page written for a query Search Console showed the
+        # site for is judged on where Search Console shows it.
+        return _query_position(db, client_id, term, as_of)
     # SE Ranking writes 0 or 101 for "not in the results we checked", which
     # `_rank` in triage_signals has always known and this did not: every
     # before reading came out as position zero.
@@ -307,6 +342,9 @@ def measure(
     as_of: date,
 ) -> Measurement:
     """One metric, as it read on `as_of`."""
+    from app.services.measurement_coverage import metric_ready
+    if not metric_ready(db, client.id, metric_key, as_of):
+        return Measurement(None, "the provider has not completed the comparison window")
     if metric_key in NOT_MEASURED:
         return Measurement(None, "this action settles a decision rather than moving a metric")
     if metric_key == "term_position":
@@ -365,7 +403,15 @@ SLOTTED_POOLS = (("action", "actions"), ("update", "updates"), ("content", "new_
 
 def _slotted(data: dict[str, Any]):
     for kind, key in SLOTTED_POOLS:
-        for action in data.get(key) or []:
+        if kind == "action" and data.get("plan_review"):
+            review = data["plan_review"]
+            snapshot = review if review.get("approved_at") else next((v for v in reversed(review.get("versions", [])) if not v.get("retired_at")), {})
+            actions = snapshot.get("items", [])
+        elif kind == "action" and data.get("review_required"):
+            actions = []
+        else:
+            actions = data.get(key) or []
+        for action in actions:
             yield kind, action
 
 
@@ -398,7 +444,7 @@ def capture_before(
             metric_key_for(action),
             url=action.get("target_url"),
             term=action.get("term"),
-            as_of=as_of,
+            as_of=existing.shipped_on - timedelta(days=1) if existing and existing.shipped_on else as_of,
         )
         # Measure first, then write. Creating the row up front left a junk
         # row behind for every action whose metric could not be read.
@@ -429,14 +475,19 @@ def check_due(
         db.query(MonthlyRecord).filter(MonthlyRecord.client_id == client.id).all()
     ):
         for kind, action in _slotted(record.record or {}):
-            uid, check_on = action.get("action_uid"), action.get("check_on")
-            if not uid or not check_on or date.fromisoformat(check_on) > today:
+            uid = action.get("action_uid")
+            if not uid:
                 continue
             row = (
                 db.query(EngineAction)
                 .filter(EngineAction.client_id == client.id, EngineAction.uid == uid)
                 .one_or_none()
             )
+            if row is None or row.shipped_on is None or row.status == "skipped":
+                continue
+            days = action.get("check_after_days", WINDOW_DAYS)
+            if row.shipped_on + timedelta(days=days) > today:
+                continue
             # `row` may legitimately not exist: an action whose term was
             # off the rankings when it was prescribed has no before reading
             # to store, and that is the most common start there is.
@@ -473,8 +524,7 @@ def check_due(
                     metric_key,
                     url=action.get("target_url"),
                     term=action.get("term"),
-                    as_of=record.data_through
-                    or date.fromisoformat(f"{record.month}-01"),
+                    as_of=row.shipped_on - timedelta(days=1),
                 )
                 if not started.unranked:
                     continue
@@ -496,8 +546,6 @@ def check_due(
 
             row.after_value = reading.value
             row.result = verdict(metric_key, before, reading.value)
-            if row.status == "assigned":
-                row.status = "done"
             judged.append(row)
 
     db.commit()
@@ -608,6 +656,11 @@ def maybe_check_results(db: Session) -> bool:
             # every metric is readable as-of a date.
             captured += capture_before(db, client, record)
         judged += len(check_due(db, client, today=today))
+        # Automatic Completed Work refresh is opt-in with service reporting.
+        # Unfinished clients keep their existing on-demand workflow.
+        if client.service_reporting is not None:
+            from app.services.annotations import remeasure_all
+            remeasure_all(db, client)
 
     checkpoint.last_run_date = today
     checkpoint.updated_at = now

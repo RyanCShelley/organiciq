@@ -13,8 +13,10 @@ PyJWT==2.15.1
 cryptography==50.0.2
 httpx==0.28.1
 google-auth==2.38.0
+requests==2.34.2  # Google auth requests transport; declare directly, not via embeddings
 lxml==6.1.3  # first-party crawler: HTML parsing and structured data
-fastembed==0.9.0  # keyword→page matching: ONNX MiniLM, no torch
-# Image library pulled in by fastembed. Listed so its floor is explicit: the
-# release fastembed 0.7 allowed had 35 advisories.
-pillow==12.3.0
+# Text-only MiniLM inference; no image library is needed for keyword matching.
+numpy==2.5.4
+onnxruntime==1.31.0
+tokenizers==0.23.3
+huggingface-hub==1.33.0

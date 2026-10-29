@@ -12,15 +12,20 @@ that says why it is empty.
 
 from __future__ import annotations
 
+import re
 import statistics
 from datetime import date, timedelta
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 from uuid import UUID
+
+from app.decisions.planning import page_identity
+from app.services.page_ownership import location_tokens, tokens
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import REFERENCE_SCENARIO, expected_ctr_percent
 from app.decisions.page_targets import (
     CONTESTED_MIN_IMPRESSIONS,
     CONTESTED_MIN_RIVAL_SHARE,
@@ -32,6 +37,7 @@ from app.decisions.page_targets import (
 from app.models.client import Client
 from app.models.config import ClientConversionPage
 from app.models.crawl import (
+    CRAWL_SOURCE_FIRST_PARTY,
     FactCrawlInternalLink,
     FactCrawlPageSchema,
     FactCrawlPageSnapshot,
@@ -40,6 +46,7 @@ from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
 from app.services.link_gaps import link_gaps
 from app.services.page_stage import confirmed_stages
+from app.services.conversion_stage import resolve as resolve_conversion_stage
 from app.services.serp_features import load as load_serp_features
 from app.services.triage_signals import MANAGED_CHANNELS
 
@@ -55,6 +62,52 @@ MIN_PAGES_FOR_MEDIAN = 5
 
 #: Which offers suit a reader at each stage, matching the catalog's own rule.
 from app.decisions.catalog import STAGE_FIT  # noqa: E402
+
+
+def rank_offers(
+    url: str, stage: str | None, offers: list[ClientConversionPage],
+    crawl: dict[str, FactCrawlPageSnapshot],
+    confirmed: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Choose an intent-compatible destination; uncertainty is not a URL tie-break.
+
+    A configured primary is a general fallback, not permission to ignore an
+    explicit location/industry mismatch or send TOFU readers to a BOFU form.
+    Non-primary destinations require readable page evidence.
+    """
+    fits = STAGE_FIT.get(stage or "", ())
+    source = crawl.get(url)
+    source_text = tokens(url + " " + (source.title or "") + " " + " ".join(
+        str(section.get("heading") or "") for section in (source.sections or [])
+        if isinstance(section, dict) and section.get("level") in (1, 2)
+    )) if source else tokens(url)
+    source_location = location_tokens(source) if source else set()
+    ranked = []
+    for offer in offers:
+        target = offer.normalized_url
+        effective_stage, _ = resolve_conversion_stage(offer, confirmed or {})
+        if effective_stage not in fits or page_identity(target) == page_identity(url):
+            continue
+        snapshot = crawl.get(target)
+        readable = bool(snapshot and snapshot.status_code and 200 <= snapshot.status_code < 300
+                        and snapshot.sections is not None)
+        if (snapshot and not readable) or (not readable and not offer.is_primary):
+            continue
+        scope_page = snapshot or SimpleNamespace(normalized_url=target, title=offer.label, sections=[])
+        scope = location_tokens(scope_page)
+        sector = re.search(r'/industries/([^/]+)', urlsplit(target).path)
+        audience = tokens(sector.group(1)) if sector else set()
+        if (scope and not scope <= source_location) or (audience and not audience <= source_text):
+            continue
+        # Prefer a matching specialist destination, then the configured primary.
+        score = (bool(scope or audience), bool(offer.is_primary))
+        ranked.append((score, target))
+    if not ranked:
+        return ()
+    best = max(score for score, _ in ranked)
+    winners = {target for score, target in ranked if score == best}
+    # Several equally eligible destinations do not justify picking alphabetically.
+    return tuple(winners) if len(winners) == 1 else ()
 
 
 def brand_terms(client: Client) -> set[str]:
@@ -265,13 +318,22 @@ def _contested_terms(
         .group_by(FactGscQueryPage.query, FactGscQueryPage.normalized_url)
         .all()
     )
-    by_query: dict[str, list[tuple[str, float, float | None]]] = {}
+    # Protocol/www/query variants are one page, not competing content.
+    grouped: dict[tuple[str, str], dict] = {}
     for query, url, impressions, weighted in rows:
         impressions = float(impressions or 0)
         if impressions <= 0 or not is_addressable(url):
             continue
+        key = (query, page_identity(url))
+        item = grouped.setdefault(key, {"url": url, "impressions": 0.0, "weighted": 0.0})
+        item["impressions"] += impressions
+        item["weighted"] += float(weighted or 0)
+        if url.startswith("https://"):
+            item["url"] = url
+    by_query: dict[str, list[tuple[str, float, float | None]]] = {}
+    for (query, _), item in grouped.items():
         by_query.setdefault(query, []).append(
-            (url, impressions, float(weighted or 0) / impressions)
+            (item["url"], item["impressions"], item["weighted"] / item["impressions"])
         )
 
     found: dict[str, list[ContestedTerm]] = {}
@@ -395,7 +457,8 @@ def load_page_candidates(
 
     newest_crawl = (
         db.query(func.max(FactCrawlPageSnapshot.snapshot_date))
-        .filter(FactCrawlPageSnapshot.client_id == client.id)
+        .filter(FactCrawlPageSnapshot.client_id == client.id,
+                FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY)
         .scalar()
     )
     crawl: dict[str, FactCrawlPageSnapshot] = {}
@@ -405,26 +468,22 @@ def load_page_candidates(
             for row in db.query(FactCrawlPageSnapshot).filter(
                 FactCrawlPageSnapshot.client_id == client.id,
                 FactCrawlPageSnapshot.snapshot_date == newest_crawl,
+                FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
             )
         }
 
-    # An offer with no declared stage is the generic one and suits any
-    # reader — which is what `ClientConversionPage` already assumes when it
-    # falls back to the primary offer. Treating a null stage as "matches
-    # nothing" meant that for every client in the warehouse, all of whose
-    # conversion pages have a null stage, no lead action could ever fire.
+    # Unknown offer intent is retained as unknown, never a match for every stage.
     broken_schema = _broken_schema(db, client.id)
     with_schema = _pages_with_schema(db, client.id)
 
     # Links in from a body, not from a menu. The count on the snapshot is
     # the same figure, but a page missing from the newest crawl has none.
-    offers = {
-        (row.normalized_url or "").strip(): (row.stage or "").strip().lower() or None
-        for row in db.query(ClientConversionPage).filter(
-            ClientConversionPage.client_id == client.id
-        )
-        if (row.normalized_url or "").strip()
-    }
+    offer_rows = list(db.query(ClientConversionPage).filter(
+        ClientConversionPage.client_id == client.id
+    ))
+    offers = {row.normalized_url: resolve_conversion_stage(row, stages)[0]
+              for row in offer_rows if (row.normalized_url or "").strip()}
+
 
     # Every in-content, non-template edge from a page to a declared offer.
     routes: dict[str, set[str]] = {}
@@ -495,14 +554,13 @@ def load_page_candidates(
         impressions = page.get("impressions", 0.0)
         lost_query, lost_before, lost_after = shifts.get(url, (None, None, None))
         expected = (
-            expected_ctr_percent(position) / 100.0 * impressions
-            if position and impressions
+            expected_ctr_percent(position, scenario=REFERENCE_SCENARIO) / 100.0 * impressions
+            if position is not None and 1 <= position <= 20 and impressions
             else None
         )
         total_sessions, engaged = sessions.get(url, (0.0, None))
         snapshot = crawl.get(url)
         stage = stages.get(url)
-        fits = STAGE_FIT.get(stage or "", ())
         out.append(
             PageCandidate(
                 url=url,
@@ -522,17 +580,13 @@ def load_page_candidates(
                 engaged_sessions=engaged,
                 site_median_engagement=median_engagement,
                 stage=stage,
+                crawl_readable=bool(snapshot and snapshot.status_code is not None
+                    and 200 <= snapshot.status_code < 300 and snapshot.sections is not None),
                 linked_offer_stages=frozenset(routes.get(url, set())),
                 # Never itself. SMA's declared conversion page is its
                 # homepage, so the top lead action told the homepage to add
                 # an in-content link to the homepage.
-                matched_offers=tuple(
-                    sorted(
-                        u
-                        for u, s in offers.items()
-                        if (s is None or s in fits) and u != url
-                    )
-                ),
+                matched_offers=rank_offers(url, stage, offer_rows, crawl, stages),
                 is_conversion_page=url in offers,
                 conversion_elements=(
                     snapshot.conversion_elements if snapshot else None

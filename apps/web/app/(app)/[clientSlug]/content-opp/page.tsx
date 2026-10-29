@@ -1,7 +1,9 @@
 import Link from "next/link";
 
+import { CandidateTable } from "@/components/DecisionEngine/CandidateTable";
 import { SlotActionBar } from "@/components/DecisionEngine/SlotActionBar";
 import { EmptySlotCard, SlotCard } from "@/components/DecisionEngine/SlotCard";
+import { PlanPick } from "@/components/DecisionEngine/PlanPick";
 import { PoolSummary } from "@/components/DecisionEngine/PoolSummary";
 import { PreviousResults } from "@/components/DecisionEngine/PreviousResults";
 import { Alert } from "@/components/ui/Alert";
@@ -9,11 +11,13 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch } from "@/lib/api";
 import { accountToolHref } from "@/lib/account-routes";
 import { requireAccountClient } from "@/lib/account-routes.server";
-import type {
-  Assignee,
-  MonthlyRecord,
-  SlotState,
-  Workflow,
+import {
+  effectivePlan,
+  finishedRuns,
+  type Assignee,
+  type MonthlyRecord,
+  type SlotState,
+  type Workflow,
 } from "@/lib/monthly-record";
 
 type RunSummary = { month: string };
@@ -49,7 +53,12 @@ export default async function ContentOppPage({
     () => ({ ok: false as const, people: [] as Assignee[] }),
   );
   try {
-    const runs = await apiFetch<RunSummary[]>("/decisions/records", { clientId });
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const runs = finishedRuns(
+      await apiFetch<RunSummary[]>("/decisions/records", { clientId }),
+      currentMonth,
+    );
     const month = typeof query.run === "string" ? query.run : runs[0]?.month;
     if (month) {
       record = await apiFetch<MonthlyRecord>(
@@ -90,31 +99,51 @@ export default async function ContentOppPage({
   // key at all. That is not the same as a plan with no refreshes in it,
   // and saying so sent somebody to check an allowance that was fine.
   const planned = record != null && record.updates !== undefined;
-  const updates = record?.updates ?? [];
-  const emptyUpdates = record?.empty_update_slots ?? [];
+  // The engine recommends; the team has the last word. An action somebody put
+  // in the plan joins it, one they took out drops to the list below, and the
+  // saved record underneath is not touched.
+  const updateCandidates = record?.update_candidates ?? [];
+  const refreshPlan = updateCandidates.length ? effectivePlan(updateCandidates, slotStates) : null;
+  const updates = refreshPlan ? refreshPlan.planned : (record?.updates ?? []);
   const slots = record?.update_slots ?? 0;
+  const emptyUpdates = (record?.empty_update_slots ?? []).slice(
+    0,
+    Math.max(0, slots - updates.length),
+  );
   // Everything the engine weighed and could not fit. The bulk of what it
   // found lives here, and a plan you cannot argue with is not a plan.
-  const alsoFound = (record?.update_candidates ?? [])
-    .filter((row) => row.slot === null)
-    // The column shows the score, so the table is ordered by it. The plan is
-    // filled by loss, and the two differ for a page whose action is not a
-    // refresh.
-    .sort((a, b) => b.score - a.score);
+  const alsoFound = refreshPlan?.left ?? [];
 
   // New pages. Same absence-of-key rule as above: an older record has no
   // `new_content` at all, which is not a plan that found nothing to write.
   const contentPlanned = record != null && record.new_content !== undefined;
-  const newContent = record?.new_content ?? [];
-  const emptyContent = record?.empty_content_slots ?? [];
+  const contentCandidates = record?.content_candidates ?? [];
+  const contentPlan = contentCandidates.length
+    ? effectivePlan(contentCandidates, slotStates)
+    : null;
+  const newContent = contentPlan ? contentPlan.planned : (record?.new_content ?? []);
   const contentSlots = record?.content_slots ?? 0;
-  const scan = record?.content_scan;
-  const contentAlsoFound = (record?.content_candidates ?? []).filter(
-    (row) => row.slot === null,
+  const emptyContent = (record?.empty_content_slots ?? []).slice(
+    0,
+    Math.max(0, contentSlots - newContent.length),
   );
+  const scan = record?.content_scan;
+  const contentAlsoFound = contentPlan?.left ?? [];
   const retainerResults = (record?.previous_results ?? []).filter(
     (row) => row.kind === "update" || row.kind === "content",
   );
+
+  function pickFor(candidates: { action_uid: string }[]) {
+    if (!record) return undefined;
+    return {
+      clientId,
+      slug: client.slug,
+      month: record.month,
+      overridden: candidates
+        .filter((row) => slotStates.get(row.action_uid)?.in_plan != null)
+        .map((row) => row.action_uid),
+    };
+  }
 
   function renderPool(
     actions: NonNullable<MonthlyRecord["updates"]>,
@@ -128,6 +157,7 @@ export default async function ContentOppPage({
           <SlotCard
             action={action}
             status={slotStates.get(action.action_uid)?.status}
+            yours={slotStates.get(action.action_uid)?.in_plan === true}
           >
             <SlotActionBar
               action={action}
@@ -138,6 +168,18 @@ export default async function ContentOppPage({
               month={record!.month}
               teamworkReady={teamworkReady}
             />
+            {record ? (
+              <div className="mt-3">
+                <PlanPick
+                  uid={action.action_uid}
+                  clientId={clientId}
+                  slug={client.slug}
+                  month={record.month}
+                  engineChose={slotStates.get(action.action_uid)?.in_plan !== true}
+                  inPlan
+                />
+              </div>
+            ) : null}
           </SlotCard>
           </div>
         ))}
@@ -273,6 +315,39 @@ export default async function ContentOppPage({
             {scan.small ?? 0} under the volume floor.
           </p>
         ) : null}
+
+        {contentPlanned && scan && !scan.blocked && (scan.demand_queries ?? 0) > 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            Beyond tracked terms: Search Console showed {scan.demand_queries} queries in
+            the last 90 days. {scan.demand_small ?? 0} drew too few impressions,{" "}
+            {scan.demand_tracked ?? 0} are already tracked or mapped,{" "}
+            {scan.demand_brand ?? 0} are brand queries, {scan.demand_earning ?? 0} already
+            earn a top-10 position and {scan.demand_covered ?? 0} have a page about them.
+            That leaves {scan.demand_gaps ?? 0} with a price and{" "}
+            {scan.demand_unpriced ?? 0} waiting for one.
+          </p>
+        ) : null}
+
+        {contentPlanned && scan && !scan.blocked && (client.competitor_domains ?? []).length === 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            No competitors set, so the plan is not looking at what they rank for.{" "}
+            <Link href={`/clients/${client.slug}#competitors`} className="underline">
+              Add up to 3 in client settings
+            </Link>
+            .
+          </p>
+        ) : null}
+
+        {contentPlanned && scan && !scan.blocked && (scan.competitor_keywords ?? 0) > 0 ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            Competitors: yours rank in the top ten for {scan.competitor_keywords}{" "}
+            terms. {scan.competitor_tracked ?? 0} are already tracked or mapped,{" "}
+            {scan.competitor_brand ?? 0} name a brand, {scan.competitor_small ?? 0} are too
+            small to chase, {scan.competitor_earning ?? 0} already earn a top-10 position
+            here and {scan.competitor_covered ?? 0} have a page about them. That leaves{" "}
+            {scan.competitor_gaps ?? 0} with no page on this site.
+          </p>
+        ) : null}
       </section>
 
       {contentAlsoFound.length > 0 ? (
@@ -286,26 +361,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <div className="table-shell overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Term</th>
-                  <th className="text-right">Opportunity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contentAlsoFound.slice(0, 25).map((row) => (
-                  <tr key={row.action_uid}>
-                    <td className="text-[13px]">{row.term ?? row.title}</td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      {Math.round(row.score).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CandidateTable rows={contentAlsoFound} kind="term" pick={pickFor(contentCandidates)} />
         </section>
       ) : null}
 
@@ -323,30 +379,7 @@ export default async function ContentOppPage({
               </span>
             }
           />
-          <div className="table-shell overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Page</th>
-                  <th>What it needs</th>
-                  <th className="text-right">Impressions at stake</th>
-                </tr>
-              </thead>
-              <tbody>
-                {alsoFound.slice(0, 25).map((row) => (
-                  <tr key={row.action_uid}>
-                    <td className="font-[family-name:var(--font-mono)] text-[12.5px]">
-                      {row.target_url.replace(/^https?:\/\/[^/]+/, "") || "/"}
-                    </td>
-                    <td className="text-[13px]">{row.title}</td>
-                    <td className="whitespace-nowrap text-right tabular-nums">
-                      {Math.round(row.score).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CandidateTable rows={alsoFound} kind="page" pick={pickFor(updateCandidates)} />
         </section>
       ) : null}
 

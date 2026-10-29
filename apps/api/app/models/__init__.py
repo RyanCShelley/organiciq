@@ -4,10 +4,11 @@ from app.models.copilot import CopilotConversation, CopilotMessage
 from app.models.config import ChannelRule, ConversionDefinition, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot, StagingSerAuditIssue, StagingSerAuditPage
 from app.models.decision import Decision, DecisionThreshold
-from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Event, StagingGa4Traffic
+from app.models.ga4 import Ga4LeadMeasurement, FactGa4Event, FactGa4Traffic, StagingGa4Event, StagingGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage, FactGscQueryPage, StagingGscDaily, StagingGscPage, StagingGscQueryPage
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
+from app.models.baseline import BaselineVersion
 from app.models.scheduler import SchedulerCheckpoint
 from app.models.seranking import (
     FactSerAiCheck,
@@ -16,6 +17,7 @@ from app.models.seranking import (
     FactSerAiSearchPrompt,
     FactSerAiTrackerStats,
     FactSerCompetitor,
+    FactSerCompetitorKeyword,
     FactSerDomainKeyword,
     FactSerKeyword,
     FactSerRanking,
@@ -32,9 +34,11 @@ from app.models.seranking import (
 from app.models.user import User, UserClient, UserRole
 from app.models.client_feed import ClientFeed
 from app.models.client_focus import ClientFocus
+from app.models.watch_target import WatchTarget
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 __all__ = [
+    "BaselineVersion",
     "WatchlistBucket",
     "WatchlistKeyword",
     "Tier",
@@ -87,6 +91,7 @@ __all__ = [
     "FactSerKeyword",
     "FactSerRanking",
     "FactSerCompetitor",
+    "FactSerCompetitorKeyword",
     "FactSerSiteSummary",
     "FactSerAiPrompt",
     "FactSerAiSearchPrompt",

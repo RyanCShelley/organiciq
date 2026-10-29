@@ -11,13 +11,15 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.client import Client
 from app.models.user import UserRole
 from app.schemas import (
-    BaselineSnapshotApplyRequest,
-    BaselineSnapshotPreviewOut,
+    BaselineGoalRequest,
+    BaselineLeadConversionsRequest,
+    BaselineLockRequest,
+    BaselineSeriesCsvRequest,
     ClientCreate,
     ClientOut,
     ClientUpdate,
 )
-from app.services import baseline_snapshot, clients as client_service
+from app.services import baseline_lock, baseline_series, clients as client_service, lead_conversions
 
 from app.services.plan_allowances import resolve_plan_allowances
 
@@ -159,52 +161,151 @@ def client_setup(
     return setup_state(db, client)
 
 
-@router.get("/{client_id}/baseline/preview", response_model=BaselineSnapshotPreviewOut)
-def preview_baseline_from_ga4(
-    client_id: UUID,
-    user: Annotated[AuthUser, Depends(require_sma_staff)],
-    db: Annotated[Session, Depends(get_db)],
-    as_of: DateType | None = Query(default=None),
-    lookback_days: int = Query(default=90, ge=7, le=365),
-) -> BaselineSnapshotPreviewOut:
+def _staff_client(db: Session, user: AuthUser, client_id: UUID) -> Client:
     if not user_can_access_client(db, user, client_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
     client = client_service.get_client(db, client_id)
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
-    try:
-        preview = baseline_snapshot.preview_baseline_from_ga4(
-            db, client, as_of=as_of, lookback_days=lookback_days
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return BaselineSnapshotPreviewOut.model_validate(preview)
+    return client
 
 
-@router.post("/{client_id}/baseline/from-ga4", response_model=BaselineSnapshotPreviewOut)
-def apply_baseline_from_ga4(
+@router.get("/{client_id}/baseline/series")
+def baseline_series_from_ga4(
     client_id: UUID,
-    payload: BaselineSnapshotApplyRequest,
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
-) -> BaselineSnapshotPreviewOut:
-    if not user_can_access_client(db, user, client_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this client")
-    client = client_service.get_client(db, client_id)
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+    months: int = Query(default=24, ge=6, le=48),
+    regime_start: str | None = Query(default=None),
+    half_life_months: float = Query(default=3.0, ge=0.5, le=24),
+    lead_event: list[str] = Query(default=[]),
+    acknowledge: list[str] = Query(default=[]),
+) -> dict:
+    """The recent-window baseline, ranges and flags from the synced GA4 data. Writes nothing."""
+    client = _staff_client(db, user, client_id)
     try:
-        _, preview = baseline_snapshot.apply_baseline_from_ga4(
+        return baseline_series.build_result(
             db,
             client,
-            monthly_lead_goal=payload.monthly_lead_goal,
-            notes=payload.notes,
-            as_of=payload.as_of,
-            lookback_days=payload.lookback_days,
+            source="ga4",
+            regime_start=regime_start,
+            lead_events=lead_event or None,
+            half_life_months=half_life_months,
+            acknowledged=acknowledge,
+            months=months,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return BaselineSnapshotPreviewOut.model_validate(preview)
+
+
+@router.post("/{client_id}/baseline/series")
+def baseline_series_from_csv(
+    client_id: UUID,
+    payload: BaselineSeriesCsvRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The same baseline from a pasted monthly CSV. Writes nothing."""
+    client = _staff_client(db, user, client_id)
+    try:
+        return baseline_series.build_result(
+            db,
+            client,
+            source="csv",
+            csv_text=payload.csv_text,
+            regime_start=payload.regime_start,
+            half_life_months=payload.half_life_months,
+            acknowledged=payload.acknowledged,
+            as_of=payload.as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{client_id}/baseline/events")
+def baseline_lead_event_candidates(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The events this client's GA4 has sent, for choosing which count as leads."""
+    client = _staff_client(db, user, client_id)
+    return baseline_series.lead_event_candidates(db, client)
+
+
+@router.post("/{client_id}/baseline/lead-conversions")
+def set_lead_conversions(
+    client_id: UUID,
+    payload: BaselineLeadConversionsRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Make these exactly the client's lead conversions, so the baseline and the home screen agree.
+
+    Nothing is deleted: a definition that drops out is switched off.
+    """
+    client = _staff_client(db, user, client_id)
+    changes = lead_conversions.sync(db, client.id, payload.lead_events)
+    db.commit()
+    return {"changes": changes, "lead_events": lead_conversions.active_lead_events(db, client.id)}
+
+
+@router.post("/{client_id}/baseline/goal")
+def set_baseline_goal(
+    client_id: UUID,
+    payload: BaselineGoalRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Set the plan-end monthly lead goal, e.g. to the newest locked baseline's 12-month figure."""
+    client = _staff_client(db, user, client_id)
+    client_service.update_client(db, client, ClientUpdate(monthly_lead_goal=payload.monthly_lead_goal))
+    return baseline_lock.goal_state(db, client)
+
+
+@router.post("/{client_id}/baseline/lock")
+def lock_baseline(
+    client_id: UUID,
+    payload: BaselineLockRequest,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Freeze a baseline as the next version. Any staff may lock.
+
+    The numbers are recomputed here from the data; nothing the screen shows is
+    trusted. Every blocker must be acknowledged, and a re-baseline needs a reason.
+    """
+    client = _staff_client(db, user, client_id)
+    try:
+        return baseline_lock.lock(db, client, user.email, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{client_id}/baseline/versions")
+def list_baseline_versions(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """Every locked baseline for the client, newest first."""
+    client = _staff_client(db, user, client_id)
+    return baseline_lock.list_versions(db, client)
+
+
+@router.get("/{client_id}/baseline/versions/{version}")
+def get_baseline_version(
+    client_id: UUID,
+    version: int,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """One locked baseline with the full analysis it was locked from."""
+    client = _staff_client(db, user, client_id)
+    found = baseline_lock.get_version(db, client, version)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such baseline version")
+    return found
 
 
 @router.get("/current/context", response_model=ClientOut)

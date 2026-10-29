@@ -16,7 +16,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
-from app.schemas.watchlist import (
+from app.schemas.v2_watchlist import (
     WatchlistBucketOut,
     WatchlistImportRequest,
     WatchlistImportResponse,

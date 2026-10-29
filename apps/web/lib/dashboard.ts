@@ -1,3 +1,19 @@
+export type RankingReading = {position: number; ranking_url: string | null; observed_on: string};
+export type DashboardExploration = {
+ visibility: {tracked: number; measured: number; top_10: number; matched: number; matched_current_top_10: number; matched_previous_top_10: number; keywords: {term: string; current: RankingReading | null; previous: RankingReading | null}[]};
+ previous_prompts?: {prompt_id?: string; prompt: string; provider: string; observed_on: string; mentioned: boolean | null; cited: boolean | null}[];
+ prompts: {prompt_id?: string; prompt: string; provider: string; observed_on: string; mentioned: boolean | null; cited: boolean | null}[];
+ previous_channels: DashboardResponse['traffic']['by_channel'] | null;
+ previous_sessions_series: number[]; previous_leads_series: number[];
+};
+export type ServiceReportingMetric = { current: number | null; previous: number | null; change_pct: number | null };
+export type ServiceReportingRow = { key: string; label: string; channels: string[]; sessions: ServiceReportingMetric; lead_events: ServiceReportingMetric };
+export type ServiceReportingData = {
+  status: string; headline_scope: string; rows: ServiceReportingRow[];
+  combined?: ServiceReportingRow; outside_services?: ServiceReportingRow; ai_referrals?: ServiceReportingRow;
+  ai_sources?: {source: string; sessions: number; lead_events: number | null; google_channels: string[]}[]; note?: string;
+};
+
 export type DashboardPeriodMetric = {
   current: number | null;
   previous: number | null;
@@ -38,12 +54,20 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       previous_from: "",
       previous_to: "",
     },
+    effective_periods: data.effective_periods ?? {},
+    exploration: data.exploration,
+    service_reporting: data.service_reporting ?? {status: "not_configured", headline_scope: "whole_site", rows: []},
+    search_console_sources: data.search_console_sources ?? {properties: [], combined_history: false},
     freshness: Array.isArray(data.freshness) ? data.freshness : [],
     conversions: {
       configured: conversions?.configured === true,
       lead_events: Array.isArray(conversions?.lead_events) ? conversions.lead_events : [],
       leads: periodMetric(conversions?.leads),
       lead_rate: periodMetric(conversions?.lead_rate),
+      session_lead_rate: periodMetric(conversions?.session_lead_rate),
+      lead_sessions: periodMetric(conversions?.lead_sessions),
+      session_measurement: conversions?.session_measurement ?? null,
+      session_rate_target_pct: conversions?.session_rate_target_pct ?? null,
       leads_by_channel: Array.isArray(conversions?.leads_by_channel)
         ? conversions.leads_by_channel.map((row) => ({
             channel: String(row.channel ?? ""),
@@ -117,6 +141,7 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
       gsc_clicks: periodMetric(traffic?.gsc_clicks),
       gsc_ctr: periodMetric(traffic?.gsc_ctr),
       ga4_sessions: periodMetric(traffic?.ga4_sessions),
+      ga4_reported_sessions: periodMetric(traffic?.ga4_reported_sessions),
       ga4_views: periodMetric(traffic?.ga4_views),
       by_channel: Array.isArray(traffic?.by_channel)
         ? traffic.by_channel.map((row) => ({
@@ -134,6 +159,10 @@ export function normalizeDashboardResponse(payload: unknown): DashboardResponse 
             ga4_sessions: typeof row.ga4_sessions === "number" ? row.ga4_sessions : 0,
             ga4_views: typeof row.ga4_views === "number" ? row.ga4_views : 0,
             ga4_key_events: typeof row.ga4_key_events === "number" ? row.ga4_key_events : 0,
+            previous_ga4_sessions: typeof row.previous_ga4_sessions === "number" ? row.previous_ga4_sessions : null,
+            previous_ga4_views: typeof row.previous_ga4_views === "number" ? row.previous_ga4_views : null,
+            previous_ga4_key_events: typeof row.previous_ga4_key_events === "number" ? row.previous_ga4_key_events : null,
+            previous_session_key_event_rate: typeof row.previous_session_key_event_rate === "number" ? row.previous_session_key_event_rate : null,
             session_key_event_rate:
               typeof row.session_key_event_rate === "number" ? row.session_key_event_rate : null,
             gsc_impressions: typeof row.gsc_impressions === "number" ? row.gsc_impressions : 0,
@@ -249,6 +278,10 @@ export type DashboardFreshness = {
 };
 
 export type DashboardResponse = {
+  exploration?: DashboardExploration;
+  service_reporting?: ServiceReportingData;
+  search_console_sources?: {properties: {property: string; clicks: number; impressions: number; observed_days: number; provenance_known: boolean}[]; combined_history: boolean; note?: string};
+  effective_periods?: Record<string, {current: [string, string] | null; previous: [string, string] | null}>;
   period: {
     from: string;
     to: string;
@@ -261,6 +294,10 @@ export type DashboardResponse = {
     lead_events: string[];
     leads: DashboardPeriodMetric;
     lead_rate: DashboardPeriodMetric;
+    session_lead_rate?: DashboardPeriodMetric;
+    lead_sessions?: DashboardPeriodMetric;
+    session_rate_target_pct?: number | null;
+    session_measurement?: { status: string; sessions: number | null; lead_sessions: number | null; conversion_rate_pct: number | null; reason?: string; measured_at?: string } | null;
     leads_by_channel: {
       channel: string;
       label: string;
@@ -314,6 +351,7 @@ export type DashboardResponse = {
     gsc_clicks: DashboardPeriodMetric;
     gsc_ctr: DashboardPeriodMetric;
     ga4_sessions: DashboardPeriodMetric;
+    ga4_reported_sessions?: DashboardPeriodMetric;
     ga4_views: DashboardPeriodMetric;
     by_channel: {
       channel: string;
@@ -328,7 +366,11 @@ export type DashboardResponse = {
       ga4_sessions: number;
       ga4_views: number;
       ga4_key_events: number;
-      /** Session-to-key-event rate, already a percentage. */
+      previous_ga4_sessions?: number | null;
+      previous_ga4_views?: number | null;
+      previous_ga4_key_events?: number | null;
+      previous_session_key_event_rate?: number | null;
+      /** Legacy field: lead events per 100 visits; not session conversion probability. */
       session_key_event_rate: number | null;
       gsc_impressions: number;
       gsc_clicks: number;

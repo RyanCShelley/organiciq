@@ -25,6 +25,7 @@ export const GROWTH_ACTIONS = [
 ] as const;
 
 export type AnnotationRow = {
+  engine_uid?: string | null;
   id: string;
   date: string;
   annotation_type: string;
@@ -42,6 +43,7 @@ export type AnnotationRow = {
   impact_summary_json: {
     deltas?: Record<string, number | null>;
     suggested_result?: string;
+    measurement_note?: string;
     baseline?: Record<string, number | null>;
     post?: Record<string, number | null>;
   };

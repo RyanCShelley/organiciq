@@ -1,5 +1,6 @@
 "use client";
 
+import { ClientFavicon } from "@/components/ClientFavicon";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -137,13 +138,14 @@ export function ClientSwitcher({
         )}
       >
         {selected ? (
-          <span
-            aria-hidden
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-[7px] text-[11px] font-bold text-white"
-            style={{ background: chipColor(selected.slug) }}
-          >
-            {initials(selected.client_name)}
-          </span>
+          <ClientFavicon
+            domain={selected.domain}
+            initials={initials(selected.client_name)}
+            background={chipColor(selected.slug)}
+            className="h-7 w-7 rounded-[7px]"
+            textClassName="text-[11px]"
+            size={28}
+          />
         ) : null}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13.5px] font-semibold">
@@ -214,13 +216,14 @@ export function ClientSwitcher({
                       index === active && "bg-[var(--surface-muted)]",
                     )}
                   >
-                    <span
-                      aria-hidden
-                      className="flex h-6 w-6 flex-none items-center justify-center rounded-[6px] text-[10px] font-bold text-white"
-                      style={{ background: chipColor(client.slug) }}
-                    >
-                      {initials(client.client_name)}
-                    </span>
+                    <ClientFavicon
+                      domain={client.domain}
+                      initials={initials(client.client_name)}
+                      background={chipColor(client.slug)}
+                      className="h-6 w-6 rounded-[6px]"
+                      textClassName="text-[10px]"
+                      size={24}
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium text-[var(--text-primary)]">
                         {client.client_name}

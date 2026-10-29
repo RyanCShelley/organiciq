@@ -41,7 +41,10 @@ def _upsert_watermark(
         )
         db.add(row)
     else:
-        row.fact_through_date = fact_through
+        # Backfills and failed refreshes cannot move the verified cutoff back.
+        if (validation_status == ValidationStatus.PASSED and fact_through is not None
+                and (row.fact_through_date is None or fact_through > row.fact_through_date)):
+            row.fact_through_date = fact_through
         row.validation_status = validation_status
         if validation_status == ValidationStatus.PASSED:
             row.last_successful_sync_at = now
@@ -84,7 +87,8 @@ def _touch_integration(db: Session, client_id, *, success: bool, fact_date: date
     integration.last_sync_completed = now
     if success:
         integration.last_successful_sync = now
-        integration.last_fact_date = fact_date
+        if fact_date is not None and (integration.last_fact_date is None or fact_date > integration.last_fact_date):
+            integration.last_fact_date = fact_date
         integration.error_message = None
         integration.connection_status = ConnectionStatus.CONNECTED
     else:

@@ -28,4 +28,6 @@ def get_dashboard(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="'from' must be on or before 'to'",
         )
-    return build_dashboard(db, client, from_date, to_date)
+    result = build_dashboard(db, client, from_date, to_date)
+    db.commit()  # Persist verified exact-period source measurements.
+    return result

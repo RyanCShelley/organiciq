@@ -1,75 +1,33 @@
+"use client";
 import Link from "next/link";
-
+import { usePathname } from "next/navigation";
 import { clientHref } from "@/lib/client-path";
 
-/**
- * In the order a client is set up, which is the order the data depends on.
- *
- * Integrations came after Settings when Settings was where you began. It is
- * not: nothing on it can be filled in usefully before a source is connected
- * and pulled, and the lead definitions screen has no event names to offer
- * until GA4's first pull has landed. Setup is the first thing on Settings,
- * and it links onward from there.
- */
-const WORKSPACE_LINKS = [
-  { segment: "", label: "Setup" },
-  { segment: "integrations", label: "Integrations" },
-  { segment: "jobs", label: "Sync jobs" },
-  { segment: "data-health", label: "Data health" },
-  { segment: "conversions", label: "Conversions" },
-  { segment: "keyword-map", label: "Keyword map" },
+const GROUPS = [
+  { title: "Account", links: [["", "General Information"]] },
+  { title: "Growth Engine Setup", links: [["integrations", "Connections"], ["conversions", "Conversions & Goals"], ["keyword-map", "Pages & Keywords"], ["competitors", "Competitors"]] },
+  { title: "Administration", links: [["advanced", "Advanced Settings"], ["team", "Team Access"]] },
 ];
-
-export function ClientWorkspaceNav({
-  clientSlug,
-  active,
-}: {
-  clientSlug: string;
-  active: string;
-}) {
-  return (
-    <div className="segmented mb-4" role="group" aria-label="Client workspace sections">
-      {WORKSPACE_LINKS.map((link) => {
-        const href = clientHref(clientSlug, link.segment);
-        const isActive = active === href;
-        return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={isActive ? "page" : undefined}
-            className={isActive ? "segmented-item segmented-item-active" : "segmented-item"}
-          >
-            {link.label}
-          </Link>
-        );
-      })}
-    </div>
-  );
+export function ClientWorkspaceNav({ clientSlug }: { clientSlug: string; active?: string }) {
+  const path = usePathname();
+  return <nav aria-label="Client settings" className="flex flex-wrap gap-1 lg:block lg:space-y-5">
+    {GROUPS.map(group => <div key={group.title} className="contents lg:block">
+      <p className="hidden lg:block px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--text-tertiary)]">{group.title}</p>
+      <div className="contents lg:block">{group.links.map(([segment, label]) => {
+        const href = clientHref(clientSlug, segment); const active = path === href;
+        return <Link key={href} href={href} aria-current={active ? "page" : undefined} className={`block rounded-lg px-3 py-3 text-sm ${active ? "bg-[var(--brand-teal)]/10 font-semibold text-[var(--brand-teal)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"}`}>{label}</Link>;
+      })}</div>
+    </div>)}
+  </nav>;
 }
-
-export function ClientWorkspaceHeader({
-  clientName,
-  domain,
-}: {
-  clientName: string;
-  domain: string;
-}) {
-  return (
-    <div className="card mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          Client workspace
-        </p>
-        <p className="mt-1 font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-          {clientName}
-        </p>
-        <p className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-          {domain}
-        </p>
-      </div>
-      <Link href="/clients" className="btn btn-secondary">
-        All clients
-      </Link>
-    </div>
-  );
+export function ClientSettingsShell({ clientSlug, children }: { clientSlug: string; children: React.ReactNode }) {
+  const path = usePathname();
+  if (path.endsWith("/setup") || path.endsWith("/jobs") || path.endsWith("/data-health")) return <>{children}</>;
+  return <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)]"><ClientWorkspaceNav clientSlug={clientSlug} /><div className="min-w-0">{children}</div></div>;
+}
+export function ClientWorkspaceHeader({ clientName, domain }: { clientName: string; domain: string }) {
+  return <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div><p className="font-semibold">{clientName}</p><p className="mt-1 text-sm text-[var(--text-secondary)]">{domain}</p></div>
+    <Link href="/clients" className="btn btn-secondary">All clients</Link>
+  </div>;
 }

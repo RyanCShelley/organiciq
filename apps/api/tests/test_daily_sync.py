@@ -1,6 +1,7 @@
+import pytest
 from datetime import date, datetime, timezone
 
-from app.ingestion.seranking.pipeline_keyword_metrics import KEYWORD_METRICS_INTERVAL_DAYS
+from app.ingestion.dataforseo.keyword_metrics import KEYWORD_METRICS_INTERVAL_DAYS
 from app.models.client import Client
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import SyncJob
@@ -56,6 +57,16 @@ def test_maybe_run_daily_sync_enqueues_mapped_sources(db, client_a: Client, monk
     assert daily_sync.maybe_run_daily_sync(db) is False
 
 
+@pytest.fixture(autouse=True)
+def _dataforseo_configured(monkeypatch):
+    """Keyword pricing and competitor reads are DataForSEO's, and are not queued without it."""
+    from app.integrations import dataforseo
+
+    monkeypatch.setattr(
+        dataforseo, "load_config", lambda: dataforseo.DataForSeoConfig(login="l", password="p")
+    )
+
+
 def _track(db, client_id, keyword: str) -> None:
     from app.models.seranking import FactSerKeyword
 
@@ -94,7 +105,7 @@ def test_keyword_metrics_due_when_nothing_priced(db, client_a: Client):
     assert stats["enqueued"] == 1
     job = (
         db.query(SyncJob)
-        .filter(SyncJob.source == "se_ranking_keyword_metrics")
+        .filter(SyncJob.source == "dataforseo_keyword_metrics")
         .one()
     )
     assert job.client_id == client_a.id

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ClientFavicon } from "@/components/ClientFavicon";
 import { AddClientForm } from "@/components/AddClientForm";
 import { DeleteClientButton } from "@/components/DeleteClientButton";
 import {
@@ -104,11 +105,21 @@ export default async function ClientsIndexPage({
             render: (row) => (
               <Link
                 href={`/clients/${row.slug}`}
-                className="block min-w-0 transition-colors hover:text-[var(--brand-teal-hover)]"
+                className="flex min-w-0 items-center gap-2.5 transition-colors hover:text-[var(--brand-teal-hover)]"
               >
-                <span className="block font-semibold">{row.client_name}</span>
-                <span className="block font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
-                  {row.domain}
+                <ClientFavicon
+                  domain={row.domain}
+                  initials={row.client_name.slice(0, 2).toUpperCase()}
+                  background="var(--surface-muted)"
+                  className="h-7 w-7 rounded-[7px]"
+                  textClassName="text-[11px] !text-[var(--text-secondary)]"
+                  size={28}
+                />
+                <span className="min-w-0">
+                  <span className="block font-semibold">{row.client_name}</span>
+                  <span className="block font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-tertiary)]">
+                    {row.domain}
+                  </span>
                 </span>
               </Link>
             ),

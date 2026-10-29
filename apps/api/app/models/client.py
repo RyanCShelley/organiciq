@@ -59,6 +59,7 @@ class Client(Base):
     tier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tiers.id"), nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     primary_market: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_reporting: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
     #: The Teamwork tasklist a sent growth action lands in. The site and token
     #: are install-wide; this is the only per-client part of the mapping.
@@ -90,6 +91,11 @@ class Client(Base):
     #: business is navigation whatever it is spelled as, and no rewrite or
     #: link moves it. Stored lowercase; matched as a phrase.
     brand_aliases: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    #: Up to three competitor domains the team names. The gap analysis reads
+    #: their top-ranking terms; nothing is read for a client that names none.
+    competitor_domains: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
     # Enterprise (and optional overrides): agreement-specific plan amounts

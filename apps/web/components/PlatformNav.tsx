@@ -1,4 +1,7 @@
+"use client";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { withNavContext } from "@/lib/navigation";
 
 const PLATFORM_LINKS = [
   { href: "/platform", label: "Overview" },
@@ -8,6 +11,7 @@ const PLATFORM_LINKS = [
 ];
 
 export function PlatformNav({ active }: { active: string }) {
+  const search = useSearchParams();
   return (
     <div className="segmented mb-4" role="group" aria-label="Platform sections">
       {PLATFORM_LINKS.map((link) => {
@@ -15,9 +19,18 @@ export function PlatformNav({ active }: { active: string }) {
         return (
           <Link
             key={link.href}
-            href={link.href}
+            href={withNavContext(
+              link.href,
+              search.get("clientId") ?? "",
+              search.get("from") ?? "",
+              search.get("to") ?? "",
+            )}
             aria-current={isActive ? "page" : undefined}
-            className={isActive ? "segmented-item segmented-item-active" : "segmented-item"}
+            className={
+              isActive
+                ? "segmented-item segmented-item-active"
+                : "segmented-item"
+            }
           >
             {link.label}
           </Link>

@@ -10,6 +10,7 @@
 export type TestStatus = "pass" | "fail" | "blocked";
 
 export type BranchTest = {
+  evidence?: Record<string, number | string | null>;
   id: string;
   name: string;
   metric_label: string;
@@ -32,6 +33,8 @@ export type BranchResult = {
 };
 
 export type RecordAction = {
+  metric_key?: string;
+  family?: string;
   action_uid: string;
   slot: number;
   id: string;
@@ -49,6 +52,7 @@ export type RecordAction = {
   steps?: string[];
   metric: string;
   check_on: string;
+  check_after_days?: number;
   flags?: string[];
 };
 
@@ -60,6 +64,10 @@ export type Candidate = RecordAction & {
 };
 
 export type MonthlyRecord = {
+  measurements?: import("@/components/DecisionEngine/MeasurementSummary").Measurements;
+  review_required?: boolean;
+  recommendation_version?: number;
+  plan_review?: { approved_at: string | null };
   client: string;
   client_name?: string;
   domain?: string;
@@ -120,6 +128,23 @@ export type MonthlyRecord = {
     small?: number;
     gaps?: number;
     pages_searched?: number;
+    /** Search Console demand the site has no page about, beyond tracked terms. */
+    demand_queries?: number;
+    demand_tracked?: number;
+    demand_brand?: number;
+    demand_small?: number;
+    demand_earning?: number;
+    demand_covered?: number;
+    demand_unpriced?: number;
+    demand_gaps?: number;
+    /** Terms the closest competitors rank in the top ten for. */
+    competitor_keywords?: number;
+    competitor_tracked?: number;
+    competitor_brand?: number;
+    competitor_small?: number;
+    competitor_earning?: number;
+    competitor_covered?: number;
+    competitor_gaps?: number;
     blocked?: string;
   };
   data_gaps: { input: string; status: string }[];
@@ -164,6 +189,8 @@ export const CONSTRAINT_LABEL: Record<string, string> = {
   leads: "Leads",
   visibility_expansion: "Visibility expansion",
   withheld: "Withheld",
+  continue_strategy: "Continue current strategy",
+  insufficient_evidence: "Insufficient evidence",
 };
 
 /** "October 2026" from "2026-10". */
@@ -175,6 +202,29 @@ export function monthName(month: string): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** "2026-11" from "2026-10". */
+export function nextMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** "2026-09" from "2026-10". */
+export function previousMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(year, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * The runs worth showing: months that have finished. A run needs the whole
+ * month's data, so the month we are standing in has no run yet (the plan for it
+ * is last month's run). A partial run saved before that rule is left out.
+ */
+export function finishedRuns<T extends { month: string }>(runs: T[], currentMonth: string): T[] {
+  return runs.filter((run) => run.month < currentMonth);
 }
 
 export function formatDay(iso: string | null | undefined): string {
@@ -227,6 +277,7 @@ export type Assignee = {
  * what the engine decided.
  */
 export type SlotState = {
+  before_value?: number | null; after_value?: number | null; result?: string | null;
   uid: string;
   status: "planned" | "assigned" | "done" | "skipped";
   assignee_email: string | null;
@@ -251,3 +302,37 @@ export type Workflow = {
   teamwork_ready: boolean;
   actions: SlotState[];
 };
+
+/**
+ * The plan after the team has had its say.
+ *
+ * The engine ranks and fills the slots; a person can put any candidate in or
+ * take any slotted action out. Nothing an override says changes the saved
+ * record, so this is computed at render. Slots are renumbered in display order,
+ * because a slot number belongs to the engine's ordering and the plan is no
+ * longer only that.
+ */
+export function effectivePlan<T extends Candidate>(
+  candidates: T[],
+  states: Map<string, { in_plan: boolean | null }>,
+): { planned: T[]; left: T[]; added: number; removed: number } {
+  const decided = (row: T) => states.get(row.action_uid)?.in_plan ?? null;
+  const chosenByEngine = (row: T) => row.slot !== null;
+  const inPlan = (row: T) => decided(row) ?? chosenByEngine(row);
+
+  const kept = candidates
+    .filter((row) => inPlan(row) && chosenByEngine(row))
+    .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
+  const added = candidates
+    .filter((row) => inPlan(row) && !chosenByEngine(row))
+    .sort((a, b) => b.score - a.score);
+  const planned = [...kept, ...added].map((row, index) => ({ ...row, slot: index + 1 }));
+  const left = candidates.filter((row) => !inPlan(row)).sort((a, b) => b.score - a.score);
+
+  return {
+    planned,
+    left,
+    added: added.length,
+    removed: candidates.filter((row) => chosenByEngine(row) && decided(row) === false).length,
+  };
+}

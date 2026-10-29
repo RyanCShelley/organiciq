@@ -177,3 +177,48 @@ def test_a_chosen_action_can_be_assigned_like_any_other(
     assert assigned.json()["status"] == "assigned"
     row = db.query(EngineAction).filter(EngineAction.uid == "u-left-out").one()
     assert row.in_plan is True and row.assignee_email == admin_user.email.lower()
+
+
+def test_a_refresh_or_new_page_the_engine_left_out_can_be_put_in_and_assigned(
+    client, db: Session, client_a: Client, admin_user
+):
+    """The retainer pools keep their candidates under their own keys; the
+    override has to find them there too, not only among growth actions."""
+    row = MonthlyRecord(
+        client_id=client_a.id,
+        month=MONTH,
+        run_saved_at=datetime.now(timezone.utc),
+        constraint_name="visibility",
+        held_since=MONTH,
+        confidence="medium",
+        record={
+            "actions": [],
+            "incidents": [],
+            "update_candidates": [
+                {"action_uid": "u-refresh", "slot": None, "id": "U-1", "title": "Refresh",
+                 "target_url": "/old", "not_slotted_because": "Slots were taken."}
+            ],
+            "content_candidates": [
+                {"action_uid": "u-newpage", "slot": None, "id": "C-2", "title": "Write",
+                 "target_url": "", "term": "heat pumps", "not_slotted_because": "Slots were taken."}
+            ],
+        },
+    )
+    db.add(row)
+    db.commit()
+    headers = client_header(client_a.id, admin_user.email)
+
+    for uid in ("u-refresh", "u-newpage"):
+        put = client.post(
+            f"/decisions/records/{MONTH}/slots/{uid}/in-plan",
+            headers=headers,
+            json={"in_plan": True},
+        )
+        assert put.status_code == 200 and put.json()["in_plan"] is True
+
+        back = client.post(
+            f"/decisions/records/{MONTH}/slots/{uid}/in-plan",
+            headers=headers,
+            json={"in_plan": None},
+        )
+        assert back.json()["in_plan"] is None

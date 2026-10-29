@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.models.annotation import Annotation, AnnotationType
 from app.models.client import Client
 from app.models.decision import EngineAction, MonthlyRecord
 
@@ -39,6 +40,9 @@ class RecordSlot:
     metric: str | None
     check_on: str | None
     effort_min: int | None
+    steps: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+    check_after_days: int | None = None
 
 
 def slots_in_record(record: dict) -> dict[str, RecordSlot]:
@@ -79,6 +83,9 @@ def slots_in_record(record: dict) -> dict[str, RecordSlot]:
                 metric=row.get("metric"),
                 check_on=row.get("check_on"),
                 effort_min=row.get("effort_min"),
+                steps=tuple(row.get("steps") or []),
+                evidence=tuple(row.get("evidence") or []),
+                check_after_days=row.get("check_after_days"),
             )
     return out
 
@@ -209,8 +216,63 @@ def mark_sent(
         row.status = "assigned"
     row.action_id = slot.action_id
     row.target_url = slot.target_url
+    # Sent after it was shipped: the entry already exists and gains its task.
+    if task_id:
+        logged = (
+            db.query(Annotation)
+            .filter(Annotation.client_id == client.id, Annotation.engine_uid == slot.uid)
+            .one_or_none()
+        )
+        if logged is not None:
+            logged.teamwork_task_id = task_id
     db.flush()
     return row
+
+
+#: What kind of entry shipping each kind of slot writes to the account history.
+_SHIPPED_TYPE = {
+    "content": AnnotationType.CONTENT_PUBLISHED,
+    "update": AnnotationType.CONTENT_UPDATED,
+    "incident": AnnotationType.TECHNICAL_CHANGE,
+    "action": AnnotationType.GROWTH_ACTION,
+}
+
+
+def _log_shipped(
+    db: Session, client: Client, slot: RecordSlot, row: EngineAction, *, on: date | None
+) -> None:
+    """Keep the account history in step with what has been marked shipped.
+
+    Shipping writes one entry and shipping it again updates that entry rather
+    than adding a second. Clearing the date removes it, which is the "marked the
+    wrong one" case: the entry exists only because of the date. Entries a person
+    typed or imported have no `engine_uid` and are never touched here.
+    """
+    existing = (
+        db.query(Annotation)
+        .filter(Annotation.client_id == client.id, Annotation.engine_uid == slot.uid)
+        .one_or_none()
+    )
+    if on is None:
+        if existing is not None:
+            db.delete(existing)
+        return
+    fields = {
+        "date": on,
+        "completed_at": on,
+        "annotation_type": _SHIPPED_TYPE.get(slot.kind, AnnotationType.GROWTH_ACTION),
+        "description": slot.title,
+        "page_url": slot.target_url or None,
+        "success_metric": slot.metric,
+        "teamwork_task_id": row.teamwork_task_id,
+        "measurement_start_date": on + timedelta(days=1),
+        "measurement_end_date": on + timedelta(days=slot.check_after_days or 28),
+    }
+    if existing is None:
+        db.add(Annotation(client_id=client.id, engine_uid=slot.uid, **fields))
+    else:
+        for key, value in fields.items():
+            setattr(existing, key, value)
 
 
 def mark_shipped(
@@ -231,11 +293,26 @@ def mark_shipped(
     Clearing it is allowed: somebody marks the wrong slot eventually.
     """
     row = _row_for(db, client, month, slot)
+    if on != row.shipped_on:
+        row.after_value = None
+        row.result = None
+        row.before_value = None
+        if on is not None:
+            from app.services.results import measure, metric_key_for
+            from app.services.plan_review import workflow_record
+            record = load_record(db, client, month)
+            data = workflow_record(record.record) if record else {}
+            action = next((a for key in ("actions", "updates", "new_content", "candidates")
+                           for a in data.get(key, []) if a.get("action_uid") == slot.uid), {})
+            reading = measure(db, client, metric_key_for(action),
+                              url=slot.target_url, term=action.get("term"),
+                              as_of=on - timedelta(days=1))
+            row.before_value = reading.value
     row.shipped_on = on
-    if on is not None and row.status == "planned":
-        row.status = "assigned"
+    row.status = "done" if on is not None else ("assigned" if row.assignee_email else "planned")
     row.action_id = slot.action_id
     row.target_url = slot.target_url
+    _log_shipped(db, client, slot, row, on=on)
     db.flush()
     return row
 
@@ -290,5 +367,8 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
         "teamwork_task_id": row.teamwork_task_id,
         "teamwork_task_url": row.teamwork_task_url,
         "assigned_action_id": row.action_id,
+        "before_value": float(row.before_value) if row.before_value is not None else None,
+        "after_value": float(row.after_value) if row.after_value is not None else None,
+        "result": row.result,
         "stale": stale,
     }

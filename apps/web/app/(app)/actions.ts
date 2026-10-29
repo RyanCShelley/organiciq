@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { apiFetch } from "@/lib/api";
+import { isSettingsSection, settingsPatch } from "@/lib/client-settings";
 import { signOut } from "@/lib/auth";
 
 export async function signOutAction() {
@@ -13,6 +14,12 @@ export async function updateClientSettingsAction(formData: FormData) {
   const clientId = String(formData.get("clientId") || "");
   if (!clientId) return { ok: false as const, error: "Missing client" };
 
+  const section = String(formData.get("settings_section") || "");
+  if (!isSettingsSection(section)) return { ok: false as const, error: "Unknown settings section. Reload the page and try again." };
+
+  const serviceChoice = String(formData.get("service_reporting") ?? "");
+  if (formData.has("service_reporting") && !["", "none", "organiciq", "ad_accelerator", "both"].includes(serviceChoice)) return { ok: false as const, error: "Choose a valid agency service." };
+  const services = serviceChoice ? { organiciq: ["organiciq", "both"].includes(serviceChoice), ad_accelerator: ["ad_accelerator", "both"].includes(serviceChoice) } : null;
   const monthlyRaw = String(formData.get("monthly_lead_goal") || "").trim();
   const sheetRaw = String(formData.get("account_sheet_url") || "").trim();
   const startRaw = String(formData.get("start_date") || "").trim();
@@ -20,25 +27,6 @@ export async function updateClientSettingsAction(formData: FormData) {
   // Staff cannot change the plan or its ceilings (the API refuses), and the
   // form does not send them. Leaving them out of the body leaves them alone.
   const planLocked = String(formData.get("plan_locked") || "") === "1";
-
-  const baselineAsOf = String(formData.get("baseline_as_of") || "").trim() || null;
-  const baselineSessionsRaw = String(formData.get("baseline_monthly_sessions") || "").trim();
-  const baselineLeadsRaw = String(formData.get("baseline_monthly_leads") || "").trim();
-  const baselineRateRaw = String(formData.get("baseline_lead_rate_pct") || "").trim();
-  const baselineSessions =
-    baselineSessionsRaw === "" ? null : Number(baselineSessionsRaw);
-  const baselineLeads = baselineLeadsRaw === "" ? null : Number(baselineLeadsRaw);
-  let baselineRate = baselineRateRaw === "" ? null : Number(baselineRateRaw);
-  if (
-    baselineRate == null &&
-    baselineSessions != null &&
-    baselineLeads != null &&
-    baselineSessions > 0 &&
-    !Number.isNaN(baselineSessions) &&
-    !Number.isNaN(baselineLeads)
-  ) {
-    baselineRate = (baselineLeads / baselineSessions) * 100;
-  }
 
   const parseOptionalInt = (key: string): number | null => {
     const raw = String(formData.get(key) || "").trim();
@@ -63,6 +51,13 @@ export async function updateClientSettingsAction(formData: FormData) {
   // short to be a name.
   const brandAliases = String(formData.get("brand_aliases") || "")
     .split(/[\n;]/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  // One domain per line, at most three: each is a 100-credit SE Ranking read a
+  // month. The API cleans them to bare domains and refuses a fourth.
+  const competitorDomains = String(formData.get("competitor_domains") || "")
+    .split(/[\n;,]/)
     .map((name) => name.trim())
     .filter(Boolean);
 
@@ -95,15 +90,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   if (crawlPageLimit != null && (crawlPageLimit < 1 || crawlPageLimit > 5000)) {
     return { ok: false as const, error: "Crawl page limit must be between 1 and 5,000." };
   }
-  if (
-    [baselineSessions, baselineLeads, baselineRate].some(
-      (value) => value != null && Number.isNaN(value),
-    )
-  ) {
-    return { ok: false as const, error: "Baseline values must be numbers." };
-  }
-
-  if (isEnterprise) {
+  if (isEnterprise && section === "general" && !planLocked) {
     if (
       customKeyword == null ||
       customContent == null ||
@@ -124,6 +111,7 @@ export async function updateClientSettingsAction(formData: FormData) {
   const market = marketRaw === "__other" ? undefined : marketRaw || null;
 
   const body = {
+    ...(formData.has("service_reporting") ? { service_reporting: services } : {}),
     client_name: String(formData.get("client_name") || "").trim(),
     domain: String(formData.get("domain") || "").trim(),
     ...(planLocked ? {} : { tier_id: String(formData.get("tier_id") || "").trim() }),
@@ -134,12 +122,6 @@ export async function updateClientSettingsAction(formData: FormData) {
     account_sheet_url: sheetRaw || null,
     teamwork_tasklist_id:
       String(formData.get("teamwork_tasklist_id") || "").trim() || null,
-    baseline_as_of: baselineAsOf,
-    baseline_monthly_sessions: baselineSessions,
-    baseline_monthly_leads: baselineLeads,
-    baseline_lead_rate_pct: baselineRate,
-    baseline_source: String(formData.get("baseline_source") || "").trim() || "manual",
-    baseline_notes: String(formData.get("baseline_notes") || "").trim() || null,
     status: String(formData.get("status") || "active"),
     ...(planLocked
       ? {}
@@ -156,10 +138,11 @@ export async function updateClientSettingsAction(formData: FormData) {
     sitemap_url: sitemapUrl,
     path_prefix: pathPrefix,
     brand_aliases: brandAliases,
+    competitor_domains: competitorDomains,
     lead_goal_overrides: leadGoalOverrides,
   };
 
-  if (!body.client_name || !body.domain || (!planLocked && !("tier_id" in body && body.tier_id))) {
+  if (section === "general" && (!body.client_name || !body.domain || (!planLocked && !("tier_id" in body && body.tier_id)))) {
     return { ok: false as const, error: "Name, domain, and tier are required." };
   }
   if (body.monthly_lead_goal != null && Number.isNaN(body.monthly_lead_goal)) {
@@ -170,7 +153,7 @@ export async function updateClientSettingsAction(formData: FormData) {
     await apiFetch(`/clients/${clientId}`, {
       method: "PATCH",
       clientId,
-      body,
+      body: settingsPatch(body, section),
     });
   } catch (e) {
     return {

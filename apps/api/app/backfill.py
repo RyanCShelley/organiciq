@@ -51,7 +51,8 @@ SAME_DAY_SOURCES = (
     "site_crawl",
     "se_ranking_backlinks",
     "se_ranking_domain_keywords",
-    "se_ranking_keyword_metrics",
+    "dataforseo_keyword_metrics",
+    "dataforseo_competitor_keywords",
 )
 
 BACKFILLABLE = ("gsc_pages", "gsc_queries", "ga4", *SAME_DAY_SOURCES)

@@ -10,8 +10,18 @@ const SOURCES = [
   "se_ranking_search",
   "se_ranking_ai",
   "se_ranking_audit",
+  "dataforseo_competitor_keywords",
+  "dataforseo_keyword_metrics",
   "unknown_test",
 ];
+
+/** Billed by DataForSEO, so the list says so. Everything else shows its name. */
+const LABELS: Record<string, string> = {
+  dataforseo_competitor_keywords:
+    "dataforseo_competitor_keywords — named competitors' top-10 terms (billed)",
+  dataforseo_keyword_metrics:
+    "dataforseo_keyword_metrics — price tracked and demand terms (billed)",
+};
 
 export function EnqueueJobForm({ clientId }: { clientId: string }) {
   const router = useRouter();
@@ -60,7 +70,7 @@ export function EnqueueJobForm({ clientId }: { clientId: string }) {
         >
           {SOURCES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {LABELS[s] ?? s}
             </option>
           ))}
         </select>

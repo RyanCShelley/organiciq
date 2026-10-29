@@ -3,6 +3,48 @@
 import { revalidatePath } from "next/cache";
 
 import { apiFetch } from "@/lib/api";
+import type { PlanReview } from "@/lib/plan-review";
+
+export async function saveLeadRateGoalAction(clientId: string, slug: string, target: number | null) {
+  try {
+    await apiFetch("/decisions/measurement-settings", { clientId, method: "PUT", body: { target_lead_rate_pct: target } });
+    revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
+    return { ok: true as const };
+  } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Rate target did not save" }; }
+}
+
+export async function savePlanReviewAction(clientId: string, slug: string, month: string, review: PlanReview, approve = false) {
+  try {
+    const path = `/decisions/records/${encodeURIComponent(month)}/review`;
+    const saved = await apiFetch<PlanReview>(path, {
+      clientId, method: "PUT",
+      body: { revision: review.revision, strategy: review.strategy, focus: review.focus, reason: review.reason, items: review.items },
+    });
+    let result = saved;
+    let warning: string | undefined;
+    if (approve) {
+      try {
+        result = await apiFetch<PlanReview>(`${path}/approve`, { clientId, method: "POST", body: { revision: saved.revision } });
+      } catch (error) { warning = `Draft saved. Approval needs attention: ${error instanceof Error ? error.message : "check the plan"}`; }
+    }
+    revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
+    revalidatePath(`/${slug}/content-opp`);
+    return { ok: true as const, review: result, warning };
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : "Plan did not save" };
+  }
+}
+
+export async function saveWatchTargetAction(clientId: string, slug: string, target: unknown) {
+  try {
+    const rows = await apiFetch<import("@/components/DecisionEngine/WatchlistPanel").WatchItem[]>("/decisions/watchlist", { clientId, method: "PUT", body: target });
+    revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
+    return { ok: true as const, rows };
+  } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Target did not save" }; }
+}
 
 /**
  * Re-run this month and replace its saved record.
@@ -40,6 +82,7 @@ export async function runMonthlyRecordAction(
       body: { month: month ?? null },
     });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     return { ok: true as const, month: record.month };
   } catch (e) {
     return {
@@ -83,6 +126,9 @@ async function slotPost(
       body,
     });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
+    // The retainer plan reads the same workflow rows.
+    revalidatePath(`/${slug}/content-opp`);
     return { ok: true as const, state };
   } catch (e) {
     return {

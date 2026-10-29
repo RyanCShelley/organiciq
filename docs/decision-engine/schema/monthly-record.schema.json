@@ -14,7 +14,7 @@
     "data_through": { "type": "string", "format": "date" },
     "plan": { "enum": ["launch", "legacy", "lift", "lead", "enterprise"] },
     "action_slots": { "type": "integer", "minimum": 0 },
-    "constraint": { "enum": ["visibility", "traffic", "leads", "visibility_expansion", "withheld"] },
+    "constraint": { "enum": ["visibility", "traffic", "leads", "visibility_expansion", "withheld", "insufficient_evidence", "continue_strategy"] },
     "reason_text": { "type": "string", "description": "One sentence with the failing numbers" },
     "reason": {
       "type": "array",

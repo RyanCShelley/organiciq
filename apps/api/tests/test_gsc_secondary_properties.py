@@ -65,7 +65,7 @@ def test_save_secondary_gsc_property_via_api(db, client, admin_user, client_a):
     assert deleted.json()["gsc_secondary_site_urls"] == []
 
 
-def test_publish_primary_wins_daily_and_rewrites_secondary_pages(db, client_a):
+def test_publish_retains_both_property_totals_and_original_page_provenance(db, client_a):
     primary = "sc-domain:clienta.example"
     secondary = "sc-domain:legacy.example"
     _connect_gsc(db, client_a, primary=primary, secondaries=[secondary])
@@ -137,16 +137,21 @@ def test_publish_primary_wins_daily_and_rewrites_secondary_pages(db, client_a):
     )
     db.commit()
 
-    assert publish_gsc_daily(db, job) == 1
-    daily = db.query(FactGscDaily).one()
-    assert daily.impressions == Decimal("100")
-    assert daily.clicks == Decimal("10")
+    assert publish_gsc_daily(db, job) == 2
+    daily = {r.gsc_site_url:r for r in db.query(FactGscDaily)}
+    assert daily[primary].impressions == Decimal("100")
+    assert daily[secondary].impressions == Decimal("999")
+    assert sum(r.clicks for r in daily.values()) == Decimal("109")
 
-    assert publish_gsc_pages(db, job) == 1
-    page = db.query(FactGscPage).one()
-    assert page.normalized_url == "https://clienta.example/services"
-    assert page.impressions == Decimal("20")
-    assert page.clicks == Decimal("2")
+    assert publish_gsc_pages(db, job) == 2
+    pages = {r.gsc_site_url:r for r in db.query(FactGscPage)}
+    assert pages[secondary].normalized_url == "https://clienta.example/services"
+    assert pages[secondary].raw_url == "https://legacy.example/services"
+    assert pages[primary].clicks == Decimal("2")
+    assert pages[secondary].clicks == Decimal("5")
+    # Repeating the same extract does not add a second copy.
+    assert publish_gsc_pages(db, job) == 2
+    assert db.query(FactGscPage).count() == 2
 
 
 def test_fetch_gsc_pages_queries_primary_and_secondary(db, client_a):
@@ -189,3 +194,21 @@ def test_fetch_gsc_pages_queries_primary_and_secondary(db, client_a):
     assert calls == [primary, secondary]
     staged = db.query(StagingGscPage).filter(StagingGscPage.job_id == job.id).all()
     assert {row.gsc_site_url for row in staged} == {primary, secondary}
+
+
+def test_controlled_restatement_is_scoped_to_client_window_and_requires_rows(db, client_a, client_b):
+    from app.ingestion.gsc.publish import _replace_scope
+    day = date(2026, 9, 1)
+    job = SyncJob(client_id=client_a.id, source="gsc_pages", start_date=day, end_date=day,
+                  status=SyncJobStatus.QUEUED, params_json={"replace_gsc_window": True})
+    db.add(job)
+    for owner, observed in [(client_a, day), (client_b, day), (client_a, day - timedelta(days=1))]:
+        db.add(FactGscDaily(client_id=owner.id, date=observed, gsc_site_url="sc-domain:example.com",
+                            clicks=1, impressions=10, ctr=Decimal("0.1"), average_position=2))
+    db.flush()
+    _replace_scope(db, FactGscDaily, job, [])
+    assert db.query(FactGscDaily).count() == 3
+    _replace_scope(db, FactGscDaily, job, [{"gsc_site_url": "sc-domain:example.com"}])
+    assert db.query(FactGscDaily).count() == 2
+    assert db.query(FactGscDaily).filter_by(client_id=client_b.id, date=day).count() == 1
+    assert db.query(FactGscDaily).filter_by(client_id=client_a.id, date=day-timedelta(days=1)).count() == 1

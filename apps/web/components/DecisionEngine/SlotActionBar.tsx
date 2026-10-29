@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import Link from "next/link";
+import { useRef, useState, useTransition } from "react";
 
 import {
   assignSlotAction,
@@ -35,6 +36,8 @@ export function SlotActionBar({
   slug,
   month,
   teamworkReady,
+  approved = true,
+  onAssignmentSaved,
 }: {
   action: RecordAction;
   state: SlotState | undefined;
@@ -43,15 +46,22 @@ export function SlotActionBar({
   slug: string;
   month: string;
   teamworkReady: boolean;
+  approved?: boolean;
+  onAssignmentSaved?: (due: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [askingSkip, setAskingSkip] = useState(false);
   const [reason, setReason] = useState("");
+  const [completing, setCompleting] = useState(false);
+  const [completionDate, setCompletionDate] = useState(new Date().toLocaleDateString("en-CA", {timeZone:"America/New_York"}));
 
   const [assignee, setAssignee] = useState(state?.assignee_email ?? "");
   const [due, setDue] = useState(state?.due ?? "");
+  const dueField = useRef<HTMLInputElement>(null);
+  const [assignmentSaved, setAssignmentSaved] = useState(false);
+  const assignmentDirty = assignee !== (state?.assignee_email ?? "") || due !== (state?.due ?? "");
   const shippedOn = state?.shipped_on ?? null;
 
   const status = state?.status ?? "planned";
@@ -66,8 +76,8 @@ export function SlotActionBar({
   }
 
   function saveAssignment(nextAssignee: string, nextDue: string) {
-    run(() =>
-      assignSlotAction({
+    run(async () => {
+      const result = await assignSlotAction({
         clientId,
         slug,
         month,
@@ -76,8 +86,13 @@ export function SlotActionBar({
         assigneeName:
           assignees.find((a) => a.email === nextAssignee)?.name ?? null,
         due: nextDue || null,
-      }),
-    );
+      });
+      if (result.ok) {
+        setAssignmentSaved(true);
+        onAssignmentSaved?.(nextDue);
+      }
+      return result;
+    });
   }
 
   /** What would go into Teamwork, for the days the API is not wired up. */
@@ -93,7 +108,13 @@ export function SlotActionBar({
       "Done when",
       action.done_when,
       "",
-      `Measured on ${action.metric}, checked ${action.check_on}`,
+      "Checklist",
+      ...(action.steps ?? []).map((step, index) => `${index + 1}. ${step}`),
+      "",
+      "Evidence and limitations",
+      ...(action.evidence ?? []),
+      "",
+      `Measured on ${action.metric}, checked ${action.check_after_days ? `${action.check_after_days} days after shipment` : action.check_on}`,
       `Estimated ${action.effort_min} minutes`,
     ];
     navigator.clipboard.writeText(lines.join("\n")).then(
@@ -105,6 +126,7 @@ export function SlotActionBar({
     );
   }
 
+  if (!approved) return <p className="text-sm text-[var(--text-secondary)]">Save and approve the reviewed plan before assigning or delivering growth work.</p>;
   if (status === "skipped") {
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -145,7 +167,7 @@ export function SlotActionBar({
 
       <div className="flex flex-wrap items-center gap-2">
         <label className="sr-only" htmlFor={`assignee-${action.action_uid}`}>
-          Assign slot {action.slot}
+          Owner for {action.title}
         </label>
         <select
           id={`assignee-${action.action_uid}`}
@@ -154,7 +176,7 @@ export function SlotActionBar({
           disabled={pending}
           onChange={(e) => {
             setAssignee(e.target.value);
-            saveAssignment(e.target.value, due);
+            setAssignmentSaved(false);
           }}
         >
           <option value="">Unassigned</option>
@@ -171,19 +193,32 @@ export function SlotActionBar({
         </select>
 
         <label className="sr-only" htmlFor={`due-${action.action_uid}`}>
-          Due date for slot {action.slot}
+          Due date for {action.title}
         </label>
         <input
           id={`due-${action.action_uid}`}
           type="date"
           className={FIELD}
-          value={due}
+          ref={dueField}
+          defaultValue={state?.due ?? ""}
           disabled={pending}
           onChange={(e) => {
             setDue(e.target.value);
-            saveAssignment(assignee, e.target.value);
+            setAssignmentSaved(false);
           }}
         />
+
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={pending || Boolean(state?.stale)}
+          onClick={() => {
+            const nextDue = dueField.current?.value ?? "";
+            setDue(nextDue);
+            saveAssignment(assignee, nextDue);
+          }}
+        >Save assignment</button>
+        {assignmentSaved ? <span role="status">Assignment saved.</span> : assignmentDirty ? <span>Unsaved assignment changes</span> : null}
 
         {sentUrl ? (
           <a
@@ -198,9 +233,14 @@ export function SlotActionBar({
           <button
             type="button"
             className={BUTTON}
-            disabled={pending}
+            disabled={pending || !state?.assignee_email || !state?.due || assignmentDirty || Boolean(state?.stale)}
             onClick={() =>
-              run(() => sendSlotAction({ clientId, slug, month, uid: action.action_uid }))
+              run(() => {
+                if ((dueField.current?.value ?? "") !== (state?.due ?? "")) {
+                  return Promise.resolve({ok: false, error: "Save the assignment changes before sending."});
+                }
+                return sendSlotAction({ clientId, slug, month, uid: action.action_uid });
+              })
             }
           >
             {pending ? "Sending…" : "Send to Teamwork"}
@@ -215,14 +255,14 @@ export function SlotActionBar({
         )}
 
         {/* Until this is set, every verdict on this action carries "not
-            recorded as shipped" — and a caveat on every row is one nobody
+            marked done" — and a caveat on every row is one nobody
             reads. */}
         {shippedOn ? (
           <button
             type="button"
             className={BUTTON}
             disabled={pending}
-            title="Clear the shipped date"
+            title="Clear the done date"
             onClick={() =>
               run(() =>
                 shipSlotAction({
@@ -235,28 +275,23 @@ export function SlotActionBar({
               )
             }
           >
-            Shipped {formatDay(shippedOn)}
+            Done {formatDay(shippedOn)}
           </button>
-        ) : (
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={pending}
-            onClick={() =>
-              run(() =>
-                shipSlotAction({
-                  clientId,
-                  slug,
-                  month,
-                  uid: action.action_uid,
-                  shippedOn: new Date().toISOString().slice(0, 10),
-                }),
-              )
-            }
+        ) : null}
+        {shippedOn ? (
+          <Link
+            href={`/${slug}/annotations`}
+            className="text-[12.5px] text-[var(--brand-teal-hover)] underline"
           >
-            Mark shipped
-          </button>
-        )}
+            In Work & Results
+          </Link>
+        ) : completing ? (
+          <form className="flex flex-wrap items-center gap-2" onSubmit={event=>{event.preventDefault();run(async()=>{const result=await shipSlotAction({clientId,slug,month,uid:action.action_uid,shippedOn:completionDate});if(result.ok)setCompleting(false);return result;});}}>
+            <label className="text-sm">Completed on<input required className={FIELD} type="date" value={completionDate} onChange={e=>setCompletionDate(e.target.value)}/></label>
+            <button className={BUTTON} disabled={pending} type="submit">Save completion</button><button className={BUTTON} type="button" onClick={()=>setCompleting(false)}>Cancel</button>
+          </form>
+        ) : <button type="button" className={BUTTON} disabled={pending} onClick={()=>setCompleting(true)}>Mark completed</button>}
+
 
         {askingSkip ? null : (
           <button

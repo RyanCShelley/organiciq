@@ -87,12 +87,12 @@ def test_a_test_with_no_input_is_never_a_pass():
 # ── The eleven ──
 
 
-def test_v1_reads_priority_terms_not_every_term():
+def test_v1_without_dated_watchlist_rankings_is_blocked():
     blocked = assess_visibility(
         VisibilitySignals(priority_keywords=0, priority_group_set=False), thresholds=T
     )[0]
     assert blocked.status is Status.BLOCKED
-    assert "priority" in (blocked.missing or "")
+    assert "dated Watch List" in (blocked.missing or "")
 
 
 def test_v2_and_v3_judge_a_fall_not_a_level():
@@ -124,12 +124,12 @@ def test_v4_fails_on_a_single_unreachable_target_page():
     assert tests["V4"].status is Status.FAIL
 
 
-def test_t1_compares_missed_clicks_to_clicks_actually_earned():
+def test_t1_benchmark_gap_is_bounded_and_uses_opportunity_denominator():
     tests = {t.id: t for t in assess_traffic(
-        TrafficSignals(missed_clicks=30.0, actual_clicks=100.0), thresholds=T)}
+        TrafficSignals(ctr_context_matched=True, missed_clicks=30.0, actual_clicks=100.0), thresholds=T)}
     assert tests["T1"].status is Status.FAIL
     tests = {t.id: t for t in assess_traffic(
-        TrafficSignals(missed_clicks=10.0, actual_clicks=100.0), thresholds=T)}
+        TrafficSignals(ctr_context_matched=True, missed_clicks=10.0, actual_clicks=100.0), thresholds=T)}
     assert tests["T1"].status is Status.PASS
 
 
@@ -152,20 +152,19 @@ def test_t3_catches_a_site_that_was_always_poor():
     assert tests["T3b"].status is Status.FAIL
 
 
-def test_l1_judges_against_the_goal_so_far_not_the_whole_month():
+def test_l1_judges_conversion_rate_against_explicit_target():
     """Day three against a monthly goal fails everyone."""
     tests = {t.id: t for t in assess_leads(
-        LeadSignals(conversions_configured=True, leads_month_to_date=4,
-                    goal_to_date=5, monthly_goal=50), thresholds=T)}
+        LeadSignals(conversions_configured=True, lead_rate=3.5, target_lead_rate=3.0), thresholds=T)}
     assert tests["L1"].status is Status.PASS
 
 
-def test_l1_fails_when_the_pace_is_genuinely_short():
+def test_l1_fails_when_the_conversion_rate_is_below_target():
     tests = {t.id: t for t in assess_leads(
-        LeadSignals(conversions_configured=True, leads_month_to_date=4,
-                    goal_to_date=16, monthly_goal=50), thresholds=T)}
+        LeadSignals(conversions_configured=True, lead_rate=1.0, target_lead_rate=3.0), thresholds=T)}
     assert tests["L1"].status is Status.FAIL
-    assert tests["L1"].display == "4 of 50 leads"
+    assert tests["L1"].value == 1.0
+    assert tests["L1"].pass_line == 3.0
 
 
 # ── The ladder ──
@@ -191,7 +190,7 @@ def test_nothing_failing_is_visibility_expansion():
 
 def test_everything_blocked_is_still_not_a_constraint():
     t = select_constraint(_branches(Status.BLOCKED, Status.BLOCKED, Status.BLOCKED))
-    assert t.constraint == VISIBILITY_EXPANSION
+    assert t.constraint == "insufficient_evidence"
 
 
 def test_a_relaunch_forces_visibility_over_a_failing_lead_branch():
@@ -216,9 +215,26 @@ def test_the_reason_names_the_failing_number():
     """"Leads is the constraint" is not a reason. The sentence has to carry
     the number that failed and the bar it missed."""
     tests = assess_leads(
-        LeadSignals(conversions_configured=True, leads_month_to_date=4,
-                    goal_to_date=16, monthly_goal=50), thresholds=T)
+        LeadSignals(conversions_configured=True, lead_rate=1.0, target_lead_rate=3.0), thresholds=T)
     leads = summarise_branch(Branch.LEADS, tests)
     t = select_constraint([*_branches()[:2], leads])
-    assert "4 of 50 leads" in t.reason_text
-    assert "80%" in t.reason_text
+    assert "1%" in t.reason_text
+    assert "3%" in t.reason_text
+    assert "pass at 3% or more" in t.reason_text
+
+
+def test_ctr_gap_with_no_earned_clicks_and_session_decline():
+    tests = {t.id: t for t in assess_traffic(TrafficSignals(ctr_context_matched=True, missed_clicks=150, actual_clicks=50, sessions=800, prior_sessions=1000), thresholds=T)}
+    assert tests["T1"].value == 75
+    assert tests["T0"].value == -20
+    assert tests["T0"].status is Status.FAIL
+    tests = {t.id: t for t in assess_traffic(TrafficSignals(ctr_context_matched=True, missed_clicks=50, actual_clicks=0), thresholds=T)}
+    assert tests["T1"].value == 100
+    tests = {t.id: t for t in assess_traffic(TrafficSignals(ctr_context_matched=True, missed_clicks=0, actual_clicks=0), thresholds=T)}
+    assert tests["T1"].status is Status.BLOCKED
+
+
+def test_unmatched_ctr_reference_cannot_choose_traffic_as_a_constraint():
+    tests = {t.id: t for t in assess_traffic(TrafficSignals(missed_clicks=150, actual_clicks=50), thresholds=T)}
+    assert tests["T1"].status is Status.BLOCKED
+    assert tests["T1"].value == 75

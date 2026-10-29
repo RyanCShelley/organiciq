@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from sqlalchemy import case
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -169,6 +170,19 @@ def publish_seranking_search(db: Session, job: SyncJob) -> tuple[int, int, int, 
             }
         )
 
+    # The keyword endpoint is the membership catalog; dated position history
+    # alone must never reactivate a removed term. Only reconcile engines with
+    # a nonempty catalog, leaving other clients/engines and empty responses alone.
+    catalog_engines = {engine for engine, _ in keyword_meta}
+    for engine in catalog_engines:
+        db.query(FactSerKeyword).filter(
+            FactSerKeyword.client_id == job.client_id,
+            FactSerKeyword.site_engine_id == engine,
+        ).update({FactSerKeyword.is_tracked: False}, synchronize_session=False)
+    for payload in keyword_payloads:
+        key = (payload["site_engine_id"], payload["keyword_id"])
+        payload["is_tracked"] = key in keyword_meta
+
     for batch in _chunked(keyword_payloads, UPSERT_BATCH_SIZE):
         if not batch:
             continue
@@ -177,6 +191,7 @@ def publish_seranking_search(db: Session, job: SyncJob) -> tuple[int, int, int, 
             constraint="uq_facts_ser_keywords_grain",
             set_={
                 "keyword": stmt.excluded.keyword,
+                "is_tracked": case((stmt.excluded.site_engine_id.in_(catalog_engines), stmt.excluded.is_tracked), else_=FactSerKeyword.is_tracked),
                 "group_id": stmt.excluded.group_id,
                 "group_name": stmt.excluded.group_name,
                 "volume": stmt.excluded.volume,

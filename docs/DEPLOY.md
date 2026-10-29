@@ -29,6 +29,7 @@ Use with [README → Deploy](../README.md#deploy-railway--vercel) and [`.env.exa
 | `GOOGLE_DATA_OAUTH_*` | — | required | optional |
 | `GOOGLE_DATA_OAUTH_REDIRECT_URI` | — | `https://<api-host>/oauth/google/callback` | — |
 | `SE_RANKING_API_KEY` | — | required for SE syncs | required for SE syncs |
+| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | — | required for keyword pricing, competitor reads and SERP features | same (whichever service runs jobs) |
 | `DECISION_ENGINE_ENABLED` | — | `true` | optional |
 | `WORKER_POLL_INTERVAL_SECONDS` | — | — | `2` (default) |
 | `DAILY_SYNC_ENABLED` | — | `true` | `true` |

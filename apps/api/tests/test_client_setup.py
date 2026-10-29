@@ -163,8 +163,21 @@ def test_each_step_links_to_where_it_is_actually_done(db: Session, client_a: Cli
         ("sources", "integrations"),
         ("leads", "conversions"),
         ("conversion_pages", "conversions"),
-        ("page_stages", "conversions"),
+        ("page_stages", "keyword-map"),
         ("keyword_targets", "keyword-map"),
     ):
         assert steps[key]["scope"] == "workspace", key
         assert steps[key]["link"] == link, key
+
+
+def test_connected_sources_require_saved_properties(db: Session, client_a: Client):
+    from app.models.integration import Integration, ConnectionStatus
+    for integration in db.query(Integration).filter(Integration.client_id == client_a.id):
+        integration.connection_status = ConnectionStatus.CONNECTED
+        integration.external_property_id = None
+    db.commit()
+    assert _step(setup_state(db, client_a), "sources")["done"] is False
+    for integration in db.query(Integration).filter(Integration.client_id == client_a.id):
+        integration.external_property_id = "selected-property"
+    db.commit()
+    assert _step(setup_state(db, client_a), "sources")["done"] is True

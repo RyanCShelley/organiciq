@@ -49,7 +49,7 @@ export function PreviousResults({ rows, empty }: { rows: Row[]; empty: string })
             {/* A verdict on work nobody recorded doing is about the metric,
                 not about the work. */}
             {row.result !== "waiting" && !row.shipped ? (
-              <span className="text-[11.5px] text-[#8A4B08]">not recorded as shipped</span>
+              <span className="text-[11.5px] text-[#8A4B08]">not marked done</span>
             ) : null}
           </div>
         </li>

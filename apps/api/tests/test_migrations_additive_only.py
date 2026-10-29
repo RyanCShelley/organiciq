@@ -24,7 +24,7 @@ from alembic.script import ScriptDirectory
 
 #: The last migration the running tool already depends on. Everything after it
 #: is v2's and is held to the additive-only rule.
-BASELINE = "0059_copilot_conversations"
+BASELINE = "0069_ga4_native_channels"
 
 _DESTRUCTIVE_SQL = re.compile(
     r"\bdrop\s+(table|column)\b|\brename\s+(to|column)\b", re.IGNORECASE

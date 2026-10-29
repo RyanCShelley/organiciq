@@ -113,6 +113,7 @@ class FactSerKeyword(Base):
     site_engine_id: Mapped[str] = mapped_column(String(64), nullable=False)
     keyword_id: Mapped[str] = mapped_column(String(64), nullable=False)
     keyword: Mapped[str] = mapped_column(Text, nullable=False)
+    is_tracked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     group_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     group_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -405,6 +406,36 @@ class FactSerDomainKeyword(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class FactSerCompetitorKeyword(Base):
+    """A keyword a competitor ranks for, from SE Ranking Domain Analysis.
+
+    Pulled for the few closest competitors a month. Volume and difficulty come
+    with the row, so a term found here needs no separate pricing.
+    """
+
+    __tablename__ = "facts_ser_competitor_keywords"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id", "competitor_domain", "keyword", name="uq_ser_competitor_keywords_grain"
+        ),
+        Index("ix_ser_competitor_keywords_client", "client_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False
+    )
+    competitor_domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    keyword: Mapped[str] = mapped_column(String(512), nullable=False)
+    position: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    difficulty: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cpc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    ranking_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fetched_at: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class FactSerAiSearchPrompt(Base):

@@ -162,3 +162,19 @@ def test_one_bad_client_does_not_stop_the_rest(
     assert maybe_run_month(db, today=NOV_5) is True
     # The second client still got its run.
     assert len(seen) == 2
+
+
+def test_failed_client_retries_without_repeating_successful_client(db,client_a,client_b,monkeypatch):
+    from app.services import monthly_run
+    _with_data(db,client_a);_with_data(db,client_b)
+    calls=[]
+    def run(db,c,**kw):
+        calls.append(c.slug)
+        if c.id==client_b.id and calls.count(c.slug)==1:
+            raise RuntimeError('temporary source failure')
+    monkeypatch.setattr(monthly_run,'save_record',run)
+    assert maybe_run_month(db,today=NOV_5)
+    assert maybe_run_month(db,today=NOV_5)
+    assert calls.count(client_a.slug)==1
+    assert calls.count(client_b.slug)==2
+    assert maybe_run_month(db,today=NOV_5) is False

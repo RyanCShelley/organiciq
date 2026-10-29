@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -52,7 +53,7 @@ def _merge_on_grain(
 
 
 def _rules(db: Session) -> list[ChannelRule]:
-    return db.query(ChannelRule).filter(ChannelRule.active.is_(True)).order_by(ChannelRule.priority.asc()).all()
+    return db.query(ChannelRule).filter(ChannelRule.active.is_(True)).order_by(ChannelRule.priority.asc(), ChannelRule.id.asc()).all()
 
 
 def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
@@ -64,12 +65,12 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     scope = normalize_path_prefix(client.path_prefix)
     traffic = (
         db.query(StagingGa4Traffic)
-        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id)
+        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id, StagingGa4Traffic.report_basis == "legacy")
         .all()
     )
     events = (
         db.query(StagingGa4Event)
-        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id)
+        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id, StagingGa4Event.report_basis == "legacy")
         .all()
     )
 
@@ -124,6 +125,31 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     )
     event_payloads = _merge_on_grain(event_payloads, EVENT_GRAIN, ("event_count",))
 
+    # Build and validate payloads before touching facts. A failed publication
+    # rolls back the replacement and leaves the previous valid snapshot intact.
+    for payload in [*traffic_payloads, *event_payloads]:
+        if not job.start_date <= payload["date"] <= job.end_date:
+            raise ValueError("GA4 row falls outside the requested job window")
+    manifest = (job.params_json or {}).get("ga4_extract") or {}
+    replace_window = (manifest.get("complete") is True
+        and manifest.get("start") == job.start_date.isoformat()
+        and manifest.get("end") == job.end_date.isoformat()
+        and manifest.get("traffic_rows") == len(traffic)
+        and manifest.get("event_rows") == len(events))
+    for model, payloads, grain in ((FactGa4Traffic, traffic_payloads, TRAFFIC_GRAIN),
+                                    (FactGa4Event, event_payloads, EVENT_GRAIN)):
+        if replace_window:
+            db.query(model).filter(model.client_id == job.client_id,
+                model.date >= job.start_date, model.date <= job.end_date).delete(synchronize_session=False)
+        else:
+            # Channel is derived, not the identity of a source observation.
+            natural = tuple(name for name in grain if name not in ("client_id", "channel"))
+            keys = list({tuple(row[name] for name in natural) for row in payloads})
+            for batch in _chunked(keys, UPSERT_BATCH_SIZE):
+                db.query(model).filter(model.client_id == job.client_id,
+                    tuple_(*(getattr(model, name) for name in natural)).in_(batch)
+                ).delete(synchronize_session=False)
+
     for batch in _chunked(traffic_payloads, UPSERT_BATCH_SIZE):
         if not batch:
             continue
@@ -153,5 +179,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         )
         db.execute(stmt)
 
+    from app.ingestion.ga4.publish_native import publish_native_channels
+    native_traffic, native_events = publish_native_channels(db, job, client, rules)
     db.commit()
-    return len(traffic_payloads), len(event_payloads)
+    return len(traffic_payloads) + native_traffic, len(event_payloads) + native_events

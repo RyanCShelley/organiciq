@@ -87,12 +87,13 @@ class StagingGscQueryPage(Base):
 class FactGscDaily(Base):
     __tablename__ = "facts_gsc_daily"
     __table_args__ = (
-        UniqueConstraint("client_id", "date", name="uq_facts_gsc_daily_grain"),
+        UniqueConstraint("client_id", "date", "gsc_site_url", name="uq_facts_gsc_daily_grain"),
         Index("ix_facts_gsc_daily_client_date", "client_id", "date"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    gsc_site_url: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
     date: Mapped[date] = mapped_column(Date, nullable=False)
     impressions: Mapped[Decimal] = mapped_column(Numeric, nullable=False, default=0)
     clicks: Mapped[Decimal] = mapped_column(Numeric, nullable=False, default=0)
@@ -113,6 +114,7 @@ class FactGscPage(Base):
             "normalized_url",
             "country",
             "device",
+            "gsc_site_url",
             name="uq_facts_gsc_pages_grain",
         ),
         Index("ix_facts_gsc_pages_client_date", "client_id", "date"),
@@ -124,6 +126,7 @@ class FactGscPage(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    gsc_site_url: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
     date: Mapped[date] = mapped_column(Date, nullable=False)
     raw_url: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -149,6 +152,7 @@ class FactGscQueryPage(Base):
             "normalized_url",
             "country",
             "device",
+            "gsc_site_url",
             name="uq_facts_gsc_query_pages_grain",
         ),
         CheckConstraint("length(trim(query)) > 0", name="ck_facts_gsc_query_pages_query_nonblank"),
@@ -157,6 +161,7 @@ class FactGscQueryPage(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    gsc_site_url: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default="")
     date: Mapped[date] = mapped_column(Date, nullable=False)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     raw_url: Mapped[str] = mapped_column(Text, nullable=False)

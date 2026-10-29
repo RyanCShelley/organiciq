@@ -1,5 +1,6 @@
 "use client";
 
+import { syncSelectedProperty } from "@/lib/setup-sync";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -81,17 +82,15 @@ export function GscConnectPanel({
       body: JSON.stringify({ clientId, site_url: siteUrl, role }),
     });
     const text = await res.text();
-    setPending(false);
     if (!res.ok) {
+      setPending(false);
       setMessage(text || "Failed to save property");
       return;
     }
-    setMessage(
-      role === "primary"
-        ? "Primary property saved — use Sync GSC below to pull data."
-        : "Secondary property saved — re-run Sync GSC to pull historical data.",
-    );
+    const syncError = await syncSelectedProperty(clientId, ["gsc_pages", "gsc_queries"]);
+    setMessage(syncError ?? "Search Console property saved. Initial data sync started or already running.");
     if (role === "secondary") setSelectedSecondary("");
+    setPending(false);
     router.refresh();
   }
 
@@ -118,8 +117,7 @@ export function GscConnectPanel({
       <h2 className="text-lg font-medium">Google Search Console</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
         Connect Google once for the workspace, then pick a primary Search Console property. Add a
-        secondary property for an old domain — history is rewritten onto this client&apos;s domain,
-        and the primary wins when both report the same day or page.
+        secondary property for an old domain. Migration properties retain separate source histories and a labeled combined view.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -129,7 +127,7 @@ export function GscConnectPanel({
           onClick={connectGoogle}
           className="btn btn-primary btn-sm disabled:opacity-50"
         >
-          {connected ? "Reconnect Google" : "Connect Google"}
+          {connected ? "Reconnect Google" : "Connect Search Console"}
         </button>
         {connected ? (
           <button

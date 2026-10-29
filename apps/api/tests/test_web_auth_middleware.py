@@ -22,14 +22,15 @@ WEB = Path(__file__).resolve().parents[2] / "web"
 
 
 def test_the_auth_middleware_is_present():
-    middleware = WEB / "middleware.ts"
-    assert middleware.is_file(), (
-        "apps/web/middleware.ts is missing. If it was moved aside to preview a "
+    # Next 16 renamed the convention from middleware.ts to proxy.ts.
+    present = [name for name in ("proxy.ts", "middleware.ts") if (WEB / name).is_file()]
+    assert present, (
+        "apps/web/proxy.ts is missing. If it was moved aside to preview a "
         "page locally, move it back before committing."
     )
-    source = middleware.read_text(encoding="utf-8")
+    source = (WEB / present[0]).read_text(encoding="utf-8")
     assert "auth(" in source and "/login" in source, (
-        "apps/web/middleware.ts no longer redirects an unauthenticated request "
+        f"apps/web/{present[0]} no longer redirects an unauthenticated request "
         "to /login."
     )
 
