@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { LogoWordmark } from "@/components/brand/Logo";
+import { ClientNav } from "@/components/layout/ClientNav";
 import { ClientSelect } from "@/components/layout/ClientSelect";
 import type { Client } from "@/lib/api";
 
@@ -50,6 +51,7 @@ export function V2Shell({
 
       <div className="flex flex-1">
         <nav aria-label="Sections" className="w-56 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] p-3">
+          <ClientNav />
           <ul className="space-y-1">
             {V2_SECTIONS.map((section) => (
               <li
