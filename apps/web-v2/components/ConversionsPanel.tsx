@@ -3,11 +3,18 @@
 import { useMemo, useState, useTransition } from "react";
 
 import {
+  loadGa4PagesAction,
   saveConversionDefinitionsAction,
   saveConversionPagesAction,
 } from "@/app/(app)/[clientSlug]/settings/conversions/actions";
 import { SaveBar, inputClass } from "@/components/ui/form";
-import { CONVERSION_TYPES, type ConversionPage, type EventCandidate } from "@/lib/conversions";
+import {
+  CONVERSION_TYPES,
+  labelFromPath,
+  type ConversionPage,
+  type EventCandidate,
+  type Ga4Page,
+} from "@/lib/conversions";
 
 type Row = { ticked: boolean; name: string; type: string; active: boolean };
 
@@ -207,13 +214,24 @@ export function ConversionPages({
   clientId,
   slug,
   pages,
+  events,
 }: {
   clientId: string;
   slug: string;
   pages: ConversionPage[];
+  events: EventCandidate[];
 }) {
   const save = useSaving();
   const [rows, setRows] = useState<ConversionPage[]>(pages);
+
+  function addPage(page: Ga4Page) {
+    setRows((current) =>
+      current.some((r) => r.normalized_url === page.url)
+        ? current
+        : [...current, { normalized_url: page.url, label: labelFromPath(page.path), stage: null, is_primary: false }],
+    );
+    save.dirty();
+  }
 
   function patch(index: number, change: Partial<ConversionPage>) {
     setRows((current) =>
@@ -302,6 +320,157 @@ export function ConversionPages({
         + Add a page
       </button>
       <SaveBar pending={save.pending} saved={save.saved} error={save.error} />
+      <Ga4PagesPanel
+        clientId={clientId}
+        events={events}
+        onAdd={addPage}
+        added={new Set(rows.map((r) => r.normalized_url))}
+      />
     </form>
+  );
+}
+
+/** The pages GA4 says each chosen event fired on, so a conversion page can be picked, not remembered. */
+function Ga4PagesPanel({
+  clientId,
+  events,
+  onAdd,
+  added,
+}: {
+  clientId: string;
+  events: EventCandidate[];
+  onAdd: (page: Ga4Page) => void;
+  added: Set<string>;
+}) {
+  const choices = events.filter((e) => !e.automatic && e.event_count > 0);
+  const initial = (events.some((e) => e.defined) ? events.filter((e) => e.defined) : events.filter((e) => e.suggested)).map(
+    (e) => e.event_name,
+  );
+  const [chosen, setChosen] = useState<string[]>(initial);
+  const [days, setDays] = useState(90);
+  const [pages, setPages] = useState<Ga4Page[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function load() {
+    setError(null);
+    startTransition(async () => {
+      const result = await loadGa4PagesAction(clientId, chosen, days);
+      if (result.ok) setPages(result.pages);
+      else setError(result.error);
+    });
+  }
+
+  return (
+    <div className="mt-8 border-t border-[var(--border)] pt-6">
+      <h3 className="text-sm font-semibold">What GA4 sees</h3>
+      <p className="mt-1 text-sm text-[var(--text-secondary)]">
+        The pages where a conversion event actually fired, straight from GA4. A contact page or a
+        thank-you page shows up near the top. Choose the events to look at, then add a page to the list
+        above.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {choices.map((event) => {
+          const on = chosen.includes(event.event_name);
+          return (
+            <button
+              key={event.event_name}
+              type="button"
+              aria-pressed={on}
+              onClick={() =>
+                setChosen((current) =>
+                  on ? current.filter((n) => n !== event.event_name) : [...current, event.event_name],
+                )
+              }
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                on
+                  ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white"
+                  : "border-[var(--border)] hover:border-[var(--brand-teal)]"
+              }`}
+            >
+              {event.event_name}
+            </button>
+          );
+        })}
+        {choices.length === 0 ? (
+          <span className="text-sm text-[var(--text-tertiary)]">GA4 has no non-automatic events yet.</span>
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex items-center gap-3">
+        <select
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+          aria-label="Time frame"
+          className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-sm"
+        >
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+          <option value={365}>Last 12 months</option>
+        </select>
+        <button
+          type="button"
+          disabled={pending || chosen.length === 0}
+          onClick={load}
+          className="rounded-lg bg-[var(--brand-dark)] px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {pending ? "Asking GA4…" : "Show pages"}
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+          {error}
+        </p>
+      ) : null}
+
+      {pages ? (
+        pages.length === 0 ? (
+          <p className="mt-3 text-sm text-[var(--text-tertiary)]">GA4 saw none of those events in that time.</p>
+        ) : (
+          <table className="mt-3 w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+              <tr>
+                <th className="py-2 font-medium">Page</th>
+                <th className="px-3 py-2 text-right font-medium">Events</th>
+                <th className="px-3 py-2 font-medium">By event</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {pages.slice(0, 40).map((page) => (
+                <tr key={page.url} className="border-t border-[var(--border)]">
+                  <td className="max-w-[18rem] truncate py-2" title={page.url}>
+                    {page.path}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{page.total.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
+                    {Object.entries(page.events)
+                      .map(([name, count]) => `${name} ${count.toLocaleString()}`)
+                      .join(" · ")}
+                  </td>
+                  <td className="py-2 text-right">
+                    {added.has(page.url) || page.declared ? (
+                      <span className="text-xs text-[var(--text-tertiary)]">Added</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onAdd(page)}
+                        className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
+                      >
+                        Add
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : null}
+      {pages && pages.length > 40 ? (
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">Showing the busiest 40 of {pages.length}.</p>
+      ) : null}
+    </div>
   );
 }

@@ -32,3 +32,21 @@ export const CONVERSION_TYPES = [
   { value: "ecommerce", label: "Ecommerce" },
   { value: "engagement", label: "Engagement" },
 ] as const;
+
+export type Ga4Page = {
+  url: string;
+  path: string;
+  total: number;
+  events: Record<string, number>;
+  declared: boolean;
+};
+
+export type Ga4PagesResult = { ok: true; pages: Ga4Page[] } | { ok: false; error: string };
+
+/** "/pages/contact-us" -> "Contact us"; the home page -> "Home". */
+export function labelFromPath(path: string): string {
+  const last = path.split("?")[0].split("/").filter(Boolean).pop();
+  if (!last) return "Home";
+  const text = decodeURIComponent(last).replace(/[-_]+/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

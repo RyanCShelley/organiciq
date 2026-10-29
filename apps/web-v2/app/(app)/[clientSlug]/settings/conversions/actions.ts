@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { ConversionDefinition, ConversionPage } from "@/lib/conversions";
+import type { ConversionDefinition, ConversionPage, Ga4Page, Ga4PagesResult } from "@/lib/conversions";
 
 function failure(error: unknown): ActionResult {
   return {
@@ -38,5 +38,23 @@ export async function saveConversionPagesAction(
     return { ok: true };
   } catch (error) {
     return failure(error);
+  }
+}
+
+export async function loadGa4PagesAction(
+  clientId: string,
+  events: string[],
+  days: number,
+): Promise<Ga4PagesResult> {
+  if (events.length === 0) return { ok: false, error: "Choose at least one event." };
+  try {
+    const query = events.map((e) => `event=${encodeURIComponent(e)}`).join("&");
+    const pages = await apiFetch<Ga4Page[]>(`/v2/conversions/pages?${query}&days=${days}`, { clientId });
+    return { ok: true, pages };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof ApiError ? error.message : "GA4 did not answer.",
+    };
   }
 }

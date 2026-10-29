@@ -24,7 +24,7 @@ export default async function ConversionsPage({
   return (
     <div className="space-y-6">
       <ConversionEvents clientId={client.id} slug={client.slug} events={events} />
-      <ConversionPages clientId={client.id} slug={client.slug} pages={pages} />
+      <ConversionPages clientId={client.id} slug={client.slug} pages={pages} events={events} />
     </div>
   );
 }
