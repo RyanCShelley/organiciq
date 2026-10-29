@@ -35,11 +35,15 @@ export function SaveBar({
   saved,
   error,
   disabled,
+  label = "Save changes",
+  savedLabel = "Saved.",
 }: {
   pending: boolean;
   saved: boolean;
   error: string | null;
   disabled?: boolean;
+  label?: string;
+  savedLabel?: string;
 }) {
   return (
     <div className="mt-6">
@@ -49,9 +53,9 @@ export function SaveBar({
           disabled={pending || disabled}
           className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
-          Save changes
+          {label}
         </button>
-        {saved ? <span className="text-sm text-[var(--text-secondary)]">Saved.</span> : null}
+        {saved ? <span className="text-sm text-[var(--text-secondary)]">{savedLabel}</span> : null}
       </div>
       {error ? (
         <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">

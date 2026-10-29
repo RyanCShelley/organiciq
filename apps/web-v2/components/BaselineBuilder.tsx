@@ -74,6 +74,9 @@ export function BaselineBuilder({
   const [locked, setLocked] = useState(false);
 
   const isFirst = versions.length === 0;
+  // Once a baseline is locked the form stays closed: a new one is the exception, not the next step.
+  const [open, setOpen] = useState(false);
+  const formVisible = isFirst || open;
 
   useEffect(() => {
     setLoadError(null);
@@ -232,7 +235,29 @@ export function BaselineBuilder({
         </div>
       ) : null}
 
-      {analysis ? (
+      {analysis && !formVisible ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+          <h2 className="text-sm font-semibold">
+            Version {versions[0].version} is the locked baseline
+          </h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {locked ? "Locked. " : ""}You only need a new one after a site relaunch, a tracking change, or if the
+            first one was wrong. The numbers above are today&apos;s, for comparison.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLocked(false);
+              setOpen(true);
+            }}
+            className="mt-4 rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white"
+          >
+            Create new baseline
+          </button>
+        </div>
+      ) : null}
+
+      {analysis && formVisible ? (
         <form
           className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6"
           onSubmit={(event) => {
@@ -249,12 +274,17 @@ export function BaselineBuilder({
                 monthly_lead_goal: goal.trim() ? Number(goal) : null,
                 sync_lead_conversions: agree,
               });
-              if (result.ok) setLocked(true);
-              else setLockError(result.error);
+              if (result.ok) {
+                setLocked(true);
+                setOpen(false);
+                setReason("");
+                setNote("");
+                setAgree(false);
+              } else setLockError(result.error);
             });
           }}
         >
-          <h2 className="text-sm font-semibold">{isFirst ? "Lock the baseline" : "Lock a new baseline"}</h2>
+          <h2 className="text-sm font-semibold">{isFirst ? "Lock the baseline" : "Create a new baseline"}</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Locking saves these numbers as version {versions.length + 1} and sets the {analysis.projection.goal_horizon_months}
             -month goal. A locked baseline never changes; a new one is a new version with a reason.
@@ -313,8 +343,16 @@ export function BaselineBuilder({
               Tick “I have checked this” above before locking.
             </p>
           ) : null}
-          <SaveBar pending={lockPending} saved={locked} error={lockError} disabled={openBlockers.length > 0 || (needsSync && !agree) || loading} />
-          {locked ? <p className="mt-2 text-sm text-[var(--text-secondary)]">Locked. It appears under Versions below.</p> : null}
+          <SaveBar label={isFirst ? "Lock baseline" : "Lock new baseline"} savedLabel="Locked." pending={lockPending} saved={locked} error={lockError} disabled={openBlockers.length > 0 || (needsSync && !agree) || loading} />
+          {!isFirst ? (
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="mt-3 text-sm text-[var(--text-secondary)] hover:underline"
+            >
+              Cancel
+            </button>
+          ) : null}
         </form>
       ) : null}
 
