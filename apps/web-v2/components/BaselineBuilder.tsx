@@ -60,7 +60,6 @@ export function BaselineBuilder({
   const events = counted.map((c) => c.event);
   const needsSync = counted.some((c) => c.type !== "lead");
 
-  const [regimeStart, setRegimeStart] = useState("");
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -79,13 +78,13 @@ export function BaselineBuilder({
   useEffect(() => {
     setLoadError(null);
     startLoading(async () => {
-      const result = await loadBaselineAction(clientId, events, regimeStart, acknowledged);
+      const result = await loadBaselineAction(clientId, events, "", acknowledged);
       if (result.ok) setAnalysis(result.analysis);
       else setLoadError(result.error);
     });
     // The event list comes from the server and does not change while this is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, regimeStart, acknowledged.join("|")]);
+  }, [clientId, acknowledged.join("|")]);
 
   const maxLeads = Math.max(1, ...(analysis?.series.map((m) => m.leads) ?? [1]));
   const openBlockers = analysis?.flags.filter((f) => f.level === "blocker" && !f.acknowledged) ?? [];
@@ -138,34 +137,6 @@ export function BaselineBuilder({
                   Worth knowing: {flag.message}
                 </p>
               ))}
-
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-              <label className="flex items-center gap-2">
-                <span className="font-semibold">Count from</span>
-                <input
-                  type="month"
-                  value={regimeStart}
-                  onChange={(e) => setRegimeStart(e.target.value)}
-                  className="rounded-lg border border-[var(--border)] px-2 py-1.5"
-                />
-              </label>
-              {analysis.window.suggested_regime_start && regimeStart !== analysis.window.suggested_regime_start ? (
-                <button
-                  type="button"
-                  onClick={() => setRegimeStart(analysis.window.suggested_regime_start ?? "")}
-                  className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
-                >
-                  Use suggested ({analysis.window.suggested_regime_start})
-                </button>
-              ) : null}
-              {regimeStart ? (
-                <button type="button" onClick={() => setRegimeStart("")} className="text-xs text-[var(--text-secondary)] hover:underline">
-                  Clear
-                </button>
-              ) : (
-                <span className="text-xs text-[var(--text-tertiary)]">Optional: set it after a relaunch or tracking change.</span>
-              )}
-            </div>
           </div>
         ) : null}
       </div>
@@ -271,7 +242,7 @@ export function BaselineBuilder({
             startLock(async () => {
               const result = await lockBaselineAction(clientId, slug, {
                 lead_events: events,
-                regime_start: regimeStart || null,
+                regime_start: null,
                 acknowledged,
                 reason_code: isFirst ? null : reason,
                 reason_note: isFirst ? null : note.trim() || null,
