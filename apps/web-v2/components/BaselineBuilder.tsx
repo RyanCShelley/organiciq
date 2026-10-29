@@ -131,6 +131,14 @@ export function BaselineBuilder({
               month.
             </p>
 
+            {analysis.flags
+              .filter((flag) => flag.level === "warning")
+              .map((flag) => (
+                <p key={flag.code} className="mt-2 text-sm text-amber-800">
+                  Worth knowing: {flag.message}
+                </p>
+              ))}
+
             <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
               <label className="flex items-center gap-2">
                 <span className="font-semibold">Count from</span>
@@ -162,34 +170,29 @@ export function BaselineBuilder({
         ) : null}
       </div>
 
-      {analysis && analysis.flags.length > 0 ? (
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-          <h2 className="text-sm font-semibold">Check before locking</h2>
-          <ul className="mt-3 space-y-2 text-sm">
-            {analysis.flags.map((flag) => (
-              <li key={flag.code} className={`rounded-lg p-3 ${LEVEL_STYLE[flag.level]}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <span>
-                    <strong className="mr-2 uppercase">{flag.level}</strong>
-                    {flag.message}
-                  </span>
-                  {flag.level !== "info" ? (
-                    <label className="flex shrink-0 items-center gap-1.5 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={flag.acknowledged || acknowledged.includes(flag.code)}
-                        onChange={(e) =>
-                          setAcknowledged((current) =>
-                            e.target.checked ? [...current, flag.code] : current.filter((c) => c !== flag.code),
-                          )
-                        }
-                      />
-                      Acknowledge
-                    </label>
-                  ) : null}
-                </div>
-              </li>
-            ))}
+      {openBlockers.length > 0 || (analysis?.flags.some((f) => f.level === "blocker") ?? false) ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+          <h2 className="text-sm font-semibold text-red-800">This stops the baseline from locking</h2>
+          <ul className="mt-3 space-y-2 text-sm text-red-800">
+            {analysis?.flags
+              .filter((flag) => flag.level === "blocker")
+              .map((flag) => (
+                <li key={flag.code} className="flex items-start justify-between gap-3">
+                  <span>{flag.message}</span>
+                  <label className="flex shrink-0 items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={flag.acknowledged || acknowledged.includes(flag.code)}
+                      onChange={(e) =>
+                        setAcknowledged((current) =>
+                          e.target.checked ? [...current, flag.code] : current.filter((c) => c !== flag.code),
+                        )
+                      }
+                    />
+                    I have checked this
+                  </label>
+                </li>
+              ))}
           </ul>
         </div>
       ) : null}
@@ -336,7 +339,7 @@ export function BaselineBuilder({
 
           {openBlockers.length > 0 ? (
             <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
-              Acknowledge the blocker{openBlockers.length === 1 ? "" : "s"} above before locking.
+              Tick “I have checked this” above before locking.
             </p>
           ) : null}
           <SaveBar pending={lockPending} saved={locked} error={lockError} disabled={openBlockers.length > 0 || (needsSync && !agree) || loading} />
