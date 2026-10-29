@@ -6,6 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -13,6 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import visibility_candidates
 from app.models.client import Client
+from app.services import page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -53,3 +55,57 @@ def visibility_bucket_overview(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+MAX_DIAGNOSED = 5
+
+
+class Selection(BaseModel):
+    search: str = Field(min_length=1, max_length=400)
+    page: str = Field(min_length=1, max_length=2048)
+
+
+class DiagnoseRequest(BaseModel):
+    month: str | None = None
+    selections: list[Selection] = Field(min_length=1, max_length=MAX_DIAGNOSED)
+
+
+@router.post("/diagnose")
+def diagnose_selected(
+    payload: DiagnoseRequest,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Read each ticked page live and run the Visibility rules on it.
+
+    The numbers for a pair are recomputed from Search Console here. Only pages on the client's
+    own site are fetched, and the fetch goes through the crawler's public-addresses-only transport.
+    """
+    month = payload.month or last_complete_month()
+    try:
+        parse_month(month)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    results = []
+    for pick in payload.selections:
+        row = visibility_candidates.lookup_pair(db, client, month, pick.search, pick.page)
+        if row is None:
+            results.append(
+                {
+                    "search": pick.search,
+                    "page": pick.page,
+                    "read": {"ok": False, "error": "That search and page are not in this client's Search Console data."},
+                    "observations": [],
+                    "prescriptions": [],
+                    "not_judged": [],
+                }
+            )
+            continue
+        results.append(
+            page_diagnostic.diagnose(
+                search=row["search"], url=pick.page, row=row, client_domain=client.domain, fetch=page_diagnostic._fetch
+            )
+        )
+    return {"month": month, "results": results}

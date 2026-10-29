@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import type { Client } from "@/lib/api";
+import { diagnoseAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
-import type { Candidate, EngineOverview, VisibilityCandidates } from "@/lib/engine";
+import type { Candidate, Diagnosis, EngineOverview, VisibilityCandidates } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus } from "@/lib/focus";
 
 const num = (n: number | null | undefined, digits = 0) =>
@@ -26,9 +27,18 @@ function Moved({ places }: { places: number | null }) {
   );
 }
 
-function Row({ c }: { c: Candidate }) {
+function Row({ c, checked, onToggle, disabled }: { c: Candidate; checked: boolean; onToggle: () => void; disabled: boolean }) {
   return (
     <tr className="border-t border-[var(--border)] align-top">
+      <td className="py-2 pr-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled && !checked}
+          onChange={onToggle}
+          aria-label={`Diagnose ${c.search}`}
+        />
+      </td>
       <td className="min-w-[10rem] py-2 pr-3">
         <div className="font-medium">{c.search}</div>
         <div className="mt-0.5 max-w-[20rem] truncate text-xs text-[var(--text-secondary)]" title={c.page}>
@@ -64,7 +74,8 @@ function Row({ c }: { c: Candidate }) {
         >
           {c.strength}
         </span>
-        {c.reason ? <div className="mt-0.5 text-xs text-[var(--text-tertiary)]">{c.reason}</div> : null}
+        {c.brand ? <div className="mt-0.5"><span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">brand search</span></div> : null}
+        {c.reason ? <div className="mt-0.5 max-w-[14rem] text-xs text-[var(--text-tertiary)]">{c.reason}</div> : null}
       </td>
     </tr>
   );
@@ -95,7 +106,30 @@ export function EngineScreen({
   const [band, setBand] = useState<string | null>(null);
   const [switching, startSwitch] = useTransition();
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[] | null>(null);
+  const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
+  const [diagnosing, startDiagnose] = useTransition();
+  const MAX_PICKS = 5;
   const advice = overview.advice;
+
+  function togglePick(key: string) {
+    setPicked((current) => (current.includes(key) ? current.filter((k) => k !== key) : [...current, key]));
+  }
+
+  function diagnose() {
+    if (!data) return;
+    setDiagnoseError(null);
+    const selections = picked
+      .map((key) => data.candidates.find((c) => `${c.search}|${c.page}` === key))
+      .filter((c): c is Candidate => Boolean(c))
+      .map((c) => ({ search: c.search, page: c.page }));
+    startDiagnose(async () => {
+      const result = await diagnoseAction(client.id, selections);
+      if (result.ok) setDiagnoses(result.results);
+      else setDiagnoseError(result.error);
+    });
+  }
   const buckets_ = overview.buckets;
 
   function switchTo(bucketId: string) {
@@ -317,10 +351,31 @@ export function EngineScreen({
               </div>
             ) : null}
 
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+              <button
+                type="button"
+                disabled={diagnosing || picked.length === 0}
+                onClick={diagnose}
+                className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {diagnosing ? "Reading the pages…" : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
+              </button>
+              <span className="text-xs text-[var(--text-secondary)]">
+                Tick up to {MAX_PICKS}. Each page is read live from the client&apos;s site and checked against the rules.
+              </span>
+              {picked.length > 0 ? (
+                <button type="button" onClick={() => setPicked([])} className="text-xs text-[var(--text-secondary)] hover:underline">
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            {diagnoseError ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{diagnoseError}</p> : null}
+
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                   <tr>
+                    <th className="w-6 py-1 pr-2" />
                     <th className="py-1 pr-3 font-medium">Search and page</th>
                     <th className="px-3 py-1 text-right font-medium">Position</th>
                     <th className="px-3 py-1 text-right font-medium">Impressions</th>
@@ -330,9 +385,10 @@ export function EngineScreen({
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((c) => (
-                    <Row key={`${c.search}|${c.page}`} c={c} />
-                  ))}
+                  {shown.map((c) => {
+                    const key = `${c.search}|${c.page}`;
+                    return <Row key={key} c={c} checked={picked.includes(key)} disabled={picked.length >= MAX_PICKS} onToggle={() => togglePick(key)} />;
+                  })}
                 </tbody>
               </table>
               {shown.length === 0 ? (
@@ -340,6 +396,81 @@ export function EngineScreen({
               ) : null}
             </div>
           </div>
+
+          {diagnoses ? (
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold">Diagnosis</h2>
+              {diagnoses.map((d) => (
+                <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="font-semibold">{d.search}</h3>
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {shortPage(d.page)}
+                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
+                    </span>
+                  </div>
+                  {!d.read.ok ? (
+                    <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                      Could not read this page: {d.read.error}
+                    </p>
+                  ) : (
+                    <>
+                      {d.prescriptions.length > 0 ? (
+                        <div className="mt-3 space-y-3">
+                          {d.prescriptions.map((p) => (
+                            <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
+                              <div className="font-semibold">
+                                {p.action_id} · {p.title}
+                              </div>
+                              <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
+                              <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                About {p.effort_min} minutes · judged on {p.metric}
+                              </p>
+                              {p.evidence.length > 0 ? (
+                                <ul className="mt-2 list-disc pl-5 text-xs text-[var(--text-tertiary)]">
+                                  {p.evidence.map((e) => <li key={e}>{e}</li>)}
+                                </ul>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
+                          No rule fires for this page. That is not the same as nothing to do: see what could not be judged below.
+                        </p>
+                      )}
+                      <ul className="mt-3 space-y-1 text-sm">
+                        {d.observations.map((o) => (
+                          <li
+                            key={o.text}
+                            className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}
+                          >
+                            {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
+                            {o.text}
+                          </li>
+                        ))}
+                      </ul>
+                      {d.not_judged.length > 0 ? (
+                        <details className="mt-3 text-sm">
+                          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
+                            Rules that did not fire or could not be judged ({d.not_judged.length})
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
+                            {d.not_judged.map((n) => (
+                              <li key={n.action_id}>
+                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {data.unranked.length > 0 ? (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">

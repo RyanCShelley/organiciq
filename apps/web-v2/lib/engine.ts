@@ -10,6 +10,7 @@ export type Candidate = {
   target_position: number;
   expected_extra_clicks: number;
   strength: "strong" | "possible";
+  brand: boolean;
   reason: string | null;
   previous: { impressions: number; position: number } | null;
   impressions_change_pct: number | null;
@@ -24,7 +25,7 @@ export type VisibilityCandidates = {
   bucket: { id: string; name: string; terms: string[] } | null;
   site_trend: { impressions_change_pct: number | null; clicks_change_pct: number | null };
   bands: { key: string; label: string; target_position: number; count: number }[];
-  counts: { strong: number; possible: number; listed: number; found: number };
+  counts: { strong: number; possible: number; listed: number; found: number; brand: number };
   candidates: Candidate[];
   unranked: { keyword: string; volume: number | null; strength: string; note: string }[];
   notes: string[];
@@ -60,3 +61,26 @@ export const EMPTY_OVERVIEW: EngineOverview = {
   coverage: { days: 0, window_days: 0 },
   advice: { level: "ok", headline: "", reasons: [], suggestions: [] },
 };
+
+export type Diagnosis = {
+  search: string;
+  page: string;
+  position?: number;
+  impressions?: number;
+  clicks?: number;
+  read: { ok: boolean; status?: number | null; error?: string | null; final_url?: string };
+  observations: { level: "problem" | "note" | "ok"; text: string }[];
+  prescriptions: {
+    action_id: string;
+    title: string;
+    why: string;
+    done_when: string;
+    metric: string;
+    effort_min: number;
+    steps: string[];
+    evidence: string[];
+  }[];
+  not_judged: { action_id: string; name: string; reason: string }[];
+};
+
+export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; error: string };

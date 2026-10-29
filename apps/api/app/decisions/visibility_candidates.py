@@ -174,6 +174,26 @@ def _pct(current: float | None, previous: float | None) -> float | None:
     return round((current - previous) / previous * 100, 1)
 
 
+def lookup_pair(db: Session, client: Client, month: str, search: str, page: str) -> dict[str, Any] | None:
+    """The numbers for one (search, page) pair, worked out again here rather than taken from the caller."""
+    year, mon = int(month[:4]), int(month[5:7])
+    start, end = windows(date(year, mon, 1))["current"]
+    key = " ".join(search.lower().split())
+    row = _aggregate(db, client.id, start, end, [key]).get((key, page))
+    if row is None:
+        return None
+    band = band_for(row["position"])
+    return {
+        "search": key,
+        "page": page,
+        "impressions": round(row["impressions"]),
+        "clicks": round(row["clicks"]),
+        "position": round(row["position"], 1),
+        "band": band.key if band else None,
+        "expected_extra_clicks": expected_extra_clicks(row["impressions"], row["position"], band) if band else 0.0,
+    }
+
+
 def _best_page_per_search(rows: dict[tuple[str, str], dict[str, float]]) -> dict[str, dict]:
     """One row per search: the page that gets the most impressions for it, and how many pages share it."""
     by_search: dict[str, list[tuple[str, dict[str, float]]]] = defaultdict(list)
@@ -184,6 +204,25 @@ def _best_page_per_search(rows: dict[tuple[str, str], dict[str, float]]) -> dict
         url, numbers = max(pages, key=lambda p: p[1]["impressions"])
         best[text] = {"url": url, "pages": len(pages), **numbers}
     return best
+
+
+# ── brand searches ───────────────────────────────────────────────────────────
+
+
+def brand_keys(client: Client) -> list[str]:
+    """What a brand search contains: the name, the domain's name, and any other names people use.
+
+    A search that names the business is navigation. No page or link change moves it, so the
+    plan does not prescribe one (the same rule the settings' "other names the brand is searched by" serves).
+    """
+    host = (client.domain or "").lower().removeprefix("www.").split("/")[0].split(".")[0]
+    names = [client.client_name or "", host.replace("-", " ").replace("_", " "), *(client.brand_aliases or [])]
+    keys = {" ".join(n.lower().split()) for n in names}
+    return sorted(k for k in keys if len(k) >= 3)
+
+
+def is_brand(search: str, keys: list[str]) -> bool:
+    return any(_contains(search, k) for k in keys)
 
 
 # ── the list ─────────────────────────────────────────────────────────────────
@@ -212,13 +251,16 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
     before = _best_page_per_search(_aggregate(db, client.id, *span["previous"], terms))
     year_ago = _best_page_per_search(_aggregate(db, client.id, *span["last_year"], terms))
 
+    brand = brand_keys(client)
     candidates: list[dict[str, Any]] = []
     for text, row in now.items():
         band = band_for(row["position"])
         if band is None:
             continue
-        gain = expected_extra_clicks(row["impressions"], row["position"], band)
-        strong = row["impressions"] >= STRONG_MIN_IMPRESSIONS
+        branded = is_brand(text, brand)
+        # A brand search stays on the list, labelled, with no gain: it is not a ranking problem.
+        gain = 0.0 if branded else expected_extra_clicks(row["impressions"], row["position"], band)
+        strong = row["impressions"] >= STRONG_MIN_IMPRESSIONS and not branded
         prior, last_year = before.get(text), year_ago.get(text)
         candidates.append(
             {
@@ -233,7 +275,12 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
                 "target_position": band.target_position,
                 "expected_extra_clicks": gain,
                 "strength": "strong" if strong else "possible",
-                "reason": None if strong else _only(round(row["impressions"])),
+                "brand": branded,
+                "reason": (
+                    "a brand search: people looking for the business by name, which no page change moves"
+                    if branded
+                    else None if strong else _only(round(row["impressions"]))
+                ),
                 "previous": None if prior is None else {"impressions": round(prior["impressions"]), "position": round(prior["position"], 1)},
                 "impressions_change_pct": _pct(row["impressions"], prior["impressions"] if prior else None),
                 "position_change": None if prior is None else round(prior["position"] - row["position"], 1),
@@ -241,7 +288,7 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             }
         )
 
-    candidates.sort(key=lambda c: (c["strength"] != "strong", -c["expected_extra_clicks"], -c["impressions"]))
+    candidates.sort(key=lambda c: (c["brand"], c["strength"] != "strong", -c["expected_extra_clicks"], -c["impressions"]))
     listed = candidates[:LIST_SIZE]
 
     unranked = []
@@ -285,6 +332,7 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             "possible": sum(1 for c in candidates if c["strength"] == "possible"),
             "listed": len(listed),
             "found": len(candidates),
+            "brand": sum(1 for c in candidates if c["brand"]),
         },
         "candidates": listed,
         "unranked": unranked,
@@ -296,6 +344,8 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             "Impression counts changed with Google's reporting change, so compare change in impressions only within "
             "the period after it; position and clicks are steadier.",
             "When a bucket is chosen, a search belongs to it if it contains one of the bucket's watchlist terms.",
+            "A search that contains the client's name (or one of its other names) is a brand search: it stays on the list "
+            "at the bottom, labelled, with no expected gain.",
         ],
     }
 
@@ -399,12 +449,13 @@ def bucket_overview(db: Session, client: Client, month: str, focus_bucket_id: st
                 "id": str(bucket.id),
                 "name": bucket.name,
                 "terms": terms,
-                "found": result["counts"]["found"],
+                # Brand searches are not something to move, so they do not count as in reach.
+                "found": result["counts"]["found"] - result["counts"]["brand"],
                 "strong": result["counts"]["strong"],
-                "possible": result["counts"]["possible"],
+                "possible": result["counts"]["possible"] - result["counts"]["brand"],
                 "expected_extra_clicks": round(sum(c["expected_extra_clicks"] for c in result["candidates"]), 1),
                 "unranked_terms": len(result["unranked"]),
-                "reach": reach_label(result["counts"]["strong"], result["counts"]["found"]),
+                "reach": reach_label(result["counts"]["strong"], result["counts"]["found"] - result["counts"]["brand"]),
             }
         )
 

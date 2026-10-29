@@ -84,7 +84,7 @@ def test_candidates_are_ranked_by_expected_gain_and_labelled_strong_or_possible(
     assert first["page"] == url_a and first["pages_for_search"] == 2
     assert second["band"] == "11-20" and second["strength"] == "strong"
     assert third["strength"] == "possible" and third["reason"] == "only 30 impressions in 3 months"
-    assert out["counts"] == {"strong": 2, "possible": 1, "listed": 3, "found": 3}
+    assert out["counts"] == {"strong": 2, "possible": 1, "listed": 3, "found": 3, "brand": 0}
     assert "face wash" not in searches and "tanning oil sale" not in searches
 
 
@@ -218,3 +218,29 @@ def test_the_overview_carries_reach_coverage_and_advice(db, client_a):
     assert by_name["Moisturizers"]["reach"] == "thin" and by_name["Moisturizers"]["unranked_terms"] == 1
     assert out["coverage"] == {"days": 1, "window_days": 92}
     assert out["advice"]["level"] == "thin_data"  # one day of Search Console is not enough
+
+
+def test_brand_searches_are_labelled_given_no_gain_and_put_last(db, client_a):
+    url = "https://shop.example/"
+    brand_name = client_a.client_name.lower()
+    _row(db, client_a, date(2026, 8, 10), f"{brand_name} sunscreen", url, 5000, 400, 2.5)  # brand, and the busiest
+    _row(db, client_a, date(2026, 8, 11), "mineral sunscreen", url, 300, 4, 6.0)
+    db.commit()
+
+    out = vc.build(db, client_a, "2026-09")
+    assert [c["search"] for c in out["candidates"]] == ["mineral sunscreen", f"{brand_name} sunscreen"]
+    brand = out["candidates"][1]
+    assert brand["brand"] is True and brand["expected_extra_clicks"] == 0.0 and brand["strength"] == "possible"
+    assert "brand search" in brand["reason"]
+    assert out["counts"]["brand"] == 1 and out["counts"]["strong"] == 1
+
+
+def test_brand_keys_cover_the_name_the_domain_and_other_names():
+    class Fake:
+        client_name = "Absolutely Natural"
+        domain = "www.absolutely-natural.com"
+        brand_aliases = ["abs natural", "x"]
+
+    keys = vc.brand_keys(Fake())
+    assert "absolutely natural" in keys and "abs natural" in keys and "x" not in keys
+    assert vc.is_brand("absolutely natural sunscreen", keys) and not vc.is_brand("natural sunscreen", keys)
