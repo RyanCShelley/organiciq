@@ -7,6 +7,7 @@ thing, and only GA4 can say it, so this asks GA4 directly for `pagePath` by even
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -16,10 +17,40 @@ from app.core.urls import normalize_landing_page, normalize_url
 from app.ingestion.ga4.client import run_report
 from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
 from app.models.client import Client
+from app.models.client_completion_pattern import ClientCompletionPattern
 from app.models.config import ClientConversionPage
 from app.models.integration import Integration, IntegrationProvider
 
 MAX_PAGES = 200
+
+#: Tail segments that mean "this visitor finished", as e-commerce checkouts and form
+#: thank-you screens spell them. Only used to *suggest* a pattern; a person confirms it.
+_COMPLETION = re.compile(
+    r"/(thank[-_]?you|order[-_]?(?:confirmation|complete|received)|confirmation|success)(?=/|$|\?)",
+    re.IGNORECASE,
+)
+
+
+def clean_pattern(raw: str) -> str:
+    """`Thank-You` -> `/thank-you`: lower case, one leading slash, no spaces."""
+    text = (raw or "").strip().lower()
+    if not text or " " in text or "\n" in text:
+        raise ValueError("A pattern is part of a page address, such as /thank-you.")
+    return text if text.startswith("/") else "/" + text
+
+
+def suggest_patterns(pages: list[dict]) -> list[dict]:
+    """Group pages whose address ends in a completion word: `[{pattern, total, pages}]`."""
+    found: dict[str, dict] = {}
+    for page in pages:
+        match = _COMPLETION.search(page["path"].split("?")[0])
+        if not match:
+            continue
+        pattern = "/" + match.group(1).lower()
+        entry = found.setdefault(pattern, {"pattern": pattern, "total": 0, "pages": 0})
+        entry["total"] += page["total"]
+        entry["pages"] += 1
+    return sorted(found.values(), key=lambda e: e["total"], reverse=True)
 
 
 class Ga4NotReady(Exception):
@@ -34,7 +65,7 @@ def pages_for_events(
     days: int = 90,
     today: date | None = None,
 ) -> list[dict]:
-    """`[{url, path, total, events: {name: count}, declared}]`, busiest page first."""
+    """Every page the events fired on, busiest first, as `{url, path, total, events, declared, tracked_by}`."""
     integration = (
         db.query(Integration)
         .filter(Integration.client_id == client.id, Integration.provider == IntegrationProvider.GA4)
@@ -74,6 +105,9 @@ def pages_for_events(
         normalize_url(r.normalized_url)
         for r in db.query(ClientConversionPage).filter(ClientConversionPage.client_id == client.id)
     }
+    tracked = [
+        p.pattern for p in db.query(ClientCompletionPattern).filter(ClientCompletionPattern.client_id == client.id)
+    ]
     out = []
     for path, counts in by_page.items():
         url = normalize_landing_page(path, client.domain)
@@ -84,7 +118,32 @@ def pages_for_events(
                 "total": sum(counts.values()),
                 "events": dict(counts),
                 "declared": normalize_url(url) in declared,
+                "tracked_by": next((t for t in tracked if t in path.lower()), None),
             }
         )
     out.sort(key=lambda page: page["total"], reverse=True)
-    return out[:MAX_PAGES]
+    return out
+
+
+def summarise(pages: list[dict], *, limit: int = MAX_PAGES) -> dict:
+    """What the screen needs, counted over every page before anything is trimmed.
+
+    Pages that match a tracked pattern are folded into `tracked`, so one thank-you
+    pattern stands for hundreds of one-off order addresses instead of burying the list.
+    """
+    tracked: dict[str, dict] = {}
+    rest = []
+    for page in pages:
+        pattern = page["tracked_by"]
+        if pattern is None:
+            rest.append(page)
+            continue
+        entry = tracked.setdefault(pattern, {"pattern": pattern, "total": 0, "pages": 0})
+        entry["total"] += page["total"]
+        entry["pages"] += 1
+    return {
+        "pages": rest[:limit],
+        "pages_not_shown": max(len(rest) - limit, 0),
+        "tracked": sorted(tracked.values(), key=lambda e: e["total"], reverse=True),
+        "suggested": suggest_patterns(rest),
+    }

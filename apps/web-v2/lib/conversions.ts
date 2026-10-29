@@ -39,9 +39,19 @@ export type Ga4Page = {
   total: number;
   events: Record<string, number>;
   declared: boolean;
+  /** The tracked pattern this page matches, if any. */
+  tracked_by: string | null;
 };
 
-export type Ga4PagesResult = { ok: true; pages: Ga4Page[] } | { ok: false; error: string };
+export type SuggestedPattern = { pattern: string; total: number; pages: number };
+
+export type CompletionPattern = { pattern: string; label: string | null };
+
+export type TrackedSummary = { pattern: string; total: number; pages: number };
+
+export type Ga4PagesResult =
+  | { ok: true; pages: Ga4Page[]; suggested: SuggestedPattern[]; tracked: TrackedSummary[]; notShown: number }
+  | { ok: false; error: string };
 
 /** "/pages/contact-us" -> "Contact us"; the home page -> "Home". */
 export function labelFromPath(path: string): string {

@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 
 import {
   loadGa4PagesAction,
+  saveCompletionPatternsAction,
   saveConversionDefinitionsAction,
   saveConversionPagesAction,
 } from "@/app/(app)/[clientSlug]/settings/conversions/actions";
@@ -11,9 +12,12 @@ import { SaveBar, inputClass } from "@/components/ui/form";
 import {
   CONVERSION_TYPES,
   labelFromPath,
+  type CompletionPattern,
   type ConversionPage,
   type EventCandidate,
   type Ga4Page,
+  type SuggestedPattern,
+  type TrackedSummary,
 } from "@/lib/conversions";
 
 type Row = { ticked: boolean; name: string; type: string; active: boolean };
@@ -215,14 +219,17 @@ export function ConversionPages({
   slug,
   pages,
   events,
+  patterns: initialPatterns,
 }: {
   clientId: string;
   slug: string;
   pages: ConversionPage[];
   events: EventCandidate[];
+  patterns: CompletionPattern[];
 }) {
   const save = useSaving();
   const [rows, setRows] = useState<ConversionPage[]>(pages);
+  const [patterns, setPatterns] = useState<CompletionPattern[]>(initialPatterns);
 
   function addPage(page: Ga4Page) {
     setRows((current) =>
@@ -245,6 +252,7 @@ export function ConversionPages({
   }
 
   return (
+    <div className="space-y-6">
     <form
       onSubmit={(event) => {
         event.preventDefault();
@@ -325,8 +333,17 @@ export function ConversionPages({
         events={events}
         onAdd={addPage}
         added={new Set(rows.map((r) => r.normalized_url))}
+        tracked={patterns.map((p) => p.pattern)}
+        onTrack={async (pattern) => {
+          const next = [...patterns, { pattern, label: null }];
+          const result = await saveCompletionPatternsAction(clientId, slug, next);
+          if (result.ok) setPatterns(next);
+          return result;
+        }}
       />
     </form>
+    <CompletionCard clientId={clientId} slug={slug} patterns={patterns} onChange={setPatterns} />
+    </div>
   );
 }
 
@@ -336,11 +353,15 @@ function Ga4PagesPanel({
   events,
   onAdd,
   added,
+  tracked,
+  onTrack,
 }: {
   clientId: string;
   events: EventCandidate[];
   onAdd: (page: Ga4Page) => void;
   added: Set<string>;
+  tracked: string[];
+  onTrack: (pattern: string) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const choices = events.filter((e) => !e.automatic && e.event_count > 0);
   const initial = (events.some((e) => e.defined) ? events.filter((e) => e.defined) : events.filter((e) => e.suggested)).map(
@@ -349,6 +370,9 @@ function Ga4PagesPanel({
   const [chosen, setChosen] = useState<string[]>(initial);
   const [days, setDays] = useState(90);
   const [pages, setPages] = useState<Ga4Page[] | null>(null);
+  const [suggested, setSuggested] = useState<SuggestedPattern[]>([]);
+  const [trackedSummary, setTrackedSummary] = useState<TrackedSummary[]>([]);
+  const [notShown, setNotShown] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -356,10 +380,18 @@ function Ga4PagesPanel({
     setError(null);
     startTransition(async () => {
       const result = await loadGa4PagesAction(clientId, chosen, days);
-      if (result.ok) setPages(result.pages);
-      else setError(result.error);
+      if (result.ok) {
+        setPages(result.pages);
+        setSuggested(result.suggested);
+        setTrackedSummary(result.tracked);
+        setNotShown(result.notShown);
+      } else setError(result.error);
     });
   }
+
+  const untrackedSuggestions = suggested.filter((s) => !tracked.includes(s.pattern));
+  // The API folds pages that match a pattern away; only a pattern tracked after loading needs hiding here.
+  const visible = pages?.filter((p) => !tracked.some((t) => p.path.toLowerCase().includes(t))) ?? [];
 
   return (
     <div className="mt-8 border-t border-[var(--border)] pt-6">
@@ -424,8 +456,36 @@ function Ga4PagesPanel({
         </p>
       ) : null}
 
+      {untrackedSuggestions.map((s) => (
+        <div
+          key={s.pattern}
+          className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--brand-teal)]/10 p-3 text-sm"
+        >
+          <span>
+            <strong>{s.pattern}</strong>: {s.total.toLocaleString()} conversions across {s.pages.toLocaleString()}{" "}
+            different page addresses. Track them as one?
+          </span>
+          <button
+            type="button"
+            onClick={async () => {
+              const result = await onTrack(s.pattern);
+              if (!result.ok) setError(result.error);
+            }}
+            className="rounded-lg bg-[var(--brand-teal)] px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            Track {s.pattern}
+          </button>
+        </div>
+      ))}
+      {trackedSummary.map((t) => (
+        <p key={t.pattern} className="mt-3 text-xs text-[var(--text-secondary)]">
+          <strong>{t.pattern}</strong> is tracked: {t.total.toLocaleString()} conversions across{" "}
+          {t.pages.toLocaleString()} page addresses, folded out of the list below.
+        </p>
+      ))}
+
       {pages ? (
-        pages.length === 0 ? (
+        visible.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--text-tertiary)]">GA4 saw none of those events in that time.</p>
         ) : (
           <table className="mt-3 w-full text-left text-sm">
@@ -438,7 +498,7 @@ function Ga4PagesPanel({
               </tr>
             </thead>
             <tbody>
-              {pages.slice(0, 40).map((page) => (
+              {visible.slice(0, 40).map((page) => (
                 <tr key={page.url} className="border-t border-[var(--border)]">
                   <td className="max-w-[18rem] truncate py-2" title={page.url}>
                     {page.path}
@@ -450,7 +510,7 @@ function Ga4PagesPanel({
                       .join(" · ")}
                   </td>
                   <td className="py-2 text-right">
-                    {added.has(page.url) || page.declared ? (
+                    {page.path === "(not set)" ? null : added.has(page.url) || page.declared ? (
                       <span className="text-xs text-[var(--text-tertiary)]">Added</span>
                     ) : (
                       <button
@@ -468,8 +528,108 @@ function Ga4PagesPanel({
           </table>
         )
       ) : null}
-      {pages && pages.length > 40 ? (
-        <p className="mt-2 text-xs text-[var(--text-tertiary)]">Showing the busiest 40 of {pages.length}.</p>
+      {visible.length > 40 || notShown > 0 ? (
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+          Showing the busiest 40 of {(visible.length + notShown).toLocaleString()}.
+        </p>
+      ) : null}
+      {visible.some((p) => p.path === "(not set)") ? (
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+          &ldquo;(not set)&rdquo; means GA4 recorded the event with no page, usually a tracking gap rather than a
+          real page.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Address patterns that mean "finished": counted, never linked to. */
+function CompletionCard({
+  clientId,
+  slug,
+  patterns,
+  onChange,
+}: {
+  clientId: string;
+  slug: string;
+  patterns: CompletionPattern[];
+  onChange: (next: CompletionPattern[]) => void;
+}) {
+  const save = useSaving();
+  const [draft, setDraft] = useState("");
+
+  function persist(next: CompletionPattern[]) {
+    save.run(async () => {
+      const result = await saveCompletionPatternsAction(clientId, slug, next);
+      if (result.ok) onChange(next);
+      return result;
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
+      <h2 className="text-sm font-semibold">Thank-you pages</h2>
+      <p className="mt-1 text-sm text-[var(--text-secondary)]">
+        A finished order or form often lands on an address that is different every time, such as
+        <code className="mx-1">/checkouts/cn/&lt;order code&gt;/en-us/thank-you</code>. Track the part that
+        never changes, like <code className="mx-1">/thank-you</code>, and every one of them counts. These are
+        for measuring conversions only: the engine never sends readers to them.
+      </p>
+
+      <ul className="mt-4 divide-y divide-[var(--border)] text-sm">
+        {patterns.map((p) => (
+          <li key={p.pattern} className="flex items-center justify-between py-2">
+            <span className="font-medium">
+              {p.pattern}
+              {p.label ? <span className="font-normal text-[var(--text-secondary)]"> · {p.label}</span> : null}
+            </span>
+            <button
+              type="button"
+              disabled={save.pending}
+              onClick={() => persist(patterns.filter((x) => x.pattern !== p.pattern))}
+              className="text-xs font-semibold text-red-700 hover:underline disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+        {patterns.length === 0 ? <li className="py-2 text-[var(--text-tertiary)]">Nothing tracked yet.</li> : null}
+      </ul>
+
+      <div className="mt-3 flex gap-3">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              document.getElementById("add-completion")?.click();
+            }
+          }}
+          placeholder="/thank-you"
+          aria-label="Page address pattern"
+          className={inputClass}
+        />
+        <button
+          id="add-completion"
+          type="button"
+          disabled={save.pending || !draft.trim()}
+          onClick={() => {
+            const text = draft.trim().toLowerCase();
+            const pattern = text.startsWith("/") ? text : `/${text}`;
+            if (!patterns.some((p) => p.pattern === pattern)) persist([...patterns, { pattern, label: null }]);
+            setDraft("");
+          }}
+          className="shrink-0 rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          Track
+        </button>
+      </div>
+      {save.saved ? <p className="mt-2 text-sm text-[var(--text-secondary)]">Saved.</p> : null}
+      {save.error ? (
+        <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+          {save.error}
+        </p>
       ) : null}
     </div>
   );
