@@ -54,6 +54,15 @@ class Throttle:
         self._clean_runs = 0
         self._lock = asyncio.Lock()
         self._next_at = 0.0
+        #: Until when the whole crawl is asked to stand still. A host that refuses one request
+        #: refuses the next three as well; only the refused worker used to wait, so the others
+        #: carried on, were refused in turn, and each paid its own minute.
+        self._paused_until = 0.0
+
+    def pause(self, seconds: float) -> None:
+        """Ask every worker to stand still for `seconds` (never shortening a pause already set)."""
+        until = asyncio.get_running_loop().time() + max(0.0, seconds)
+        self._paused_until = max(self._paused_until, until)
 
     def back_off(self) -> None:
         """Called after the server turns a request away."""
@@ -86,6 +95,9 @@ class Throttle:
         than each sleeping the same interval and then firing together — which
         is the burst the limiter is there to stop.
         """
+        remaining = self._paused_until - asyncio.get_running_loop().time()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
         if self.delay <= 0:
             return
         async with self._lock:
@@ -891,6 +903,9 @@ async def _fetch_page(
                         else RATE_LIMIT_BASE_DELAY * (2**attempts)
                     )
                     attempts += 1
+                    if throttle is not None:
+                        # The others wait out the same refusal instead of walking into it.
+                        throttle.pause(wait)
                     await asyncio.sleep(wait)
                     continue
                 # Out of retries. The status is deliberately not kept: stored
