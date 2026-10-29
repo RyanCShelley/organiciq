@@ -157,3 +157,23 @@ def test_return_to_only_accepts_the_two_known_values(client, db, client_a, admin
     monkeypatch.setattr(s, "google_data_oauth_client_id", "id")
     monkeypatch.setattr(s, "google_data_oauth_client_secret", "secret")
     assert _start(client, client_a, admin_user, return_to="https://evil.example").status_code == 422
+
+
+def test_a_rejected_seranking_key_says_so_plainly(client, db, client_a, admin_user, monkeypatch):
+    import httpx
+
+    from app.api.routers import seranking as ser
+
+    monkeypatch.setattr(get_settings(), "se_ranking_api_key", "old-key")
+
+    def refused(key):
+        request = httpx.Request("GET", "https://api.seranking.com/v1/project-management/sites")
+        raise httpx.HTTPStatusError("401", request=request, response=httpx.Response(401, request=request))
+
+    monkeypatch.setattr(ser, "list_sites", refused)
+    response = client.get(
+        "/integrations/seranking/projects", headers=client_header(client_a.id, admin_user.email)
+    )
+    assert response.status_code == 502
+    assert "refused the API key" in response.json()["detail"]
+    assert "seranking.com" not in response.json()["detail"]
