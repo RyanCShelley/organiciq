@@ -67,6 +67,7 @@ export type Client = {
   status: "active" | "paused" | "onboarding" | "archived";
   start_date?: string | null;
   primary_market?: string | null;
+  monthly_lead_goal?: number | null;
   business_model?: "lead_gen" | "ecommerce" | "both" | null;
   brand_aliases?: string[];
   competitor_domains?: string[];
