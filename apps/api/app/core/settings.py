@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     google_data_oauth_client_secret: str = ""
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
+    #: Where the Google connect flow returns to when v2 started it.
+    web_v2_app_url: str = "http://127.0.0.1:3001"
     se_ranking_api_key: str = ""
+    bing_webmaster_api_key: str = ""
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True
     daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)

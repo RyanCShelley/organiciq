@@ -32,6 +32,7 @@ from app.models.seranking import (
     StagingSerSiteSummary,
 )
 from app.models.user import User, UserClient, UserRole
+from app.models.client_bing_site import ClientBingSite
 from app.models.client_feed import ClientFeed
 from app.models.client_focus import ClientFocus
 from app.models.watch_target import WatchTarget

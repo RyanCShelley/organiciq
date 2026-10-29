@@ -5,6 +5,7 @@ import { useParams, usePathname } from "next/navigation";
 
 const TABS = [
   { label: "General", path: "" },
+  { label: "Connections", path: "/connections" },
   { label: "Content sources", path: "/content" },
   { label: "Watchlist import", path: "/watchlist" },
   { label: "Competitors", path: "/competitors" },

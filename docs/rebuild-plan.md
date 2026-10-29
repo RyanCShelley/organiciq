@@ -148,7 +148,8 @@ Rule for every ticket: additive migrations only, tests in the same change, nothi
 ### Client setup in v2 (added after Phase 0 review with Ryan)
 Modelled on the current tool's account area, with what the engine does not need left out.
 - **Stage 1, built:** General (agency services: OrganicIQ, Ad Accelerator or both, with no "none"; company name; website; tier; status; contract start; account sheet), Content sources (whole-site sitemap plus blog feeds), Competitors, Advanced (site folder, search market, timezone, crawl page limit, brand aliases), Team access, and Add client.
-- **Stage 2, next:** Conversions & Goals (GA4 lead events, conversion pages, baseline and 3/6/9/12-month checkpoints) and Connections (GSC, GA4, SE Ranking; needs a v2 return path for the Google connect flow).
+- **Stage 2a, built:** Connections (Google sign-in with a v2 return path, Search Console site, GA4 property, SE Ranking project, Bing Webmaster site, Teamwork tasklist). Bing is stored in `client_bing_sites`, not `integrations`, so the live tool never meets a provider it does not know. Bing data itself arrives in Phase 4.
+- **Stage 2b, next:** Conversions & Goals (GA4 lead events, conversion pages, baseline and 3/6/9/12-month checkpoints).
 - **Left out on purpose:** Pages & Keywords (page stages, pages the engine leaves alone, keyword map: Topic Hub mapping logic is ported later), per-client allowance overrides, keyword match margin, lead value, Teamwork list.
 - **Cutover clean-up:** the old tool's Watch List (SE Ranking view) and `watch_targets` are not used by v2. Remove their tables, routes and screens when v2 replaces the live tool; the additive-only rule forbids it before then.
 
