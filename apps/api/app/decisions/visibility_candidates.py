@@ -300,19 +300,101 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
     }
 
 
-def bucket_overview(db: Session, client: Client, month: str) -> list[dict[str, Any]]:
-    """Each bucket in one line: how much there is to move, and how many terms have nothing at all."""
+#: A bucket is thin when nothing in it is strong and fewer than this many searches are in reach.
+THIN_BELOW = 5
+#: ...and good when this many are strong.
+GOOD_AT = 3
+#: Search Console days (of the window) below which no list can be trusted.
+MIN_COVERAGE_SHARE = 0.5
+
+
+def reach_label(strong: int, found: int) -> str:
+    if strong == 0 and found < THIN_BELOW:
+        return "thin"
+    return "good" if strong >= GOOD_AT else "some"
+
+
+def advise(
+    buckets: list[dict[str, Any]],
+    focus_bucket_id: str | None,
+    *,
+    coverage_days: int,
+    window_days: int,
+) -> dict[str, Any]:
+    """Say whether there is enough to work on, and where the movement is if there is not.
+
+    It recommends; it never changes the focus. A thin bucket may be the right focus
+    (a client priority that needs new pages), and the advice says that too.
+    """
+    if window_days and coverage_days < window_days * MIN_COVERAGE_SHARE:
+        return {
+            "level": "thin_data",
+            "headline": "Not enough Search Console history to trust this list.",
+            "reasons": [
+                f"Search Console has {coverage_days} days of data in the {window_days}-day window. "
+                "Positions and impressions from so few days can swing the ranking of every row."
+            ],
+            "suggestions": [{"kind": "data", "text": "Pull more Search Console history, then read the list again."}],
+        }
+
+    focus = next((b for b in buckets if b["id"] == focus_bucket_id), None)
+    if focus is None:
+        return {"level": "ok", "headline": "", "reasons": [], "suggestions": []}
+
+    others = sorted(
+        (b for b in buckets if b["id"] != focus["id"] and b["strong"] > 0),
+        key=lambda b: b["expected_extra_clicks"],
+        reverse=True,
+    )
+    if focus["reach"] != "thin":
+        return {
+            "level": "ok",
+            "headline": f"{focus['name']} has enough to work with.",
+            "reasons": [f"{focus['strong']} strong and {focus['possible']} possible searches are in reach."],
+            "suggestions": [],
+        }
+
+    reasons = [
+        f"{focus['found']} {'search' if focus['found'] == 1 else 'searches'} in reach, none strong, "
+        f"for a possible +{focus['expected_extra_clicks']:g} clicks."
+    ]
+    if focus["unranked_terms"]:
+        reasons.append(f"{focus['unranked_terms']} of its {focus['terms']} terms have no Google impressions at all.")
+    reasons.append("No page ranks well enough to nudge, so moving this bucket means writing pages for it.")
+
+    suggestions: list[dict[str, Any]] = [
+        {
+            "kind": "bucket",
+            "bucket_id": b["id"],
+            "name": b["name"],
+            "text": f"{b['name']}: {b['strong']} strong, +{b['expected_extra_clicks']:g} extra clicks in the top 20.",
+        }
+        for b in others[:2]
+    ]
+    if others:
+        headline = f"Shift Visibility to {others[0]['name']}, or treat {focus['name']} as a content job."
+    else:
+        headline = f"Nothing in any bucket is close enough to move. Treat {focus['name']} as a content job, or pick a different focus."
+        suggestions.append({"kind": "focus", "text": "Visibility has little to move on any bucket; consider Traffic or Leads."})
+    suggestions.append(
+        {"kind": "content", "text": f"Keep {focus['name']} as the focus and plan new pages for its terms (Content hub, later)."}
+    )
+    return {"level": "shift", "headline": headline, "reasons": reasons, "suggestions": suggestions}
+
+
+def bucket_overview(db: Session, client: Client, month: str, focus_bucket_id: str | None = None) -> dict[str, Any]:
+    """Each bucket in one line, and advice on the focus: is there enough here to work on?"""
     buckets = (
         db.query(WatchlistBucket)
         .filter(WatchlistBucket.client_id == client.id)
         .order_by(WatchlistBucket.sort_order, WatchlistBucket.name)
         .all()
     )
-    out = []
+    rows = []
     for bucket in buckets:
         result = build(db, client, month, bucket.id)
         terms = len(result["bucket"]["terms"]) if result["bucket"] else 0
-        out.append(
+        rows.append(
             {
                 "id": str(bucket.id),
                 "name": bucket.name,
@@ -322,6 +404,21 @@ def bucket_overview(db: Session, client: Client, month: str) -> list[dict[str, A
                 "possible": result["counts"]["possible"],
                 "expected_extra_clicks": round(sum(c["expected_extra_clicks"] for c in result["candidates"]), 1),
                 "unranked_terms": len(result["unranked"]),
+                "reach": reach_label(result["counts"]["strong"], result["counts"]["found"]),
             }
         )
-    return out
+
+    year, mon = int(month[:4]), int(month[5:7])
+    start, end = windows(date(year, mon, 1))["current"]
+    coverage = (
+        db.query(func.count(func.distinct(FactGscDaily.date)))
+        .filter(FactGscDaily.client_id == client.id, FactGscDaily.date >= start, FactGscDaily.date <= end)
+        .scalar()
+        or 0
+    )
+    window_days = (end - start).days + 1
+    return {
+        "buckets": rows,
+        "coverage": {"days": int(coverage), "window_days": window_days},
+        "advice": advise(rows, focus_bucket_id, coverage_days=int(coverage), window_days=window_days),
+    }

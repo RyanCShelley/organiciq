@@ -39,4 +39,24 @@ export type BucketOverview = {
   possible: number;
   expected_extra_clicks: number;
   unranked_terms: number;
+  reach: "thin" | "some" | "good";
+};
+
+export type Advice = {
+  level: "ok" | "shift" | "thin_data";
+  headline: string;
+  reasons: string[];
+  suggestions: { kind: "bucket" | "content" | "focus" | "data"; text: string; bucket_id?: string; name?: string }[];
+};
+
+export type EngineOverview = {
+  buckets: BucketOverview[];
+  coverage: { days: number; window_days: number };
+  advice: Advice;
+};
+
+export const EMPTY_OVERVIEW: EngineOverview = {
+  buckets: [],
+  coverage: { days: 0, window_days: 0 },
+  advice: { level: "ok", headline: "", reasons: [], suggestions: [] },
 };

@@ -42,11 +42,14 @@ def visibility_bucket_overview(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     month: Annotated[str | None, Query()] = None,
-) -> list[dict]:
-    """How much each watchlist bucket has to move, side by side."""
+    focus_bucket_id: UUID | None = None,
+) -> dict:
+    """How much each watchlist bucket has to move, side by side, and advice on the focus bucket."""
     chosen = month or last_complete_month()
     try:
         parse_month(chosen)
-        return visibility_candidates.bucket_overview(db, client, chosen)
+        return visibility_candidates.bucket_overview(
+            db, client, chosen, str(focus_bucket_id) if focus_bucket_id else None
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

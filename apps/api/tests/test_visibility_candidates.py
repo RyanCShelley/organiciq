@@ -147,23 +147,74 @@ def test_the_route_refuses_a_bad_month(client, db, client_a, admin_user):
     assert response.status_code == 400
 
 
-def test_the_bucket_overview_shows_which_bucket_has_something_to_move(db, client_a):
-    busy = _bucket(db, client_a, [("tanning oil", 10000)])
+def test_a_single_impression_reads_as_singular():
+    assert vc._only(1) == "only 1 impression in 3 months"
+    assert vc._only(30) == "only 30 impressions in 3 months"
+
+
+def _b(id_, name, *, found, strong, extra, unranked=0, terms=4):
+    return {
+        "id": id_, "name": name, "terms": terms, "found": found, "strong": strong, "possible": found - strong,
+        "expected_extra_clicks": extra, "unranked_terms": unranked, "reach": vc.reach_label(strong, found),
+    }
+
+
+MOISTURIZERS = _b("m", "Moisturizers", found=2, strong=0, extra=0, unranked=2)
+SUNSCREEN = _b("s", "Sunscreen", found=120, strong=9, extra=135.7)
+TANNING = _b("t", "Tanning", found=100, strong=6, extra=36.5, terms=2)
+
+
+def test_reach_is_thin_good_or_some():
+    assert vc.reach_label(0, 2) == "thin"
+    assert vc.reach_label(0, 15) == "some"
+    assert vc.reach_label(2, 3) == "some"
+    assert vc.reach_label(3, 40) == "good"
+
+
+def test_a_thin_focus_is_told_to_shift_and_pointed_at_the_buckets_with_movement():
+    advice = vc.advise([MOISTURIZERS, SUNSCREEN, TANNING], "m", coverage_days=90, window_days=92)
+    assert advice["level"] == "shift"
+    assert advice["headline"].startswith("Shift Visibility to Sunscreen")
+    names = [s["name"] for s in advice["suggestions"] if s["kind"] == "bucket"]
+    assert names == ["Sunscreen", "Tanning"]  # best first
+    assert any(s["kind"] == "content" for s in advice["suggestions"])
+    assert any("2 of its 4 terms have no Google impressions" in r for r in advice["reasons"])
+
+
+def test_a_focus_with_enough_in_reach_is_left_alone():
+    advice = vc.advise([MOISTURIZERS, SUNSCREEN], "s", coverage_days=90, window_days=92)
+    assert advice["level"] == "ok" and advice["suggestions"] == []
+
+
+def test_when_no_bucket_has_anything_it_says_to_consider_another_focus():
+    quiet = _b("q", "Aroma", found=1, strong=0, extra=0.2)
+    advice = vc.advise([MOISTURIZERS, quiet], "m", coverage_days=90, window_days=92)
+    assert advice["level"] == "shift" and "Nothing in any bucket" in advice["headline"]
+    assert any(s["kind"] == "focus" for s in advice["suggestions"])
+
+
+def test_too_little_search_console_history_beats_every_other_advice():
+    advice = vc.advise([MOISTURIZERS, SUNSCREEN], "m", coverage_days=20, window_days=92)
+    assert advice["level"] == "thin_data" and "20 days" in advice["reasons"][0]
+
+
+def test_no_focus_bucket_means_no_advice_to_give():
+    assert vc.advise([MOISTURIZERS, SUNSCREEN], None, coverage_days=90, window_days=92)["level"] == "ok"
+
+
+def test_the_overview_carries_reach_coverage_and_advice(db, client_a):
+    _bucket(db, client_a, [("tanning oil", 10000)])
     empty = WatchlistBucket(client_id=client_a.id, name="Moisturizers", name_key="moisturizers", sort_order=1)
     db.add(empty)
     db.flush()
     db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=empty.id, keyword="face oil", keyword_key="face oil", volume=1500))
     _row(db, client_a, date(2026, 8, 10), "tanning oil", "https://shop.example/tan", 2000, 40, 12.0)
+    db.add(FactGscDaily(client_id=client_a.id, date=date(2026, 8, 10), impressions=1, clicks=0, ctr=0, average_position=0))
     db.commit()
 
-    overview = {b["name"]: b for b in vc.bucket_overview(db, client_a, "2026-09")}
-    assert overview["Sun care"]["found"] == 1 and overview["Sun care"]["strong"] == 1
-    assert overview["Sun care"]["expected_extra_clicks"] > 0 and overview["Sun care"]["unranked_terms"] == 0
-    assert overview["Moisturizers"]["found"] == 0 and overview["Moisturizers"]["unranked_terms"] == 1
-    assert overview["Moisturizers"]["expected_extra_clicks"] == 0
-    assert busy.id
-
-
-def test_a_single_impression_reads_as_singular():
-    assert vc._only(1) == "only 1 impression in 3 months"
-    assert vc._only(30) == "only 30 impressions in 3 months"
+    out = vc.bucket_overview(db, client_a, "2026-09", str(empty.id))
+    by_name = {b["name"]: b for b in out["buckets"]}
+    assert by_name["Sun care"]["found"] == 1 and by_name["Sun care"]["expected_extra_clicks"] > 0
+    assert by_name["Moisturizers"]["reach"] == "thin" and by_name["Moisturizers"]["unranked_terms"] == 1
+    assert out["coverage"] == {"days": 1, "window_days": 92}
+    assert out["advice"]["level"] == "thin_data"  # one day of Search Console is not enough

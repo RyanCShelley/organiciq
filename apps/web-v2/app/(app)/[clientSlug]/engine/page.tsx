@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { EngineScreen } from "@/components/EngineScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
-import type { BucketOverview, VisibilityCandidates } from "@/lib/engine";
+import { EMPTY_OVERVIEW, type EngineOverview, type VisibilityCandidates } from "@/lib/engine";
 import { currentMonth, type ClientFocus } from "@/lib/focus";
 import { lastCompleteMonth } from "@/lib/review";
 import type { Watchlist } from "@/lib/watchlist";
@@ -35,11 +35,14 @@ export default async function EnginePage({
   const showVisibility = focus?.focus === "visibility" || show === "visibility";
 
   let data: VisibilityCandidates | null = null;
-  let overview: BucketOverview[] = [];
+  let overview: EngineOverview = EMPTY_OVERVIEW;
   let error: string | null = null;
   if (showVisibility) {
     try {
-      overview = await apiFetch<BucketOverview[]>(`/v2/engine/visibility/buckets?month=${month}`, { clientId: client.id });
+      const focusBucket = focus?.bucket_id ? `&focus_bucket_id=${focus.bucket_id}` : "";
+      overview = await apiFetch<EngineOverview>(`/v2/engine/visibility/buckets?month=${month}${focusBucket}`, {
+        clientId: client.id,
+      });
       const query = new URLSearchParams({ month });
       if (bucketId) query.set("bucket_id", bucketId);
       data = await apiFetch<VisibilityCandidates>(`/v2/engine/visibility?${query}`, { clientId: client.id });

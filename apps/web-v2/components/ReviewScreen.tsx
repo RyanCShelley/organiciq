@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import type { Client } from "@/lib/api";
+import type { BucketOverview } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
 import type { EngineNumbers, Pair, Review, VisibilityTerm } from "@/lib/review";
 
@@ -136,17 +137,23 @@ function FocusPanel({
   planMonth,
   focus,
   buckets,
+  reach,
 }: {
   client: Client;
   planMonth: string;
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
+  reach: BucketOverview[];
 }) {
   const [choice, setChoice] = useState<FocusValue | null>(focus?.focus ?? null);
   const [bucketId, setBucketId] = useState(focus?.bucket_id ?? "");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const picked = reach.find((x) => x.id === bucketId);
+  const thinPick = picked && picked.reach === "thin" ? picked : null;
+  const better = [...reach].filter((x) => x.id !== bucketId && x.strong > 0).sort((a, b) => b.expected_extra_clicks - a.expected_extra_clicks)[0];
 
   function run(task: () => Promise<{ ok: true } | { ok: false; error: string }>, then?: () => void) {
     setError(null);
@@ -199,12 +206,23 @@ function FocusPanel({
           className="mt-1 w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm"
         >
           <option value="">{buckets.length ? "No bucket chosen" : "No buckets: import the watchlist in Settings"}</option>
-          {buckets.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
+          {buckets.map((b) => {
+            const r = reach.find((x) => x.id === b.id);
+            return (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {choice === "visibility" && r ? ` (${r.reach === "thin" ? "little to move" : `${r.strong} strong, +${Math.round(r.expected_extra_clicks)} clicks`})` : ""}
+              </option>
+            );
+          })}
         </select>
+        {choice === "visibility" && thinPick ? (
+          <span className="mt-2 block rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+            {thinPick.name} has almost nothing in reach for Visibility ({thinPick.found} searches, none strong), so
+            it would be a content job.
+            {better ? ` ${better.name} has ${better.strong} strong searches (+${Math.round(better.expected_extra_clicks)} clicks).` : ""}
+          </span>
+        ) : null}
       </label>
       <div className="mt-4 flex items-center gap-3">
         <button
@@ -252,6 +270,7 @@ export function ReviewScreen({
   error,
   focus,
   buckets,
+  reach,
 }: {
   client: Client;
   month: string;
@@ -260,6 +279,7 @@ export function ReviewScreen({
   error: string | null;
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
+  reach: BucketOverview[];
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
@@ -506,7 +526,7 @@ export function ReviewScreen({
               </p>
             </div>
           ) : null}
-          <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} />
+          <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
         </aside>
       </div>
     </section>

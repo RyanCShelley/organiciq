@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import type { Client } from "@/lib/api";
-import type { BucketOverview, Candidate, VisibilityCandidates } from "@/lib/engine";
+import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
+import type { Candidate, EngineOverview, VisibilityCandidates } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus } from "@/lib/focus";
 
 const num = (n: number | null | undefined, digits = 0) =>
@@ -87,11 +88,24 @@ export function EngineScreen({
   bucketId: string | null;
   showVisibility: boolean;
   data: VisibilityCandidates | null;
-  overview: BucketOverview[];
+  overview: EngineOverview;
   error: string | null;
 }) {
   const router = useRouter();
   const [band, setBand] = useState<string | null>(null);
+  const [switching, startSwitch] = useTransition();
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const advice = overview.advice;
+  const buckets_ = overview.buckets;
+
+  function switchTo(bucketId: string) {
+    setSwitchError(null);
+    startSwitch(async () => {
+      const result = await saveFocusAction(client.id, client.slug, workMonth, "visibility", bucketId);
+      if (result.ok) router.push(`/${client.slug}/engine`);
+      else setSwitchError(result.error);
+    });
+  }
   const focusLabel = FOCUSES.find((f) => f.value === focus?.focus)?.label;
 
   const shown = useMemo(
@@ -122,6 +136,42 @@ export function EngineScreen({
         </Link>
       </div>
 
+      {advice.level !== "ok" && advice.headline ? (
+        <div
+          className={`mb-6 rounded-xl border p-5 text-sm ${
+            advice.level === "thin_data" ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <h2 className="font-semibold">{advice.headline}</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {advice.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+          {advice.suggestions.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide opacity-70">What you could do</div>
+              {advice.suggestions.map((s) => (
+                <div key={s.text} className="flex flex-wrap items-center justify-between gap-3">
+                  <span>{s.text}</span>
+                  {s.kind === "bucket" && s.bucket_id ? (
+                    <button
+                      type="button"
+                      disabled={switching}
+                      onClick={() => switchTo(s.bucket_id as string)}
+                      className="rounded-lg bg-[var(--brand-teal)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Switch the focus to {s.name}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {switchError ? <p role="alert" className="mt-3 text-red-800">{switchError}</p> : null}
+        </div>
+      ) : null}
+
       {!showVisibility ? (
         <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--text-secondary)]">
           {focus
@@ -138,7 +188,7 @@ export function EngineScreen({
         </div>
       ) : null}
 
-      {overview.length > 0 ? (
+      {buckets_.length > 0 ? (
         <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h2 className="text-sm font-semibold">What each bucket has to move</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -157,7 +207,7 @@ export function EngineScreen({
                 </tr>
               </thead>
               <tbody>
-                {overview.map((b) => (
+                {buckets_.map((b) => (
                   <tr
                     key={b.id}
                     onClick={() => router.push(`/${client.slug}/engine?bucket=${b.id}${focus ? "" : "&show=visibility"}`)}
@@ -252,16 +302,16 @@ export function EngineScreen({
               </p>
             ) : null}
 
-            {data.bucket && data.counts.strong === 0 && data.counts.found < 5 ? (
+            {data.bucket && data.bucket.id !== focus?.bucket_id && data.counts.strong === 0 && data.counts.found < 5 ? (
               <div className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
                 <strong>{data.bucket.name}</strong> has almost nothing to move: {data.counts.found}{" "}
                 {data.counts.found === 1 ? "search" : "searches"} in reach, none strong
                 {data.unranked.length > 0 ? `, and ${data.unranked.length} of its ${data.bucket.terms.length} terms have no Google impressions at all` : ""}.
                 No page ranks well enough to nudge. These terms need a page written for them, which is content work
                 and not a ranking fix.
-                {overview.some((o) => o.id !== data.bucket?.id && o.strong > 0) ? (
+                {buckets_.some((o) => o.id !== data.bucket?.id && o.strong > 0) ? (
                   <>
-                    {" "}Buckets with real candidates: {overview.filter((o) => o.id !== data.bucket?.id && o.strong > 0).map((o) => `${o.name} (${o.strong} strong)`).join(", ")}.
+                    {" "}Buckets with real candidates: {buckets_.filter((o) => o.id !== data.bucket?.id && o.strong > 0).map((o) => `${o.name} (${o.strong} strong)`).join(", ")}.
                   </>
                 ) : null}
               </div>

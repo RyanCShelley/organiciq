@@ -4,6 +4,7 @@ import { ReviewScreen } from "@/components/ReviewScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { ClientFocus } from "@/lib/focus";
+import { EMPTY_OVERVIEW, type EngineOverview } from "@/lib/engine";
 import { lastCompleteMonth, nextMonth, type Review } from "@/lib/review";
 import type { Watchlist } from "@/lib/watchlist";
 
@@ -32,9 +33,13 @@ export default async function ReviewPage({
     error = e instanceof ApiError ? e.message : "The review could not be built: the API did not answer.";
   }
 
-  const [focus, watchlist] = await Promise.all([
+  const [focus, watchlist, reach] = await Promise.all([
     apiFetch<ClientFocus | null>(`/v2/focus/${planMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
+    // Reach is a hint beside the choice; the review still works without it.
+    apiFetch<EngineOverview>(`/v2/engine/visibility/buckets?month=${month}`, { clientId: client.id }).catch(
+      () => EMPTY_OVERVIEW,
+    ),
   ]);
 
   return (
@@ -46,6 +51,7 @@ export default async function ReviewPage({
       error={error}
       focus={focus}
       buckets={watchlist.buckets.map((b) => ({ id: b.id, name: b.name }))}
+      reach={reach.buckets}
     />
   );
 }
