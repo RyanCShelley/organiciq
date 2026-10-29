@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Annotated, Literal
@@ -45,6 +47,7 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 #: restart or a second instance loses a flow in progress — which reads to
 #: the operator as "Google connect is flaky" rather than as a restart.
 _OAUTH_STATE_TTL = timedelta(minutes=15)
+logger = logging.getLogger("organiciq.oauth")
 _oauth_states: dict[str, dict] = {}
 
 
@@ -247,7 +250,20 @@ def google_data_oauth_callback(
     with httpx.Client(timeout=30.0) as client:
         token_res = client.post(GOOGLE_TOKEN_URL, data=token_payload)
         if token_res.status_code >= 400:
-            return back(message="token_exchange_failed")
+            # Google's reason is an error code ("invalid_client", "redirect_uri_mismatch"),
+            # never a secret. Without it a wrong secret and a wrong redirect URI look alike.
+            try:
+                body = token_res.json()
+            except ValueError:
+                body = {}
+            reason = str(body.get("error") or token_res.status_code)
+            logger.warning(
+                "Google token exchange failed: %s (%s) redirect_uri=%s",
+                reason,
+                body.get("error_description"),
+                settings.google_data_oauth_redirect_uri,
+            )
+            return back(message=f"token_exchange_failed: {reason}" if v2 else "token_exchange_failed")
         tokens = token_res.json()
 
     refresh_token = tokens.get("refresh_token")
