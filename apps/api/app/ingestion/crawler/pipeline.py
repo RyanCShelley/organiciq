@@ -344,6 +344,12 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
 
         scope_note = f"{client.domain}{client.path_prefix or ''}"
         extra_hosts = _hosts_from_search_console(db, client)
+        domain = client.domain
+        sitemap_url = (client.sitemap_url or "").strip() or None
+        path_prefix = (client.path_prefix or "").strip() or None
+        # The crawl takes minutes. A transaction left open across it holds a lock on the
+        # tables it read (a migration waited on one for half an hour), so end it first.
+        db.commit()
         logger.info(
             "Crawling %s (limit=%d)%s",
             scope_note,
@@ -352,10 +358,10 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         )
         result = asyncio.run(
             crawl_site(
-                client.domain,
+                domain,
                 page_limit=limit,
-                sitemap_url=(client.sitemap_url or "").strip() or None,
-                path_prefix=(client.path_prefix or "").strip() or None,
+                sitemap_url=sitemap_url,
+                path_prefix=path_prefix,
                 extra_hosts=extra_hosts,
             )
         )

@@ -244,3 +244,18 @@ def test_brand_keys_cover_the_name_the_domain_and_other_names():
     keys = vc.brand_keys(Fake())
     assert "absolutely natural" in keys and "abs natural" in keys and "x" not in keys
     assert vc.is_brand("absolutely natural sunscreen", keys) and not vc.is_brand("natural sunscreen", keys)
+
+
+def test_link_sources_are_pages_on_the_same_topic_not_pages_with_every_word(db, client_a):
+    page = "https://shop.example/products/spf-15"
+    _row(db, client_a, date(2026, 8, 10), "spf 15 mineral sunscreen", page, 200, 10, 2.5)
+    # Same topic, fewer words: the collection page should be offered as a source of links.
+    _row(db, client_a, date(2026, 8, 11), "mineral sunscreen", "https://shop.example/collections/spf", 900, 5, 14.0)
+    # Off topic, and the page itself, are not.
+    _row(db, client_a, date(2026, 8, 12), "face wash", "https://shop.example/collections/wash", 500, 5, 6.0)
+    db.commit()
+
+    evidence = vc.page_evidence(db, client_a, "2026-09", "spf 15 mineral sunscreen", page)
+    assert [d["url"] for d in evidence["donors"]] == ["https://shop.example/collections/spf"]
+    assert evidence["donors"][0]["query"] == "mineral sunscreen"
+    assert evidence["page_queries"][0]["query"] == "spf 15 mineral sunscreen" and evidence["competing_pages"] == 1

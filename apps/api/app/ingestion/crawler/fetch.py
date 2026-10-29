@@ -146,6 +146,12 @@ MAX_RETRY_AFTER = 60.0
 #: Once a site rate-limits us, every later request waits at least this long.
 #: ACC Tek answered 429 on sixty pages in one run: the crawl kept four
 #: requests in flight the whole way down and never slowed.
+#: The gap between requests when robots.txt states none. Flat out (four requests in flight, no
+#: gap) trips a rate limit on hosts like Shopify, which answer 429 with a Retry-After of up to a
+#: minute and make the crawl pay it: 30 pages took 138 seconds that way and 25 to 34 seconds at a
+#: steady 0.35 to 0.5 second gap, with no refusals. A steady, polite pace is also faster overall.
+DEFAULT_CRAWL_DELAY = 0.4
+
 THROTTLED_MIN_DELAY = 1.0
 #: And the delay grows each time it happens again.
 THROTTLE_GROWTH = 1.5
@@ -594,7 +600,7 @@ async def crawl_site(
             except (TypeError, ValueError):
                 declared_delay = None
         result.crawl_delay = declared_delay
-        throttle = Throttle(declared_delay or 0.0)
+        throttle = Throttle(declared_delay if declared_delay is not None else DEFAULT_CRAWL_DELAY)
         if robots is not None and not robots.can_fetch(USER_AGENT, root):
             result.robots_disallows_site = True
 

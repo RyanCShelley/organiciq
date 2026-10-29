@@ -27,6 +27,7 @@ import httpx
 
 from app.decisions.catalog import VISIBILITY_ACTIONS, PageFacts, SectionFacts, _mentions
 from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
 from app.ingestion.crawler.parse import ParsedPage, parse_page
@@ -236,8 +237,13 @@ def diagnose(
     row: dict[str, Any],
     client_domain: str,
     fetch: Callable[[str], Awaitable[Fetched]] = _fetch,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One (search, page) pair, read live. `row` carries the pair's numbers from the candidate list."""
+    """One (search, page) pair, read live. `row` carries the pair's numbers from the candidate list.
+
+    `evidence` is what Search Console knows about the page (its other searches, competing pages,
+    topical pages that could link to it). Without it, the unconfirmed suggestions are left out.
+    """
     result: dict[str, Any] = {
         "search": search,
         "page": url,
@@ -248,6 +254,8 @@ def diagnose(
         "observations": [],
         "prescriptions": [],
         "not_judged": [],
+        "suggestions": [],
+        "skipped_suggestions": [],
     }
     try:
         fetched = read_page(url, client_domain, fetch)
@@ -284,6 +292,9 @@ def diagnose(
         result["not_judged"].append({"action_id": action_id, "name": name, "reason": reason})
 
     result["observations"] = observations(search, parsed, fetched, row)
+    if evidence is not None:
+        found = provisional_suggest(search=search, url=url, row=row, parsed=parsed, facts=facts, evidence=evidence)
+        result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
     result["page_facts"] = {
         "title": facts.title,
         "description": facts.description,

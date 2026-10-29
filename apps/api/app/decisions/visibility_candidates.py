@@ -473,3 +473,97 @@ def bucket_overview(db: Session, client: Client, month: str, focus_bucket_id: st
         "coverage": {"days": int(coverage), "window_days": window_days},
         "advice": advise(rows, focus_bucket_id, coverage_days=int(coverage), window_days=window_days),
     }
+
+
+_STOP = frozenset("a an and are as at be by for from how in is it of on or the to what when where which who why with your".split())
+
+
+def _tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[^\W_]+", text.lower()) if len(t) >= 2 and t not in _STOP]
+
+
+def page_evidence(db: Session, client: Client, month: str, search: str, page: str) -> dict[str, Any]:
+    """What else Search Console knows about a page and its search, for suggestions that need it.
+
+    - `page_queries`: the searches this page gets impressions for, busiest first;
+    - `competing_pages`: how many pages of the site show for the exact search;
+    - `donors`: other pages that show for searches on the same topic, who could link here.
+    """
+    year, mon = int(month[:4]), int(month[5:7])
+    start, end = windows(date(year, mon, 1))["current"]
+    q = func.lower(func.trim(FactGscQueryPage.query))
+
+    page_rows = (
+        db.query(
+            q.label("q"),
+            func.sum(FactGscQueryPage.impressions),
+            func.sum(FactGscQueryPage.clicks),
+            func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.normalized_url == page,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by("q")
+        .order_by(func.sum(FactGscQueryPage.impressions).desc())
+        .limit(80)
+        .all()
+    )
+    page_queries = []
+    for text, impressions, clicks, weighted in page_rows:
+        impressions = float(impressions or 0)
+        if impressions <= 0:
+            continue
+        page_queries.append(
+            {
+                "query": text,
+                "impressions": round(impressions),
+                "clicks": round(float(clicks or 0)),
+                "position": round(float(weighted or 0) / impressions, 1),
+            }
+        )
+
+    key = " ".join(search.lower().split())
+    competing = (
+        db.query(func.count(func.distinct(FactGscQueryPage.normalized_url)))
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            q == key,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+            FactGscQueryPage.impressions > 0,
+        )
+        .scalar()
+        or 0
+    )
+
+    core = _tokens(search)
+    donors: list[dict[str, Any]] = []
+    # Topical, not identical: a page shows for the topic if it shares at least two of the search's
+    # words (one if the search has only one). Numbers alone ("15") do not make a topic.
+    meaningful = [t for t in core if not t.isdigit()]
+    need = min(2, len(meaningful))
+    if meaningful:
+        topical = db.query(
+            FactGscQueryPage.normalized_url,
+            q.label("q"),
+            func.sum(FactGscQueryPage.impressions).label("imp"),
+        ).filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.normalized_url != page,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+            or_(*[q.like(_like(t), escape="\\") for t in meaningful]),
+        )
+        best: dict[str, dict[str, Any]] = {}
+        for url, text, imp in topical.group_by(FactGscQueryPage.normalized_url, "q").order_by(func.sum(FactGscQueryPage.impressions).desc()).limit(600).all():
+            imp = float(imp or 0)
+            if imp < 10 or len(set(_tokens(text)) & set(meaningful)) < need:
+                continue
+            if url not in best or imp > best[url]["impressions"]:
+                best[url] = {"url": url, "query": text, "impressions": round(imp)}
+        donors = sorted(best.values(), key=lambda d: d["impressions"], reverse=True)[:5]
+
+    return {"page_queries": page_queries, "competing_pages": int(competing), "donors": donors}

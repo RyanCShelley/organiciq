@@ -81,6 +81,17 @@ export type Diagnosis = {
     evidence: string[];
   }[];
   not_judged: { action_id: string; name: string; reason: string }[];
+  /** Worth looking at, but not provable with the data we have yet. Never a prescription. */
+  suggestions: {
+    id: string;
+    title: string;
+    why: string;
+    steps: string[];
+    needs_to_confirm: string;
+    confidence: "unconfirmed";
+    evidence: string[];
+  }[];
+  skipped_suggestions: { id: string; name: string; reason: string }[];
 };
 
 export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; error: string };

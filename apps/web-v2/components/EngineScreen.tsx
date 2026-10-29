@@ -107,6 +107,8 @@ export function EngineScreen({
   const [switching, startSwitch] = useTransition();
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
+  // After a diagnosis the candidate list folds away so the diagnosis is the first thing on the screen.
+  const [collapsed, setCollapsed] = useState(false);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[] | null>(null);
   const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
   const [diagnosing, startDiagnose] = useTransition();
@@ -126,8 +128,10 @@ export function EngineScreen({
       .map((c) => ({ search: c.search, page: c.page }));
     startDiagnose(async () => {
       const result = await diagnoseAction(client.id, selections);
-      if (result.ok) setDiagnoses(result.results);
-      else setDiagnoseError(result.error);
+      if (result.ok) {
+        setDiagnoses(result.results);
+        setCollapsed(true);
+      } else setDiagnoseError(result.error);
     });
   }
   const buckets_ = overview.buckets;
@@ -275,16 +279,140 @@ export function EngineScreen({
 
       {data ? (
         <div className="space-y-6">
+          {diagnoses ? (
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold">Diagnosis</h2>
+              {diagnoses.map((d) => (
+                <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="font-semibold">{d.search}</h3>
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {shortPage(d.page)}
+                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
+                    </span>
+                  </div>
+                  {!d.read.ok ? (
+                    <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                      Could not read this page: {d.read.error}
+                    </p>
+                  ) : (
+                    <>
+                      {d.prescriptions.length > 0 ? (
+                        <div className="mt-3 space-y-3">
+                          {d.prescriptions.map((p) => (
+                            <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
+                              <div className="font-semibold">
+                                {p.action_id} · {p.title}
+                              </div>
+                              <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
+                              <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                About {p.effort_min} minutes · judged on {p.metric}
+                              </p>
+                              {p.evidence.length > 0 ? (
+                                <ul className="mt-2 list-disc pl-5 text-xs text-[var(--text-tertiary)]">
+                                  {p.evidence.map((e) => <li key={e}>{e}</li>)}
+                                </ul>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
+                          No rule fires for this page. That is not the same as nothing to do: see what could not be judged below.
+                        </p>
+                      )}
+                      <ul className="mt-3 space-y-1 text-sm">
+                        {d.observations.map((o) => (
+                          <li
+                            key={o.text}
+                            className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}
+                          >
+                            {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
+                            {o.text}
+                          </li>
+                        ))}
+                      </ul>
+                      {d.suggestions.length > 0 ? (
+                        <div className="mt-4">
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                            Still worth doing, not yet provable
+                          </h4>
+                          <div className="mt-2 space-y-3">
+                            {d.suggestions.map((g) => (
+                              <div key={g.id} className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold">
+                                    {g.id} · {g.title}
+                                  </span>
+                                  <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">unconfirmed</span>
+                                </div>
+                                <p className="mt-1 text-[var(--text-secondary)]">{g.why}</p>
+                                <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--text-secondary)]">
+                                  {g.steps.map((st) => (
+                                    <li key={st}>{st}</li>
+                                  ))}
+                                </ul>
+                                <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                                  <strong>To confirm:</strong> {g.needs_to_confirm}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          {d.skipped_suggestions.length > 0 ? (
+                            <ul className="mt-2 space-y-1 text-xs text-[var(--text-tertiary)]">
+                              {d.skipped_suggestions.map((k) => (
+                                <li key={k.id}>
+                                  <strong>{k.id} {k.name}:</strong> {k.reason}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {d.not_judged.length > 0 ? (
+                        <details className="mt-3 text-sm">
+                          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
+                            Rules that did not fire or could not be judged ({d.not_judged.length})
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
+                            {d.not_judged.map((n) => (
+                              <li key={n.action_id}>
+                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold">Visibility candidates</h2>
-                <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                  Searches where a page ranks 2 to 20 and a better position is worth chasing. Read over{" "}
-                  {data.window.from} to {data.window.to}, against the three months before.
-                </p>
+                {collapsed ? (
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                    {picked.length} selected · {data.counts.found.toLocaleString()} found ({data.counts.strong} strong).
+                  </p>
+                ) : null}
+                {!collapsed ? (
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                    Searches where a page ranks 2 to 20 and a better position is worth chasing. Read over{" "}
+                    {data.window.from} to {data.window.to}, against the three months before.
+                  </p>
+                ) : null}
               </div>
-              <label className="text-sm">
+              {collapsed ? (
+                <button type="button" onClick={() => setCollapsed(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold">
+                  Show the candidates
+                </button>
+              ) : null}
+              <label className={collapsed ? "hidden" : "text-sm"}>
                 <span className="font-semibold">Scope</span>
                 <select
                   value={bucketId ?? "site"}
@@ -301,6 +429,8 @@ export function EngineScreen({
               </label>
             </div>
 
+            {!collapsed ? (
+              <>
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
               <button
                 type="button"
@@ -395,84 +525,11 @@ export function EngineScreen({
                 <p className="py-4 text-sm text-[var(--text-tertiary)]">Nothing in this band for this scope.</p>
               ) : null}
             </div>
+              </>
+            ) : null}
           </div>
 
-          {diagnoses ? (
-            <div className="space-y-4">
-              <h2 className="text-sm font-semibold">Diagnosis</h2>
-              {diagnoses.map((d) => (
-                <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="font-semibold">{d.search}</h3>
-                    <span className="text-xs text-[var(--text-secondary)]">
-                      {shortPage(d.page)}
-                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
-                    </span>
-                  </div>
-                  {!d.read.ok ? (
-                    <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
-                      Could not read this page: {d.read.error}
-                    </p>
-                  ) : (
-                    <>
-                      {d.prescriptions.length > 0 ? (
-                        <div className="mt-3 space-y-3">
-                          {d.prescriptions.map((p) => (
-                            <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
-                              <div className="font-semibold">
-                                {p.action_id} · {p.title}
-                              </div>
-                              <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
-                              <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
-                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                                About {p.effort_min} minutes · judged on {p.metric}
-                              </p>
-                              {p.evidence.length > 0 ? (
-                                <ul className="mt-2 list-disc pl-5 text-xs text-[var(--text-tertiary)]">
-                                  {p.evidence.map((e) => <li key={e}>{e}</li>)}
-                                </ul>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
-                          No rule fires for this page. That is not the same as nothing to do: see what could not be judged below.
-                        </p>
-                      )}
-                      <ul className="mt-3 space-y-1 text-sm">
-                        {d.observations.map((o) => (
-                          <li
-                            key={o.text}
-                            className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}
-                          >
-                            {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
-                            {o.text}
-                          </li>
-                        ))}
-                      </ul>
-                      {d.not_judged.length > 0 ? (
-                        <details className="mt-3 text-sm">
-                          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
-                            Rules that did not fire or could not be judged ({d.not_judged.length})
-                          </summary>
-                          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
-                            {d.not_judged.map((n) => (
-                              <li key={n.action_id}>
-                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {data.unranked.length > 0 ? (
+          {!collapsed && data.unranked.length > 0 ? (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
               <h2 className="text-sm font-semibold">Watchlist terms with no Google impressions</h2>
               <ul className="mt-3 divide-y divide-[var(--border)] text-sm">
@@ -488,7 +545,7 @@ export function EngineScreen({
             </div>
           ) : null}
 
-          <ul className="space-y-1 text-xs text-[var(--text-tertiary)]">
+          <ul className={`space-y-1 text-xs text-[var(--text-tertiary)] ${collapsed ? "hidden" : ""}`}>
             {data.notes.map((n) => (
               <li key={n}>{n}</li>
             ))}

@@ -100,12 +100,19 @@ def diagnose_selected(
                     "observations": [],
                     "prescriptions": [],
                     "not_judged": [],
+                    "suggestions": [],
+                    "skipped_suggestions": [],
                 }
             )
             continue
         results.append(
             page_diagnostic.diagnose(
-                search=row["search"], url=pick.page, row=row, client_domain=client.domain, fetch=page_diagnostic._fetch
+                search=row["search"],
+                url=pick.page,
+                row=row,
+                client_domain=client.domain,
+                fetch=page_diagnostic._fetch,
+                evidence=visibility_candidates.page_evidence(db, client, month, row["search"], pick.page),
             )
         )
     return {"month": month, "results": results}
