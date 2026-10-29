@@ -1,6 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { WatchlistImport } from "@/components/WatchlistImport";
 import { apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { Watchlist } from "@/lib/watchlist";
@@ -28,7 +28,15 @@ export default async function WatchlistPage({
         </p>
       </header>
 
-      <WatchlistImport clientId={client.id} slug={client.slug} />
+      <p className="text-sm text-[var(--text-secondary)]">
+        {watchlist.keyword_count === 0 ? "Nothing here yet. " : "To update this list, "}
+        <Link
+          href={`/${client.slug}/settings/watchlist`}
+          className="font-semibold text-[var(--brand-teal)] hover:underline"
+        >
+          {watchlist.keyword_count === 0 ? "Import the watchlist in Settings →" : "re-import it in Settings →"}
+        </Link>
+      </p>
 
       {watchlist.buckets.map((bucket) => (
         <div key={bucket.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
