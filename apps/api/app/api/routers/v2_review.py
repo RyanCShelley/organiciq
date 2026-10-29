@@ -1,0 +1,30 @@
+"""The monthly review: one month at a glance, for v2."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.core.client_scope import require_client
+from app.core.db import get_db
+from app.core.security import AuthUser, require_sma_staff
+from app.models.client import Client
+from app.services import monthly_review
+
+router = APIRouter(prefix="/v2/review", tags=["v2 review"])
+
+
+@router.get("")
+def monthly_review_for(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: Annotated[str | None, Query(description="YYYY-MM; defaults to the last complete month")] = None,
+) -> dict:
+    chosen = month or monthly_review.last_complete_month()
+    try:
+        return monthly_review.build_review(db, client, chosen)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

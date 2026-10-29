@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 
 const PAGES = [
-  { label: "Overview", path: "" },
+  { label: "Monthly review", path: "/review" },
   { label: "Focus", path: "/focus" },
   { label: "Watchlist", path: "/watchlist" },
   { label: "Settings", path: "/settings" },
