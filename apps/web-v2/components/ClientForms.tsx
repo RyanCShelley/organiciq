@@ -8,6 +8,7 @@ import { createClientAction } from "@/app/(app)/new-client/actions";
 import { Card, Field, SaveBar, inputClass } from "@/components/ui/form";
 import type { Client } from "@/lib/api";
 import {
+  BUSINESS_MODELS,
   SEARCH_MARKETS,
   SERVICES,
   STATUSES,
@@ -91,6 +92,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
   const [domain, setDomain] = useState(client.domain);
   const [tierId, setTierId] = useState(client.tier_id);
   const [status, setStatus] = useState<string>(client.status);
+  const [model, setModel] = useState<string>(client.business_model ?? "");
   const [start, setStart] = useState(client.start_date ?? "");
   const [sheet, setSheet] = useState(client.account_sheet_url ?? "");
   const tier = tiers.find((t) => t.id === tierId);
@@ -107,6 +109,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
             domain: domain.trim(),
             tier_id: tierId,
             status,
+            business_model: model || null,
             start_date: start || null,
             account_sheet_url: sheet.trim() || null,
           }),
@@ -139,6 +142,19 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
           </Field>
           <Field label="Contract start date">
             <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} />
+          </Field>
+          <Field
+            label="Business type"
+            hint="Ecommerce clients are measured on orders and revenue from GA4; lead-gen clients on leads."
+          >
+            <select value={model} onChange={(e) => setModel(e.target.value)} className={inputClass}>
+              <option value="">Not set</option>
+              {BUSINESS_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
         <div className="mt-4">
@@ -307,6 +323,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
   const [domain, setDomain] = useState("");
   const [tierId, setTierId] = useState("");
   const [start, setStart] = useState("");
+  const [model, setModel] = useState("");
 
   return (
     <form
@@ -320,6 +337,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
             client_name: name.trim(),
             domain: domain.trim(),
             tier_id: tierId,
+            business_model: model || null,
             start_date: start || null,
           });
           if (result.ok) router.push(`/${result.slug}/settings`);
@@ -343,6 +361,16 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
           </Field>
           <Field label="Contract start date">
             <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Business type" hint="Ecommerce clients are measured on orders and revenue.">
+            <select value={model} onChange={(e) => setModel(e.target.value)} className={inputClass}>
+              <option value="">Not set</option>
+              {BUSINESS_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
         <div className="mt-6 flex items-center gap-3">

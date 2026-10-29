@@ -70,6 +70,7 @@ class ClientCreate(BaseModel):
     slug: str | None = None
     start_date: Date | None = None
     primary_market: str | None = None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str = "America/New_York"
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
@@ -130,6 +131,7 @@ class ClientUpdate(BaseModel):
     tier_id: UUID | None = None
     start_date: Date | None = None
     primary_market: str | None = None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str | None = None
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
@@ -191,6 +193,7 @@ class ClientOut(ORMModel):
     tier_id: UUID
     start_date: Date | None
     primary_market: str | None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str
     monthly_lead_goal: int | None
     brand_aliases: list[str] = []

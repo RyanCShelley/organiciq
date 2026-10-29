@@ -59,6 +59,9 @@ class Client(Base):
     tier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tiers.id"), nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     primary_market: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: lead_gen | ecommerce | both. Null is "not said yet". An ecommerce client is measured on
+    #: orders and revenue, a lead-gen client on leads; the dashboard and baseline read this.
+    business_model: Mapped[str | None] = mapped_column(String(16), nullable=True)
     service_reporting: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
     #: The Teamwork tasklist a sent growth action lands in. The site and token

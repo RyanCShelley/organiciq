@@ -23,6 +23,13 @@ export function configFromService(value: ServiceValue) {
   return { organiciq: value !== "ad_accelerator", ad_accelerator: value !== "organiciq" };
 }
 
+/** How a client earns, which decides what the dashboard and baseline measure. */
+export const BUSINESS_MODELS = [
+  { value: "lead_gen", label: "Lead generation" },
+  { value: "ecommerce", label: "Ecommerce" },
+  { value: "both", label: "Both" },
+] as const;
+
 export const STATUSES = [
   { value: "onboarding", label: "Onboarding" },
   { value: "active", label: "Active" },
