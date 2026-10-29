@@ -131,6 +131,9 @@ def clean_brand_aliases(values: list[str] | None) -> list[str]:
 
 def create_client(db: Session, payload: ClientCreate) -> Client:
     data = payload.model_dump()
+    # Resolved from the tier when a client is read; there is no column for them.
+    data.pop("growth_action_allowance", None)
+    data.pop("plan_label", None)
     data["brand_aliases"] = clean_brand_aliases(data.get("brand_aliases"))
     data["competitor_domains"] = clean_competitor_domains(
         data.get("competitor_domains"), own_domain=data.get("domain")

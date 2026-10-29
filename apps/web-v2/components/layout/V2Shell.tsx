@@ -39,6 +39,9 @@ export function V2Shell({
         <div className="ml-4">
           <ClientSelect clients={clients} />
         </div>
+        <Link href="/new-client" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
+          + Add client
+        </Link>
         <div className="ml-auto flex items-center gap-4 text-sm text-[var(--sidebar-fg-muted)]">
           {userEmail ? <span>{userEmail}</span> : null}
           <form action={signOutAction}>

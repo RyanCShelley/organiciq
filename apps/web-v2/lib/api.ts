@@ -60,6 +60,16 @@ export type Client = {
   domain: string;
   tier_id: string;
   plan_label?: string | null;
+  growth_action_allowance?: number | null;
   timezone: string;
   account_sheet_url?: string | null;
+  service_reporting?: { organiciq: boolean; ad_accelerator: boolean } | null;
+  status: "active" | "paused" | "onboarding" | "archived";
+  start_date?: string | null;
+  primary_market?: string | null;
+  brand_aliases?: string[];
+  competitor_domains?: string[];
+  sitemap_url?: string | null;
+  path_prefix?: string | null;
+  crawl_page_limit?: number | null;
 };

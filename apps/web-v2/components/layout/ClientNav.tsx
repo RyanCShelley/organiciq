@@ -20,7 +20,7 @@ export function ClientNav() {
     <ul className="mb-4 space-y-1 border-b border-[var(--border)] pb-4">
       {PAGES.map((page) => {
         const href = `/${clientSlug}${page.path}`;
-        const active = pathname === href;
+        const active = page.path ? pathname.startsWith(href) : pathname === href;
         return (
           <li key={page.label}>
             <Link

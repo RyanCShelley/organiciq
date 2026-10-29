@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getClients } from "@/lib/clients";
@@ -13,6 +14,12 @@ export default async function HomePage() {
       <p className="mt-2 text-sm text-[var(--text-secondary)]">
         You are signed in, but the API returned no clients for this account.
       </p>
+      <Link
+        href="/new-client"
+        className="mt-4 inline-block rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white"
+      >
+        Add a client
+      </Link>
     </section>
   );
 }
