@@ -122,3 +122,20 @@ def clear_bing_site(
     db.query(ClientBingSite).filter(ClientBingSite.client_id == client.id).delete()
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/bing/sync")
+def sync_bing(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Pull this client's Bing query statistics now."""
+    from app.services import bing_sync
+
+    try:
+        return bing_sync.sync_query_stats(db, client)
+    except bing_sync.BingNotReady as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except bing.BingError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import type { Client } from "@/lib/api";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
-import type { Pair, Review } from "@/lib/review";
+import type { EngineNumbers, Pair, Review, VisibilityTerm } from "@/lib/review";
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -58,6 +58,76 @@ function Card({
       ) : null}
       {note ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{note}</div> : null}
     </div>
+  );
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  "Top 3": "bg-green-50 text-green-800",
+  "Page 1": "bg-green-50 text-green-800",
+  "Page 2": "bg-amber-50 text-amber-800",
+  "Beyond page 2": "bg-[var(--bg)] text-[var(--text-secondary)]",
+  "Barely showing": "bg-[var(--bg)] text-[var(--text-secondary)]",
+  "Not showing": "bg-red-50 text-red-800",
+};
+
+/** A position moved by this many places; lower is better, so a smaller number is an improvement. */
+function PositionCell({ pair }: { pair: Pair }) {
+  if (pair.current == null) return <span className="text-[var(--text-tertiary)]">–</span>;
+  const gain = pair.previous != null ? pair.previous - pair.current : null;
+  return (
+    <span className="tabular-nums">
+      {pair.current.toFixed(1)}
+      {gain != null && Math.abs(gain) >= 0.5 ? (
+        <span className={`ml-1 text-xs ${gain > 0 ? "text-green-700" : "text-red-700"}`}>
+          {gain > 0 ? "▲" : "▼"}
+          {Math.abs(gain).toFixed(1)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ImpressionsCell({ pair }: { pair: Pair }) {
+  const change = pair.change_pct;
+  return (
+    <span className="tabular-nums">
+      {num(pair.current)}
+      {change != null && Math.abs(change) >= 1 ? (
+        <span className={`ml-1 text-xs ${change > 0 ? "text-green-700" : "text-red-700"}`}>
+          {change > 0 ? "▲" : "▼"}
+          {Math.abs(change).toFixed(0)}%
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function TermRow({ term, showBing }: { term: VisibilityTerm; showBing: boolean }) {
+  const g: EngineNumbers = term.google;
+  const b: EngineNumbers = term.bing;
+  const base = term.status.replace(" (Bing)", "");
+  return (
+    <tr className="border-t border-[var(--border)] align-top">
+      <td className="min-w-[11rem] py-2 pr-3">
+        <div className="font-medium">{term.keyword}</div>
+        {term.prompt ? <div className="mt-0.5 max-w-[22rem] text-xs italic text-[var(--text-tertiary)]">Prompt: {term.prompt}</div> : null}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{num(term.volume)}</td>
+      <td className="px-3 py-2 text-right"><ImpressionsCell pair={g.impressions} /></td>
+      <td className="px-3 py-2 text-right"><PositionCell pair={g.position} /></td>
+      <td className="px-3 py-2 text-right tabular-nums">{num(g.clicks.current)}</td>
+      {showBing ? (
+        <>
+          <td className="px-3 py-2 text-right"><ImpressionsCell pair={b.impressions} /></td>
+          <td className="px-3 py-2 text-right"><PositionCell pair={b.position} /></td>
+        </>
+      ) : null}
+      <td className="py-2 pl-3">
+        <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[base] ?? STATUS_STYLE["Not showing"]}`}>
+          {term.status}
+        </span>
+      </td>
+    </tr>
   );
 }
 
@@ -219,7 +289,7 @@ export function ReviewScreen({
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {review ? (
             <>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -345,6 +415,64 @@ export function ReviewScreen({
                   </table>
                 </div>
               </div>
+              {review.visibility ? (
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 className="text-sm font-semibold">Visibility: the watchlist in Google and Bing</h2>
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {review.visibility.summary.showing_in_google} of {review.visibility.summary.terms} terms showed in Google ·{" "}
+                      {review.visibility.summary.on_page_one} on page one
+                      {review.visibility.bing.has_data ? ` · ${review.visibility.summary.showing_in_bing} in Bing` : ""}
+                    </span>
+                  </div>
+                  {!review.visibility.has_google_data ? (
+                    <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                      No Search Console data for these terms yet, so nothing is shown for Google.
+                    </p>
+                  ) : null}
+                  <div className="mt-3 space-y-5 overflow-x-auto">
+                    {review.visibility.buckets.map((bucket) => (
+                      <div key={bucket.id}>
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                          {bucket.name}
+                        </h3>
+                        <table className="mt-1 w-full min-w-[34rem] text-left text-sm">
+                          <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+                            <tr>
+                              <th className="py-1 pr-3 font-medium">Term</th>
+                              <th className="px-3 py-1 text-right font-medium">Volume</th>
+                              <th className="px-3 py-1 text-right font-medium">Google impr.</th>
+                              <th className="px-3 py-1 text-right font-medium">Google pos.</th>
+                              <th className="px-3 py-1 text-right font-medium">Clicks</th>
+                              {review.visibility?.bing.has_data ? (
+                                <>
+                                  <th className="px-3 py-1 text-right font-medium">Bing impr.</th>
+                                  <th className="px-3 py-1 text-right font-medium">Bing pos.</th>
+                                </>
+                              ) : null}
+                              <th className="py-1 pl-3 font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bucket.terms.map((term) => (
+                              <TermRow key={term.keyword} term={term} showBing={review.visibility?.bing.has_data ?? false} />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                  <ul className="mt-4 space-y-1 text-xs text-[var(--text-tertiary)]">
+                    <li>
+                      Each term is matched to the exact search; a longer phrase the site shows for is not counted here, so
+                      these numbers understate it. Position is the average across impressions, and under 10 impressions it
+                      is not meaningful. Arrows compare with {prior}.
+                    </li>
+                    {review.visibility.bing.has_data ? <li>{review.visibility.bing.note}</li> : <li>No Bing data pulled yet.</li>}
+                    <li>AI prompt results: {review.visibility.ai_prompts}</li>
+                  </ul>
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>

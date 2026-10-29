@@ -296,6 +296,18 @@ def summarise(review: dict) -> list[str]:
     else:
         lines.append("There is no Search Console data for this month, so search clicks and impressions are not shown.")
 
+    vis = review.get("visibility")
+    if vis:
+        s = vis["summary"]
+        line = (
+            f"Watchlist visibility: {s['showing_in_google']} of {s['terms']} terms showed in Google in {month} "
+            f"({_fmt(s['google_impressions'])} impressions, {_fmt(s['google_clicks'])} clicks); "
+            f"{s['on_page_one']} averaged page one"
+        )
+        if vis["bing"]["has_data"]:
+            line += f"; {s['showing_in_bing']} showed in Bing"
+        lines.append(line + ".")
+
     stale = [f["source"] for f in review.get("freshness", []) if not f.get("available")]
     if stale:
         lines.append("No data yet from: " + ", ".join(stale) + ".")
@@ -314,4 +326,10 @@ def build_review(db: Session, client: Client, month: str) -> dict:
     revenue = None
     if client.business_model in ("ecommerce", "both"):
         revenue = revenue_for(db, client, month)
-    return assemble(current, previous, month=month, model=client.business_model, revenue=revenue)
+    result = assemble(current, previous, month=month, model=client.business_model, revenue=revenue)
+
+    from app.services.review_visibility import build_visibility  # imported here: it imports this module
+
+    result["visibility"] = build_visibility(db, client, month)
+    result["summary"] = summarise(result)
+    return result

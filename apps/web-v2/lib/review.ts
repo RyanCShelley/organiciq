@@ -11,6 +11,34 @@ export type RevenueBlock =
     }
   | { status: "unavailable"; reason: string };
 
+export type EngineNumbers = { impressions: Pair; clicks: Pair; position: Pair };
+
+export type VisibilityTerm = {
+  keyword: string;
+  volume: number | null;
+  prompt: string | null;
+  google: EngineNumbers;
+  bing: EngineNumbers;
+  status: string;
+};
+
+export type Visibility = {
+  month: string;
+  buckets: { id: string; name: string; terms: VisibilityTerm[] }[];
+  summary: {
+    terms: number;
+    showing_in_google: number;
+    on_page_one: number;
+    showing_in_bing: number;
+    google_impressions: number;
+    google_clicks: number;
+    prompts: number;
+  };
+  has_google_data: boolean;
+  bing: { has_data: boolean; first_week: string | null; last_week: string | null; note: string };
+  ai_prompts: string;
+};
+
 export type Review = {
   month: string;
   previous_month: string;
@@ -40,6 +68,7 @@ export type Review = {
   };
   freshness: { source: string; available: boolean }[];
   revenue: RevenueBlock | null;
+  visibility: Visibility | null;
   summary: string[];
 };
 
