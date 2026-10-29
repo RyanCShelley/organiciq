@@ -52,37 +52,58 @@ export async function startGoogleConnectAction(clientId: string): Promise<Connec
   }
 }
 
-export const loadGscSitesAction = (clientId: string) =>
-  options<{ site_url: string; permission_level: string | null }>("/integrations/gsc/sites", clientId, (r) => ({
-    value: r.site_url,
-    label: r.site_url,
-  }));
-export const saveGscAction = (clientId: string, slug: string, siteUrl: string) =>
-  save(slug, "/integrations/gsc/property", clientId, { site_url: siteUrl, role: "primary" });
+export async function loadGscSitesAction(clientId: string): Promise<OptionsResult> {
+  return options<{ site_url: string; permission_level: string | null }>(
+    "/integrations/gsc/sites",
+    clientId,
+    (r) => ({ value: r.site_url, label: r.site_url }),
+  );
+}
 
-export const loadGa4Action = (clientId: string) =>
-  options<{ property_id: string; display_name: string; account_name: string }>(
+export async function saveGscAction(clientId: string, slug: string, siteUrl: string): Promise<ActionResult> {
+  return save(slug, "/integrations/gsc/property", clientId, { site_url: siteUrl, role: "primary" });
+}
+
+export async function loadGa4Action(clientId: string): Promise<OptionsResult> {
+  return options<{ property_id: string; display_name: string; account_name: string }>(
     "/integrations/ga4/properties",
     clientId,
     (r) => ({ value: r.property_id, label: `${r.display_name} · ${r.account_name} (${r.property_id})` }),
   );
-export const saveGa4Action = (clientId: string, slug: string, propertyId: string) =>
-  save(slug, "/integrations/ga4/property", clientId, { property_id: propertyId });
+}
 
-export const loadSeRankingAction = (clientId: string) =>
-  options<{ site_id: string; title: string; url: string | null }>("/integrations/seranking/projects", clientId, (r) => ({
-    value: r.site_id,
-    label: r.url ? `${r.title} · ${r.url}` : r.title,
-  }));
-export const saveSeRankingAction = (clientId: string, slug: string, siteId: string, name: string) =>
-  save(slug, "/integrations/seranking/property", clientId, { site_id: siteId, project_name: name });
+export async function saveGa4Action(clientId: string, slug: string, propertyId: string): Promise<ActionResult> {
+  return save(slug, "/integrations/ga4/property", clientId, { property_id: propertyId });
+}
 
-export const loadBingSitesAction = (clientId: string) =>
-  options<{ url: string; verified: boolean }>("/v2/connections/bing/sites", clientId, (r) => ({
+export async function loadSeRankingAction(clientId: string): Promise<OptionsResult> {
+  return options<{ site_id: string; title: string; url: string | null }>(
+    "/integrations/seranking/projects",
+    clientId,
+    (r) => ({ value: r.site_id, label: r.url ? `${r.title} · ${r.url}` : r.title }),
+  );
+}
+
+export async function saveSeRankingAction(
+  clientId: string,
+  slug: string,
+  siteId: string,
+  name: string,
+): Promise<ActionResult> {
+  return save(slug, "/integrations/seranking/property", clientId, { site_id: siteId, project_name: name });
+}
+
+export async function loadBingSitesAction(clientId: string): Promise<OptionsResult> {
+  return options<{ url: string; verified: boolean }>("/v2/connections/bing/sites", clientId, (r) => ({
     value: r.url,
     label: r.verified ? r.url : `${r.url} (not verified)`,
   }));
-export const saveBingAction = (clientId: string, slug: string, siteUrl: string) =>
-  save(slug, "/v2/connections/bing", clientId, { site_url: siteUrl }, "PUT");
-export const clearBingAction = (clientId: string, slug: string) =>
-  save(slug, "/v2/connections/bing", clientId, undefined, "DELETE");
+}
+
+export async function saveBingAction(clientId: string, slug: string, siteUrl: string): Promise<ActionResult> {
+  return save(slug, "/v2/connections/bing", clientId, { site_url: siteUrl }, "PUT");
+}
+
+export async function clearBingAction(clientId: string, slug: string): Promise<ActionResult> {
+  return save(slug, "/v2/connections/bing", clientId, undefined, "DELETE");
+}
