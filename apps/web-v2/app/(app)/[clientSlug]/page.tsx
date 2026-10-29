@@ -30,6 +30,12 @@ export default async function ClientHomePage({
       >
         Watchlist →
       </Link>
+      <Link
+        href={`/${client.slug}/settings`}
+        className="mt-3 block rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm font-semibold hover:border-[var(--brand-teal)]"
+      >
+        Settings →
+      </Link>
 
       <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
         <h2 className="text-sm font-semibold">What is coming to v2</h2>

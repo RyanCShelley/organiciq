@@ -141,7 +141,7 @@ Rule for every ticket: additive migrations only, tests in the same change, nothi
 - **P0-2 `apps/web-v2` shell. BUILT, signed-in view not yet checked (needs a Google sign-in on port 3001).** Next.js app reusing the existing Google sign-in and roles, own Vercel project, same API. Done when a signed-in user lands on an empty client-scoped home.
 - **P0-3 Watchlist tables and CSV import. BUILT (uncommitted); import screen not yet checked signed in.** Tables for bucket (topic), keyword, volume, difficulty, intent, paired AI prompt, notes, per client. Importer reads the sheet's CSV export including the merged-cell columns (Intent, Current Position). Done when the Absolutely Natural Watchlist imports as 5 buckets and 18 keywords with correct prompts.
 - **P0-4 Sheet connector.** Reads the Watchlist and Content Calendar tabs of a client's account sheet by link. To verify first: which Google credentials/scopes the app has today and whether Sheets read access needs a new scope. Never reads Overview.
-- **P0-5 Client settings: feed URLs.** One or more feed URLs per client in client settings.
+- **P0-5 Client settings: feed URLs. BUILT.** One or more feed URLs per client, added and removed on the v2 Settings screen; URLs must be http(s), and the same feed twice is refused.
 - **P0-6 Monthly focus record.** Client, month, focus set (Visibility, Traffic, Leads) within the client's tier allowance, one watchlist bucket. Reuses tier allowances. Done when a focus can be saved and read back per month.
 - **P0-7 Copilot on v2 screens.** Existing Copilot panel mounted on every v2 screen and sent the current screen and client as context. To verify: what context the current Copilot already accepts.
 

@@ -12,7 +12,7 @@ function errorMessage(error?: string): string {
     case "Configuration":
     case "OAuthCallback":
     case "Callback":
-      return `Google rejected the sign-in redirect. Add ${LOGIN_ORIGIN}/api/auth/callback/google as an authorized redirect URI on the OAuth client, then try again.`;
+      return `Sign-in failed after Google. The web server's log has the reason (a wrong client secret, or ${LOGIN_ORIGIN}/api/auth/callback/google missing from the OAuth client's redirect URIs).`;
     case "SessionExpired":
       return "Your session expired. Sign in again to continue.";
     default:

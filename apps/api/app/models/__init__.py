@@ -30,6 +30,7 @@ from app.models.seranking import (
     StagingSerSiteSummary,
 )
 from app.models.user import User, UserClient, UserRole
+from app.models.client_feed import ClientFeed
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 __all__ = [
