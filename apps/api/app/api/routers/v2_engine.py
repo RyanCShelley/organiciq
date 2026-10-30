@@ -229,20 +229,21 @@ def _month_or_last(month: str | None) -> str:
     return month
 
 
-@router.get("/topics")
-def topics(
+@router.get("/topic-for")
+def topic_for(
     client: Annotated[Client, Depends(require_client)],
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
-) -> list[dict]:
-    """The watchlist keywords a growth action can be planned for, by bucket."""
-    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
-
-    out = []
-    for bucket in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order, WatchlistBucket.name):
-        keywords = [k.keyword for k in db.query(WatchlistKeyword).filter(WatchlistKeyword.bucket_id == bucket.id).order_by(WatchlistKeyword.keyword)]
-        out.append({"bucket_id": str(bucket.id), "bucket": bucket.name, "keywords": keywords})
-    return out
+    page: Annotated[str, Query(min_length=1, max_length=2048)],
+    search: str = "",
+    month: str | None = None,
+) -> dict:
+    """The topic a candidate belongs to, and the pages that show for it with the one to work on first."""
+    month = _month_or_last(month)
+    topic = growth_action.resolve_topic(db, client, month, search, page)
+    if topic["keyword"] is None:
+        return {**topic, "pages": None}
+    return {**topic, "pages": growth_action.topic_pages(db, client, month, topic["keyword"])}
 
 
 @router.get("/topic-pages")

@@ -189,10 +189,42 @@ def test_the_teamwork_text_of_a_growth_action_lists_each_part_with_its_checklist
     assert "A growth action from the Decision engine" in text
 
 
-def test_the_routes_list_topics_choose_pages_and_refuse_a_bad_month(client, db, client_a, admin_user):
+def test_the_routes_choose_pages_and_refuse_a_bad_month(client, db, client_a, admin_user):
     data(db, client_a)
     watch(db, client_a)
     h = client_header(client_a.id, admin_user.email)
-    assert client.get("/v2/engine/topics", headers=h).json()[0]["keywords"] == ["natural sunscreen"]
     assert client.get("/v2/engine/topic-pages?keyword=natural sunscreen&month=2026-09", headers=h).json()["recommended"]
     assert client.get("/v2/engine/topic-pages?keyword=x&month=bad", headers=h).status_code == 400
+
+
+# ── a candidate's topic ──────────────────────────────────────────────────────
+
+
+def test_a_search_takes_the_longest_watchlist_keyword_it_contains_else_it_is_its_own_topic(db, client_a):
+    watch(db, client_a, keyword="natural sunscreen")
+    got = ga.resolve_topic(db, client_a, SEP, "best natural sunscreen spf 30", PROD)
+    assert got == {"keyword": "natural sunscreen", "source": "the watchlist keyword it contains"}
+    assert ga.resolve_topic(db, client_a, SEP, "natural self tanner", PROD) == {"keyword": "natural self tanner", "source": "the search itself"}
+
+
+def test_a_page_from_the_traffic_or_leads_list_takes_its_top_non_brand_search(db, client_a):
+    client_a.client_name = "Shop Example"
+    db.commit()
+    watch(db, client_a, keyword="natural sunscreen")
+    gsc(db, client_a, "shop example spf 30", PROD, 9000)  # brand: ignored
+    gsc(db, client_a, "natural sunscreen spf 30", PROD, 400)
+    gsc(db, client_a, "mineral sunscreen", PROD, 100)
+    db.commit()
+    got = ga.resolve_topic(db, client_a, SEP, "(page)", PROD)
+    assert got["keyword"] == "natural sunscreen" and "top search" in got["source"]
+    assert ga.resolve_topic(db, client_a, SEP, "(page)", "https://shop.example/none")["keyword"] is None
+
+
+def test_the_route_returns_the_topic_and_its_pages(client, db, client_a, admin_user):
+    data(db, client_a)
+    watch(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    out = client.get(f"/v2/engine/topic-for?search=natural sunscreen spf 30&page={PROD}&month=2026-09", headers=h).json()
+    assert out["keyword"] == "natural sunscreen" and out["pages"]["recommended"]
+    none = client.get("/v2/engine/topic-for?search=(page)&page=https://shop.example/none&month=2026-09", headers=h).json()
+    assert none["keyword"] is None and none["pages"] is None

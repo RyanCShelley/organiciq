@@ -279,4 +279,4 @@ export type GrowthActionBundle =
       draft: TaskDraft;
     };
 
-export type TopicGroup = { bucket_id: string; bucket: string; keywords: string[] };
+export type CandidateTopic = { keyword: string | null; source: string; pages: TopicPages | null };

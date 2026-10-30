@@ -51,6 +51,49 @@ def _key(keyword: str) -> str:
     return " ".join(keyword.lower().split())
 
 
+def resolve_topic(db: Session, client: Client, month: str, search: str, page: str) -> dict[str, Any]:
+    """The topic a candidate belongs to.
+
+    A search takes the watchlist keyword it contains (the longest), else it is its own topic. A page picked
+    from the Traffic or Leads list has no search, so its topic is the search that brings it the most
+    impressions (brand searches excluded), narrowed to a watchlist keyword the same way.
+    """
+    from sqlalchemy import func
+
+    from app.models.gsc import FactGscQueryPage
+    from app.models.watchlist import WatchlistKeyword
+
+    keywords = sorted({_key(k.keyword) for k in db.query(WatchlistKeyword).filter(WatchlistKeyword.client_id == client.id)}, key=len, reverse=True)
+
+    def narrow(text: str) -> tuple[str, str]:
+        for kw in keywords:
+            if f" {kw} " in f" {text} ":
+                return kw, "the watchlist keyword it contains"
+        return text, "the search itself"
+
+    text = _key(search)
+    if text and not text.startswith("("):
+        keyword, source = narrow(text)
+        return {"keyword": keyword, "source": source}
+
+    year, mon = int(month[:4]), int(month[5:7])
+    start, end = vc.windows(date(year, mon, 1))["current"]
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    rows = (
+        db.query(q, func.sum(FactGscQueryPage.impressions))
+        .filter(FactGscQueryPage.client_id == client.id, FactGscQueryPage.normalized_url == page, FactGscQueryPage.date >= start, FactGscQueryPage.date <= end)
+        .group_by(q)
+        .order_by(func.sum(FactGscQueryPage.impressions).desc())
+        .all()
+    )
+    brand = vc.brand_keys(client)
+    for query_text, _ in rows:
+        if not vc.is_brand(query_text, brand):
+            keyword, source = narrow(query_text)
+            return {"keyword": keyword, "source": f"the page's top search" + (f", narrowed to {source}" if source != "the search itself" else "")}
+    return {"keyword": None, "source": "no search in Search Console brings this page impressions"}
+
+
 def topic_pages(db: Session, client: Client, month: str, keyword: str) -> dict[str, Any]:
     """The pages that show for searches containing `keyword`, with the one the tool would work on first.
 

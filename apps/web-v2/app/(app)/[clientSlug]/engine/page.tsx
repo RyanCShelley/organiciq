@@ -11,7 +11,6 @@ import {
   type EngineOverview,
   type LeadsCandidates,
   type TaskPlan,
-  type TopicGroup,
   type TrafficCandidates,
   type VisibilityCandidates,
 } from "@/lib/engine";
@@ -35,7 +34,7 @@ export default async function EnginePage({
 
   const month = lastCompleteMonth();
   const workMonth = currentMonth();
-  const [focus, watchlist, plan, team, topics] = await Promise.all([
+  const [focus, watchlist, plan, team] = await Promise.all([
     apiFetch<ClientFocus | null>(`/v2/focus/${workMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
     apiFetch<TaskPlan>(`/v2/engine/tasks?month=${workMonth}`, { clientId: client.id }).catch(() => EMPTY_PLAN),
@@ -43,7 +42,6 @@ export default async function EnginePage({
     apiFetch<{ email: string; name: string | null; is_active: boolean }[]>(`/admin/clients/${client.id}/team`)
       .then((rows) => rows.filter((r) => r.is_active).map((r) => ({ email: r.email, name: r.name })))
       .catch(() => [] as { email: string; name: string | null }[]),
-    apiFetch<TopicGroup[]>("/v2/engine/topics", { clientId: client.id }).catch(() => [] as TopicGroup[]),
   ]);
 
   // The bucket in the URL wins; otherwise the one chosen with the focus; otherwise the whole site.
@@ -86,7 +84,6 @@ export default async function EnginePage({
     <>
     <DataFreshness clientId={client.id} />
     <EngineScreen
-      topics={topics}
       client={client}
       workMonth={workMonth}
       focus={focus}

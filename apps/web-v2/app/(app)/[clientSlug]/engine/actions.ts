@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, GrowthActionBundle, TaskDraft, TaskResult, TopicPages } from "@/lib/engine";
+import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, CandidateTopic, GrowthActionBundle, TaskDraft, TaskResult } from "@/lib/engine";
 
 export async function diagnoseAction(
   clientId: string,
@@ -96,12 +96,15 @@ export async function diagnosePagesAction(
   }
 }
 
-export async function topicPagesAction(clientId: string, keyword: string): Promise<TaskResult<TopicPages>> {
+export async function topicForAction(clientId: string, search: string, page: string): Promise<TaskResult<CandidateTopic>> {
   try {
-    const value = await apiFetch<TopicPages>(`/v2/engine/topic-pages?keyword=${encodeURIComponent(keyword)}`, { clientId });
+    const value = await apiFetch<CandidateTopic>(
+      `/v2/engine/topic-for?page=${encodeURIComponent(page)}&search=${encodeURIComponent(search)}`,
+      { clientId },
+    );
     return { ok: true, value };
   } catch (error) {
-    return failure(error, "The pages could not be listed: the API did not answer.");
+    return failure(error, "The topic could not be worked out: the API did not answer.");
   }
 }
 

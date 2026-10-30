@@ -20,7 +20,6 @@ import type {
   LeadsCandidates,
   TaskDraft,
   TaskPlan,
-  TopicGroup,
   TrafficCandidates,
   VisibilityCandidates,
 } from "@/lib/engine";
@@ -150,7 +149,6 @@ export function EngineScreen({
   overview,
   plan,
   team,
-  topics,
   error,
 }: {
   client: Client;
@@ -165,7 +163,6 @@ export function EngineScreen({
   overview: EngineOverview;
   plan: TaskPlan;
   team: { email: string; name: string | null }[];
-  topics: TopicGroup[];
   error: string | null;
 }) {
   const router = useRouter();
@@ -186,8 +183,8 @@ export function EngineScreen({
   const live = tasks.filter((t) => t.status !== "dropped");
   const allowance: Allowance = {
     monthly: plan.allowance.monthly,
-    used: live.length,
-    over: plan.allowance.monthly != null && live.length > plan.allowance.monthly,
+    used: new Set(live.map((t) => t.page)).size,
+    over: plan.allowance.monthly != null && new Set(live.map((t) => t.page)).size > plan.allowance.monthly,
   };
 
   function upsertTask(task: EngineTask) {
@@ -268,29 +265,33 @@ export function EngineScreen({
             No focus is set for <strong>{monthLabel(workMonth)}</strong>.
           </span>
         )}
+        <a href="#plan" className="text-[var(--text-secondary)] hover:underline">
+          {monthLabel(workMonth)} plan: <strong>{allowance.used}{allowance.monthly != null ? ` of ${allowance.monthly}` : ""}</strong> growth actions ↓
+        </a>
         <Link href={`/${client.slug}/review`} className="font-semibold text-[var(--brand-teal)] hover:underline">
           {focus ? "Change on the monthly review →" : "Choose it on the monthly review →"}
         </Link>
       </div>
 
-      <EnginePlan
-        clientId={client.id}
-        month={workMonth}
-        tasks={tasks}
-        allowance={allowance}
-        teamwork={plan.teamwork}
-        team={team}
-        onTaskChange={upsertTask}
-      />
-
-      <GrowthActionPlanner
-        clientId={client.id}
-        month={workMonth}
-        topics={topics}
-        tasks={tasks}
-        focusBucketId={focus?.bucket_id ?? null}
-        onConfirmed={upsertTask}
-      />
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="Focus">
+        {FOCUSES.map((f) => {
+          const on = kind === f.value;
+          return (
+            <Link
+              key={f.value}
+              role="tab"
+              aria-selected={on}
+              href={`/${client.slug}/engine?show=${f.value}${bucketId ? `&bucket=${bucketId}` : ""}`}
+              className={`rounded-full border px-4 py-1.5 font-semibold ${
+                on ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] hover:border-[var(--brand-teal)]"
+              }`}
+            >
+              {f.label}
+              {focus?.focus === f.value ? <span className={`ml-2 text-xs ${on ? "text-white/80" : "text-[var(--brand-teal)]"}`}>this month&apos;s focus</span> : null}
+            </Link>
+          );
+        })}
+      </div>
 
       {kind === "visibility" && advice.level !== "ok" && advice.headline ? (
         <div
@@ -327,26 +328,6 @@ export function EngineScreen({
           {switchError ? <p role="alert" className="mt-3 text-red-800">{switchError}</p> : null}
         </div>
       ) : null}
-
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="Focus">
-        {FOCUSES.map((f) => {
-          const on = kind === f.value;
-          return (
-            <Link
-              key={f.value}
-              role="tab"
-              aria-selected={on}
-              href={`/${client.slug}/engine?show=${f.value}${bucketId ? `&bucket=${bucketId}` : ""}`}
-              className={`rounded-full border px-4 py-1.5 font-semibold ${
-                on ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] hover:border-[var(--brand-teal)]"
-              }`}
-            >
-              {f.label}
-              {focus?.focus === f.value ? <span className={`ml-2 text-xs ${on ? "text-white/80" : "text-[var(--brand-teal)]"}`}>this month&apos;s focus</span> : null}
-            </Link>
-          );
-        })}
-      </div>
 
       {!kind ? (
         <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--text-secondary)]">
@@ -403,167 +384,6 @@ export function EngineScreen({
         <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-800">
           {error}
         </p>
-      ) : null}
-
-      {diagnoses ? (
-        <div className="mb-6">
-
-            <div className="space-y-4">
-              <h2 className="text-sm font-semibold">Diagnosis</h2>
-              {diagnoses.map((d) => (
-                <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="font-semibold">{d.search.startsWith("(") ? shortPage(d.page) : d.search}</h3>
-                    <span className="text-xs text-[var(--text-secondary)]">
-                      {d.search.startsWith("(") ? d.page.replace(/^https?:\/\//, "") : shortPage(d.page)}
-                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
-                    </span>
-                  </div>
-                  {!d.read.ok ? (
-                    <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
-                      Could not read this page: {d.read.error}
-                    </p>
-                  ) : (
-                    <>
-                      {d.prescriptions.length > 0 ? (
-                        <div className="mt-3 space-y-3">
-                          {d.prescriptions.map((p) => (
-                            <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="font-semibold">
-                                  {p.action_id} · {p.title}
-                                </div>
-                                <ConfirmButton
-                                  clientId={client.id}
-                                  month={workMonth}
-                                  existing={existingFor(p.action_id, d.search, d.page)}
-                                  onConfirmed={upsertTask}
-                                  draft={{
-                                    kind: "prescription",
-                                    rule_id: p.action_id,
-                                    search: d.search,
-                                    page: d.page,
-                                    title: p.title,
-                                    why: p.why,
-                                    steps: p.steps,
-                                    done_when: p.done_when,
-                                    metric: p.metric,
-                                    effort_min: p.effort_min,
-                                    evidence: p.evidence,
-                                  }}
-                                />
-                              </div>
-                              <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
-                              <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
-                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                                About {p.effort_min} minutes · judged on {p.metric}
-                              </p>
-                              {p.evidence.length > 0 ? (
-                                <ul className="mt-2 list-disc pl-5 text-xs text-[var(--text-tertiary)]">
-                                  {p.evidence.map((e) => <li key={e}>{e}</li>)}
-                                </ul>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
-                          {d.search.startsWith("(")
-                            ? "The page was read. No catalog rule runs on a page picked from the Traffic or Leads list: what is worth checking is worked out from the numbers that put it here."
-                            : "No rule fires for this page. That is not the same as nothing to do: see what could not be judged below."}
-                        </p>
-                      )}
-                      <ul className="mt-3 space-y-1 text-sm">
-                        {d.observations.map((o) => (
-                          <li
-                            key={o.text}
-                            className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}
-                          >
-                            {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
-                            {o.text}
-                          </li>
-                        ))}
-                      </ul>
-                      {d.suggestions.length > 0 ? (
-                        <div className="mt-4">
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-                            Still worth doing, not yet provable
-                          </h4>
-                          <div className="mt-2 space-y-3">
-                            {d.suggestions.map((g) => (
-                              <div key={g.id} className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="font-semibold">
-                                    {g.id} · {g.title}
-                                  </span>
-                                  <span className="flex items-center gap-2">
-                                    {existingFor(g.id, d.search, d.page) ? null : (
-                                      <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">unconfirmed</span>
-                                    )}
-                                    <ConfirmButton
-                                      clientId={client.id}
-                                      month={workMonth}
-                                      existing={existingFor(g.id, d.search, d.page)}
-                                      onConfirmed={upsertTask}
-                                      draft={{
-                                        kind: "suggestion",
-                                        rule_id: g.id,
-                                        search: d.search,
-                                        page: d.page,
-                                        title: g.title,
-                                        why: g.why,
-                                        steps: g.steps,
-                                        done_when: null,
-                                        metric: null,
-                                        effort_min: null,
-                                        evidence: [...g.evidence, `To confirm: ${g.needs_to_confirm}`],
-                                      }}
-                                    />
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-[var(--text-secondary)]">{g.why}</p>
-                                <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--text-secondary)]">
-                                  {g.steps.map((st) => (
-                                    <li key={st}>{st}</li>
-                                  ))}
-                                </ul>
-                                <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                                  <strong>To confirm:</strong> {g.needs_to_confirm}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                          {d.skipped_suggestions.length > 0 ? (
-                            <ul className="mt-2 space-y-1 text-xs text-[var(--text-tertiary)]">
-                              {d.skipped_suggestions.map((k) => (
-                                <li key={k.id}>
-                                  <strong>{k.id} {k.name}:</strong> {k.reason}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {d.not_judged.length > 0 ? (
-                        <details className="mt-3 text-sm">
-                          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
-                            Rules that did not fire or could not be judged ({d.not_judged.length})
-                          </summary>
-                          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
-                            {d.not_judged.map((n) => (
-                              <li key={n.action_id}>
-                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-        </div>
       ) : null}
 
       {kind === "traffic" && traffic ? (
@@ -753,6 +573,187 @@ export function EngineScreen({
           </ul>
         </div>
       ) : null}
+      {diagnoses ? (
+        <div className="mb-6">
+
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold">Diagnosis</h2>
+              {diagnoses.map((d) => (
+                <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="font-semibold">{d.search.startsWith("(") ? shortPage(d.page) : d.search}</h3>
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {d.search.startsWith("(") ? d.page.replace(/^https?:\/\//, "") : shortPage(d.page)}
+                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
+                    </span>
+                  </div>
+                  {!d.read.ok ? (
+                    <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                      Could not read this page: {d.read.error}
+                    </p>
+                  ) : (
+                    <>
+                      {d.prescriptions.length > 0 ? (
+                        <div className="mt-3 space-y-3">
+                          {d.prescriptions.map((p) => (
+                            <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="font-semibold">
+                                  {p.action_id} · {p.title}
+                                </div>
+                                <ConfirmButton
+                                  clientId={client.id}
+                                  month={workMonth}
+                                  existing={existingFor(p.action_id, d.search, d.page)}
+                                  onConfirmed={upsertTask}
+                                  draft={{
+                                    kind: "prescription",
+                                    rule_id: p.action_id,
+                                    search: d.search,
+                                    page: d.page,
+                                    title: p.title,
+                                    why: p.why,
+                                    steps: p.steps,
+                                    done_when: p.done_when,
+                                    metric: p.metric,
+                                    effort_min: p.effort_min,
+                                    evidence: p.evidence,
+                                  }}
+                                />
+                              </div>
+                              <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
+                              <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                About {p.effort_min} minutes · judged on {p.metric}
+                              </p>
+                              {p.evidence.length > 0 ? (
+                                <ul className="mt-2 list-disc pl-5 text-xs text-[var(--text-tertiary)]">
+                                  {p.evidence.map((e) => <li key={e}>{e}</li>)}
+                                </ul>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
+                          {d.search.startsWith("(")
+                            ? "The page was read. No catalog rule runs on a page picked from the Traffic or Leads list: what is worth checking is worked out from the numbers that put it here."
+                            : "No rule fires for this page. That is not the same as nothing to do: see what could not be judged below."}
+                        </p>
+                      )}
+                      <ul className="mt-3 space-y-1 text-sm">
+                        {d.observations.map((o) => (
+                          <li
+                            key={o.text}
+                            className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}
+                          >
+                            {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
+                            {o.text}
+                          </li>
+                        ))}
+                      </ul>
+                      <GrowthActionPlanner
+                        clientId={client.id}
+                        month={workMonth}
+                        search={d.search}
+                        page={d.page}
+                        tasks={tasks}
+                        onConfirmed={upsertTask}
+                      />
+                      {d.suggestions.length > 0 ? (
+                        <div className="mt-4">
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                            Single suggestions, if you would rather confirm one at a time
+                          </h4>
+                          <div className="mt-2 space-y-3">
+                            {d.suggestions.map((g) => (
+                              <div key={g.id} className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold">
+                                    {g.id} · {g.title}
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    {existingFor(g.id, d.search, d.page) ? null : (
+                                      <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">unconfirmed</span>
+                                    )}
+                                    <ConfirmButton
+                                      clientId={client.id}
+                                      month={workMonth}
+                                      existing={existingFor(g.id, d.search, d.page)}
+                                      onConfirmed={upsertTask}
+                                      draft={{
+                                        kind: "suggestion",
+                                        rule_id: g.id,
+                                        search: d.search,
+                                        page: d.page,
+                                        title: g.title,
+                                        why: g.why,
+                                        steps: g.steps,
+                                        done_when: null,
+                                        metric: null,
+                                        effort_min: null,
+                                        evidence: [...g.evidence, `To confirm: ${g.needs_to_confirm}`],
+                                      }}
+                                    />
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-[var(--text-secondary)]">{g.why}</p>
+                                <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--text-secondary)]">
+                                  {g.steps.map((st) => (
+                                    <li key={st}>{st}</li>
+                                  ))}
+                                </ul>
+                                <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                                  <strong>To confirm:</strong> {g.needs_to_confirm}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          {d.skipped_suggestions.length > 0 ? (
+                            <ul className="mt-2 space-y-1 text-xs text-[var(--text-tertiary)]">
+                              {d.skipped_suggestions.map((k) => (
+                                <li key={k.id}>
+                                  <strong>{k.id} {k.name}:</strong> {k.reason}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {d.not_judged.length > 0 ? (
+                        <details className="mt-3 text-sm">
+                          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
+                            Rules that did not fire or could not be judged ({d.not_judged.length})
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
+                            {d.not_judged.map((n) => (
+                              <li key={n.action_id}>
+                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+        </div>
+      ) : null}
+
+
+      <div id="plan" className="mt-8 scroll-mt-4">
+      <EnginePlan
+        clientId={client.id}
+        month={workMonth}
+        tasks={tasks}
+        allowance={allowance}
+        teamwork={plan.teamwork}
+        team={team}
+        onTaskChange={upsertTask}
+      />
+      </div>
     </section>
   );
 }
