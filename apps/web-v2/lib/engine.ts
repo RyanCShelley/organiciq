@@ -275,7 +275,7 @@ export type GrowthActionBundle =
       search: string;
       parts: GrowthPart[];
       left_out: { id: string; reason: string }[];
-      also_seen: { id: string; title: string }[];
+      optional: GrowthPart[];
       draft: TaskDraft;
     };
 

@@ -33,8 +33,10 @@ from app.services import llm_evidence
 FIT_WEIGHT = 1.5
 #: Parts that join the bundle when the page read produces them, in the order they are listed.
 CORE = ("A-1", "S-1", "S-2", "V-7")
-EXTRAS = ("S-5", "P-1", "S-4")
-PART_ORDER = ("A-1", "S-1", "S-2", "V-7", "P-1", "S-5", "S-4")
+EXTRAS = ("P-1", "S-5", "S-4")
+#: Suggestions that are not offered at all here: S-6 asks which page should own the topic, and choosing the
+#: page is what this screen does.
+NOT_OFFERED = ("S-6",)
 
 PART_NAMES = {
     "A-1": "Answer the question at the top",
@@ -44,6 +46,7 @@ PART_NAMES = {
     "P-1": "Rewrite the opening",
     "S-5": "Reread the title and description",
     "S-4": "Link here from related pages",
+    "V-4": "Add internal links",
 }
 
 
@@ -159,8 +162,8 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str) -> dict[s
 def _part(id_: str, source: dict[str, Any], *, core: bool) -> dict[str, Any]:
     return {
         "id": id_,
-        "name": PART_NAMES[id_],
-        "title": source.get("title") or PART_NAMES[id_],
+        "name": PART_NAMES.get(id_) or (source.get("title") or id_),
+        "title": source.get("title") or PART_NAMES.get(id_) or id_,
         "why": source.get("why") or "",
         "steps": list(source.get("steps") or []),
         "evidence": list(source.get("evidence") or []),
@@ -178,6 +181,7 @@ def build(
     page: str | None,
     diagnose,
     evidence_for,
+    extra_suggestions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Diagnose the chosen page for the topic and bundle what applies into one growth action.
 
@@ -210,9 +214,19 @@ def build(
     skipped = {s["id"]: s["reason"] for s in result["skipped_suggestions"]}
     paired = llm_evidence.paired_keyword(db, client, search)
 
-    for id_ in PART_ORDER:
+    # Order: the core parts, then every rule that fired (a prescription is a fact, not a hunch), then the extras.
+    for id_ in CORE:
         if id_ in found:
-            parts.append(_part(id_, found[id_], core=id_ in CORE))
+            parts.append(_part(id_, found[id_], core=True))
+    fired = [p["action_id"] for p in result["prescriptions"]]
+    for id_ in fired:
+        if id_ not in CORE:
+            parts.append(_part(id_, found[id_], core=False))
+    for id_ in EXTRAS:
+        if id_ in found and id_ not in fired:
+            parts.append(_part(id_, found[id_], core=False))
+    for extra in extra_suggestions or []:
+        parts.append(_part(extra["id"], extra, core=False))
 
     # A core part with nothing from the page read can still be built from the topic's paired question.
     have = {p["id"] for p in parts}
@@ -239,7 +253,9 @@ def build(
     if "S-2" not in have and "V-7" not in have:
         if paired is not None:
             prompt = " ".join(paired.paired_ai_prompt.split())
-            parts.append(
+            idx = next((i for i, p in enumerate(parts) if p["id"] not in ("A-1", "S-1")), len(parts))
+            parts.insert(
+                idx,
                 {
                     "id": "S-2", "name": PART_NAMES["S-2"], "core": True, "confirmed_by_rule": False,
                     "title": "Add a short FAQ",
@@ -255,9 +271,9 @@ def build(
         else:
             left_out.append({"id": "S-2", "reason": skipped.get("S-2", "No question to base an FAQ on.")})
 
-    parts.sort(key=lambda p: PART_ORDER.index(p["id"]))
     seen = {p["id"] for p in parts}
-    also = [{"id": s["id"], "title": s["title"]} for s in result["suggestions"] if s["id"] not in seen and s["id"] not in EXTRAS + CORE]
+    # Suggestions the page read produced that are not in the action: offered to add, never repeated elsewhere.
+    optional = [_part(s["id"], s, core=False) for s in result["suggestions"] if s["id"] not in seen and s["id"] not in NOT_OFFERED]
     return {
         "ok": True,
         "topic": topic,
@@ -268,7 +284,7 @@ def build(
         "row": row,
         "parts": parts,
         "left_out": left_out,
-        "also_seen": also,
+        "optional": optional,
         "observations": result["observations"],
         "opening": _opening_text(result),
     }

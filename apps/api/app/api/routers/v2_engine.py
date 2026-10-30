@@ -177,6 +177,20 @@ class PageDiagnoseRequest(BaseModel):
     pages: list[str] = Field(min_length=1, max_length=MAX_DIAGNOSED)
 
 
+def _page_evidence(db: Session, client: Client, month: str, focus: str, url: str, leads: dict | None) -> dict:
+    """What a Traffic or Leads page's own suggestions are built from."""
+    if focus == "traffic":
+        return {"lost": traffic_candidates.queries_lost(db, client, month, url)}
+    row = next((c for c in (leads or {}).get("candidates", []) if c["page"] == url), None)
+    return {
+        "row": row,
+        "site": (leads or {}).get("site") or {},
+        "noun": (leads or {}).get("noun"),
+        "path": leads_candidates.conversion_path(db, client, url),
+        "summary": row,
+    }
+
+
 @router.post("/diagnose-page")
 def diagnose_selected_pages(
     payload: PageDiagnoseRequest,
@@ -192,24 +206,13 @@ def diagnose_selected_pages(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
-    results = []
-    for url in payload.pages:
-        if payload.focus == "traffic":
-            evidence = {"lost": traffic_candidates.queries_lost(db, client, month, url)}
-        else:
-            row = next((c for c in (leads or {}).get("candidates", []) if c["page"] == url), None)
-            evidence = {
-                "row": row,
-                "site": (leads or {}).get("site") or {},
-                "noun": (leads or {}).get("noun"),
-                "path": leads_candidates.conversion_path(db, client, url),
-                "summary": row,
-            }
-        results.append(
-            page_diagnostic.diagnose_page(
-                focus=payload.focus, url=url, client_domain=client.domain, fetch=page_diagnostic._fetch, evidence=evidence
-            )
+    results = [
+        page_diagnostic.diagnose_page(
+            focus=payload.focus, url=url, client_domain=client.domain, fetch=page_diagnostic._fetch,
+            evidence=_page_evidence(db, client, month, payload.focus, url, leads),
         )
+        for url in payload.pages
+    ]
     return {"month": month, "focus": payload.focus, "results": results}
 
 
@@ -218,6 +221,10 @@ class GrowthActionRequest(BaseModel):
     keyword: str = Field(min_length=1, max_length=400)
     #: A page of the topic to use instead of the one the tool recommends.
     page: str | None = Field(default=None, max_length=2048)
+    #: Which list the candidate came from, and its page. When the page worked is the candidate's own, a Traffic or
+    #: Leads page's own suggestions join the action so they appear once.
+    focus: Literal["visibility", "traffic", "leads"] = "visibility"
+    candidate_page: str | None = Field(default=None, max_length=2048)
 
 
 def _month_or_last(month: str | None) -> str:
@@ -267,6 +274,17 @@ def build_growth_action(
 ) -> dict:
     """Read the page for the topic live and bundle what applies into one growth action, as a task draft."""
     month = _month_or_last(payload.month)
+    extras: list[dict] = []
+    if payload.focus != "visibility" and payload.candidate_page:
+        topic = growth_action.topic_pages(db, client, month, payload.keyword)
+        worked = payload.page or topic["recommended"]
+        if worked == payload.candidate_page:
+            leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
+            own = page_diagnostic.diagnose_page(
+                focus=payload.focus, url=worked, client_domain=client.domain, fetch=page_diagnostic._fetch,
+                evidence=_page_evidence(db, client, month, payload.focus, worked, leads),
+            )
+            extras = own.get("suggestions") or []
     bundle = growth_action.build(
         db,
         client,
@@ -277,6 +295,7 @@ def build_growth_action(
             search=search, url=url, row=row, client_domain=client.domain, fetch=page_diagnostic._fetch, evidence=evidence
         ),
         evidence_for=lambda search, url: _evidence(db, client, month, search, url),
+        extra_suggestions=extras,
     )
     if bundle["ok"]:
         bundle["draft"] = growth_action.draft(bundle, _next_month(month))

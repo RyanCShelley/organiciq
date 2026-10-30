@@ -109,7 +109,7 @@ def test_the_bundle_holds_the_core_parts_that_apply_and_the_extras_the_page_read
     assert out["ok"] and out["page"] == COLL and out["search"] == "natural sunscreen"
     assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "S-2", "S-5"]
     assert [p["core"] for p in out["parts"]] == [True, True, True, False]
-    assert [a["id"] for a in out["also_seen"]] == ["S-3", "S-6"]  # seen, but not part of this action
+    assert [o["id"] for o in out["optional"]] == ["S-3"]  # offered to add; S-6 is answered by choosing the page
 
 
 def test_a_core_part_with_nothing_to_do_is_named_and_not_padded_in(db, client_a):
@@ -228,3 +228,21 @@ def test_the_route_returns_the_topic_and_its_pages(client, db, client_a, admin_u
     assert out["keyword"] == "natural sunscreen" and out["pages"]["recommended"]
     none = client.get("/v2/engine/topic-for?search=(page)&page=https://shop.example/none&month=2026-09", headers=h).json()
     assert none["keyword"] is None and none["pages"] is None
+
+
+def test_every_rule_that_fired_is_in_the_action_and_replaces_its_unconfirmed_twin(db, client_a):
+    data(db, client_a)
+    watch(db, client_a, prompt="")
+    v4 = {"action_id": "V-4", "title": "Add internal links to the page that owns “natural sunscreen”", "why": "0 links", "steps": ["Link from the donors"], "evidence": ["0 editorial inbound"]}
+    out = build(db, client_a, fake_diagnosis([sug("S-1")], prescriptions=[v4]), page=COLL)
+    assert [p["id"] for p in out["parts"]] == ["S-1", "V-4"]
+    v4_part = out["parts"][1]
+    assert v4_part["confirmed_by_rule"] is True and v4_part["name"] == "Add internal links"
+
+
+def test_a_page_level_suggestion_from_traffic_or_leads_joins_the_action_when_it_is_the_candidates_page(db, client_a):
+    data(db, client_a)
+    watch(db, client_a, prompt="")
+    leads_s = sug("L-S2", title="Check the way to an order", steps=("Look at the next step",))
+    out = ga.build(db, client_a, SEP, "natural sunscreen", page=COLL, diagnose=fake_diagnosis([sug("S-1")]), evidence_for=lambda s, u: {}, extra_suggestions=[leads_s])
+    assert [p["id"] for p in out["parts"]] == ["S-1", "L-S2"] and out["parts"][1]["name"] == "Check the way to an order"

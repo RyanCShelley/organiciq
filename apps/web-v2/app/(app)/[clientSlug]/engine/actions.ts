@@ -108,9 +108,19 @@ export async function topicForAction(clientId: string, search: string, page: str
   }
 }
 
-export async function buildGrowthActionAction(clientId: string, keyword: string, page: string | null): Promise<GrowthActionBundle> {
+export async function buildGrowthActionAction(
+  clientId: string,
+  keyword: string,
+  page: string | null,
+  focus: "visibility" | "traffic" | "leads",
+  candidatePage: string,
+): Promise<GrowthActionBundle> {
   try {
-    return await apiFetch<GrowthActionBundle>("/v2/engine/growth-action", { method: "POST", clientId, body: { keyword, page } });
+    return await apiFetch<GrowthActionBundle>("/v2/engine/growth-action", {
+      method: "POST",
+      clientId,
+      body: { keyword, page, focus, candidate_page: candidatePage },
+    });
   } catch (error) {
     return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };
   }
