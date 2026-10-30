@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     web_v2_app_url: str = "http://127.0.0.1:3001"
     se_ranking_api_key: str = ""
     bing_webmaster_api_key: str = ""
+    #: LLM visibility asks these platforms the watchlist's paired prompts. A platform with no key is skipped.
+    openai_api_key: str = ""
+    perplexity_api_key: str = ""
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True
     daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)

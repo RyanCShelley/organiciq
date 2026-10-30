@@ -311,6 +311,49 @@ def enqueue_due_bing_syncs(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
+#: A run asks every prompt on every platform and is billed per call, so once a month.
+LLM_RUN_INTERVAL_DAYS = 28
+LLM_RETRY_DAYS = 3
+
+
+def enqueue_due_llm_runs(db: Session) -> dict[str, int]:
+    """Queue a monthly LLM visibility run for each worked client that has paired prompts, if a platform has a key."""
+    from app.llm_visibility import platforms, runner
+    from app.models.llm_visibility import LlmRun
+
+    if not platforms.enabled_platforms():
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
+    now = datetime.now(timezone.utc)
+    last_run = {
+        cid: started
+        for cid, started in db.query(LlmRun.client_id, func.max(LlmRun.started_at)).group_by(LlmRun.client_id)
+    }
+    tried = {
+        row[0]
+        for row in db.query(SyncJob.client_id).filter(
+            SyncJob.source == runner.SOURCE, SyncJob.created_at >= now - timedelta(days=LLM_RETRY_DAYS)
+        )
+    }
+    enqueued = skipped = errors = due = 0
+    today = now.date()
+    for client in db.query(Client).filter(Client.status.in_(WORKED_STATUSES)).all():
+        started = last_run.get(client.id)
+        if (started is not None and now - started < timedelta(days=LLM_RUN_INTERVAL_DAYS)) or client.id in tried:
+            continue
+        if not runner.prompts_for(db, client):
+            continue
+        due += 1
+        try:
+            enqueue_sync_job(db, client.id, SyncJobCreate(source=runner.SOURCE, start_date=today, end_date=today, params={"triggered_by": "scheduler"}))
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("LLM run enqueue failed client=%s", client.id)
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
 def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     """Price every client's tracked keywords, monthly.
 
@@ -487,6 +530,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
     stats = enqueue_daily_syncs(db)
     crawl_stats = enqueue_due_site_crawls(db)
     bing_stats = enqueue_due_bing_syncs(db)
+    llm_stats = enqueue_due_llm_runs(db)
     metric_stats = enqueue_due_keyword_metrics(db)
     competitor_stats = enqueue_due_competitor_keywords(db)
     checkpoint.last_run_date = today
@@ -509,6 +553,14 @@ def maybe_run_daily_sync(db: Session) -> bool:
             crawl_stats["enqueued"],
             crawl_stats["skipped"],
             crawl_stats["errors"],
+        )
+    if llm_stats["due"]:
+        logger.info(
+            "LLM runs due=%s enqueued=%s skipped=%s errors=%s",
+            llm_stats["due"],
+            llm_stats["enqueued"],
+            llm_stats["skipped"],
+            llm_stats["errors"],
         )
     if bing_stats["due"]:
         logger.info(
