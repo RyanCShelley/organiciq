@@ -20,7 +20,27 @@ CODES = {"Cited + Mentioned": "C+M", "Cited": "C", "Mentioned": "M"}
 
 
 def _valid(rows: Iterable[Any]) -> list[Any]:
-    return [r for r in rows if r.visibility_type and r.visibility_type != "Error"]
+    """Answers that say something about discovery: not errors, and not prompts that already named the brand."""
+    return [r for r in rows if r.visibility_type and r.visibility_type != "Error" and not getattr(r, "asked_by_name", False)]
+
+
+def brand_check(rows: Iterable[Any]) -> dict[str, Any]:
+    """Prompts that name the brand: does each platform cite the site? A mention here only repeats the question."""
+    named = [r for r in rows if getattr(r, "asked_by_name", False)]
+    per_platform: dict[str, dict[str, int]] = {}
+    per_prompt: dict[str, dict[str, Any]] = {}
+    for r in named:
+        if r.visibility_type == "Error":
+            continue
+        p = per_platform.setdefault(r.platform, {"answers": 0, "site_cited": 0})
+        p["answers"] += 1
+        p["site_cited"] += bool(r.url_cited)
+        q = per_prompt.setdefault(r.query_text, {"query": r.query_text, "topic_cluster": r.topic_cluster, "by_platform": {}})
+        q["by_platform"][r.platform] = "Cited" if r.url_cited else "Not cited"
+    return {
+        "platforms": [{"platform": k, **v} for k, v in sorted(per_platform.items())],
+        "prompts": sorted(per_prompt.values(), key=lambda q: (q["topic_cluster"] or "", q["query"])),
+    }
 
 
 def _pair(current: float, previous: float | None) -> dict[str, float | None]:
@@ -243,6 +263,7 @@ def overview(db: Session, client: Client, brand: str, run_id: UUID | None = None
         "platforms": platform_deltas(cur_rows, prev_rows),
         "share_of_voice": share_of_voice(cur_rows, prev_rows, brand),
         "queries": queries,
+        "brand_check": brand_check(cur_rows),
         "movers": movers(queries),
         "trend": trend,
         "errors": [{"platform": p, "message": m, "count": n} for (p, m), n in errors.most_common(5)],
@@ -260,6 +281,7 @@ def run_responses(db: Session, run: LlmRun) -> list[dict[str, Any]]:
             "topic_cluster": r.topic_cluster,
             "platform": r.platform,
             "visibility": r.visibility_type,
+            "asked_by_name": bool(r.asked_by_name),
             "brand_mentioned": bool(r.brand_mentioned),
             "url_cited": bool(r.url_cited),
             "cited_urls": list(r.cited_urls or []),

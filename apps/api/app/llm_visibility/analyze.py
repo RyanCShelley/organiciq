@@ -97,7 +97,16 @@ def analyze(text: str, citations: list[str], config: BrandConfig) -> Analysis:
     return result
 
 
-def visibility_type(a: Analysis) -> str:
+def names_brand(prompt: str, config: BrandConfig) -> bool:
+    """Whether the question itself says the brand's name, so an answer repeating it shows nothing."""
+    lower = prompt.lower()
+    return any(find_word(lower, p) != -1 for p in config.brand_patterns)
+
+
+def visibility_type(a: Analysis, asked_by_name: bool = False) -> str:
+    """How visible the brand was. When the prompt named it, only a citation of its site counts."""
+    if asked_by_name:
+        return "Cited" if a.url_cited else "Named in prompt"
     if a.url_cited and a.brand_mentioned:
         return "Cited + Mentioned"
     if a.url_cited:

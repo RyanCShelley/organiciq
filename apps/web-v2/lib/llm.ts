@@ -59,6 +59,10 @@ export type LlmOverview = {
   trend?: { run_id: string; started_at: string; visibility_rate: number; mentions: number; citations: number }[];
   errors?: { platform: string; message: string; count: number }[];
   other_brands?: { name: string; count: number }[];
+  brand_check?: {
+    platforms: { platform: string; answers: number; site_cited: number }[];
+    prompts: { query: string; topic_cluster: string | null; by_platform: Record<string, string> }[];
+  };
 };
 
 export type LlmSettings = {
@@ -79,6 +83,7 @@ export type LlmResponseRow = {
   topic_cluster: string | null;
   platform: string;
   visibility: string | null;
+  asked_by_name: boolean;
   brand_mentioned: boolean;
   url_cited: boolean;
   cited_urls: string[];

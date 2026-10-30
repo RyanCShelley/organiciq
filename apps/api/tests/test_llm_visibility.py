@@ -275,3 +275,49 @@ def test_an_extra_prompt_can_be_removed_but_not_by_another_client(client, db, cl
     pid = client.get("/v2/llm/settings", headers=h).json()["extra_prompts"][0]["id"]
     assert client.delete(f"/v2/llm/prompts/{pid}", headers=client_header(client_b.id, admin_user.email)).status_code == 404
     assert client.delete(f"/v2/llm/prompts/{pid}", headers=h).json()["extra_prompts"] == []
+
+
+# ── prompts that name the brand ──────────────────────────────────────────────
+
+
+def test_a_prompt_that_says_the_brand_is_asked_by_name_and_only_a_citation_counts():
+    assert analyze.names_brand("Is Absolutely Natural sunscreen any good?", CONFIG)
+    assert not analyze.names_brand("Which mineral sunscreen is gentle for a toddler?", CONFIG)
+    echoed = analyze.analyze("Absolutely Natural? I have no information on that brand.", [], CONFIG)
+    assert echoed.brand_mentioned
+    assert analyze.visibility_type(echoed, asked_by_name=True) == "Named in prompt"
+    cited = analyze.analyze("See https://absolutelynatural.com/p", [], CONFIG)
+    assert analyze.visibility_type(cited, asked_by_name=True) == "Cited"
+
+
+def named(query, platform, vis, cited):
+    r = row(query, platform, vis, cited=cited)
+    r.asked_by_name = True
+    return r
+
+
+def test_named_prompts_stay_out_of_the_visibility_numbers_and_get_their_own_check():
+    rows = [
+        row("category q", "ChatGPT", "Not visible"),
+        named("Is Absolutely Natural good?", "ChatGPT", "Named in prompt", False),
+        named("Is Absolutely Natural good?", "Perplexity", "Cited", True),
+        named("Is Absolutely Natural good?", "Gemini", "Error", None),
+    ]
+    assert report.summary(rows, None)["responses"] == 1 and report.summary(rows, None)["mentions"]["current"] == 0
+    assert [r["query"] for r in report.query_summary(rows, None)] == ["category q"]
+    check = report.brand_check(rows)
+    assert check["platforms"] == [{"platform": "ChatGPT", "answers": 1, "site_cited": 0}, {"platform": "Perplexity", "answers": 1, "site_cited": 1}]
+    assert check["prompts"][0]["by_platform"] == {"ChatGPT": "Not cited", "Perplexity": "Cited"}
+
+
+def test_a_run_marks_prompts_that_name_the_brand(db, client_a, keys, monkeypatch):
+    client_a.client_name, client_a.domain = "Absolutely Natural", "absolutelynatural.com"
+    db.commit()
+    _watch(db, client_a, [("a", "Is Absolutely Natural any good?"), ("b", "Best mineral sunscreen?")])
+    monkeypatch.setattr(platforms, "ask", lambda platform, prompt: platforms.PlatformAnswer(text="Absolutely Natural, I know little.", input_tokens=1, output_tokens=1))
+    run = runner.run_for_client(db, client_a)
+    rows = {(r.query_text, r.platform): r for r in db.query(LlmResponse).filter(LlmResponse.run_id == run.id)}
+    asked = rows[("Is Absolutely Natural any good?", "ChatGPT")]
+    assert asked.asked_by_name is True and asked.visibility_type == "Named in prompt"
+    plain = rows[("Best mineral sunscreen?", "ChatGPT")]
+    assert plain.asked_by_name is False and plain.visibility_type == "Mentioned"

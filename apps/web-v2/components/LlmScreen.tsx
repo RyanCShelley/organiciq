@@ -122,6 +122,40 @@ function Overview({ data }: { data: LlmOverview }) {
         </div>
       </div>
 
+      {data.brand_check && data.brand_check.prompts.length > 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <h3 className="text-sm font-semibold">Brand check: questions that name the brand</h3>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            These are left out of the numbers above. An answer that repeats the name proves nothing, so the test is whether the platform cites the site.
+          </p>
+          <ul className="mt-3 flex flex-wrap gap-3">
+            {data.brand_check.platforms.map((p) => (
+              <li key={p.platform} className="rounded-lg bg-[var(--bg)] px-3 py-2 text-sm">
+                <span className="font-semibold">{p.platform}</span> cited the site in {p.site_cited} of {p.answers}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <tbody>
+                {data.brand_check.prompts.map((q) => (
+                  <tr key={q.query} className="border-t border-[var(--border)] align-top">
+                    <td className="py-2 pr-3">{q.query}</td>
+                    {Object.entries(q.by_platform).map(([platform, result]) => (
+                      <td key={platform} className="px-2 py-2 text-xs">
+                        <span className={result === "Cited" ? "font-semibold text-green-700" : "text-[var(--text-tertiary)]"}>
+                          {platform}: {result.toLowerCase()}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
       {trend.length > 1 ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h3 className="text-sm font-semibold">Visibility rate by run</h3>
@@ -262,7 +296,7 @@ function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
                   <span className="block text-sm font-medium">{r.query}</span>
                   <span className="text-xs text-[var(--text-tertiary)]">{r.platform} · {r.topic_cluster ?? "Uncategorized"}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
                 </span>
-                <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${r.visibility === "Error" ? "bg-red-50 text-red-800" : CODE_STYLE[r.visibility === "Cited + Mentioned" ? "C+M" : r.visibility === "Cited" ? "C" : r.visibility === "Mentioned" ? "M" : "—"]}`}>{r.visibility}</span>
+                <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${r.visibility === "Error" ? "bg-red-50 text-red-800" : r.visibility === "Named in prompt" ? "bg-[var(--bg)] text-[var(--text-secondary)]" : CODE_STYLE[r.visibility === "Cited + Mentioned" ? "C+M" : r.visibility === "Cited" ? "C" : r.visibility === "Mentioned" ? "M" : "—"]}`}>{r.visibility}</span>
               </button>
               {open === key ? (
                 <div className="mt-2 space-y-2 text-sm">

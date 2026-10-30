@@ -65,8 +65,10 @@ class LlmResponse(Base):
     topic_cluster: Mapped[str | None] = mapped_column(String(160), nullable=True)
     keyword: Mapped[str | None] = mapped_column(String(400), nullable=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
-    #: Cited + Mentioned | Cited | Mentioned | Not visible | Error
+    #: Cited + Mentioned | Cited | Mentioned | Not visible | Named in prompt | Error
     visibility_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    #: The prompt itself names the brand, so a mention proves nothing; only a citation of the site counts.
+    asked_by_name: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     brand_mentioned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     url_cited: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     cited_urls: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)

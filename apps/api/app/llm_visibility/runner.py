@@ -96,10 +96,12 @@ def _ask_one(platform: str, item: dict, config: analysis.BrandConfig) -> dict:
     try:
         answer = platforms.ask(platform, item["prompt"])
         result = analysis.analyze(answer.text, answer.citations, config)
+        by_name = analysis.names_brand(item["prompt"], config)
         known = [config.brand_name, *(name for name, _ in config.competitors)]
         return {
             **base,
-            "visibility_type": analysis.visibility_type(result),
+            "visibility_type": analysis.visibility_type(result, by_name),
+            "asked_by_name": by_name,
             "brand_mentioned": result.brand_mentioned,
             "url_cited": result.url_cited,
             "cited_urls": result.cited_urls,
