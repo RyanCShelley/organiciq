@@ -407,15 +407,24 @@ function VisibilityPanel({ visibility, prior, href }: { visibility: Visibility; 
           </tr>
         </thead>
         <tbody>
-          {visibility.buckets.map((bucket) => {
+          {visibility.buckets.map((bucket, index) => {
             const terms = bucket.terms.filter(keep[filter]);
             if (terms.length === 0) return null;
+            const first = visibility.buckets.slice(0, index).every((b) => b.terms.filter(keep[filter]).length === 0);
             const impressions = terms.reduce((n, t) => n + (t.google.impressions.current ?? 0), 0);
             return (
               <Fragment key={bucket.id}>
-                <tr className="bg-[var(--bg)]">
-                  <td colSpan={bing ? 8 : 7} className="px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)]">
-                    {bucket.name} · {terms.length} term{terms.length === 1 ? "" : "s"} · {num(impressions)} impression{impressions === 1 ? "" : "s"}
+                {first ? null : (
+                  <tr aria-hidden="true">
+                    <td colSpan={bing ? 8 : 7} className="h-6 p-0" />
+                  </tr>
+                )}
+                <tr className="bg-[var(--brand-teal)]/10">
+                  <td colSpan={bing ? 8 : 7} className="border-l-4 border-[var(--brand-teal)] px-3 py-2.5">
+                    <span className="text-sm font-bold text-[var(--text-primary)]">{bucket.name}</span>
+                    <span className="ml-3 text-xs font-normal text-[var(--text-secondary)]">
+                      {terms.length} term{terms.length === 1 ? "" : "s"} · {num(impressions)} impression{impressions === 1 ? "" : "s"}
+                    </span>
                   </td>
                 </tr>
                 {terms.map((t) => {
