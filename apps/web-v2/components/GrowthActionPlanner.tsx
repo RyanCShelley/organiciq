@@ -18,7 +18,7 @@ function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: Grow
     steps.push(`# ${i + 1}. ${p.name}`);
     steps.push(...choices[p.id].text.split("\n").map((l) => l.trim()).filter(Boolean));
   });
-  const evidence = [bundle.draft.evidence[0], ...chosen.flatMap((p) => p.evidence.map((e) => `${p.id}: ${e}`))].filter(Boolean);
+  const evidence = [bundle.draft.evidence[0], ...chosen.flatMap((p) => p.evidence.map((e) => `${p.name}: ${e}`))].filter(Boolean);
   return {
     ...bundle.draft,
     why: `This page gets the most impressions for “${bundle.keyword}” (${bundle.chosen.impressions.toLocaleString()} over three months). The work is ${chosen.length} part${chosen.length === 1 ? "" : "s"}, done together on this one page: ${chosen.map((p) => p.name.toLowerCase()).join(", ")}.`,
@@ -121,11 +121,6 @@ export function GrowthActionPlanner({
             <span>
               {index != null && c.on ? `${index}. ` : ""}
               {p.name}
-              <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
-                {p.id}
-                {p.core ? "" : " · extra"}
-                {p.confirmed_by_rule ? " · rule" : " · unconfirmed"}
-              </span>
             </span>
           </label>
           {c.on ? (
@@ -223,7 +218,7 @@ export function GrowthActionPlanner({
             </>
           ) : null}
           {bundle.left_out.length > 0 ? (
-            <p className="mt-3 text-xs text-[var(--text-tertiary)]">Not in this action: {bundle.left_out.map((l) => `${l.id} (${l.reason})`).join(" · ")}</p>
+            <p className="mt-3 text-xs text-[var(--text-tertiary)]">Not in this action: {bundle.left_out.map((l) => `${l.name} (${l.reason})`).join(" · ")}</p>
           ) : null}
           <div className="mt-3">
             {inPlan(bundle.page) ? (

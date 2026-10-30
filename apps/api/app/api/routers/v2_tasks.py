@@ -223,11 +223,11 @@ def _description(task: EngineTask, client: Client) -> tuple[str, str]:
     if task.evidence:
         text += "\n\nEvidence and limitations\n" + "\n".join(task.evidence)
     origin = (
-        "Prescribed by a rule in the Decision engine."
+        "Recommended by the Decision engine from a check of the page and its data."
         if task.kind == "prescription"
-        else "A growth action from the Decision engine: one page, worked together for one topic. Its parts come from a live read of the page, Search Console and the AI platform runs; a person confirmed it."
+        else "A growth action from the Decision engine: one page, worked together for one topic. Its parts come from a live read of the page, Search Console and the AI platform runs, and a person chose them."
         if task.kind == "growth_action"
-        else "An unconfirmed suggestion from the Decision engine: the data to prove it was not available, and a person confirmed it."
+        else "Suggested by the Decision engine. The data to prove it was not available, so a person chose to do it."
     )
     text += f"\n\n{origin} Search: “{task.search}”. Confirmed by {task.confirmed_by} for {task.month}."
     return name, text

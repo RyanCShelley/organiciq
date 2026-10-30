@@ -54,7 +54,7 @@ def test_phrasing_already_in_the_title_is_not_suggested():
 def test_several_pages_for_one_search_asks_for_an_owner_and_says_why_it_is_unconfirmed():
     parsed, facts = page()
     s6 = next(s for s in run(parsed, facts, {"page_queries": [], "competing_pages": 3, "donors": []})["suggestions"] if s["id"] == "S-6")
-    assert "3 pages" in s6["why"] and "declared owner" in s6["needs_to_confirm"]
+    assert "3 pages" in s6["why"] and "Which page should own the search" in s6["needs_to_confirm"]
 
 
 def test_a_top_three_page_with_weak_click_through_is_told_to_reread_its_snippet():

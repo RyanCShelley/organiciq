@@ -139,7 +139,7 @@ def suggest(
                     f"Pick the page that should rank for “{search}”.",
                     "Point the other pages at it with an in-content link, and stop repeating the same target phrase in their titles.",
                 ],
-                "A declared owner page for the search (rule V-6), which comes with the Topic Hub mapping.",
+                "Which page should own the search. This tool doesn't hold that yet.",
                 [f"{competing} pages show for this search in Search Console"],
             )
         )
@@ -243,7 +243,7 @@ def suggest(
                     [f"“{q['query']}” ({q['impressions']:,} impressions)" for q in questions]
                     + [
                         "Answer each in one to three sentences on the page, in the words you would use to a customer.",
-                        "Then mark it up as FAQPage (rule V-7 will pick it up once the section exists).",
+                        "Then mark the FAQ up as FAQPage so search engines can read it as questions and answers.",
                     ],
                     "Whether an AI answer or featured snippet appears for these questions. Not pulled yet.",
                     [f"{len(questions)} question-shaped searches for this page"],

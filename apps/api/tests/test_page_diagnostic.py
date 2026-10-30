@@ -54,7 +54,7 @@ def test_what_cannot_be_judged_is_said_and_never_read_as_no_problem():
     out = run(page())
     ids = {n["action_id"]: n["reason"] for n in out["not_judged"]}
     assert set(ids) == {"V-6", "V-7", "V-5", "V-4"}
-    assert "declared owner" in ids["V-6"] and "SERP features" in ids["V-5"] and "link crawl" in ids["V-4"]
+    assert "page that should own the search" in ids["V-6"] and "featured snippet" in ids["V-5"] and "crawl of the whole site" in ids["V-4"]
     assert ids["V-7"] == "The page has no FAQ section, so there are no questions to mark up."
 
 

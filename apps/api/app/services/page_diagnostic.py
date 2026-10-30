@@ -46,21 +46,20 @@ _NOT_JUDGED = {
     "v6_rehoming": (
         "V-6",
         "Wrong page ranks",
-        "Needs a declared owner page for the search to compare with. v2 has none until the Topic Hub "
-        "mapping arrives, so it cannot say the wrong page is ranking.",
+        "Can't tell yet whether the wrong page ranks for this search. That needs the page that should own the "
+        "search to be chosen, and this tool doesn't hold that yet.",
     ),
     "v7_mark_up_the_faq": ("V-7", "Mark up the FAQ", None),
     "v5_add_an_extractable_structure": (
         "V-5",
         "Add something an answer engine can lift",
-        "Needs to know the search's SERP features (does an AI answer or snippet appear), which have not been "
-        "pulled for this client.",
+        "Needs to know whether an AI answer or a featured snippet shows for this search, which isn't collected for this client yet.",
     ),
     "v4_internal_links": (
         "V-4",
         "Add internal links",
-        "Needs the site-wide link crawl, to see which pages link here and compare with the site's median. "
-        "That crawl has not completed for this client.",
+        "Needs the crawl of the whole site, to see which pages link here and compare with the site's typical page. "
+        "That crawl hasn't completed for this client.",
     ),
 }
 
@@ -297,7 +296,7 @@ def diagnose(
     if fetched.status >= 400:
         result["observations"] = observations(search, parsed, fetched, row)
         result["not_judged"] = [
-            {"action_id": _NOT_JUDGED[a.__name__][0], "name": _NOT_JUDGED[a.__name__][1], "reason": "The page did not load, so no rule was run on it."}
+            {"action_id": _NOT_JUDGED[a.__name__][0], "name": _NOT_JUDGED[a.__name__][1], "reason": "The page did not load, so it could not be checked."}
             for a in VISIBILITY_ACTIONS
             if a.__name__ in _NOT_JUDGED
         ]

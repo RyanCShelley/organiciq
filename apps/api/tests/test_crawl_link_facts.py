@@ -123,4 +123,4 @@ def test_when_every_topical_page_already_links_it_says_so():
 def test_without_a_crawl_the_old_honest_message_stands():
     out = _diag(None)
     reasons = {n["action_id"]: n["reason"] for n in out["not_judged"]}
-    assert "link crawl" in reasons["V-4"]
+    assert "crawl of the whole site" in reasons["V-4"]

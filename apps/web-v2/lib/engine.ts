@@ -274,7 +274,7 @@ export type GrowthActionBundle =
       chosen: TopicPage;
       search: string;
       parts: GrowthPart[];
-      left_out: { id: string; reason: string }[];
+      left_out: { id: string; name: string; reason: string }[];
       optional: GrowthPart[];
       draft: TaskDraft;
     };

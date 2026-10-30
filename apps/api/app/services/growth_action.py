@@ -159,6 +159,11 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str) -> dict[s
     }
 
 
+def _plain(line: str) -> str:
+    """Evidence lines come from the shared rules and can name a table; a person reading the task should not meet that."""
+    return line.replace("facts_crawl_internal_links:", "From the site crawl:")
+
+
 def _part(id_: str, source: dict[str, Any], *, core: bool) -> dict[str, Any]:
     return {
         "id": id_,
@@ -166,7 +171,7 @@ def _part(id_: str, source: dict[str, Any], *, core: bool) -> dict[str, Any]:
         "title": source.get("title") or PART_NAMES.get(id_) or id_,
         "why": source.get("why") or "",
         "steps": list(source.get("steps") or []),
-        "evidence": list(source.get("evidence") or []),
+        "evidence": [_plain(e) for e in source.get("evidence") or []],
         "core": core,
         "confirmed_by_rule": source.get("action_id") is not None,
     }
@@ -247,9 +252,9 @@ def build(
             },
         )
     elif "A-1" not in have:
-        left_out.append({"id": "A-1", "reason": skipped.get("A-1", "No paired question for this topic.")})
+        left_out.append({"id": "A-1", "name": PART_NAMES["A-1"], "reason": skipped.get("A-1", "No paired question for this topic.")})
     if "S-1" not in have:
-        left_out.append({"id": "S-1", "reason": "The page's title and main heading already say the phrasing people search, or no longer phrasing shows for it."})
+        left_out.append({"id": "S-1", "name": PART_NAMES["S-1"], "reason": "The page's title and main heading already say the phrasing people search, or no longer phrasing shows for it."})
     if "S-2" not in have and "V-7" not in have:
         if paired is not None:
             prompt = " ".join(paired.paired_ai_prompt.split())
@@ -269,7 +274,7 @@ def build(
                 }
             )
         else:
-            left_out.append({"id": "S-2", "reason": skipped.get("S-2", "No question to base an FAQ on.")})
+            left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": skipped.get("S-2", "No question to base an FAQ on.")})
 
     seen = {p["id"] for p in parts}
     # Suggestions the page read produced that are not in the action: offered to add, never repeated elsewhere.
@@ -306,7 +311,7 @@ def draft(bundle: dict[str, Any], month: str) -> dict[str, Any]:
         steps.extend(p["steps"])
     evidence = [f"{chosen['impressions']:,} impressions for searches containing “{bundle['keyword']}”, best position {chosen['position']}"]
     for p in parts:
-        evidence.extend(f"{p['id']}: {line}" for line in p["evidence"])
+        evidence.extend(f"{p['name']}: {line}" for line in p["evidence"])
     return {
         "month": month,
         "kind": "growth_action",

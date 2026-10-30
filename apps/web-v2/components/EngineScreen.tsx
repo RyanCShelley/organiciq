@@ -616,17 +616,17 @@ export function EngineScreen({
                       {d.not_judged.length + d.skipped_suggestions.length > 0 ? (
                         <details className="mt-3 text-sm">
                           <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">
-                            Rules and suggestions that did not apply ({d.not_judged.length + d.skipped_suggestions.length})
+                            Checks that did not apply ({d.not_judged.length + d.skipped_suggestions.length})
                           </summary>
                           <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
                             {d.skipped_suggestions.map((k) => (
                               <li key={k.id}>
-                                <strong>{k.id} {k.name}:</strong> {k.reason}
+                                <strong>{k.name}:</strong> {k.reason}
                               </li>
                             ))}
                             {d.not_judged.map((n) => (
                               <li key={n.action_id}>
-                                <strong>{n.action_id} {n.name}:</strong> {n.reason}
+                                <strong>{n.name}:</strong> {n.reason}
                               </li>
                             ))}
                           </ul>

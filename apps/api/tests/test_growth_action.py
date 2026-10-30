@@ -155,7 +155,7 @@ def test_the_draft_is_one_task_with_every_part_as_a_headed_checklist(db, client_
     assert d["kind"] == "growth_action" and d["rule_id"] == "GA" and d["search"] == "natural sunscreen" and d["page"] == COLL
     assert d["title"] == "Growth action: /collections/spf for “natural sunscreen”"
     assert d["steps"] == ["# 1. Answer the question at the top", "Write the answer", "# 2. Use the phrasing people search", "Say it"]
-    assert "2 parts" in d["why"] and "A-1: quoted" in d["evidence"]
+    assert "2 parts" in d["why"] and "Answer the question at the top: quoted" in d["evidence"]
 
 
 # ── the plan counts pages ────────────────────────────────────────────────────

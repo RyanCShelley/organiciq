@@ -126,7 +126,7 @@ def test_sending_creates_one_teamwork_task_and_a_second_press_does_not_make_a_tw
     assert first.json()["teamwork_task_url"].endswith("/9001") and second.json()["teamwork_task_id"] == "9001"
     assert tw["calls"] == 1
     assert tw["tasklist_id"] == "555" and tw["assignee_teamwork_id"] == "77" and tw["due"] == "2026-10-20"
-    assert "An unconfirmed suggestion from the Decision engine" in tw["description"]
+    assert "Suggested by the Decision engine" in tw["description"]
     assert "1. “sunscreen spf 15”: 315 impressions" in tw["description"] and admin_user.email in tw["description"]
 
 
@@ -135,7 +135,7 @@ def test_a_prescription_says_a_rule_prescribed_it(client, db, client_a, admin_us
     db.commit()
     tid = client.post("/v2/engine/tasks", json={**BODY, "kind": "prescription", "rule_id": "V-7"}, headers=h(client_a, admin_user)).json()["task"]["id"]
     client.post(f"/v2/engine/tasks/{tid}/send", headers=h(client_a, admin_user))
-    assert "Prescribed by a rule in the Decision engine." in tw["description"]
+    assert "Recommended by the Decision engine from a check of the page and its data." in tw["description"]
 
 
 def test_an_unknown_assignee_still_sends_unassigned(client, db, client_a, admin_user, tw):
