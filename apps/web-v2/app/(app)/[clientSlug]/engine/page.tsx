@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { EngineScreen } from "@/components/EngineScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
-import { EMPTY_OVERVIEW, type EngineOverview, type VisibilityCandidates } from "@/lib/engine";
+import { EMPTY_OVERVIEW, EMPTY_PLAN, type EngineOverview, type TaskPlan, type VisibilityCandidates } from "@/lib/engine";
 import { currentMonth, type ClientFocus } from "@/lib/focus";
 import { lastCompleteMonth } from "@/lib/review";
 import type { Watchlist } from "@/lib/watchlist";
@@ -24,9 +24,14 @@ export default async function EnginePage({
 
   const month = lastCompleteMonth();
   const workMonth = currentMonth();
-  const [focus, watchlist] = await Promise.all([
+  const [focus, watchlist, plan, team] = await Promise.all([
     apiFetch<ClientFocus | null>(`/v2/focus/${workMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
+    apiFetch<TaskPlan>(`/v2/engine/tasks?month=${workMonth}`, { clientId: client.id }).catch(() => EMPTY_PLAN),
+    // Who can be assigned. Only an admin can list a client's team, so anyone else simply sees no picker.
+    apiFetch<{ email: string; name: string | null; is_active: boolean }[]>(`/admin/clients/${client.id}/team`)
+      .then((rows) => rows.filter((r) => r.is_active).map((r) => ({ email: r.email, name: r.name })))
+      .catch(() => [] as { email: string; name: string | null }[]),
   ]);
 
   // The bucket in the URL wins; otherwise the one chosen with the focus; otherwise the whole site.
@@ -61,6 +66,8 @@ export default async function EnginePage({
       showVisibility={showVisibility}
       data={data}
       overview={overview}
+      plan={plan}
+      team={team}
       error={error}
     />
   );

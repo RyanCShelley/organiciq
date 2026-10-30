@@ -95,3 +95,59 @@ export type Diagnosis = {
 };
 
 export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; error: string };
+
+export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped";
+
+export type EngineTask = {
+  id: string;
+  month: string;
+  kind: "prescription" | "suggestion";
+  rule_id: string;
+  search: string;
+  page: string;
+  title: string;
+  why: string | null;
+  steps: string[];
+  done_when: string | null;
+  metric: string | null;
+  effort_min: number | null;
+  evidence: string[];
+  status: TaskStatus;
+  confirmed_by: string;
+  assignee_email: string | null;
+  due: string | null;
+  teamwork_task_id: string | null;
+  teamwork_task_url: string | null;
+};
+
+export type Allowance = { monthly: number | null; used: number; over: boolean };
+
+export type TaskPlan = {
+  month: string;
+  tasks: EngineTask[];
+  allowance: Allowance;
+  teamwork: { configured: boolean; tasklist_id: string | null };
+};
+
+export const EMPTY_PLAN: TaskPlan = {
+  month: "",
+  tasks: [],
+  allowance: { monthly: null, used: 0, over: false },
+  teamwork: { configured: false, tasklist_id: null },
+};
+
+export type TaskDraft = {
+  kind: "prescription" | "suggestion";
+  rule_id: string;
+  search: string;
+  page: string;
+  title: string;
+  why: string | null;
+  steps: string[];
+  done_when: string | null;
+  metric: string | null;
+  effort_min: number | null;
+  evidence: string[];
+};
+
+export type TaskResult<T = EngineTask> = { ok: true; value: T; allowance?: Allowance } | { ok: false; error: string };

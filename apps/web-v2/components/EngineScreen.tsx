@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import type { Client } from "@/lib/api";
-import { diagnoseAction } from "@/app/(app)/[clientSlug]/engine/actions";
+import { confirmTaskAction, diagnoseAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
-import type { Candidate, Diagnosis, EngineOverview, VisibilityCandidates } from "@/lib/engine";
+import { EnginePlan } from "@/components/EnginePlan";
+import type { Allowance, Candidate, Diagnosis, EngineOverview, EngineTask, TaskDraft, TaskPlan, VisibilityCandidates } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus } from "@/lib/focus";
 
 const num = (n: number | null | undefined, digits = 0) =>
@@ -81,6 +82,46 @@ function Row({ c, checked, onToggle, disabled }: { c: Candidate; checked: boolea
   );
 }
 
+function ConfirmButton({
+  clientId,
+  month,
+  draft,
+  existing,
+  onConfirmed,
+}: {
+  clientId: string;
+  month: string;
+  draft: TaskDraft;
+  existing: EngineTask | undefined;
+  onConfirmed: (task: EngineTask) => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  if (existing) {
+    return <span className="text-xs font-semibold text-green-800">✓ In the plan ({existing.status})</span>;
+  }
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            setError(null);
+            const result = await confirmTaskAction(clientId, month, draft);
+            if (result.ok) onConfirmed(result.value);
+            else setError(result.error);
+          })
+        }
+        className="rounded-lg bg-[var(--brand-dark)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+      >
+        {pending ? "Adding…" : draft.kind === "suggestion" ? "Confirm as a task" : "Add to the plan"}
+      </button>
+      {error ? <span className="max-w-[16rem] text-right text-xs text-red-800">{error}</span> : null}
+    </span>
+  );
+}
+
 export function EngineScreen({
   client,
   workMonth,
@@ -90,6 +131,8 @@ export function EngineScreen({
   showVisibility,
   data,
   overview,
+  plan,
+  team,
   error,
 }: {
   client: Client;
@@ -100,12 +143,15 @@ export function EngineScreen({
   showVisibility: boolean;
   data: VisibilityCandidates | null;
   overview: EngineOverview;
+  plan: TaskPlan;
+  team: { email: string; name: string | null }[];
   error: string | null;
 }) {
   const router = useRouter();
   const [band, setBand] = useState<string | null>(null);
   const [switching, startSwitch] = useTransition();
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<EngineTask[]>(plan.tasks);
   const [picked, setPicked] = useState<string[]>([]);
   // After a diagnosis the candidate list folds away so the diagnosis is the first thing on the screen.
   const [collapsed, setCollapsed] = useState(false);
@@ -114,6 +160,22 @@ export function EngineScreen({
   const [diagnosing, startDiagnose] = useTransition();
   const MAX_PICKS = 5;
   const advice = overview.advice;
+
+  const norm = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+  const live = tasks.filter((t) => t.status !== "dropped");
+  const allowance: Allowance = {
+    monthly: plan.allowance.monthly,
+    used: live.length,
+    over: plan.allowance.monthly != null && live.length > plan.allowance.monthly,
+  };
+
+  function upsertTask(task: EngineTask) {
+    setTasks((current) => (current.some((t) => t.id === task.id) ? current.map((t) => (t.id === task.id ? task : t)) : [...current, task]));
+  }
+
+  function existingFor(ruleId: string, search: string, page: string): EngineTask | undefined {
+    return live.find((t) => t.rule_id === ruleId && t.search === norm(search) && t.page === page);
+  }
 
   function togglePick(key: string) {
     setPicked((current) => (current.includes(key) ? current.filter((k) => k !== key) : [...current, key]));
@@ -173,6 +235,16 @@ export function EngineScreen({
           {focus ? "Change on the monthly review →" : "Choose it on the monthly review →"}
         </Link>
       </div>
+
+      <EnginePlan
+        clientId={client.id}
+        month={workMonth}
+        tasks={tasks}
+        allowance={allowance}
+        teamwork={plan.teamwork}
+        team={team}
+        onTaskChange={upsertTask}
+      />
 
       {advice.level !== "ok" && advice.headline ? (
         <div
@@ -301,8 +373,29 @@ export function EngineScreen({
                         <div className="mt-3 space-y-3">
                           {d.prescriptions.map((p) => (
                             <div key={p.action_id} className="rounded-lg border border-[var(--brand-teal)] bg-[var(--brand-teal)]/5 p-4 text-sm">
-                              <div className="font-semibold">
-                                {p.action_id} · {p.title}
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="font-semibold">
+                                  {p.action_id} · {p.title}
+                                </div>
+                                <ConfirmButton
+                                  clientId={client.id}
+                                  month={workMonth}
+                                  existing={existingFor(p.action_id, d.search, d.page)}
+                                  onConfirmed={upsertTask}
+                                  draft={{
+                                    kind: "prescription",
+                                    rule_id: p.action_id,
+                                    search: d.search,
+                                    page: d.page,
+                                    title: p.title,
+                                    why: p.why,
+                                    steps: p.steps,
+                                    done_when: p.done_when,
+                                    metric: p.metric,
+                                    effort_min: p.effort_min,
+                                    evidence: p.evidence,
+                                  }}
+                                />
                               </div>
                               <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p>
                               <p className="mt-2"><strong>Done when:</strong> {p.done_when}</p>
@@ -345,7 +438,30 @@ export function EngineScreen({
                                   <span className="font-semibold">
                                     {g.id} · {g.title}
                                   </span>
-                                  <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">unconfirmed</span>
+                                  <span className="flex items-center gap-2">
+                                    {existingFor(g.id, d.search, d.page) ? null : (
+                                      <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">unconfirmed</span>
+                                    )}
+                                    <ConfirmButton
+                                      clientId={client.id}
+                                      month={workMonth}
+                                      existing={existingFor(g.id, d.search, d.page)}
+                                      onConfirmed={upsertTask}
+                                      draft={{
+                                        kind: "suggestion",
+                                        rule_id: g.id,
+                                        search: d.search,
+                                        page: d.page,
+                                        title: g.title,
+                                        why: g.why,
+                                        steps: g.steps,
+                                        done_when: null,
+                                        metric: null,
+                                        effort_min: null,
+                                        evidence: [...g.evidence, `To confirm: ${g.needs_to_confirm}`],
+                                      }}
+                                    />
+                                  </span>
                                 </div>
                                 <p className="mt-1 text-[var(--text-secondary)]">{g.why}</p>
                                 <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--text-secondary)]">

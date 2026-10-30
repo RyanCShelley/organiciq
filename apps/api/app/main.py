@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, annotations, auth, clients, copilot, dashboard, decisions, integrations, jobs, oauth_google, seranking, site_crawl, v2_connections, v2_conversions, v2_engine, v2_feeds, v2_focus, v2_review, v2_watchlist, watch_list
+from app.api.routers import admin, annotations, auth, clients, copilot, dashboard, decisions, integrations, jobs, oauth_google, seranking, site_crawl, v2_connections, v2_conversions, v2_engine, v2_feeds, v2_focus, v2_review, v2_tasks, v2_watchlist, watch_list
 from app.core.settings import get_settings
 
 logger = logging.getLogger("organiciq.api")
@@ -102,3 +102,4 @@ app.include_router(v2_engine.router)
 app.include_router(v2_feeds.router)
 app.include_router(v2_focus.router)
 app.include_router(v2_review.router)
+app.include_router(v2_tasks.router)
