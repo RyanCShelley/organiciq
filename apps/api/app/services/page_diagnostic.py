@@ -27,6 +27,7 @@ import httpx
 
 from app.decisions.catalog import VISIBILITY_ACTIONS, PageFacts, SectionFacts, _mentions
 from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.page_targets import LinkDonor
 from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
@@ -120,11 +121,12 @@ def read_page(url: str, client_domain: str, fetch: Callable[[str], Awaitable[Fet
 # ── facts ────────────────────────────────────────────────────────────────────
 
 
-def facts_from(url: str, parsed: ParsedPage) -> PageFacts:
+def facts_from(url: str, parsed: ParsedPage, links: dict[str, Any] | None = None) -> PageFacts:
     """What the catalog reads about a page, from a page parsed live.
 
-    Link counts are left at "unknown": a single page cannot say how many pages link to it,
-    and the internal-links rule treats unknown as "cannot judge", never as "has none".
+    Link counts come from the site crawl when there is one. Without it they are left at
+    "unknown": a single page cannot say how many pages link to it, and the internal-links
+    rule treats unknown as "cannot judge", never as "has none".
     """
     sections = parsed.sections or []
     faq_schema = any(_declares_faq(block.raw) for block in parsed.schema_blocks if block.raw is not None)
@@ -147,9 +149,15 @@ def facts_from(url: str, parsed: ParsedPage) -> PageFacts:
             SectionFacts(heading=s.heading, has_table=s.has_table, has_list=s.has_list, has_stat=s.has_stat, level=s.level)
             for s in sections
         ),
-        inbound_editorial_links=0,
-        site_median_links=0.0,
+        inbound_editorial_links=int(links["inbound"]) if links else 0,
+        site_median_links=float(links["median"]) if links else 0.0,
         page_type=classify_page_url(url).page_type.value,
+        # Pages on the same topic that are known not to link here yet. Without a crawl there is
+        # no way to know, so none are offered to the rule.
+        link_donors=tuple(
+            LinkDonor(url=d["url"], anchor=d["query"], clicks=float(d.get("clicks") or 0))
+            for d in (links["sources_without_link"] if links else [])
+        ),
     )
 
 
@@ -174,6 +182,22 @@ def _prescription(p: Prescription) -> dict[str, Any]:
     out = asdict(p)
     out["branch"] = p.branch.value
     return out
+
+
+def _why_v4_did_not_fire(links: dict[str, Any]) -> str:
+    """Judged from the crawl, so the answer is a fact about the page and not a missing input."""
+    n, m, day = links["inbound"], links["median"], links["date"]
+    if not links.get("in_crawl"):
+        return f"The crawl of {day} did not reach this page, so its links could not be counted."
+    if n >= m:
+        return (
+            f"Judged from the crawl of {day}: {n} in-content {'link points' if n == 1 else 'links point'} here, against a site "
+            f"median of {m:g}. It is not under-linked by the site's own measure."
+        )
+    return (
+        f"Judged from the crawl of {day}: {n} in-content links here against a median of {m:g}, but no page on the same "
+        "topic that lacks a link to it was found, so there is no one to ask for a link."
+    )
 
 
 # ── observations ─────────────────────────────────────────────────────────────
@@ -265,7 +289,8 @@ def diagnose(
 
     result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url)
     parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
-    facts = facts_from(url, parsed)
+    crawl_links = (evidence or {}).get("crawl")
+    facts = facts_from(url, parsed, crawl_links)
     scored = _scored(search, url, float(row["position"]), float(row.get("expected_extra_clicks") or 0), facts.page_type)
 
     if fetched.status >= 400:
@@ -284,6 +309,8 @@ def diagnose(
             result["prescriptions"].append(_prescription(fired))
             continue
         action_id, name, reason = info or (action.__name__, action.__name__, "No reason recorded.")
+        if action.__name__ == "v4_internal_links" and crawl_links:
+            reason = _why_v4_did_not_fire(crawl_links)
         if action.__name__ == "v7_mark_up_the_faq":
             reason = (
                 "The page already has FAQ markup." if facts.has_faq_schema
@@ -295,6 +322,9 @@ def diagnose(
     if evidence is not None:
         found = provisional_suggest(search=search, url=url, row=row, parsed=parsed, facts=facts, evidence=evidence)
         result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
+        # A rule that fired already says it; the unconfirmed version of the same advice would repeat it.
+        if any(p["action_id"] == "V-4" for p in result["prescriptions"]):
+            result["suggestions"] = [g for g in result["suggestions"] if g["id"] != "S-4"]
     result["page_facts"] = {
         "title": facts.title,
         "description": facts.description,

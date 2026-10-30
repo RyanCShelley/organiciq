@@ -175,20 +175,35 @@ def suggest(
             )
 
     # S-4: other pages on the same topic that could link here.
-    donors = evidence.get("donors") or []
+    crawl = evidence.get("crawl")
+    if crawl:
+        donors = crawl["sources_without_link"]
+        checked = f"Checked against the crawl of {crawl['date']}: these pages show for the topic and have no in-content link here."
+        already = crawl["sources_already_linking"]
+    else:
+        donors = evidence.get("donors") or []
+        checked = ""
+        already = []
     if donors:
         out.append(
             _item(
                 "S-4",
                 "Link here from pages on the same topic",
-                "These pages already show for searches on this topic, so a link from them is relevant and carries readers.",
+                (
+                    "These pages already show for searches on this topic, so a link from them is relevant and carries readers."
+                    + (f" This page has {crawl['inbound']} in-content {'link' if crawl['inbound'] == 1 else 'links'} against a site median of {crawl['median']:g}, so this is optional, not a fix for a gap." if crawl and crawl["inbound"] >= crawl["median"] else "")
+                ),
                 [
                     f"{d['url']} (shows for “{d['query']}”, {d['impressions']:,} impressions): add an in-content link to this page where it reads naturally."
                     for d in donors[:3]
                 ]
-                + ["Check each page does not already link here first."],
-                "The site-wide link crawl, to see which of these already link here and how many links this page has against the site's median.",
-                [f"{len(donors)} topical pages found in Search Console"],
+                + ([checked] if checked else ["Check each page does not already link here first."]),
+                (
+                    "Nothing more: the crawl has already checked that these do not link here."
+                    if crawl
+                    else "The site-wide link crawl, to see which of these already link here and how many links this page has against the site's median."
+                ),
+                [f"{len(donors)} topical pages without a link, from the crawl" if crawl else f"{len(donors)} topical pages found in Search Console"],
             )
         )
     else:
@@ -196,7 +211,11 @@ def suggest(
             {
                 "id": "S-4",
                 "name": "Add internal links",
-                "reason": "No other page shows for searches on this topic, so no natural source for a link was found.",
+                "reason": (
+                    f"Every page on the topic that shows in Search Console already links here ({len(already)} checked against the crawl of {crawl['date']})."
+                    if crawl and already
+                    else "No other page shows for searches on this topic, so no natural source for a link was found."
+                ),
             }
         )
 

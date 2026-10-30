@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import visibility_candidates
 from app.models.client import Client
-from app.services import page_diagnostic
+from app.services import crawl_link_facts, page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -70,6 +70,12 @@ class DiagnoseRequest(BaseModel):
     selections: list[Selection] = Field(min_length=1, max_length=MAX_DIAGNOSED)
 
 
+def _evidence(db: Session, client: Client, month: str, search: str, page: str) -> dict:
+    found = visibility_candidates.page_evidence(db, client, month, search, page)
+    found["crawl"] = crawl_link_facts.link_facts(db, client, page, found["donors"])
+    return found
+
+
 @router.post("/diagnose")
 def diagnose_selected(
     payload: DiagnoseRequest,
@@ -112,7 +118,7 @@ def diagnose_selected(
                 row=row,
                 client_domain=client.domain,
                 fetch=page_diagnostic._fetch,
-                evidence=visibility_candidates.page_evidence(db, client, month, row["search"], pick.page),
+                evidence=_evidence(db, client, month, row["search"], pick.page),
             )
         )
     return {"month": month, "results": results}
