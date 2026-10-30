@@ -74,6 +74,11 @@ export function TrafficList({
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const toggle = (key: string) => setPicked((c) => (c.includes(key) ? c.filter((k) => k !== key) : [...c, key]));
+  const [sortBy, setSortBy] = useState<"month" | "year">("month");
+  const [shown, setShown] = useState(25);
+  const dropped = [...data.dropped_pages].sort((a, b) =>
+    sortBy === "month" ? b.lost_month - a.lost_month || b.lost_year - a.lost_year : b.lost_year - a.lost_year || b.lost_month - a.lost_month,
+  );
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -127,6 +132,85 @@ export function TrafficList({
           </p>
 
           <PickBar picked={picked} max={MAX_PICKS} diagnosing={diagnosing} onDiagnose={() => onDiagnose(picked)} onClear={() => setPicked([])} />
+
+          <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Pages that dropped</h3>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                Every page that lost 5+ organic sessions a month, whatever the tests say: {data.dropped_total} in {data.scope}.
+              </p>
+            </div>
+            <label className="text-sm">
+              <span className="font-semibold">Biggest drop</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as "month" | "year")}
+                className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
+              >
+                <option value="month">Last month vs the month before</option>
+                <option value="year">Last 3 months vs last year</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+                <tr>
+                  <th className="w-6 py-1 pr-2" />
+                  <th className="py-1 pr-3 font-medium">Page</th>
+                  <th className="px-3 py-1 text-right font-medium">Last month</th>
+                  <th className="px-3 py-1 text-right font-medium">3 months vs last year</th>
+                  <th className="px-3 py-1 text-right font-medium">Lost a month</th>
+                  <th className="py-1 pl-3 font-medium">Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dropped.slice(0, shown).map((d) => (
+                  <tr key={d.page} className="border-t border-[var(--border)] align-top">
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(d.page)}
+                        disabled={picked.length >= MAX_PICKS && !picked.includes(d.page)}
+                        onChange={() => toggle(d.page)}
+                        aria-label={`Diagnose ${shortPage(d.page)}`}
+                      />
+                    </td>
+                    <td className="min-w-[10rem] break-all py-2 pr-3 font-medium">{shortPage(d.page)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {num(d.sessions.current)} <Change value={d.sessions.change_pct} />
+                      <div className="text-xs text-[var(--text-tertiary)]">was {num(d.sessions.previous)}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {num(d.three_months.current)} <Change value={d.three_months.change_pct} />
+                      <div className="text-xs text-[var(--text-tertiary)]">was {num(d.three_months.last_year)}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <span className="font-semibold">{num(sortBy === "month" ? d.lost_month : d.lost_year)}</span>
+                      <div className="text-xs text-[var(--text-tertiary)]">{sortBy === "month" ? "vs month before" : "vs last year, per month"}</div>
+                    </td>
+                    <td className="py-2 pl-3 text-xs">
+                      {d.flag ? (
+                        <span className="rounded bg-red-50 px-2 py-0.5 font-semibold text-red-800">
+                          {d.flag === "sudden" ? "sudden drop" : d.flag === "slow_bleed" ? "slow bleed" : "sudden + slow"}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--text-tertiary)]">under the test thresholds</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {dropped.length === 0 ? <p className="py-4 text-sm text-[var(--text-tertiary)]">No page lost 5+ sessions a month in this scope.</p> : null}
+            {dropped.length > shown ? (
+              <button type="button" onClick={() => setShown((n) => n + 25)} className="mt-2 text-sm font-semibold underline">
+                Show 25 more ({dropped.length - shown} left)
+              </button>
+            ) : null}
+          </div>
+
+          <h3 className="mt-6 text-sm font-semibold">Ranked against the site's trend</h3>
 
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[40rem] text-left text-sm">

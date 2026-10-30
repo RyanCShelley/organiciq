@@ -167,6 +167,15 @@ export type TrafficRow = {
   at_stake: number;
 };
 
+export type DroppedPage = {
+  page: string;
+  sessions: { current: number; previous: number; change_pct: number | null };
+  three_months: { current: number; last_year: number; change_pct: number | null };
+  lost_month: number;
+  lost_year: number;
+  flag: "sudden" | "slow_bleed" | "both" | null;
+};
+
 export type TrafficCandidates = {
   month: string;
   scope: string;
@@ -179,6 +188,8 @@ export type TrafficCandidates = {
   };
   counts: { strong: number; possible: number; listed: number };
   candidates: TrafficRow[];
+  dropped_pages: DroppedPage[];
+  dropped_total: number;
   thresholds: { sudden: string; slow_bleed: string };
   notes: string[];
 };

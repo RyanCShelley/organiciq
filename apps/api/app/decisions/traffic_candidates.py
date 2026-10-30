@@ -49,6 +49,11 @@ PAGE_MIN_SESSIONS = 30.0
 #: Pages that a bucket's searches reach: impressions over the three months for a search containing a term.
 BUCKET_PAGE_MIN_IMPRESSIONS = 5.0
 
+#: Every page that lost at least this many sessions a month (against the month before, or the monthly
+#: average of the same three months last year) is listed, biggest loss first, whatever the tests say.
+DROPPED_MIN_LOSS = 5.0
+DROPPED_LIST_SIZE = 100
+
 ORGANIC = OrganicChannel.ORGANIC_SEARCH
 
 
@@ -256,6 +261,28 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             continue
         add("page", url, url, series)
 
+    dropped: list[dict[str, Any]] = []
+    for url, series in pages.items():
+        if not is_real_page(url) or (scope_pages is not None and url not in scope_pages):
+            continue
+        m = _measure(series, cur, prev, cur3, ly3)
+        lost_month = m["previous"] - m["current"]
+        lost_year = (m["ly3"] - m["cur3"]) / 3
+        if max(lost_month, lost_year) < DROPPED_MIN_LOSS:
+            continue
+        j = judge(m, site_ratio)
+        dropped.append(
+            {
+                "page": url,
+                "sessions": {"current": round(m["current"]), "previous": round(m["previous"]), "change_pct": _pct(m["current"], m["previous"])},
+                "three_months": {"current": round(m["cur3"]), "last_year": round(m["ly3"]), "change_pct": _pct(m["cur3"], m["ly3"])},
+                "lost_month": round(max(lost_month, 0.0)),
+                "lost_year": round(max(lost_year, 0.0)),
+                "flag": _flag(j),
+            }
+        )
+    dropped.sort(key=lambda r: -max(r["lost_month"], r["lost_year"]))
+
     falling = sorted((u for u in units if u["_falling"]), key=lambda u: (u["strength"] != "strong", -u["at_stake"], -u["_size"]))
     rest = sorted((u for u in units if not u["_falling"] and u["level"] == "page"), key=lambda u: -u["_size"])
     listed = (falling + rest)[:LIST_SIZE]
@@ -279,6 +306,8 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             "listed": len(listed),
         },
         "candidates": listed,
+        "dropped_pages": dropped[:DROPPED_LIST_SIZE],
+        "dropped_total": len(dropped),
         "thresholds": {
             "sudden": f"down {int(SUDDEN_DROP * 100)}% or more on a prior month of {int(SUDDEN_MIN_PRIOR)}+ sessions",
             "slow_bleed": f"last 3 months keep at most {int(SLOW_RELATIVE_RETENTION * 100)}% of the share the whole site kept of last year's, on a baseline of {int(SLOW_MIN_BASELINE)}+ sessions",
