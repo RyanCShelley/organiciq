@@ -50,3 +50,10 @@ class EngineTask(Base):
     teamwork_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: What the page and topic looked like in the 28 days before it shipped.
+    baseline: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The day the 28 days after shipping are complete in Search Console, and so the day it can be judged.
+    check_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: What the same numbers were over the 28 days after, kept once measured so it never moves again.
+    outcome: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

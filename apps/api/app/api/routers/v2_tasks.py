@@ -25,6 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
+from app.services import task_results
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -79,6 +80,7 @@ def _out(task: EngineTask) -> dict:
         "teamwork_task_id": task.teamwork_task_id,
         "teamwork_task_url": task.teamwork_task_url,
         "shipped_at": task.shipped_at.isoformat() if task.shipped_at else None,
+        "check_on": task.check_on.isoformat() if task.check_on else None,
     }
 
 
@@ -108,6 +110,16 @@ def _get(db: Session, client: Client, task_id: UUID) -> EngineTask:
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
+
+
+@router.get("/results")
+def task_results_list(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """What each shipped task did: the 28 days before against the 28 days after, once those are in."""
+    return task_results.list_results(db, client)
 
 
 @router.get("")
@@ -198,6 +210,8 @@ def update_task(
         else:
             task.status = payload.status
         task.shipped_at = datetime.now(timezone.utc) if payload.status == "shipped" else None
+        if payload.status == "shipped":
+            task_results.take_baseline(db, client, task)
     db.commit()
     db.refresh(task)
     return _out(task)

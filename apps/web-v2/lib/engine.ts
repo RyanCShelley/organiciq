@@ -118,6 +118,8 @@ export type EngineTask = {
   due: string | null;
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
+  shipped_at?: string | null;
+  check_on?: string | null;
 };
 
 export type Allowance = { monthly: number | null; used: number; over: boolean };
@@ -280,3 +282,23 @@ export type GrowthActionBundle =
     };
 
 export type CandidateTopic = { keyword: string | null; source: string; pages: TopicPages | null };
+
+export type GscNumbers = { clicks: number; impressions: number; position: number | null };
+export type AiNumbers = { run_date: string; cited: number; platforms: number } | null;
+
+export type ShippedResult = {
+  task_id: string;
+  title: string;
+  topic: string;
+  page: string;
+  kind: string;
+  shipped_on: string | null;
+  check_on: string | null;
+  status: "no_baseline" | "measuring" | "measured";
+  before?: GscNumbers;
+  after?: GscNumbers;
+  change?: { clicks: number; impressions: number; position: number | null };
+  ai_before?: AiNumbers;
+  ai_after?: AiNumbers;
+  note?: string | null;
+};

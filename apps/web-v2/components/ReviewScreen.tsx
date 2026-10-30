@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import type { Client } from "@/lib/api";
-import type { BucketOverview } from "@/lib/engine";
+import type { BucketOverview, ShippedResult } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
 import type { EngineNumbers, Pair, Review, VisibilityTerm } from "@/lib/review";
 
@@ -262,6 +262,67 @@ function FocusPanel({
   );
 }
 
+const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
+const signed = (n: number) => `${n > 0 ? "+" : ""}${n.toLocaleString()}`;
+const shortDate = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+
+/** What the work shipped earlier did: 28 days before against 28 days after, with no verdict. */
+function ShippedWork({ rows }: { rows: ShippedResult[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <h2 className="text-sm font-semibold">Work we shipped: what it did</h2>
+      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+        Searches for the topic on that page, the 28 days before it shipped against the 28 days after. A small page moves by chance, so read these as direction, not proof.
+      </p>
+      <ul className="mt-3 divide-y divide-[var(--border)]">
+        {rows.map((r) => (
+          <li key={r.task_id} className="py-3 text-sm">
+            <div className="font-medium">{r.title}</div>
+            <div className="text-xs text-[var(--text-secondary)]">
+              “{r.topic}” · {shortPage(r.page)} · shipped {shortDate(r.shipped_on)}
+            </div>
+            {r.status === "measuring" && r.before ? (
+              <p className="mt-1 text-[var(--text-secondary)]">
+                Measuring until {shortDate(r.check_on)}. Before: {r.before.clicks.toLocaleString()} clicks, {r.before.impressions.toLocaleString()} impressions
+                {r.before.position != null ? `, position ${r.before.position}` : ""}.
+              </p>
+            ) : null}
+            {r.status === "measured" && r.before && r.after && r.change ? (
+              <div className="mt-1 grid gap-x-6 gap-y-1 text-[var(--text-secondary)] sm:grid-cols-3">
+                <span>
+                  Clicks {r.before.clicks.toLocaleString()} → {r.after.clicks.toLocaleString()}{" "}
+                  <strong className={r.change.clicks > 0 ? "text-green-700" : r.change.clicks < 0 ? "text-red-700" : ""}>({signed(r.change.clicks)})</strong>
+                </span>
+                <span>
+                  Impressions {r.before.impressions.toLocaleString()} → {r.after.impressions.toLocaleString()}{" "}
+                  <strong className={r.change.impressions > 0 ? "text-green-700" : r.change.impressions < 0 ? "text-red-700" : ""}>({signed(r.change.impressions)})</strong>
+                </span>
+                <span>
+                  Position {r.before.position ?? "–"} → {r.after.position ?? "–"}
+                  {r.change.position != null ? (
+                    <strong className={r.change.position < 0 ? "ml-1 text-green-700" : r.change.position > 0 ? "ml-1 text-red-700" : "ml-1"}>
+                      ({signed(r.change.position)}{r.change.position < 0 ? ", better" : r.change.position > 0 ? ", worse" : ""})
+                    </strong>
+                  ) : null}
+                </span>
+              </div>
+            ) : null}
+            {r.status === "measured" && (r.ai_before || r.ai_after) ? (
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                AI platforms citing the site for this topic: {r.ai_before ? `${r.ai_before.cited} of ${r.ai_before.platforms}` : "no run before"} →{" "}
+                {r.ai_after ? `${r.ai_after.cited} of ${r.ai_after.platforms}` : "no run since"}.
+              </p>
+            ) : null}
+            {r.note ? <p className="mt-1 text-xs text-amber-800">{r.note}</p> : null}
+            {r.status === "no_baseline" ? <p className="mt-1 text-xs text-[var(--text-tertiary)]">No starting numbers were recorded for this one.</p> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ReviewScreen({
   client,
   month,
@@ -271,6 +332,7 @@ export function ReviewScreen({
   focus,
   buckets,
   reach,
+  shipped,
 }: {
   client: Client;
   month: string;
@@ -280,6 +342,7 @@ export function ReviewScreen({
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
   reach: BucketOverview[];
+  shipped: ShippedResult[];
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
@@ -435,6 +498,7 @@ export function ReviewScreen({
                   </table>
                 </div>
               </div>
+              <ShippedWork rows={shipped} />
               {review.visibility ? (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">

@@ -57,6 +57,11 @@ function TaskRow({
           <div className="mt-0.5 truncate text-xs text-[var(--text-secondary)]" title={task.page}>
             “{task.search}” · {shortPage(task.page)}
           </div>
+          {task.status === "shipped" && task.check_on ? (
+            <div className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+              Shipped; its result shows on the monthly review from {new Date(`${task.check_on}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.
+            </div>
+          ) : null}
         </div>
         <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[task.status] ?? STATUS_STYLE.confirmed}`}>
           {task.status}
