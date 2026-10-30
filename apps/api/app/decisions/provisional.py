@@ -23,6 +23,9 @@ from app.decisions.ctr_curve import expected_ctr_percent
 from app.ingestion.crawler.parse import ParsedPage
 from app.services.target_signals import _is_question
 
+#: A form with this many fields or more counts as long.
+FRICTION_FORM_FIELDS = 6
+
 _STOP = frozenset("a an and are as at be by for from how in is it of on or the to what when where which who why with your".split())
 
 
@@ -44,6 +47,60 @@ def _item(id_: str, title: str, why: str, steps: list[str], needs: str, evidence
     }
 
 
+def _opening(parsed: ParsedPage) -> str:
+    """The page's first headed passage as it reads now: the main heading and the paragraph under it."""
+    first = next((sec for sec in parsed.sections if sec.first_paragraph.strip()), None)
+    paragraph = " ".join(first.first_paragraph.split())[:240] if first else ""
+    return f"Main heading: “{parsed.h1 or '(none)'}”." + (f" The first paragraph reads: “{paragraph.rstrip('.')}”." if paragraph else " No opening paragraph was found.")
+
+
+def _answer_item(search: str, parsed: ParsedPage, llm: dict[str, Any]) -> dict[str, Any] | None:
+    """A-1: the platforms answered the paired question and did not all cite this site."""
+    platforms = llm["platforms"]
+    missed = [p["platform"] for p in platforms if not p["cited"]]
+    if not missed:
+        return None
+    cited = [p["platform"] for p in platforms if p["cited"]]
+    named = llm["named"]
+    why = (
+        f"On {llm['run_date']}, {', '.join(missed)} answered “{llm['prompt']}” without citing this site"
+        + (f" ({', '.join(cited)} did cite it)" if cited else "")
+        + (f", and named {', '.join(named[:4])} instead" if named else "")
+        + ". A page that opens with a direct, factual answer to the question is easier for them to quote."
+    )
+    return _item(
+        "A-1",
+        f"Answer “{llm['prompt']}” at the top of the page",
+        why,
+        [
+            f"The question the platforms were asked: “{llm['prompt']}” (paired with the watchlist keyword “{llm['keyword']}”).",
+            _opening(parsed),
+            "Write a two to three sentence answer to that question, in plain words a customer would use, and put it directly under the main heading.",
+            "Use only facts already true of this page and product (what it is, who it suits, what it is made of, any certification). Do not claim anything the page does not already support.",
+            "Next month's run asks the same question again: check whether a platform now cites this page.",
+        ],
+        "Which pages the platforms did cite for this question. Only whether this site was cited is stored, not the full source list.",
+        [f"{p['platform']}: {'cited this site' if p['cited'] else 'did not cite this site'}" for p in platforms],
+    )
+
+
+def _opening_item(search: str, parsed: ParsedPage, why: str, evidence: list[str]) -> dict[str, Any]:
+    """P-1: rewrite the page's opening so the first screen answers what the visitor came for."""
+    return _item(
+        "P-1",
+        "Rewrite the opening so it answers what they came for",
+        why,
+        [
+            f"Visitors arrive for “{search}”." if search else "Think of the search that brings visitors here.",
+            _opening(parsed),
+            "Rewrite the first two sentences to say, plainly, what this page is and how it answers that search. Lead with the answer or the product, not a brand story.",
+            "Keep the words of the search where they read naturally, and keep it short enough to read without scrolling.",
+        ],
+        "Why they leave or do not click: the first screen as a visitor sees it, and the snippet. Neither is measured here.",
+        evidence,
+    )
+
+
 def suggest(
     *,
     search: str,
@@ -58,6 +115,17 @@ def suggest(
     skipped: list[dict[str, str]] = []
     wanted = _tokens(search)
     page_queries = evidence.get("page_queries") or []
+
+    # A-1: the AI platforms answered this search's paired prompt without citing the site.
+    llm = evidence.get("llm")
+    if llm and llm.get("ok"):
+        answer = _answer_item(search, parsed, llm)
+        if answer:
+            out.append(answer)
+        else:
+            skipped.append({"id": "A-1", "name": "Answer the paired question at the top", "reason": f"Every platform cited this site for “{llm['prompt']}” in the run of {llm['run_date']}."})
+    elif llm:
+        skipped.append({"id": "A-1", "name": "Answer the paired question at the top", "reason": llm["reason"]})
 
     # S-6: more than one page shows for the search.
     competing = int(evidence.get("competing_pages") or 0)
@@ -127,6 +195,20 @@ def suggest(
                         "Ask whether they say this page is the answer, and what a competitor's snippet promises that this one does not.",
                     ],
                     "Whether SERP features (an AI answer, shopping results) sit above the result and take clicks that wording cannot win back. Not pulled yet.",
+                    [f"{impressions:,} impressions, {clicks:,} clicks"],
+                )
+            )
+
+    # P-1: ranks on the first page but click-through is under the benchmark (the top three are S-5's, the snippet).
+    if 3.5 < position <= 10.5 and impressions >= 100:
+        actual = clicks / impressions * 100
+        expected = expected_ctr_percent(position)
+        if actual < 0.9 * expected:
+            out.append(
+                _opening_item(
+                    search,
+                    parsed,
+                    f"The page ranks at position {position:.1f}, but click-through is {actual:.1f}% against {expected:.1f}% expected there. A page that opens by answering the search earns more of the clicks it is already shown for.",
                     [f"{impressions:,} impressions, {clicks:,} clicks"],
                 )
             )
@@ -341,6 +423,48 @@ def suggest_leads(
                     "How visitors move after landing here. Not pulled.",
                     [f"{row['conversions']} {noun['plural']} from {row['sessions']:,} sessions"],
                 )
+            )
+    if low_eng:
+        out.append(
+            _opening_item(
+                "",
+                parsed,
+                f"Engagement is {row['engagement_rate']}% against a site median of {med_eng}%: many visitors leave without doing anything. The opening is the first thing they judge the page on.",
+                [f"engagement {row['engagement_rate']}% vs site median {med_eng}%"],
+            )
+        )
+    if low_conv:
+        friction = []
+        if parsed.conversion_elements == 0:
+            friction.append("The page has no form, phone or email link, or button that asks for the next step.")
+        if path.get("crawl") and path["declared"] and not path["linked_to"]:
+            friction.append(f"It does not link in its content to any of the {path['declared']} declared conversion pages.")
+        if parsed.form_fields >= FRICTION_FORM_FIELDS:
+            friction.append(f"The form on the page asks for {parsed.form_fields} fields.")
+        if parsed.contact_only_in_footer:
+            friction.append("The only phone number or email link is in the footer.")
+        if friction:
+            out.append(
+                _item(
+                    "F-1",
+                    f"Remove what stands between the visitor and the {noun['singular']}",
+                    f"{ends} The page read shows: " + " ".join(friction),
+                    friction
+                    + [
+                        "Fix the one that matches how a visitor would act: a shorter form, a call to action near the top, an in-content link to the page that converts.",
+                        "Change one thing, so next month's numbers say which one mattered.",
+                    ],
+                    "How visitors behave on the page (where they stop). Page-level behaviour is not pulled.",
+                    [f"{row['conversions']} {noun['plural']} from {row['sessions']:,} sessions", f"{parsed.conversion_elements} conversion elements on the page"],
+                )
+            )
+        else:
+            skipped.append(
+                {
+                    "id": "F-1",
+                    "name": "Remove friction",
+                    "reason": "The page read found none of the known frictions: it has a conversion element, no long form, contact details outside the footer, and it links to a conversion page.",
+                }
             )
     if not (low_eng or low_conv):
         skipped.append(

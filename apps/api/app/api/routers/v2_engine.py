@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
 from app.models.client import Client
-from app.services import crawl_link_facts, data_freshness, page_diagnostic
+from app.services import crawl_link_facts, data_freshness, llm_evidence, page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -118,6 +118,7 @@ class DiagnoseRequest(BaseModel):
 def _evidence(db: Session, client: Client, month: str, search: str, page: str) -> dict:
     found = visibility_candidates.page_evidence(db, client, month, search, page)
     found["crawl"] = crawl_link_facts.link_facts(db, client, page, found["donors"])
+    found["llm"] = llm_evidence.for_search(db, client, search)
     return found
 
 
