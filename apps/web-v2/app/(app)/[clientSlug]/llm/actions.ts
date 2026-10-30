@@ -34,3 +34,22 @@ export async function llmResponsesAction(clientId: string, runId: string): Promi
     return failure(error, "The run could not be read: the API did not answer.");
   }
 }
+
+export async function addLlmPromptsAction(
+  clientId: string,
+  prompts: { prompt: string; topic_cluster: string }[],
+): Promise<LlmResult<{ added: number; skipped: number; settings: LlmSettings }>> {
+  try {
+    return { ok: true, value: await apiFetch("/v2/llm/prompts", { method: "POST", clientId, body: { prompts } }) };
+  } catch (error) {
+    return failure(error, "The prompts could not be saved: the API did not answer.");
+  }
+}
+
+export async function removeLlmPromptAction(clientId: string, promptId: string): Promise<LlmResult<LlmSettings>> {
+  try {
+    return { ok: true, value: await apiFetch<LlmSettings>(`/v2/llm/prompts/${promptId}`, { method: "DELETE", clientId }) };
+  } catch (error) {
+    return failure(error, "The prompt could not be removed: the API did not answer.");
+  }
+}

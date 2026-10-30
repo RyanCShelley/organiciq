@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.llm_visibility import platforms, report, runner
 from app.models.client import Client
-from app.models.llm_visibility import ClientLlmSettings, LlmRun
+from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmRun
 from app.schemas import SyncJobCreate
 from app.services.competitors import bare_domain
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
@@ -27,6 +27,15 @@ class CompetitorIn(BaseModel):
     domain: str
     name: str = Field(min_length=1, max_length=120)
     patterns: list[str] = Field(min_length=1, max_length=10)
+
+
+class PromptIn(BaseModel):
+    prompt: str = Field(min_length=3, max_length=600)
+    topic_cluster: str = Field(min_length=1, max_length=160)
+
+
+class PromptsIn(BaseModel):
+    prompts: list[PromptIn] = Field(min_length=1, max_length=50)
 
 
 class SettingsIn(BaseModel):
@@ -64,6 +73,12 @@ def get_llm_settings(
         ],
         "prompts": len(prompts),
         "clusters": sorted({p["cluster"] for p in prompts}),
+        "extra_prompts": [
+            {"id": str(r.id), "prompt": r.prompt, "topic_cluster": r.topic_cluster}
+            for r in db.query(ClientLlmPrompt)
+            .filter(ClientLlmPrompt.client_id == client.id)
+            .order_by(ClientLlmPrompt.topic_cluster, ClientLlmPrompt.created_at)
+        ],
         "platforms": [{"key": p, "name": platforms.DISPLAY[p], "enabled": p in enabled} for p in platforms.PLATFORMS],
         "calls_per_run": len(prompts) * len(enabled),
     }
@@ -94,6 +109,43 @@ def save_llm_settings(
         row = ClientLlmSettings(client_id=client.id)
         db.add(row)
     row.brand_name, row.brand_patterns, row.competitors = payload.brand_name.strip(), patterns, competitors
+    db.commit()
+    return get_llm_settings(client, _, db)
+
+
+@router.post("/prompts")
+def add_llm_prompts(
+    payload: PromptsIn,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Add prompts to every run, beyond the watchlist's. One already asked (here or on the watchlist) is skipped."""
+    asked = {p["prompt"].lower() for p in runner.prompts_for(db, client)}
+    added = skipped = 0
+    for item in payload.prompts:
+        text = runner.clean_prompt(item.prompt)
+        if len(text) < 3 or text.lower() in asked:
+            skipped += 1
+            continue
+        asked.add(text.lower())
+        db.add(ClientLlmPrompt(client_id=client.id, prompt=text, prompt_key=text.lower(), topic_cluster=item.topic_cluster.strip()))
+        added += 1
+    db.commit()
+    return {"added": added, "skipped": skipped, "settings": get_llm_settings(client, _, db)}
+
+
+@router.delete("/prompts/{prompt_id}")
+def remove_llm_prompt(
+    prompt_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    row = db.query(ClientLlmPrompt).filter(ClientLlmPrompt.id == prompt_id, ClientLlmPrompt.client_id == client.id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That prompt is not on this client.")
+    db.delete(row)
     db.commit()
     return get_llm_settings(client, _, db)
 

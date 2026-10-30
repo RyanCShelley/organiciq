@@ -82,3 +82,19 @@ class LlmResponse(Base):
     estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientLlmPrompt(Base):
+    """A prompt asked on every run that is not a watchlist keyword's paired prompt: brand checks and niche questions."""
+
+    __tablename__ = "client_llm_prompts"
+    __table_args__ = (UniqueConstraint("client_id", "prompt_key", name="uq_client_llm_prompt"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Lower-cased and whitespace-collapsed, so the same question is never asked twice.
+    prompt_key: Mapped[str] = mapped_column(String(600), nullable=False)
+    #: The group its answers count under in share of voice, e.g. "Brand check".
+    topic_cluster: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

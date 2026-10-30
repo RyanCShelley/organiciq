@@ -68,6 +68,7 @@ export type LlmSettings = {
   competitors: { domain: string; name: string; patterns: string[] }[];
   prompts: number;
   clusters: string[];
+  extra_prompts: { id: string; prompt: string; topic_cluster: string }[];
   platforms: { key: string; name: string; enabled: boolean }[];
   calls_per_run: number;
 };

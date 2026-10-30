@@ -14,7 +14,7 @@ from app.llm_visibility import analyze as analysis
 from app.llm_visibility import platforms
 from app.models.client import Client
 from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
-from app.models.llm_visibility import ClientLlmSettings, LlmResponse, LlmRun
+from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 from app.services.competitors import bare_domain
 
@@ -62,8 +62,12 @@ def brand_config(db: Session, client: Client) -> analysis.BrandConfig:
     return analysis.BrandConfig(name, [p.lower() for p in patterns], bare_domain(client.domain), competitors)
 
 
+def clean_prompt(text: str | None) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
 def prompts_for(db: Session, client: Client) -> list[dict]:
-    """The watchlist keywords that carry a paired AI prompt; the keyword's bucket is the topic cluster."""
+    """What a run asks: the watchlist keywords' paired prompts (the bucket is the topic), then the client's own extra prompts."""
     rows = (
         db.query(WatchlistKeyword, WatchlistBucket.name)
         .join(WatchlistBucket, WatchlistBucket.id == WatchlistKeyword.bucket_id)
@@ -74,10 +78,15 @@ def prompts_for(db: Session, client: Client) -> list[dict]:
     out = []
     seen: set[str] = set()
     for keyword, bucket in rows:
-        prompt = re.sub(r"\s+", " ", keyword.paired_ai_prompt or "").strip()
+        prompt = clean_prompt(keyword.paired_ai_prompt)
         if prompt and prompt.lower() not in seen:
             seen.add(prompt.lower())
-            out.append({"prompt": prompt, "keyword": keyword.keyword, "cluster": bucket})
+            out.append({"prompt": prompt, "keyword": keyword.keyword, "cluster": bucket, "extra": False})
+    extras = db.query(ClientLlmPrompt).filter(ClientLlmPrompt.client_id == client.id).order_by(ClientLlmPrompt.topic_cluster, ClientLlmPrompt.created_at).all()
+    for row in extras:
+        if row.prompt_key not in seen:
+            seen.add(row.prompt_key)
+            out.append({"prompt": row.prompt, "keyword": None, "cluster": row.topic_cluster, "extra": True})
     return out
 
 

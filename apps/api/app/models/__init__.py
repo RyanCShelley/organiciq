@@ -35,7 +35,7 @@ from app.models.user import User, UserClient, UserRole
 from app.models.bing_stats import FactBingQueryStat
 from app.models.client_bing_site import ClientBingSite
 from app.models.engine_task import EngineTask
-from app.models.llm_visibility import ClientLlmSettings, LlmResponse, LlmRun
+from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.models.client_completion_pattern import ClientCompletionPattern
 from app.models.client_feed import ClientFeed
 from app.models.client_focus import ClientFocus
@@ -44,6 +44,7 @@ from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 __all__ = [
     "BaselineVersion",
+    "ClientLlmPrompt",
     "ClientLlmSettings",
     "LlmRun",
     "LlmResponse",

@@ -246,3 +246,32 @@ def test_gemini_is_asked_without_thinking_so_the_answer_is_not_cut_off(monkeypat
     monkeypatch.setattr(platforms, "_post", fake_post)
     assert platforms._gemini("hi", "k").text == "ok"
     assert sent["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
+
+
+def test_extra_prompts_join_the_run_under_their_own_topic_and_are_never_asked_twice(client, db, client_a, admin_user, keys):
+    _watch(db, client_a, [("a", "Best mineral sunscreen?")])
+    h = client_header(client_a.id, admin_user.email)
+    added = client.post(
+        "/v2/llm/prompts",
+        json={"prompts": [
+            {"prompt": "Is Absolutely  Natural any good?", "topic_cluster": "Brand check"},
+            {"prompt": "best mineral sunscreen?", "topic_cluster": "Niche"},  # already a watchlist prompt
+            {"prompt": "is absolutely natural any good?", "topic_cluster": "Niche"},  # same as the first
+        ]},
+        headers=h,
+    ).json()
+    assert added["added"] == 1 and added["skipped"] == 2
+    items = runner.prompts_for(db, client_a)
+    assert [(i["prompt"], i["cluster"], i["extra"]) for i in items] == [
+        ("Best mineral sunscreen?", "Sunscreen", False),
+        ("Is Absolutely Natural any good?", "Brand check", True),
+    ]
+    assert added["settings"]["prompts"] == 2 and added["settings"]["extra_prompts"][0]["topic_cluster"] == "Brand check"
+
+
+def test_an_extra_prompt_can_be_removed_but_not_by_another_client(client, db, client_a, client_b, admin_user, keys):
+    h = client_header(client_a.id, admin_user.email)
+    client.post("/v2/llm/prompts", json={"prompts": [{"prompt": "A question?", "topic_cluster": "Niche"}]}, headers=h)
+    pid = client.get("/v2/llm/settings", headers=h).json()["extra_prompts"][0]["id"]
+    assert client.delete(f"/v2/llm/prompts/{pid}", headers=client_header(client_b.id, admin_user.email)).status_code == 404
+    assert client.delete(f"/v2/llm/prompts/{pid}", headers=h).json()["extra_prompts"] == []
