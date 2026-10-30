@@ -142,7 +142,13 @@ def _gemini(prompt: str, key: str) -> PlatformAnswer:
         headers={"x-goog-api-key": key},
         body={
             "contents": [{"parts": [{"text": f"{SYSTEM}\n\n{prompt}"}]}],
-            "generationConfig": {"maxOutputTokens": MAX_TOKENS, "temperature": TEMPERATURE},
+            # Gemini 2.5 spends its output allowance on hidden "thinking" first; left on, the visible answer is cut off
+            # after a couple of hundred characters. A plain answer needs no thinking.
+            "generationConfig": {
+                "maxOutputTokens": MAX_TOKENS,
+                "temperature": TEMPERATURE,
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
         },
         label="Gemini",
     )

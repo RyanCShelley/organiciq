@@ -234,3 +234,15 @@ def test_the_monthly_schedule_queues_clients_with_prompts_and_not_twice(db, clie
     for name in ("openai_api_key", "perplexity_api_key"):
         monkeypatch.setattr(get_settings(), name, "")
     assert daily_sync.enqueue_due_llm_runs(db)["due"] == 0
+
+
+def test_gemini_is_asked_without_thinking_so_the_answer_is_not_cut_off(monkeypatch):
+    sent = {}
+
+    def fake_post(url, *, headers, body, label):
+        sent.update(body)
+        return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}], "usageMetadata": {}}
+
+    monkeypatch.setattr(platforms, "_post", fake_post)
+    assert platforms._gemini("hi", "k").text == "ok"
+    assert sent["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
