@@ -302,6 +302,11 @@ export function LeadsList({
   const [picked, setPicked] = useState<string[]>([]);
   const toggle = (key: string) => setPicked((c) => (c.includes(key) ? c.filter((k) => k !== key) : [...c, key]));
   const noun = data.noun.plural;
+  const [sortBy, setSortBy] = useState<"missed" | "sessions" | "rate">("missed");
+  const [shown, setShown] = useState(25);
+  const everyPage = [...(data.all_pages ?? [])].sort((a, b) =>
+    sortBy === "sessions" ? b.sessions - a.sessions : sortBy === "rate" ? a.conversion_rate - b.conversion_rate || b.sessions - a.sessions : b.missed_conversions - a.missed_conversions || b.sessions - a.sessions,
+  );
 
   if (data.needs === "conversions") {
     return (
@@ -417,6 +422,72 @@ export function LeadsList({
               </div>
             </>
           )}
+          <div className="mt-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Every page with organic visits</h3>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                {data.all_pages_total ?? 0} pages with 10+ organic sessions in {data.scope}, including ones too small to be compared with the site&apos;s norm.
+              </p>
+            </div>
+            <label className="text-sm">
+              <span className="font-semibold">Sort by</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as "missed" | "sessions" | "rate")}
+                className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
+              >
+                <option value="missed">Most missed {noun}</option>
+                <option value="sessions">Most sessions</option>
+                <option value="rate">Lowest conversion rate</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[40rem] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+                <tr>
+                  <th className="w-6 py-1 pr-2" />
+                  <th className="py-1 pr-3 font-medium">Page</th>
+                  <th className="px-3 py-1 text-right font-medium">Sessions</th>
+                  <th className="px-3 py-1 text-right font-medium">{noun}</th>
+                  <th className="px-3 py-1 text-right font-medium">Engagement</th>
+                  <th className="px-3 py-1 text-right font-medium">Missed {noun}</th>
+                  <th className="py-1 pl-3 font-medium">Compared</th>
+                </tr>
+              </thead>
+              <tbody>
+                {everyPage.slice(0, shown).map((p) => (
+                  <tr key={p.page} className="border-t border-[var(--border)] align-top">
+                    <td className="py-2 pr-2">
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(p.page)}
+                        disabled={picked.length >= MAX_PICKS && !picked.includes(p.page)}
+                        onChange={() => toggle(p.page)}
+                        aria-label={`Diagnose ${shortPage(p.page)}`}
+                      />
+                    </td>
+                    <td className="min-w-[10rem] break-all py-2 pr-3 font-medium" title={p.page}>
+                      {shortPage(p.page)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{num(p.sessions)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {num(p.conversions)}
+                      <div className="text-xs text-[var(--text-tertiary)]">{p.conversion_rate}%</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{p.engagement_rate}%</td>
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{p.missed_conversions > 0 ? `+${num(p.missed_conversions, 1)}` : "–"}</td>
+                    <td className="py-2 pl-3 text-xs text-[var(--text-tertiary)]">{p.compared ? "yes" : "no, under 50 sessions"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {everyPage.length > shown ? (
+              <button type="button" onClick={() => setShown((n) => n + 25)} className="mt-2 text-sm font-semibold underline">
+                Show 25 more ({everyPage.length - shown} left)
+              </button>
+            ) : null}
+          </div>
           <ul className="mt-3 space-y-1 text-xs text-[var(--text-tertiary)]">
             {data.notes.map((n) => (
               <li key={n}>{n}</li>

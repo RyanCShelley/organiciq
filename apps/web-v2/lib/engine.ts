@@ -207,6 +207,16 @@ export type LeadRow = {
   reason: string | null;
 };
 
+export type LeadsPageRow = {
+  page: string;
+  sessions: number;
+  conversions: number;
+  conversion_rate: number;
+  engagement_rate: number;
+  missed_conversions: number;
+  compared: boolean;
+};
+
 export type LeadsCandidates = {
   month: string;
   window: { from: string; to: string; months: number };
@@ -218,5 +228,7 @@ export type LeadsCandidates = {
   site?: { qualifying_pages: number; median_conversion_rate: number | null; median_engagement_rate: number | null; organic_sessions: number };
   counts: { strong: number; possible: number; listed: number; found?: number };
   candidates: LeadRow[];
+  all_pages?: LeadsPageRow[];
+  all_pages_total?: number;
   notes: string[];
 };

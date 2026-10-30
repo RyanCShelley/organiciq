@@ -36,6 +36,9 @@ from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 LIST_SIZE = 20
 PAGE_MIN_SESSIONS = 50.0
+#: The all-pages table lists any page with this many organic sessions over the quarter, compared or not.
+ALL_PAGES_MIN_SESSIONS = 10.0
+ALL_PAGES_SIZE = 100
 STRONG_MIN_SESSIONS = 100.0
 WORST_SHARE = 0.25
 
@@ -172,6 +175,25 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
                     "reason": reason,
                 }
             )
+    all_pages: list[dict[str, Any]] = []
+    for url, (sessions, engaged) in traffic.items():
+        if sessions < ALL_PAGES_MIN_SESSIONS or not is_real_page(url) or (scope is not None and url not in scope):
+            continue
+        conversions = converted.get(url, 0.0)
+        rate = conversions / sessions
+        all_pages.append(
+            {
+                "page": url,
+                "sessions": round(sessions),
+                "conversions": round(conversions),
+                "conversion_rate": round(rate * 100, 2),
+                "engagement_rate": round(engaged / sessions * 100, 1),
+                "missed_conversions": round(sessions * max(0.0, site_conv - rate), 1) if site_conv is not None else 0.0,
+                "compared": url in rows,
+            }
+        )
+    all_pages.sort(key=lambda r: (-r["missed_conversions"], -r["sessions"]))
+
     out.sort(key=lambda c: (c["strength"] != "strong", -c["missed_conversions"], -c["sessions"]))
     listed = out if list_size is None else out[:list_size]
 
@@ -192,6 +214,8 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             "found": len(out),
         },
         "candidates": listed,
+        "all_pages": all_pages[:ALL_PAGES_SIZE],
+        "all_pages_total": len(all_pages),
         "notes": [
             f"A page needs {int(PAGE_MIN_SESSIONS)}+ organic sessions over the three months to be listed. Each page is compared with this site's own median, never an outside benchmark.",
             f"Missed {noun['plural']} = sessions x (the site's median conversion rate - the page's rate). Strong means the worst quarter of the site on both conversion and engagement, with {int(STRONG_MIN_SESSIONS)}+ sessions.",

@@ -325,3 +325,28 @@ def test_a_sharp_drop_on_tiny_numbers_says_too_small_not_no_decline(db, client_a
     by = {c["key"]: c for c in tc.build(db, client_a, SEP)["candidates"] if c["level"] == "page"}
     assert by["https://shop.example/tiny"]["reason"] == "too small to judge: 25 sessions the month before, 10 last month"
     assert "no decline flagged" in by["https://shop.example/steady"]["reason"]
+
+
+def test_the_all_pages_table_includes_small_pages_and_says_they_were_not_compared(db, client_a):
+    define(db, client_a)
+    build_site(db, client_a)
+    out = lc.build(db, client_a, SEP)
+    by = {r["page"].rsplit("/", 1)[-1]: r for r in out["all_pages"]}
+    assert by["tiny"]["compared"] is False and by["tiny"]["sessions"] == 20
+    assert by["leaky"]["compared"] is True
+    # Biggest missed conversions first, and a page above the norm misses nothing.
+    assert out["all_pages"][0]["page"].endswith("/leaky")
+    assert by["great1"]["missed_conversions"] == 0.0
+    assert out["all_pages_total"] == 13
+
+
+def test_the_all_pages_table_respects_a_bucket_scope_and_the_organic_filter(db, client_a):
+    define(db, client_a)
+    build_site(db, client_a)
+    traffic(db, client_a, date(2026, 8, 20), "https://shop.example/paid_only", 500, channel=PAID)
+    gsc(db, client_a, "leaky thing", "https://shop.example/leaky")
+    b = bucket(db, client_a, "Leaky", ["leaky thing"])
+    db.commit()
+    assert all("paid_only" not in r["page"] for r in lc.build(db, client_a, SEP)["all_pages"])
+    scoped = lc.build(db, client_a, SEP, b.id)
+    assert [r["page"].rsplit("/", 1)[-1] for r in scoped["all_pages"]] == ["leaky"]
