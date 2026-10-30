@@ -107,8 +107,8 @@ Requires **Python 3.13** for the API (3.14 is not yet supported by pydantic-core
 
 Seed data:
 
-- Clients: **SMA Marketing** (`smamarketing.net`)
-- Users: `admin@smamarketing.net` (SMA Admin), `team@smamarketing.net` (SMA Team → SMA Marketing)
+- Clients: **SMA Marketing** (`smamarketing.com`)
+- Users: `admin@smamarketing.com` (SMA Admin), `team@smamarketing.com` (SMA Team → SMA Marketing)
 
 ### API
 
@@ -306,7 +306,7 @@ Second test client for isolation and independent syncs:
 
 | Client | Domain | Purpose |
 |--------|--------|---------|
-| SMA Marketing | `smamarketing.net` | Primary validation client (real integrations) |
+| SMA Marketing | `smamarketing.com` | Primary validation client (real integrations) |
 | Beacon Industrial | `beaconindustrial.com` | Second client shell for mappings + isolation |
 
 Re-run seed after pulling Phase 8 changes:

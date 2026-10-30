@@ -1,12 +1,11 @@
 /**
  * SMA Workspace login domains — keep in sync with login page copy.
  *
- * Both are accepted through the .com migration: staff accounts and Workspace
- * aliases are still on .net. Override with SMA_GOOGLE_HOSTED_DOMAIN
+ * smamarketing.com only. Override with SMA_GOOGLE_HOSTED_DOMAIN
  * (comma-separated) to change this without a deploy.
  */
 export const HOSTED_DOMAINS = (
-  process.env.SMA_GOOGLE_HOSTED_DOMAIN || "smamarketing.com,smamarketing.net"
+  process.env.SMA_GOOGLE_HOSTED_DOMAIN || "smamarketing.com"
 )
   .split(",")
   .map((d) => d.trim().toLowerCase().replace(/^@/, ""))

@@ -35,9 +35,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://organiciq:organiciq@localhost:5432/organiciq"
     auth_secret: str = INSECURE_AUTH_SECRET
     sma_admin_emails: str = ""
-    # Comma-separated. Both are accepted through the .com migration; existing
-    # staff accounts and Google Workspace aliases are still on .net.
-    sma_google_hosted_domain: str = "smamarketing.com,smamarketing.net"
+    # Comma-separated: who may sign in. smamarketing.com only; a staff account still on .net must be moved.
+    sma_google_hosted_domain: str = "smamarketing.com"
     # Domains that are the same company, for matching a person across
     # systems. Deliberately not the login setting above: that one answers
     # "who may sign in" and gets narrowed, and narrowing it should not make

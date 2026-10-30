@@ -119,10 +119,13 @@ database first** if Railway lets you, and confirm `/health` answers `{"status":"
 
 ## Sign-in domain
 
-Production uses `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com` on the API, the worker and web-v2. The code's own default
-still accepts both `.com` and `.net` while accounts move over, so **setting only `.com` refuses any staff account that
-is still on `.net`**. Before narrowing it, check every person who signs in has a `.com` account, and that
-`SMA_ADMIN_EMAILS` lists `.com` addresses.
+Production uses `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com` on the API, the worker and web-v2. The code's own default is also
+`smamarketing.com` only, so **a staff account still on `.net` is refused**. Check every person who signs in has a `.com`
+account, and that `SMA_ADMIN_EMAILS` lists `.com` addresses.
+
+One deliberate exception: `IDENTITY_DOMAINS` still lists both domains. It is not about signing in. It matches a person
+between systems (Teamwork still holds 7 of 8 people on `.net`), so removing `.net` there would leave their tasks
+unassigned. Drop it once Teamwork is moved.
 
 ## Google Console
 

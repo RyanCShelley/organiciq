@@ -124,7 +124,7 @@ def test_upsert_guard_is_skipped_in_development(monkeypatch):
 def test_upsert_assigns_team_not_admin_by_default(db):
     user = upsert_user(
         db,
-        AuthUpsertRequest(email="Staffer@smamarketing.net", name="Staffer", google_sub="g-1"),
+        AuthUpsertRequest(email="Staffer@smamarketing.com", name="Staffer", google_sub="g-1"),
     )
     assert user.role == UserRole.SMA_TEAM
 
@@ -581,21 +581,19 @@ def test_startup_states_the_security_posture():
 
 # Explicit rather than relying on the default: a developer's local .env sets
 # this, and test outcomes must not depend on it.
-BOTH_DOMAINS = "smamarketing.com,smamarketing.net"
+BOTH_DOMAINS = "smamarketing.com"
 
 
-def test_code_default_covers_both_domains():
+def test_code_default_is_smamarketing_com_only():
     """What production falls back to if SMA_GOOGLE_HOSTED_DOMAIN is unset."""
     default = Settings.model_fields["sma_google_hosted_domain"].default
-    assert "smamarketing.com" in default
-    assert "smamarketing.net" in default
+    assert default == "smamarketing.com"
 
 
-def test_both_workspace_domains_are_accepted():
-    """Staff accounts are still on .net while the org moves to .com."""
+def test_only_smamarketing_com_may_sign_in():
     settings = Settings(sma_google_hosted_domain=BOTH_DOMAINS)
     assert settings.is_workspace_email("ryan@smamarketing.com")
-    assert settings.is_workspace_email("ryan@smamarketing.net")
+    assert not settings.is_workspace_email("ryan@smamarketing.net")
 
 
 def test_workspace_check_is_case_and_whitespace_insensitive():
