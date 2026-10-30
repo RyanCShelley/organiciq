@@ -81,6 +81,13 @@ def test_share_of_voice_is_per_topic_cluster_and_includes_competitors():
     assert sov["Rival"]["share"]["current"] == 1.0 and sov["Rival"]["mentions"]["previous"] is None
 
 
+def test_the_brand_is_listed_in_every_topic_even_when_no_answer_named_it():
+    cur = [row("q1", "ChatGPT", "Not visible", comps=["Rival"])]
+    sov = {r["brand"]: r for r in report.share_of_voice(cur, None, "Absolutely Natural")}
+    assert sov["Absolutely Natural"]["share"]["current"] == 0.0 and sov["Absolutely Natural"]["is_self"]
+    assert sov["Rival"]["share"]["current"] == 1.0
+
+
 def test_query_movers_rank_the_biggest_changes():
     cur = [row("up", "ChatGPT", "Cited + Mentioned"), row("down", "ChatGPT", "Not visible"), row("same", "ChatGPT", "Mentioned")]
     prev = [row("up", "ChatGPT", "Not visible"), row("down", "ChatGPT", "Mentioned"), row("same", "ChatGPT", "Mentioned")]

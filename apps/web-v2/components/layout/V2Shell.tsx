@@ -11,7 +11,6 @@ export const V2_SECTIONS = [
   { label: "Site Health", phase: "Phase 3" },
   { label: "Search Visibility", phase: "Phase 4" },
   { label: "CTR Optimizer", phase: "Phase 5" },
-  { label: "LLM Visibility", phase: "Phase 6" },
   { label: "Content Hub", phase: "Phase 7" },
 ] as const;
 

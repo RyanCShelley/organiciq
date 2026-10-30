@@ -81,7 +81,7 @@ def _sov_bucket(rows: list[Any], brand: str) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for r in _valid(rows):
         cluster = r.topic_cluster or "Uncategorized"
-        b = out.setdefault(cluster, {"total": 0, "brands": {}})
+        b = out.setdefault(cluster, {"total": 0, "brands": {brand: {"count": 0, "self": True}}})
         b["total"] += 1
         names = ([brand] if r.brand_mentioned else []) + list(r.competitors_mentioned or [])
         for name in names:
