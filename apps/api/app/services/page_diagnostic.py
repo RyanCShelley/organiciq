@@ -29,6 +29,7 @@ from app.decisions.catalog import VISIBILITY_ACTIONS, PageFacts, SectionFacts, _
 from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.page_targets import LinkDonor
 from app.decisions.provisional import suggest as provisional_suggest
+from app.decisions.provisional import suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
 from app.ingestion.crawler.parse import ParsedPage, parse_page
@@ -332,4 +333,60 @@ def diagnose(
         "word_count": parsed.word_count,
         "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
     }
+    return result
+
+
+def diagnose_page(
+    *,
+    focus: str,
+    url: str,
+    client_domain: str,
+    fetch: Callable[[str], Awaitable[Fetched]] = _fetch,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """A page picked from the Traffic or Leads list, read live.
+
+    There is no search to judge, so no catalog Visibility rule runs: the page is read, the facts that
+    make it a candidate are set beside it, and what is worth checking is listed, unconfirmed.
+    """
+    result: dict[str, Any] = {
+        "search": "(page)",
+        "page": url,
+        "read": {"ok": False, "status": None, "error": None, "at": datetime.now(timezone.utc).isoformat()},
+        "observations": [],
+        "prescriptions": [],
+        "not_judged": [],
+        "suggestions": [],
+        "skipped_suggestions": [],
+        "evidence": evidence.get("summary"),
+    }
+    try:
+        fetched = read_page(url, client_domain, fetch)
+    except PageUnreadable as exc:
+        result["read"]["error"] = str(exc)
+        return result
+
+    result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url)
+    parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+
+    notes: list[dict[str, str]] = []
+    if fetched.status >= 400:
+        notes.append({"level": "problem", "text": f"The page answers with an error ({fetched.status})."})
+    if parsed.meta_noindex:
+        notes.append({"level": "problem", "text": "The page is marked noindex, so Google is told not to show it."})
+    canonical = parsed.canonical_url
+    if canonical and urlsplit(canonical).path.rstrip("/") != urlsplit(fetched.final_url).path.rstrip("/"):
+        notes.append({"level": "problem", "text": f"The page's canonical points elsewhere ({canonical}), so Google may rank that address instead."})
+    if parsed.says_not_found:
+        notes.append({"level": "problem", "text": "The page says it is not found while returning a normal response."})
+    notes.append({"level": "note", "text": f"Title: “{parsed.title}”. Main heading: “{parsed.h1}”."})
+    notes.append({"level": "note", "text": f"{parsed.word_count:,} words, {len(parsed.sections)} headed sections, {parsed.conversion_elements} conversion elements."})
+    result["observations"] = notes
+
+    if fetched.status < 400:
+        if focus == "traffic":
+            found = suggest_traffic(lost=evidence.get("lost") or [], unit=evidence.get("unit"))
+        else:
+            found = suggest_leads(row=evidence.get("row"), site=evidence.get("site") or {}, path=evidence.get("path") or {}, parsed=parsed, noun=evidence.get("noun") or {"singular": "lead", "plural": "leads"})
+        result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
     return result

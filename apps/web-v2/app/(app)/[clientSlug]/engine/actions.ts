@@ -75,3 +75,23 @@ export async function taskTextAction(clientId: string, id: string): Promise<Task
     return failure(error, "The text could not be built: the API did not answer.");
   }
 }
+
+export async function diagnosePagesAction(
+  clientId: string,
+  focus: "traffic" | "leads",
+  pages: string[],
+): Promise<DiagnoseResult> {
+  try {
+    const body = await apiFetch<{ results: Diagnosis[] }>("/v2/engine/diagnose-page", {
+      method: "POST",
+      clientId,
+      body: { focus, pages },
+    });
+    return { ok: true, results: body.results };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof ApiError ? error.message : "The pages could not be read: the API did not answer.",
+    };
+  }
+}

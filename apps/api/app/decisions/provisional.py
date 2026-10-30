@@ -220,3 +220,134 @@ def suggest(
         )
 
     return {"suggestions": out, "skipped": skipped}
+
+
+def suggest_traffic(*, lost: list[dict[str, Any]], unit: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+    """For a page whose organic sessions fell: which searches it lost, and whether rankings or demand moved."""
+    out: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    if not lost:
+        skipped.append(
+            {
+                "id": "T-S1",
+                "name": "Find the searches that lost the most",
+                "reason": "No search with at least 20 impressions before lost clicks or impressions on this page, so the drop is not in the searches Search Console reports.",
+            }
+        )
+        return {"suggestions": out, "skipped": skipped}
+
+    def line(x: dict[str, Any]) -> str:
+        pos = x["position"]
+        moved = f", position {pos['previous']} to {pos['current']}" if pos["current"] is not None else ", no longer showing"
+        return f"“{x['query']}”: {x['impressions']['previous']:,} to {x['impressions']['current']:,} impressions, {x['clicks']['previous']} to {x['clicks']['current']} clicks{moved}"
+
+    out.append(
+        _item(
+            "T-S1",
+            "Start with the searches that lost the most",
+            "These are the searches on this page that lost the most clicks, three months against the three before.",
+            [line(x) for x in lost[:5]] + ["Open each in Search Console and in the search results, and see what now ranks above the page."],
+            "A person's read of the results. Nothing is missing, but the cause is not stated: this lists what fell, not why.",
+            [f"{len(lost)} searches lost clicks or impressions"],
+        )
+    )
+
+    slipped = [x for x in lost if x["position"]["current"] is None or x["position"]["current"] - x["position"]["previous"] >= 1.5]
+    if len(slipped) >= max(2, round(len(lost) * 0.6)):
+        out.append(
+            _item(
+                "T-S2",
+                "Rankings fell, not just demand",
+                f"{len(slipped)} of the {len(lost)} searches moved down the results or dropped out, so this looks like lost ranking, not fewer people searching.",
+                ["Compare the page with what now outranks it for the biggest loser.", "Check the page was not changed, redirected or slowed in the period."],
+                "A view of what changed on the page in that period. Not tracked: the crawl keeps one snapshot.",
+                [f"{len(slipped)} searches with a worse position"],
+            )
+        )
+    elif lost:
+        out.append(
+            _item(
+                "T-S2",
+                "Demand fell more than rankings",
+                "Most of these searches kept their position but drew fewer impressions, which points to fewer people searching, not a ranking loss.",
+                ["Compare the same months a year ago for a seasonal pattern before acting on the page."],
+                "A year of Search Console history to separate a season from a decline.",
+                [f"{len(lost) - len(slipped)} of {len(lost)} searches kept their position"],
+            )
+        )
+    return {"suggestions": out, "skipped": skipped}
+
+
+def suggest_leads(
+    *, row: dict[str, Any] | None, site: dict[str, Any], path: dict[str, Any], parsed: ParsedPage, noun: str
+) -> dict[str, list[dict[str, Any]]]:
+    """For a page whose organic visitors convert or engage less than the site's own median."""
+    out: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    if row is None:
+        return {"suggestions": out, "skipped": [{"id": "L-S1", "name": "Compare with the site", "reason": "This page is not among those the site's median is measured on (it needs 50 organic sessions over the three months)."}]}
+
+    med_eng, med_conv = site.get("median_engagement_rate"), site.get("median_conversion_rate")
+    article = "an" if noun["singular"][:1].lower() in "aeiou" else "a"
+    ends = f"{row['conversion_rate']}% of sessions end in {article} {noun['singular']} here, against a site median of {med_conv}%."
+    low_eng = med_eng is not None and row["engagement_rate"] < med_eng - 5
+    low_conv = med_conv is not None and row["conversion_rate"] < med_conv
+
+    if low_eng:
+        out.append(
+            _item(
+                "L-S1",
+                "Visitors leave without engaging",
+                f"Engagement is {row['engagement_rate']}% against a site median of {med_eng}%. Many arrive and go straight back.",
+                [
+                    "Open the page as a visitor from the search that brings them: does the first screen say they are in the right place?",
+                    f"The page has {parsed.word_count:,} words in {len(parsed.sections)} headed sections and {parsed.conversion_elements} conversion elements.",
+                ],
+                "Why they leave (speed, mismatch with the search, layout). Page-level behaviour is not pulled.",
+                [f"engagement {row['engagement_rate']}% vs site median {med_eng}%"],
+            )
+        )
+    if low_conv:
+        if path["declared"] == 0:
+            out.append(
+                _item(
+                    "L-S2",
+                    f"Check the way from this page to an {noun['singular']}",
+                    f"{ends} The page has {parsed.conversion_elements} conversion elements on it.",
+                    ["Look at where a visitor is meant to go next from this page, and how easy that is to find.",
+                     "No conversion pages are declared for this client, so the path could not be checked against them. Declare them in Settings → Conversions & goals to check."],
+                    "Declared conversion pages, to check the page links to them.",
+                    [f"{row['conversions']} {noun['plural']} from {row['sessions']:,} sessions"],
+                )
+            )
+        elif path["crawl"] and not path["linked_to"]:
+            out.append(
+                _item(
+                    "L-S2",
+                    f"This page does not link to a conversion page",
+                    f"{ends} The crawl found no in-content link from here to any of the {path['declared']} conversion pages declared for this client.",
+                    ["Add a clear in-content link, or a call to action, to the conversion page that fits what this visitor wants."],
+                    "Nothing more: the crawl has already checked.",
+                    [f"0 of {path['declared']} conversion pages linked from this page"],
+                )
+            )
+        else:
+            out.append(
+                _item(
+                    "L-S2",
+                    f"Check the way from this page to an {noun['singular']}",
+                    f"{ends} It links to {len(path['linked_to'])} of {path['declared']} declared conversion pages, so the link exists: the question is whether visitors act on it.",
+                    ["Read the page as a visitor and ask whether the next step is the obvious one."],
+                    "How visitors move after landing here. Not pulled.",
+                    [f"{row['conversions']} {noun['plural']} from {row['sessions']:,} sessions"],
+                )
+            )
+    if not (low_eng or low_conv):
+        skipped.append(
+            {
+                "id": "L-S1",
+                "name": "Weak engagement or conversion",
+                "reason": f"This page is at or above the site's median on both ({row['engagement_rate']}% engagement, {row['conversion_rate']}% conversion), so there is no gap to explain.",
+            }
+        )
+    return {"suggestions": out, "skipped": skipped}

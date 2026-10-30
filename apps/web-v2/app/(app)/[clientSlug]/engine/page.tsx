@@ -3,7 +3,16 @@ import { notFound } from "next/navigation";
 import { EngineScreen } from "@/components/EngineScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
-import { EMPTY_OVERVIEW, EMPTY_PLAN, type EngineOverview, type TaskPlan, type VisibilityCandidates } from "@/lib/engine";
+import {
+  EMPTY_OVERVIEW,
+  EMPTY_PLAN,
+  type EngineKind,
+  type EngineOverview,
+  type LeadsCandidates,
+  type TaskPlan,
+  type TrafficCandidates,
+  type VisibilityCandidates,
+} from "@/lib/engine";
 import { currentMonth, type ClientFocus } from "@/lib/focus";
 import { lastCompleteMonth } from "@/lib/review";
 import type { Watchlist } from "@/lib/watchlist";
@@ -37,12 +46,26 @@ export default async function EnginePage({
   // The bucket in the URL wins; otherwise the one chosen with the focus; otherwise the whole site.
   const bucketId =
     requestedBucket === "site" ? null : (requestedBucket ?? focus?.bucket_id ?? null);
-  const showVisibility = focus?.focus === "visibility" || show === "visibility";
+  // A tab in the URL wins; otherwise the focus chosen for this month.
+  const kind: EngineKind | null =
+    show === "visibility" || show === "traffic" || show === "leads" ? show : (focus?.focus ?? null);
 
   let data: VisibilityCandidates | null = null;
+  let traffic: TrafficCandidates | null = null;
+  let leads: LeadsCandidates | null = null;
   let overview: EngineOverview = EMPTY_OVERVIEW;
   let error: string | null = null;
-  if (showVisibility) {
+  if (kind === "traffic" || kind === "leads") {
+    try {
+      const query = new URLSearchParams({ month });
+      if (bucketId) query.set("bucket_id", bucketId);
+      if (kind === "traffic") traffic = await apiFetch<TrafficCandidates>(`/v2/engine/traffic?${query}`, { clientId: client.id });
+      else leads = await apiFetch<LeadsCandidates>(`/v2/engine/leads?${query}`, { clientId: client.id });
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : "The candidate list could not be built: the API did not answer.";
+    }
+  }
+  if (kind === "visibility") {
     try {
       const focusBucket = focus?.bucket_id ? `&focus_bucket_id=${focus.bucket_id}` : "";
       overview = await apiFetch<EngineOverview>(`/v2/engine/visibility/buckets?month=${month}${focusBucket}`, {
@@ -63,8 +86,10 @@ export default async function EnginePage({
       focus={focus}
       buckets={watchlist.buckets.map((b) => ({ id: b.id, name: b.name }))}
       bucketId={bucketId}
-      showVisibility={showVisibility}
+      kind={kind}
       data={data}
+      traffic={traffic}
+      leads={leads}
       overview={overview}
       plan={plan}
       team={team}

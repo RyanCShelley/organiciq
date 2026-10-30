@@ -151,3 +151,61 @@ export type TaskDraft = {
 };
 
 export type TaskResult<T = EngineTask> = { ok: true; value: T; allowance?: Allowance } | { ok: false; error: string };
+
+export type EngineKind = "visibility" | "traffic" | "leads";
+
+export type TrafficRow = {
+  level: "site" | "bucket" | "page";
+  key: string;
+  label: string;
+  bucket: string | null;
+  sessions: { current: number; previous: number; change_pct: number | null };
+  three_months: { current: number; last_year: number; change_pct: number | null };
+  flag: "sudden" | "slow_bleed" | "both" | null;
+  strength: "strong" | "possible";
+  reason: string | null;
+  at_stake: number;
+};
+
+export type TrafficCandidates = {
+  month: string;
+  scope: string;
+  bucket: { id: string; name: string } | null;
+  windows: { current: string; previous: string; three_months: string[]; last_year: string[] };
+  site: {
+    sessions: { current: number; previous: number; change_pct: number | null };
+    three_months: { current: number; last_year: number; change_pct: number | null };
+    has_last_year: boolean;
+  };
+  counts: { strong: number; possible: number; listed: number };
+  candidates: TrafficRow[];
+  thresholds: { sudden: string; slow_bleed: string };
+  notes: string[];
+};
+
+export type LeadRow = {
+  page: string;
+  sessions: number;
+  conversions: number;
+  conversion_rate: number;
+  engagement_rate: number;
+  missed_conversions: number;
+  worst_conversion: boolean;
+  worst_engagement: boolean;
+  strength: "strong" | "possible";
+  reason: string | null;
+};
+
+export type LeadsCandidates = {
+  month: string;
+  window: { from: string; to: string; months: number };
+  noun: { plural: string; singular: string };
+  conversion_events: string[];
+  needs?: "conversions";
+  scope?: string;
+  bucket?: { id: string; name: string } | null;
+  site?: { qualifying_pages: number; median_conversion_rate: number | null; median_engagement_rate: number | null; organic_sessions: number };
+  counts: { strong: number; possible: number; listed: number; found?: number };
+  candidates: LeadRow[];
+  notes: string[];
+};

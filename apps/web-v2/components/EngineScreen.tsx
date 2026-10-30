@@ -5,10 +5,23 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import type { Client } from "@/lib/api";
-import { confirmTaskAction, diagnoseAction } from "@/app/(app)/[clientSlug]/engine/actions";
+import { confirmTaskAction, diagnoseAction, diagnosePagesAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { EnginePlan } from "@/components/EnginePlan";
-import type { Allowance, Candidate, Diagnosis, EngineOverview, EngineTask, TaskDraft, TaskPlan, VisibilityCandidates } from "@/lib/engine";
+import { LeadsList, TrafficList } from "@/components/FocusLists";
+import type {
+  Allowance,
+  Candidate,
+  Diagnosis,
+  EngineKind,
+  EngineOverview,
+  EngineTask,
+  LeadsCandidates,
+  TaskDraft,
+  TaskPlan,
+  TrafficCandidates,
+  VisibilityCandidates,
+} from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus } from "@/lib/focus";
 
 const num = (n: number | null | undefined, digits = 0) =>
@@ -128,8 +141,10 @@ export function EngineScreen({
   focus,
   buckets,
   bucketId,
-  showVisibility,
+  kind,
   data,
+  traffic,
+  leads,
   overview,
   plan,
   team,
@@ -140,8 +155,10 @@ export function EngineScreen({
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
   bucketId: string | null;
-  showVisibility: boolean;
+  kind: EngineKind | null;
   data: VisibilityCandidates | null;
+  traffic: TrafficCandidates | null;
+  leads: LeadsCandidates | null;
   overview: EngineOverview;
   plan: TaskPlan;
   team: { email: string; name: string | null }[];
@@ -179,6 +196,22 @@ export function EngineScreen({
 
   function togglePick(key: string) {
     setPicked((current) => (current.includes(key) ? current.filter((k) => k !== key) : [...current, key]));
+  }
+
+  function diagnosePages(pages: string[]) {
+    if (!pages.length || (kind !== "traffic" && kind !== "leads")) return;
+    setDiagnoseError(null);
+    startDiagnose(async () => {
+      const result = await diagnosePagesAction(client.id, kind, pages);
+      if (result.ok) {
+        setDiagnoses(result.results);
+        setCollapsed(true);
+      } else setDiagnoseError(result.error);
+    });
+  }
+
+  function scopeTo(bucketKey: string) {
+    router.push(`/${client.slug}/engine?bucket=${bucketKey}${kind && kind !== focus?.focus ? `&show=${kind}` : ""}`);
   }
 
   function diagnose() {
@@ -246,7 +279,7 @@ export function EngineScreen({
         onTaskChange={upsertTask}
       />
 
-      {advice.level !== "ok" && advice.headline ? (
+      {kind === "visibility" && advice.level !== "ok" && advice.headline ? (
         <div
           className={`mb-6 rounded-xl border p-5 text-sm ${
             advice.level === "thin_data" ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900"
@@ -282,23 +315,33 @@ export function EngineScreen({
         </div>
       ) : null}
 
-      {!showVisibility ? (
-        <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--text-secondary)]">
-          {focus
-            ? `Candidate lists for ${focusLabel} are the next thing to build. Visibility is ready now.`
-            : "Set a focus and the candidates for it appear here. Visibility is ready now."}
-          <div className="mt-3">
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="Focus">
+        {FOCUSES.map((f) => {
+          const on = kind === f.value;
+          return (
             <Link
-              href={`/${client.slug}/engine?show=visibility`}
-              className="font-semibold text-[var(--brand-teal)] hover:underline"
+              key={f.value}
+              role="tab"
+              aria-selected={on}
+              href={`/${client.slug}/engine?show=${f.value}${bucketId ? `&bucket=${bucketId}` : ""}`}
+              className={`rounded-full border px-4 py-1.5 font-semibold ${
+                on ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] hover:border-[var(--brand-teal)]"
+              }`}
             >
-              Show the Visibility candidates →
+              {f.label}
+              {focus?.focus === f.value ? <span className={`ml-2 text-xs ${on ? "text-white/80" : "text-[var(--brand-teal)]"}`}>this month&apos;s focus</span> : null}
             </Link>
-          </div>
+          );
+        })}
+      </div>
+
+      {!kind ? (
+        <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-sm text-[var(--text-secondary)]">
+          No focus is set for this month. Choose one on the monthly review, or open any tab above to look at its candidates.
         </div>
       ) : null}
 
-      {buckets_.length > 0 ? (
+      {kind === "visibility" && buckets_.length > 0 ? (
         <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h2 className="text-sm font-semibold">What each bucket has to move</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -349,17 +392,17 @@ export function EngineScreen({
         </p>
       ) : null}
 
-      {data ? (
-        <div className="space-y-6">
-          {diagnoses ? (
+      {diagnoses ? (
+        <div className="mb-6">
+
             <div className="space-y-4">
               <h2 className="text-sm font-semibold">Diagnosis</h2>
               {diagnoses.map((d) => (
                 <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="font-semibold">{d.search}</h3>
+                    <h3 className="font-semibold">{d.search.startsWith("(") ? shortPage(d.page) : d.search}</h3>
                     <span className="text-xs text-[var(--text-secondary)]">
-                      {shortPage(d.page)}
+                      {d.search.startsWith("(") ? d.page.replace(/^https?:\/\//, "") : shortPage(d.page)}
                       {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
                     </span>
                   </div>
@@ -412,7 +455,9 @@ export function EngineScreen({
                         </div>
                       ) : (
                         <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
-                          No rule fires for this page. That is not the same as nothing to do: see what could not be judged below.
+                          {d.search.startsWith("(")
+                            ? "The page was read. No catalog rule runs on a page picked from the Traffic or Leads list: what is worth checking is worked out from the numbers that put it here."
+                            : "No rule fires for this page. That is not the same as nothing to do: see what could not be judged below."}
                         </p>
                       )}
                       <ul className="mt-3 space-y-1 text-sm">
@@ -505,8 +550,35 @@ export function EngineScreen({
                 </div>
               ))}
             </div>
-          ) : null}
+        </div>
+      ) : null}
 
+      {kind === "traffic" && traffic ? (
+        <TrafficList
+          data={traffic}
+          collapsed={collapsed}
+          diagnosing={diagnosing}
+          onDiagnose={diagnosePages}
+          onScope={scopeTo}
+          buckets={buckets}
+          onShow={() => setCollapsed(false)}
+        />
+      ) : null}
+      {kind === "leads" && leads ? (
+        <LeadsList
+          data={leads}
+          collapsed={collapsed}
+          diagnosing={diagnosing}
+          onDiagnose={diagnosePages}
+          onScope={scopeTo}
+          buckets={buckets}
+          onShow={() => setCollapsed(false)}
+          settingsHref={`/${client.slug}/settings/conversions`}
+        />
+      ) : null}
+
+      {kind === "visibility" && data ? (
+        <div className="space-y-6">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
@@ -532,7 +604,7 @@ export function EngineScreen({
                 <span className="font-semibold">Scope</span>
                 <select
                   value={bucketId ?? "site"}
-                  onChange={(e) => router.push(`/${client.slug}/engine?bucket=${e.target.value}${showVisibility && !focus ? "&show=visibility" : ""}`)}
+                  onChange={(e) => router.push(`/${client.slug}/engine?bucket=${e.target.value}${kind && kind !== focus?.focus ? `&show=${kind}` : ""}`)}
                   className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
                 >
                   <option value="site">Whole site</option>
