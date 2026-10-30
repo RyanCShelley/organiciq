@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, TaskDraft, TaskResult } from "@/lib/engine";
+import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, GrowthActionBundle, TaskDraft, TaskResult, TopicPages } from "@/lib/engine";
 
 export async function diagnoseAction(
   clientId: string,
@@ -93,5 +93,22 @@ export async function diagnosePagesAction(
       ok: false,
       error: error instanceof ApiError ? error.message : "The pages could not be read: the API did not answer.",
     };
+  }
+}
+
+export async function topicPagesAction(clientId: string, keyword: string): Promise<TaskResult<TopicPages>> {
+  try {
+    const value = await apiFetch<TopicPages>(`/v2/engine/topic-pages?keyword=${encodeURIComponent(keyword)}`, { clientId });
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "The pages could not be listed: the API did not answer.");
+  }
+}
+
+export async function buildGrowthActionAction(clientId: string, keyword: string, page: string | null): Promise<GrowthActionBundle> {
+  try {
+    return await apiFetch<GrowthActionBundle>("/v2/engine/growth-action", { method: "POST", clientId, body: { keyword, page } });
+  } catch (error) {
+    return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };
   }
 }

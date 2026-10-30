@@ -101,7 +101,7 @@ export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped";
 export type EngineTask = {
   id: string;
   month: string;
-  kind: "prescription" | "suggestion";
+  kind: "prescription" | "suggestion" | "growth_action";
   rule_id: string;
   search: string;
   page: string;
@@ -137,7 +137,7 @@ export const EMPTY_PLAN: TaskPlan = {
 };
 
 export type TaskDraft = {
-  kind: "prescription" | "suggestion";
+  kind: "prescription" | "suggestion" | "growth_action";
   rule_id: string;
   search: string;
   page: string;
@@ -232,3 +232,51 @@ export type LeadsCandidates = {
   all_pages_total?: number;
   notes: string[];
 };
+
+export type TopicPage = {
+  url: string;
+  impressions: number;
+  clicks: number;
+  position: number | null;
+  searches: number;
+  top_search: string;
+  title: string;
+  title_says_topic: boolean;
+  score: number;
+};
+
+export type TopicPages = {
+  keyword: string;
+  window: { from: string; to: string };
+  recommended: string | null;
+  pages: TopicPage[];
+  total_pages: number;
+  rule: string;
+};
+
+export type GrowthPart = {
+  id: string;
+  name: string;
+  title: string;
+  why: string;
+  steps: string[];
+  evidence: string[];
+  core: boolean;
+  confirmed_by_rule: boolean;
+};
+
+export type GrowthActionBundle =
+  | { ok: false; error: string }
+  | {
+      ok: true;
+      keyword: string;
+      page: string;
+      chosen: TopicPage;
+      search: string;
+      parts: GrowthPart[];
+      left_out: { id: string; reason: string }[];
+      also_seen: { id: string; title: string }[];
+      draft: TaskDraft;
+    };
+
+export type TopicGroup = { bucket_id: string; bucket: string; keywords: string[] };

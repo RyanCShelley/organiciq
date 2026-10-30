@@ -34,7 +34,7 @@ COUNTED = ("confirmed", "sent", "shipped")
 
 class TaskIn(BaseModel):
     month: str
-    kind: Literal["prescription", "suggestion"]
+    kind: Literal["prescription", "suggestion", "growth_action"]
     rule_id: str = Field(min_length=1, max_length=16)
     search: str = Field(min_length=1, max_length=400)
     page: str = Field(min_length=1, max_length=2048)
@@ -90,6 +90,11 @@ def _month(value: str) -> str:
     return value
 
 
+def _pages_used(rows) -> int:
+    """Growth actions are sold by the page: however many tasks a page has, it is one."""
+    return len({r.page_url for r in rows if r.status in COUNTED})
+
+
 def _allowance(client: Client, used: int) -> dict:
     try:
         monthly = resolve_plan_allowances(client).growth_action_allowance
@@ -119,7 +124,7 @@ def list_tasks(
         .order_by(EngineTask.confirmed_at)
         .all()
     )
-    used = sum(1 for r in rows if r.status in COUNTED)
+    used = _pages_used(rows)
     return {
         "month": month,
         "tasks": [_out(r) for r in rows],
@@ -166,9 +171,7 @@ def confirm_task(
         task.evidence = list(payload.evidence)
     db.commit()
     db.refresh(task)
-    used = db.query(EngineTask).filter(
-        EngineTask.client_id == client.id, EngineTask.month == month, EngineTask.status.in_(COUNTED)
-    ).count()
+    used = _pages_used(db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month).all())
     return {"created": created, "task": _out(task), "allowance": _allowance(client, used)}
 
 
@@ -211,13 +214,19 @@ def _description(task: EngineTask, client: Client) -> tuple[str, str]:
         effort_min=task.effort_min,
         record_url=f"{get_settings().web_v2_app_url.rstrip('/')}/{client.slug}/engine",
     )
-    if task.steps:
+    if task.steps and task.kind == "growth_action":
+        # Parts are headed by "# " lines; the steps under a heading are its checklist.
+        lines = [f"\n{step[2:]}" if step.startswith("# ") else f"  [ ] {step}" for step in task.steps]
+        text += "\n\nChecklist" + "\n".join(lines)
+    elif task.steps:
         text += "\n\nChecklist\n" + "\n".join(f"{i + 1}. {step}" for i, step in enumerate(task.steps))
     if task.evidence:
         text += "\n\nEvidence and limitations\n" + "\n".join(task.evidence)
     origin = (
         "Prescribed by a rule in the Decision engine."
         if task.kind == "prescription"
+        else "A growth action from the Decision engine: one page, worked together for one topic. Its parts come from a live read of the page, Search Console and the AI platform runs; a person confirmed it."
+        if task.kind == "growth_action"
         else "An unconfirmed suggestion from the Decision engine: the data to prove it was not available, and a person confirmed it."
     )
     text += f"\n\n{origin} Search: “{task.search}”. Confirmed by {task.confirmed_by} for {task.month}."

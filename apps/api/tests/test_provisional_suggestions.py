@@ -112,3 +112,17 @@ def test_the_diagnosis_carries_suggestions_apart_from_prescriptions():
     assert out["prescriptions"] == [] and "S-6" in [s["id"] for s in out["suggestions"]]
     without = pd.diagnose(search="x", url="https://shop.example/p", row=ROW, client_domain="shop.example", fetch=fetch)
     assert without["suggestions"] == []
+
+
+def test_phrasing_that_is_a_brand_search_is_never_suggested():
+    parsed, facts = page()
+    evidence = {
+        "page_queries": [
+            {"query": "natural spf 15 mineral sunscreen", "impressions": 60, "clicks": 1, "position": 4.0},
+            {"query": "shop example spf 15 mineral sunscreen", "impressions": 300, "clicks": 20, "position": 1.2},
+        ],
+        "competing_pages": 1, "donors": [], "brand_keys": ["shop example"],
+    }
+    s1 = next(s for s in run(parsed, facts, evidence)["suggestions"] if s["id"] == "S-1")
+    text = " ".join(s1["steps"])
+    assert "natural spf 15 mineral sunscreen" in text and "shop example" not in text.split("Today the title")[0]

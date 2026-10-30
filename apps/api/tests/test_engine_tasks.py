@@ -47,9 +47,9 @@ def test_confirming_the_same_thing_twice_is_one_task(client, db, client_a, admin
     assert db.query(EngineTask).count() == 1
 
 
-def test_the_plan_counts_tasks_against_the_monthly_allowance(client, db, client_a, admin_user):
+def test_the_plan_counts_pages_against_the_monthly_allowance(client, db, client_a, admin_user):
     for i in range(2):
-        client.post("/v2/engine/tasks", json={**BODY, "rule_id": f"S-{i}"}, headers=h(client_a, admin_user))
+        client.post("/v2/engine/tasks", json={**BODY, "rule_id": f"S-{i}", "page": f"https://shop.example/p{i}"}, headers=h(client_a, admin_user))
     plan = client.get("/v2/engine/tasks?month=2026-10", headers=h(client_a, admin_user)).json()
     assert len(plan["tasks"]) == 2
     assert plan["allowance"]["used"] == 2 and plan["allowance"]["monthly"] is not None
@@ -61,7 +61,7 @@ def test_going_over_the_allowance_is_reported_not_blocked(client, db, client_a, 
 
     monkeypatch.setattr(v2_tasks, "_allowance", lambda c, used: {"monthly": 1, "used": used, "over": used > 1})
     for i in range(3):
-        res = client.post("/v2/engine/tasks", json={**BODY, "rule_id": f"S-{i}"}, headers=h(client_a, admin_user))
+        res = client.post("/v2/engine/tasks", json={**BODY, "rule_id": f"S-{i}", "page": f"https://shop.example/p{i}"}, headers=h(client_a, admin_user))
         assert res.status_code == 200
     assert res.json()["allowance"] == {"monthly": 1, "used": 3, "over": True}
 

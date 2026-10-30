@@ -145,9 +145,11 @@ def suggest(
         )
 
     # S-1: phrasing people search that the title and main heading do not use.
+    brand = evidence.get("brand_keys") or []
     related = [
         q for q in page_queries
         if q["query"] != " ".join(search.lower().split())
+        and not any(f" {k} " in f" {q['query'].lower()} " for k in brand)  # a brand search is navigation: no wording change moves it
         and len(_tokens(q["query"]) & wanted) >= min(2, len(wanted))
         and q["impressions"] >= 20
     ]

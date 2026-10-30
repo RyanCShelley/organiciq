@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
 from app.models.client import Client
-from app.services import crawl_link_facts, data_freshness, llm_evidence, page_diagnostic
+from app.services import crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -119,6 +119,7 @@ def _evidence(db: Session, client: Client, month: str, search: str, page: str) -
     found = visibility_candidates.page_evidence(db, client, month, search, page)
     found["crawl"] = crawl_link_facts.link_facts(db, client, page, found["donors"])
     found["llm"] = llm_evidence.for_search(db, client, search)
+    found["brand_keys"] = visibility_candidates.brand_keys(client)
     return found
 
 
@@ -210,3 +211,77 @@ def diagnose_selected_pages(
             )
         )
     return {"month": month, "focus": payload.focus, "results": results}
+
+
+class GrowthActionRequest(BaseModel):
+    month: str | None = None
+    keyword: str = Field(min_length=1, max_length=400)
+    #: A page of the topic to use instead of the one the tool recommends.
+    page: str | None = Field(default=None, max_length=2048)
+
+
+def _month_or_last(month: str | None) -> str:
+    month = month or last_complete_month()
+    try:
+        parse_month(month)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return month
+
+
+@router.get("/topics")
+def topics(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """The watchlist keywords a growth action can be planned for, by bucket."""
+    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+    out = []
+    for bucket in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order, WatchlistBucket.name):
+        keywords = [k.keyword for k in db.query(WatchlistKeyword).filter(WatchlistKeyword.bucket_id == bucket.id).order_by(WatchlistKeyword.keyword)]
+        out.append({"bucket_id": str(bucket.id), "bucket": bucket.name, "keywords": keywords})
+    return out
+
+
+@router.get("/topic-pages")
+def topic_pages(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    keyword: Annotated[str, Query(min_length=1, max_length=400)],
+    month: str | None = None,
+) -> dict:
+    """The pages that show for a topic and the one to work on first, with the numbers behind the choice."""
+    return growth_action.topic_pages(db, client, _month_or_last(month), keyword)
+
+
+@router.post("/growth-action")
+def build_growth_action(
+    payload: GrowthActionRequest,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Read the page for the topic live and bundle what applies into one growth action, as a task draft."""
+    month = _month_or_last(payload.month)
+    bundle = growth_action.build(
+        db,
+        client,
+        month,
+        payload.keyword,
+        page=payload.page,
+        diagnose=lambda search, url, row, evidence: page_diagnostic.diagnose(
+            search=search, url=url, row=row, client_domain=client.domain, fetch=page_diagnostic._fetch, evidence=evidence
+        ),
+        evidence_for=lambda search, url: _evidence(db, client, month, search, url),
+    )
+    if bundle["ok"]:
+        bundle["draft"] = growth_action.draft(bundle, _next_month(month))
+    return bundle
+
+
+def _next_month(month: str) -> str:
+    year, mon = int(month[:4]), int(month[5:7])
+    return f"{year + (mon == 12):04d}-{(mon % 12) + 1:02d}"

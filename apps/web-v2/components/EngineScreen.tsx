@@ -8,6 +8,7 @@ import type { Client } from "@/lib/api";
 import { confirmTaskAction, diagnoseAction, diagnosePagesAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { EnginePlan } from "@/components/EnginePlan";
+import { GrowthActionPlanner } from "@/components/GrowthActionPlanner";
 import { LeadsList, TrafficList } from "@/components/FocusLists";
 import type {
   Allowance,
@@ -19,6 +20,7 @@ import type {
   LeadsCandidates,
   TaskDraft,
   TaskPlan,
+  TopicGroup,
   TrafficCandidates,
   VisibilityCandidates,
 } from "@/lib/engine";
@@ -148,6 +150,7 @@ export function EngineScreen({
   overview,
   plan,
   team,
+  topics,
   error,
 }: {
   client: Client;
@@ -162,6 +165,7 @@ export function EngineScreen({
   overview: EngineOverview;
   plan: TaskPlan;
   team: { email: string; name: string | null }[];
+  topics: TopicGroup[];
   error: string | null;
 }) {
   const router = useRouter();
@@ -277,6 +281,15 @@ export function EngineScreen({
         teamwork={plan.teamwork}
         team={team}
         onTaskChange={upsertTask}
+      />
+
+      <GrowthActionPlanner
+        clientId={client.id}
+        month={workMonth}
+        topics={topics}
+        tasks={tasks}
+        focusBucketId={focus?.bucket_id ?? null}
+        onConfirmed={upsertTask}
       />
 
       {kind === "visibility" && advice.level !== "ok" && advice.headline ? (

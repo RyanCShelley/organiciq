@@ -49,7 +49,9 @@ function TaskRow({
           <div className="font-medium">
             <span className="mr-2 text-xs text-[var(--text-tertiary)]">{task.rule_id}</span>
             {task.title}
-            {task.kind === "suggestion" ? (
+            {task.kind === "growth_action" ? (
+              <span className="ml-2 rounded bg-green-50 px-1.5 py-0.5 text-xs font-semibold text-green-800">growth action</span>
+            ) : task.kind === "suggestion" ? (
               <span className="ml-2 rounded bg-amber-50 px-1.5 py-0.5 text-xs font-semibold text-amber-800">confirmed by {task.confirmed_by.split("@")[0]}</span>
             ) : null}
           </div>
