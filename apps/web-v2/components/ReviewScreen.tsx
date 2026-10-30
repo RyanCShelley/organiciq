@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
-import type { EngineNumbers, Pair, Review, VisibilityAi, VisibilityTerm } from "@/lib/review";
+import type { Pair, Review, Visibility, VisibilityAi, VisibilityTerm } from "@/lib/review";
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -100,48 +100,6 @@ function ImpressionsCell({ pair }: { pair: Pair }) {
         </span>
       ) : null}
     </span>
-  );
-}
-
-function TermRow({ term, showBing }: { term: VisibilityTerm; showBing: boolean }) {
-  const g: EngineNumbers = term.google;
-  const b: EngineNumbers = term.bing;
-  const base = term.status.replace(" (Bing)", "");
-  return (
-    <tr className="border-t border-[var(--border)] align-top">
-      <td className="min-w-[11rem] py-2 pr-3">
-        <div className="font-medium">{term.keyword}</div>
-        {term.prompt ? <div className="mt-0.5 max-w-[22rem] text-xs italic text-[var(--text-tertiary)]">Prompt: {term.prompt}</div> : null}
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums">{num(term.volume)}</td>
-      <td className="px-3 py-2 text-right"><ImpressionsCell pair={g.impressions} /></td>
-      <td className="px-3 py-2 text-right"><PositionCell pair={g.position} /></td>
-      <td className="px-3 py-2 text-right tabular-nums">{num(g.clicks.current)}</td>
-      {showBing ? (
-        <>
-          <td className="px-3 py-2 text-right"><ImpressionsCell pair={b.impressions} /></td>
-          <td className="px-3 py-2 text-right"><PositionCell pair={b.position} /></td>
-        </>
-      ) : null}
-      <td className="px-3 py-2 text-xs">
-        {term.ai ? (
-          <span title={term.prompt ?? undefined}>
-            <strong className={term.ai.cited > 0 ? "text-green-700" : ""}>cited {term.ai.cited}/{term.ai.platforms}</strong>
-            <span className="text-[var(--text-secondary)]"> · named {term.ai.mentioned}/{term.ai.platforms}</span>
-            {term.ai.previous_cited != null ? (
-              <span className="block text-[var(--text-tertiary)]">before: cited {term.ai.previous_cited}, named {term.ai.previous_mentioned}</span>
-            ) : null}
-          </span>
-        ) : (
-          <span className="text-[var(--text-tertiary)]">{term.prompt ? "no answer yet" : "no prompt"}</span>
-        )}
-      </td>
-      <td className="py-2 pl-3">
-        <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[base] ?? STATUS_STYLE["Not showing"]}`}>
-          {term.status}
-        </span>
-      </td>
-    </tr>
   );
 }
 
@@ -277,41 +235,6 @@ function FocusPanel({
 
 const aiPts = (n: number | null) => (n == null || n === 0 ? null : `${n > 0 ? "▲" : "▼"} ${Math.abs(Math.round(n * 100))} pts`);
 
-/** The AI platforms in one line: how often they named or cited the brand, and how that moved. The detail lives on the LLM visibility screen. */
-function AiStrip({ llm, href }: { llm: VisibilityAi | null; href: string }) {
-  if (!llm) {
-    return (
-      <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
-        No AI platform run yet, so there are no ChatGPT, Perplexity, Gemini or Claude results.{" "}
-        <a href={href} className="font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
-      </p>
-    );
-  }
-  const s = llm.summary;
-  const move = aiPts(s.visibility_rate.delta);
-  return (
-    <div className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="font-semibold">
-          AI platforms: {Math.round(s.visibility_rate.current * 100)}% of answers named or cited the brand
-          {move ? <span className={`ml-2 text-xs ${(s.visibility_rate.delta ?? 0) > 0 ? "text-green-700" : "text-red-700"}`}>{move}</span> : null}
-        </span>
-        <a href={href} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
-      </div>
-      <p className="mt-1 text-xs text-[var(--text-secondary)]">
-        {llm.in_month ? `Run of ${llm.run_date}` : `Latest run, ${llm.run_date}, after this month`}
-        {llm.previous_run_date ? `, against ${llm.previous_run_date}` : ", the first run"} · {s.mentions.current} mentions, {s.citations.current} citations in {s.responses} answers
-        {llm.platforms.length ? ` · ${llm.platforms.map((p) => `${p.platform} ${Math.round(p.visibility_rate.current * 100)}%`).join(", ")}` : ""}
-      </p>
-      {llm.brand_check.length > 0 ? (
-        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-          Asked about the brand by name, the site was cited by {llm.brand_check.map((p) => `${p.platform} ${p.site_cited}/${p.answers}`).join(", ")}.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
 const signed = (n: number) => `${n > 0 ? "+" : ""}${n.toLocaleString()}`;
 const shortDate = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
@@ -373,6 +296,181 @@ function ShippedWork({ rows }: { rows: ShippedResult[] }) {
   );
 }
 
+
+const PLATFORM_ORDER = ["ChatGPT", "Claude", "Gemini", "Perplexity"];
+type Filter = "all" | "showing" | "not" | "page1" | "ai";
+
+/** The watchlist in Google, Bing and the AI platforms: one line per term, no sideways scrolling. */
+function VisibilityPanel({ visibility, prior, href }: { visibility: Visibility; prior: string; href: string }) {
+  const [filter, setFilter] = useState<Filter>("all");
+  const all = visibility.buckets.flatMap((b) => b.terms);
+  const showing = (t: VisibilityTerm) => (t.google.impressions.current ?? 0) > 0;
+  const pageOne = (t: VisibilityTerm) => t.status.startsWith("Top 3") || t.status.startsWith("Page 1");
+  const aiCited = (t: VisibilityTerm) => (t.ai?.cited ?? 0) > 0;
+  const keep: Record<Filter, (t: VisibilityTerm) => boolean> = {
+    all: () => true,
+    showing,
+    not: (t) => !showing(t),
+    page1: pageOne,
+    ai: aiCited,
+  };
+  const chips: [Filter, string, number][] = [
+    ["all", "All", all.length],
+    ["showing", "Showing", all.filter(showing).length],
+    ["not", "Not showing", all.filter((t) => !showing(t)).length],
+    ["page1", "Page one", all.filter(pageOne).length],
+    ["ai", "AI cited", all.filter(aiCited).length],
+  ];
+  const llm = visibility.llm;
+  const rate = llm?.summary.visibility_rate;
+  const bing = visibility.bing.has_data;
+  const tile = "rounded-lg bg-[var(--bg)] px-3 py-2";
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">Visibility: the watchlist in Google, Bing and AI platforms</h2>
+        <a href={href} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className={tile}>
+          <div className="text-xs text-[var(--text-secondary)]">Terms showing in Google</div>
+          <div className="text-xl font-semibold tabular-nums">{visibility.summary.showing_in_google} of {visibility.summary.terms}</div>
+        </div>
+        <div className={tile}>
+          <div className="text-xs text-[var(--text-secondary)]">On page one</div>
+          <div className="text-xl font-semibold tabular-nums">{visibility.summary.on_page_one}</div>
+        </div>
+        <div className={tile}>
+          <div className="text-xs text-[var(--text-secondary)]">Clicks from these terms</div>
+          <div className="text-xl font-semibold tabular-nums">{num(visibility.summary.google_clicks)}</div>
+        </div>
+        <div className={tile} title={llm ? (llm.in_month ? `Run of ${llm.run_date}` : `Latest run, ${llm.run_date}, after this month`) : undefined}>
+          <div className="text-xs text-[var(--text-secondary)]">AI answers naming or citing us</div>
+          {rate ? (
+            <div className="text-xl font-semibold tabular-nums">
+              {Math.round(rate.current * 100)}%
+              {aiPts(rate.delta) ? <span className={`ml-2 text-xs ${(rate.delta ?? 0) > 0 ? "text-green-700" : "text-red-700"}`}>{aiPts(rate.delta)}</span> : null}
+            </div>
+          ) : (
+            <div className="text-sm text-[var(--text-tertiary)]">no run yet</div>
+          )}
+        </div>
+      </div>
+      {llm ? (
+        <p className="mt-2 text-xs text-[var(--text-secondary)]">
+          {llm.in_month ? `AI run of ${llm.run_date}` : `Latest AI run, ${llm.run_date}, after this month`}
+          {llm.previous_run_date ? `, against ${llm.previous_run_date}` : ", the first run"} · {llm.platforms.map((p) => `${p.platform} ${Math.round(p.visibility_rate.current * 100)}%`).join(" · ")}
+          {llm.brand_check.length > 0 ? ` · asked by name, the site was cited by ${llm.brand_check.map((p) => `${p.platform} ${p.site_cited}/${p.answers}`).join(", ")}` : ""}
+        </p>
+      ) : null}
+
+      {!visibility.has_google_data ? (
+        <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No Search Console data for these terms yet, so nothing is shown for Google.</p>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Filter terms">
+        {chips.map(([id, label, n]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setFilter(id)}
+            aria-pressed={filter === id}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${filter === id ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)]"}`}
+          >
+            {label} {n}
+          </button>
+        ))}
+      </div>
+
+      <table className="mt-3 w-full table-fixed text-left text-sm">
+        <colgroup>
+          <col style={{ width: "25%" }} />
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "15%" }} />
+          <col style={{ width: "11%" }} />
+          <col style={{ width: "7%" }} />
+          {bing ? <col style={{ width: "11%" }} /> : null}
+          <col style={{ width: "9%" }} />
+          <col style={{ width: "13%" }} />
+        </colgroup>
+        <thead className="text-[0.65rem] uppercase text-[var(--text-tertiary)]">
+          <tr>
+            <th className="py-1 pr-2 font-medium">Term</th>
+            <th className="px-1 py-1 text-right font-medium">Volume</th>
+            <th className="px-1 py-1 text-right font-medium">Google impr.</th>
+            <th className="px-1 py-1 text-right font-medium">Position</th>
+            <th className="px-1 py-1 text-right font-medium">Clicks</th>
+            {bing ? <th className="px-1 py-1 text-right font-medium">Bing</th> : null}
+            <th className="px-1 py-1 text-right font-medium">AI</th>
+            <th className="py-1 pl-2 text-right font-medium">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visibility.buckets.map((bucket) => {
+            const terms = bucket.terms.filter(keep[filter]);
+            if (terms.length === 0) return null;
+            const impressions = terms.reduce((n, t) => n + (t.google.impressions.current ?? 0), 0);
+            return (
+              <Fragment key={bucket.id}>
+                <tr className="bg-[var(--bg)]">
+                  <td colSpan={bing ? 8 : 7} className="px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)]">
+                    {bucket.name} · {terms.length} term{terms.length === 1 ? "" : "s"} · {num(impressions)} impression{impressions === 1 ? "" : "s"}
+                  </td>
+                </tr>
+                {terms.map((t) => {
+                  const base = t.status.replace(" (Bing)", "");
+                  return (
+                    <tr key={t.keyword} className="border-t border-[var(--border)]">
+                      <td className="truncate py-1.5 pr-2 font-medium" title={t.prompt ? `${t.keyword}\nAI prompt: ${t.prompt}` : t.keyword}>{t.keyword}</td>
+                      <td className="px-1 py-1.5 text-right tabular-nums">{num(t.volume)}</td>
+                      <td className="px-1 py-1.5 text-right"><ImpressionsCell pair={t.google.impressions} /></td>
+                      <td className="px-1 py-1.5 text-right"><PositionCell pair={t.google.position} /></td>
+                      <td className="px-1 py-1.5 text-right tabular-nums">{num(t.google.clicks.current)}</td>
+                      {bing ? (
+                        <td className="px-1 py-1.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                          {(t.bing.impressions.current ?? 0) > 0 ? `${num(t.bing.impressions.current)} · ${t.bing.position.current?.toFixed(1) ?? "–"}` : "–"}
+                        </td>
+                      ) : null}
+                      <td className="px-1 py-1.5 text-right">
+                        {t.ai ? (
+                          <span className="inline-flex gap-1" title={PLATFORM_ORDER.map((p) => `${p}: ${t.ai?.by_platform[p] ? (t.ai.by_platform[p].cited ? "cited" : t.ai.by_platform[p].named ? "named, not cited" : "not visible") : "not asked"}`).join("\n")}>
+                            {PLATFORM_ORDER.map((p) => {
+                              const r = t.ai?.by_platform[p];
+                              return (
+                                <i
+                                  key={p}
+                                  aria-label={`${p}: ${r ? (r.cited ? "cited" : r.named ? "named" : "not visible") : "not asked"}`}
+                                  className={`inline-block h-2.5 w-2.5 rounded-full border ${r?.cited ? "border-green-700 bg-green-700" : r?.named ? "border-amber-600 bg-amber-300" : "border-[var(--border-strong,#bbb)]"}`}
+                                />
+                              );
+                            })}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--text-tertiary)]">{t.prompt ? "–" : "no prompt"}</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pl-2 text-right">
+                        <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[base] ?? STATUS_STYLE["Not showing"]}`}>{base.replace("Beyond page 2", "Page 3+").replace("Barely showing", "Barely")}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+      {all.filter(keep[filter]).length === 0 ? <p className="mt-3 text-sm text-[var(--text-tertiary)]">No terms match this filter.</p> : null}
+
+      <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+        AI dots are ChatGPT, Claude, Gemini and Perplexity: green cited the site, amber named the brand only, empty did not show it. Hover a term for its prompt and a dot for its platform. Arrows compare with {prior}.
+        {" "}Terms match the exact search, so a longer phrase the site shows for isn&apos;t counted here. {bing ? "Bing reports weekly; a week counts toward the month it starts in." : "No Bing data pulled yet."}
+      </p>
+    </div>
+  );
+}
+
 export function ReviewScreen({
   client,
   month,
@@ -421,7 +519,41 @@ export function ReviewScreen({
         </p>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
+
+          {review ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Summary</h2>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(review.summary.join("\n"));
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  }}
+                  className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <ul className="mt-3 space-y-2 text-sm">
+                {review.summary.map((line) => (
+                  <li key={line} className="text-[var(--text-secondary)]">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+                Worked out from the numbers below. It says what moved, not why.
+              </p>
+            </div>
+          ) : null}
+          <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
+        
+      </div>
+
+      <div>
         <div className="min-w-0 space-y-6">
           {review ? (
             <>
@@ -549,101 +681,12 @@ export function ReviewScreen({
                 </div>
               </div>
               <ShippedWork rows={shipped} />
-              {review.visibility ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h2 className="text-sm font-semibold">Visibility: the watchlist in Google and Bing</h2>
-                    <span className="text-xs text-[var(--text-secondary)]">
-                      {review.visibility.summary.showing_in_google} of {review.visibility.summary.terms} terms showed in Google ·{" "}
-                      {review.visibility.summary.on_page_one} on page one
-                      {review.visibility.bing.has_data ? ` · ${review.visibility.summary.showing_in_bing} in Bing` : ""}
-                    </span>
-                  </div>
-                  <AiStrip llm={review.visibility.llm} href={`/${client.slug}/llm`} />
-                  {!review.visibility.has_google_data ? (
-                    <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                      No Search Console data for these terms yet, so nothing is shown for Google.
-                    </p>
-                  ) : null}
-                  <div className="mt-3 space-y-5 overflow-x-auto">
-                    {review.visibility.buckets.map((bucket) => (
-                      <div key={bucket.id}>
-                        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-                          {bucket.name}
-                        </h3>
-                        <table className="mt-1 w-full min-w-[34rem] text-left text-sm">
-                          <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-                            <tr>
-                              <th className="py-1 pr-3 font-medium">Term</th>
-                              <th className="px-3 py-1 text-right font-medium">Volume</th>
-                              <th className="px-3 py-1 text-right font-medium">Google impr.</th>
-                              <th className="px-3 py-1 text-right font-medium">Google pos.</th>
-                              <th className="px-3 py-1 text-right font-medium">Clicks</th>
-                              {review.visibility?.bing.has_data ? (
-                                <>
-                                  <th className="px-3 py-1 text-right font-medium">Bing impr.</th>
-                                  <th className="px-3 py-1 text-right font-medium">Bing pos.</th>
-                                </>
-                              ) : null}
-                              <th className="px-3 py-1 font-medium">AI platforms</th>
-                              <th className="py-1 pl-3 font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {bucket.terms.map((term) => (
-                              <TermRow key={term.keyword} term={term} showBing={review.visibility?.bing.has_data ?? false} />
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))}
-                  </div>
-                  <ul className="mt-4 space-y-1 text-xs text-[var(--text-tertiary)]">
-                    <li>
-                      Each term is matched to the exact search; a longer phrase the site shows for is not counted here, so
-                      these numbers understate it. Position is the average across impressions, and under 10 impressions it
-                      is not meaningful. Arrows compare with {prior}.
-                    </li>
-                    {review.visibility.bing.has_data ? <li>{review.visibility.bing.note}</li> : <li>No Bing data pulled yet.</li>}
-                    <li>AI platforms: {review.visibility.ai_prompts} Each prompt is asked of ChatGPT, Perplexity, Gemini and Claude; &ldquo;cited&rdquo; means the answer linked the client&apos;s site, &ldquo;named&rdquo; means it said the brand.</li>
-                  </ul>
-                </div>
-              ) : null}
+              {review.visibility ? <VisibilityPanel visibility={review.visibility} prior={prior} href={`/${client.slug}/llm`} /> : null}
             </>
           ) : null}
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          {review ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Summary</h2>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(review.summary.join("\n"));
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  }}
-                  className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <ul className="mt-3 space-y-2 text-sm">
-                {review.summary.map((line) => (
-                  <li key={line} className="text-[var(--text-secondary)]">
-                    {line}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                Worked out from the numbers on the left. It says what moved, not why.
-              </p>
-            </div>
-          ) : null}
-          <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
-        </aside>
+
       </div>
     </section>
   );

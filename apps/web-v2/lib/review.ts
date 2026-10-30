@@ -20,7 +20,7 @@ export type VisibilityTerm = {
   google: EngineNumbers;
   bing: EngineNumbers;
   status: string;
-  ai: { platforms: number; cited: number; mentioned: number; previous_cited: number | null; previous_mentioned: number | null } | null;
+  ai: { by_platform: Record<string, { cited: boolean; named: boolean }>; platforms: number; cited: number; mentioned: number; previous_cited: number | null; previous_mentioned: number | null } | null;
 };
 
 export type AiPair = { current: number; previous: number | null; delta: number | null };

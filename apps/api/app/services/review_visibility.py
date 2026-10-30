@@ -176,7 +176,13 @@ def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dic
     now, then = tally(rows), tally(prev)
     if now is None:
         return None
+    by_platform = {
+        r.platform: {"cited": bool(r.url_cited), "named": bool(r.brand_mentioned)}
+        for r in rows
+        if r.visibility_type != "Error" and key_of(r.query_text) == key
+    }
     return {
+        "by_platform": by_platform,
         "platforms": now[0],
         "cited": now[1],
         "mentioned": now[2],

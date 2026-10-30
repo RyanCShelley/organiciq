@@ -183,7 +183,10 @@ def test_each_term_shows_how_the_platforms_answered_its_prompt_against_the_run_b
     _ai_run(db, client_a, datetime(2026, 9, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (True, True), "Gemini": (False, True)})
     out = rv.build_visibility(db, client_a, "2026-09")
     terms = {t["keyword"]: t for b in out["buckets"] for t in b["terms"]}
-    assert terms["sunscreen"]["ai"] == {"platforms": 2, "cited": 1, "mentioned": 2, "previous_cited": 0, "previous_mentioned": 1}
+    assert terms["sunscreen"]["ai"] == {
+        "by_platform": {"ChatGPT": {"cited": True, "named": True}, "Gemini": {"cited": False, "named": True}},
+        "platforms": 2, "cited": 1, "mentioned": 2, "previous_cited": 0, "previous_mentioned": 1,
+    }
     assert terms["tan oil"]["ai"] is None  # no paired prompt
     llm = out["llm"]
     assert llm["run_date"] == "2026-09-20" and llm["in_month"] is True and llm["previous_run_date"] == "2026-08-20"
