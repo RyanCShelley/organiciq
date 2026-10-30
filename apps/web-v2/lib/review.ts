@@ -20,6 +20,18 @@ export type VisibilityTerm = {
   google: EngineNumbers;
   bing: EngineNumbers;
   status: string;
+  ai: { platforms: number; cited: number; mentioned: number; previous_cited: number | null; previous_mentioned: number | null } | null;
+};
+
+export type AiPair = { current: number; previous: number | null; delta: number | null };
+
+export type VisibilityAi = {
+  run_date: string;
+  in_month: boolean;
+  previous_run_date: string | null;
+  summary: { mentions: AiPair; citations: AiPair; visibility_rate: AiPair; responses: number };
+  platforms: { platform: string; visibility_rate: AiPair; mentions: AiPair; citations: AiPair }[];
+  brand_check: { platform: string; answers: number; site_cited: number }[];
 };
 
 export type Visibility = {
@@ -37,6 +49,7 @@ export type Visibility = {
   has_google_data: boolean;
   bing: { has_data: boolean; first_week: string | null; last_week: string | null; note: string };
   ai_prompts: string;
+  llm: VisibilityAi | null;
 };
 
 export type Review = {

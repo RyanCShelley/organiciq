@@ -147,3 +147,63 @@ def test_the_sync_route_says_what_is_missing(client, db, client_a, admin_user, m
     monkeypatch.setattr(get_settings(), "bing_webmaster_api_key", "k")
     response = client.post("/v2/connections/bing/sync", headers=client_header(client_a.id, admin_user.email))
     assert response.status_code == 400 and "Bing site" in response.json()["detail"]
+
+
+# ── AI platforms in the review ───────────────────────────────────────────────
+
+from datetime import datetime, timezone  # noqa: E402
+
+from app.models.llm_visibility import LlmResponse, LlmRun  # noqa: E402
+
+
+def _ai_run(db, client_a, when, results):
+    """`results`: {platform: (cited, mentioned)} for the prompt 'Best sunscreen?'."""
+    run = LlmRun(client_id=client_a.id, status="completed", started_at=when, platforms=list(results))
+    db.add(run)
+    db.flush()
+    for platform, (cited, mentioned) in results.items():
+        vis = "Cited + Mentioned" if cited and mentioned else "Cited" if cited else "Mentioned" if mentioned else "Not visible"
+        db.add(LlmResponse(run_id=run.id, client_id=client_a.id, query_text="Best sunscreen?", platform=platform, visibility_type=vis,
+                           url_cited=cited, brand_mentioned=mentioned, topic_cluster="Sun"))
+    db.commit()
+
+
+def _term(db, client_a):
+    b = WatchlistBucket(client_id=client_a.id, name="Sun", name_key="sun", sort_order=0)
+    db.add(b)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=b.id, keyword="sunscreen", keyword_key="sunscreen", paired_ai_prompt="Best  sunscreen?"))
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=b.id, keyword="tan oil", keyword_key="tan oil"))
+    db.commit()
+
+
+def test_each_term_shows_how_the_platforms_answered_its_prompt_against_the_run_before(db, client_a):
+    _term(db, client_a)
+    _ai_run(db, client_a, datetime(2026, 8, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (False, False), "Gemini": (False, True)})
+    _ai_run(db, client_a, datetime(2026, 9, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (True, True), "Gemini": (False, True)})
+    out = rv.build_visibility(db, client_a, "2026-09")
+    terms = {t["keyword"]: t for b in out["buckets"] for t in b["terms"]}
+    assert terms["sunscreen"]["ai"] == {"platforms": 2, "cited": 1, "mentioned": 2, "previous_cited": 0, "previous_mentioned": 1}
+    assert terms["tan oil"]["ai"] is None  # no paired prompt
+    llm = out["llm"]
+    assert llm["run_date"] == "2026-09-20" and llm["in_month"] is True and llm["previous_run_date"] == "2026-08-20"
+    assert llm["summary"]["visibility_rate"] == {"current": 1.0, "previous": 0.5, "delta": 0.5}
+
+
+def test_a_month_with_no_run_shows_the_latest_one_labelled_as_such_and_none_at_all_shows_nothing(db, client_a):
+    _term(db, client_a)
+    assert rv.build_visibility(db, client_a, "2026-09")["llm"] is None
+    _ai_run(db, client_a, datetime(2026, 10, 30, 12, tzinfo=timezone.utc), {"ChatGPT": (False, False)})
+    llm = rv.build_visibility(db, client_a, "2026-09")["llm"]
+    assert llm["run_date"] == "2026-10-30" and llm["in_month"] is False
+
+
+def test_the_review_summary_says_what_the_ai_platforms_did(db, client_a):
+    from app.services import monthly_review as mr
+
+    _term(db, client_a)
+    _ai_run(db, client_a, datetime(2026, 8, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (False, False), "Gemini": (False, False)})
+    _ai_run(db, client_a, datetime(2026, 9, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (True, True), "Gemini": (False, False)})
+    review = mr.build_review(db, client_a, "2026-09")
+    line = next(x for x in review["summary"] if x.startswith("AI platforms"))
+    assert "50% of discovery answers named or cited the brand in the 2026-09-20 run" in line and "up 50 points" in line

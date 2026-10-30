@@ -307,6 +307,14 @@ def summarise(review: dict) -> list[str]:
         if vis["bing"]["has_data"]:
             line += f"; {s['showing_in_bing']} showed in Bing"
         lines.append(line + ".")
+        llm = vis.get("llm")
+        if llm:
+            m, c, r = llm["summary"]["mentions"], llm["summary"]["citations"], llm["summary"]["visibility_rate"]
+            when = f"in the {llm['run_date']} run" if llm["in_month"] else f"in the latest run ({llm['run_date']}, after {month})"
+            ai = f"AI platforms: {round((r['current'] or 0) * 100)}% of discovery answers named or cited the brand {when} ({m['current']} mentions, {c['current']} citations)"
+            if r["delta"] is not None:
+                ai += f", {'up' if r['delta'] > 0 else 'down' if r['delta'] < 0 else 'unchanged'}" + (f" {abs(round(r['delta'] * 100))} points" if r["delta"] else "") + " on the run before"
+            lines.append(ai + ".")
 
     stale = [f["source"] for f in review.get("freshness", []) if not f.get("available")]
     if stale:

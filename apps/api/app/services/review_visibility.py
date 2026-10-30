@@ -5,14 +5,15 @@ a search query exactly (lower-cased), so a variant the site shows for does not c
 toward the term: the numbers say how the term itself performs, and understate it where
 people search a longer phrase. SE Ranking is deliberately not used here.
 
-AI prompt results do not come from here. Each term shows its paired prompt so the
-pairing is visible, and the results arrive with the LLM tool.
+AI results come from the client's LLM visibility runs: for each term, whether the AI platforms
+named or cited the brand when asked its paired prompt, in the run of the month (or, if none was
+done that month, the latest run, labelled as such).
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.bing_stats import FactBingQueryStat
 from app.models.client import Client
 from app.models.gsc import FactGscQueryPage
+from app.models.llm_visibility import LlmResponse, LlmRun
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 from app.services.monthly_review import parse_month, pct_change, previous_month
 
@@ -128,6 +130,61 @@ def status_for(google: dict, bing: dict) -> str:
     return "Not showing"
 
 
+def _llm(db: Session, client: Client, month: str) -> dict[str, Any] | None:
+    """The AI platforms' results for the month: the run done in it against the run before."""
+    from app.llm_visibility import report
+
+    first, last = parse_month(month)
+    start = datetime.combine(first, time.min, tzinfo=timezone.utc)
+    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    done = db.query(LlmRun).filter(LlmRun.client_id == client.id, LlmRun.status == "completed")
+    run = done.filter(LlmRun.started_at >= start, LlmRun.started_at < end).order_by(LlmRun.started_at.desc()).first()
+    in_month = run is not None
+    if run is None:
+        run = done.order_by(LlmRun.started_at.desc()).first()
+    if run is None:
+        return None
+    previous = done.filter(LlmRun.started_at < run.started_at).order_by(LlmRun.started_at.desc()).first()
+    rows = db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()
+    prev_rows = db.query(LlmResponse).filter(LlmResponse.run_id == previous.id).all() if previous else None
+    return {
+        "run_date": run.started_at.date().isoformat(),
+        "in_month": in_month,
+        "previous_run_date": previous.started_at.date().isoformat() if previous else None,
+        "summary": report.summary(rows, prev_rows),
+        "platforms": report.platform_deltas(rows, prev_rows),
+        "brand_check": report.brand_check(rows)["platforms"],
+        "_rows": rows,
+        "_prev": prev_rows,
+    }
+
+
+def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dict[str, Any] | None:
+    """How the platforms answered one term's paired prompt: how many named or cited the brand, against the last run."""
+    if not prompt:
+        return None
+    key = key_of(prompt)
+
+    def tally(source: list[Any] | None) -> tuple[int, int, int] | None:
+        if source is None:
+            return None
+        mine = [r for r in source if r.visibility_type != "Error" and key_of(r.query_text) == key]
+        if not mine:
+            return None
+        return len(mine), sum(bool(r.url_cited) for r in mine), sum(bool(r.brand_mentioned) for r in mine)
+
+    now, then = tally(rows), tally(prev)
+    if now is None:
+        return None
+    return {
+        "platforms": now[0],
+        "cited": now[1],
+        "mentioned": now[2],
+        "previous_cited": then[1] if then else None,
+        "previous_mentioned": then[2] if then else None,
+    }
+
+
 def build_visibility(db: Session, client: Client, month: str) -> dict | None:
     """The watchlist grouped by bucket, with Google and Bing for the month and the one before."""
     rows = (
@@ -151,6 +208,10 @@ def build_visibility(db: Session, client: Client, month: str) -> dict | None:
         FactBingQueryStat.client_id == client.id
     ).one()
 
+    llm = _llm(db, client, month)
+    llm_rows = llm["_rows"] if llm else []
+    llm_prev = llm["_prev"] if llm else None
+
     buckets: dict[str, dict] = {}
     for keyword, bucket in rows:
         k = key_of(keyword.keyword)
@@ -164,6 +225,7 @@ def build_visibility(db: Session, client: Client, month: str) -> dict | None:
                 "google": google,
                 "bing": bing,
                 "status": status_for(google, bing),
+                "ai": _term_ai(keyword.paired_ai_prompt, llm_rows, llm_prev),
             }
         )
 
@@ -190,5 +252,6 @@ def build_visibility(db: Session, client: Client, month: str) -> dict | None:
             "last_week": bing_range[1].isoformat() if bing_range[1] else None,
             "note": "Bing reports weekly. A week counts toward the month it starts in.",
         },
-        "ai_prompts": "Results arrive with the LLM tool. The prompt shown is the one paired with the term.",
+        "ai_prompts": "The prompt shown is the one paired with the term; its answers come from the LLM visibility run.",
+        "llm": ({k: v for k, v in llm.items() if not k.startswith("_")} if llm else None),
     }

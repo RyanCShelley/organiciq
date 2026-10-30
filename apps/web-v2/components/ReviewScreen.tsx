@@ -7,7 +7,7 @@ import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focu
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
-import type { EngineNumbers, Pair, Review, VisibilityTerm } from "@/lib/review";
+import type { EngineNumbers, Pair, Review, VisibilityAi, VisibilityTerm } from "@/lib/review";
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -123,6 +123,19 @@ function TermRow({ term, showBing }: { term: VisibilityTerm; showBing: boolean }
           <td className="px-3 py-2 text-right"><PositionCell pair={b.position} /></td>
         </>
       ) : null}
+      <td className="px-3 py-2 text-xs">
+        {term.ai ? (
+          <span title={term.prompt ?? undefined}>
+            <strong className={term.ai.cited > 0 ? "text-green-700" : ""}>cited {term.ai.cited}/{term.ai.platforms}</strong>
+            <span className="text-[var(--text-secondary)]"> · named {term.ai.mentioned}/{term.ai.platforms}</span>
+            {term.ai.previous_cited != null ? (
+              <span className="block text-[var(--text-tertiary)]">before: cited {term.ai.previous_cited}, named {term.ai.previous_mentioned}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-[var(--text-tertiary)]">{term.prompt ? "no answer yet" : "no prompt"}</span>
+        )}
+      </td>
       <td className="py-2 pl-3">
         <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[base] ?? STATUS_STYLE["Not showing"]}`}>
           {term.status}
@@ -256,6 +269,43 @@ function FocusPanel({
       {error ? (
         <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
           {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const aiPts = (n: number | null) => (n == null || n === 0 ? null : `${n > 0 ? "▲" : "▼"} ${Math.abs(Math.round(n * 100))} pts`);
+
+/** The AI platforms in one line: how often they named or cited the brand, and how that moved. The detail lives on the LLM visibility screen. */
+function AiStrip({ llm, href }: { llm: VisibilityAi | null; href: string }) {
+  if (!llm) {
+    return (
+      <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
+        No AI platform run yet, so there are no ChatGPT, Perplexity, Gemini or Claude results.{" "}
+        <a href={href} className="font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
+      </p>
+    );
+  }
+  const s = llm.summary;
+  const move = aiPts(s.visibility_rate.delta);
+  return (
+    <div className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-semibold">
+          AI platforms: {Math.round(s.visibility_rate.current * 100)}% of answers named or cited the brand
+          {move ? <span className={`ml-2 text-xs ${(s.visibility_rate.delta ?? 0) > 0 ? "text-green-700" : "text-red-700"}`}>{move}</span> : null}
+        </span>
+        <a href={href} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
+      </div>
+      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+        {llm.in_month ? `Run of ${llm.run_date}` : `Latest run, ${llm.run_date}, after this month`}
+        {llm.previous_run_date ? `, against ${llm.previous_run_date}` : ", the first run"} · {s.mentions.current} mentions, {s.citations.current} citations in {s.responses} answers
+        {llm.platforms.length ? ` · ${llm.platforms.map((p) => `${p.platform} ${Math.round(p.visibility_rate.current * 100)}%`).join(", ")}` : ""}
+      </p>
+      {llm.brand_check.length > 0 ? (
+        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+          Asked about the brand by name, the site was cited by {llm.brand_check.map((p) => `${p.platform} ${p.site_cited}/${p.answers}`).join(", ")}.
         </p>
       ) : null}
     </div>
@@ -509,6 +559,7 @@ export function ReviewScreen({
                       {review.visibility.bing.has_data ? ` · ${review.visibility.summary.showing_in_bing} in Bing` : ""}
                     </span>
                   </div>
+                  <AiStrip llm={review.visibility.llm} href={`/${client.slug}/llm`} />
                   {!review.visibility.has_google_data ? (
                     <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
                       No Search Console data for these terms yet, so nothing is shown for Google.
@@ -534,6 +585,7 @@ export function ReviewScreen({
                                   <th className="px-3 py-1 text-right font-medium">Bing pos.</th>
                                 </>
                               ) : null}
+                              <th className="px-3 py-1 font-medium">AI platforms</th>
                               <th className="py-1 pl-3 font-medium">Status</th>
                             </tr>
                           </thead>
@@ -553,7 +605,7 @@ export function ReviewScreen({
                       is not meaningful. Arrows compare with {prior}.
                     </li>
                     {review.visibility.bing.has_data ? <li>{review.visibility.bing.note}</li> : <li>No Bing data pulled yet.</li>}
-                    <li>AI prompt results: {review.visibility.ai_prompts}</li>
+                    <li>AI platforms: {review.visibility.ai_prompts} Each prompt is asked of ChatGPT, Perplexity, Gemini and Claude; &ldquo;cited&rdquo; means the answer linked the client&apos;s site, &ldquo;named&rdquo; means it said the brand.</li>
                   </ul>
                 </div>
               ) : null}
