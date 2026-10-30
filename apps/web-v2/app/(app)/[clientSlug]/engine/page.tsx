@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { EngineScreen } from "@/components/EngineScreen";
+import { DataFreshness } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import {
@@ -80,6 +81,8 @@ export default async function EnginePage({
   }
 
   return (
+    <>
+    <DataFreshness clientId={client.id} />
     <EngineScreen
       client={client}
       workMonth={workMonth}
@@ -95,5 +98,6 @@ export default async function EnginePage({
       team={team}
       error={error}
     />
+    </>
   );
 }

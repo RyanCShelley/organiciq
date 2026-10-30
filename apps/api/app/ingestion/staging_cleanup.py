@@ -57,6 +57,8 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     # The crawler holds its pages in memory for the run and writes facts
     # directly; there is no staging table to purge.
     "site_crawl": (),
+    # One request, upserted straight into facts; no staging tables to purge.
+    "bing_query_stats": (),
     # One request, merged in memory, upserted into facts.
     "se_ranking_backlinks": (),
     # Writes straight to facts; no staging tables to purge.

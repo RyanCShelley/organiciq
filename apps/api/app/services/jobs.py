@@ -202,6 +202,7 @@ def _job_handlers() -> dict[str, object]:
         run_dataforseo_competitor_keywords_job,
     )
     from app.ingestion.seranking.pipeline_domain import run_seranking_domain_keywords_job
+    from app.services.bing_sync import run_bing_query_stats_job
 
     return {
         "gsc_pages": run_gsc_pages_job,
@@ -234,6 +235,8 @@ def _job_handlers() -> dict[str, object]:
         # its own crawl source so it can be compared against the SE Ranking
         # audit before anything reads it.
         "site_crawl": run_site_crawl_job,
+        # Bing's query statistics are weekly; scheduled by daily_sync.enqueue_due_bing_syncs.
+        "bing_query_stats": run_bing_query_stats_job,
     }
 
 

@@ -262,6 +262,55 @@ def enqueue_due_site_crawls(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
+#: Bing reports by week, so a pull more often than weekly has nothing new to read.
+BING_SYNC_INTERVAL_DAYS = 7
+#: A pull that failed (no data, a key problem) is tried again after this long, not every day.
+BING_RETRY_DAYS = 2
+
+
+def enqueue_due_bing_syncs(db: Session) -> dict[str, int]:
+    """Pull Bing query statistics weekly for every worked client that has a Bing site saved."""
+    from app.models.client_bing_site import ClientBingSite
+    from app.services.bing_sync import BING_SOURCE
+
+    if not get_settings().bing_webmaster_api_key.strip():
+        return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
+
+    now = datetime.now(timezone.utc)
+    last_ok = {
+        row.client_id: row.last_successful_sync_at
+        for row in db.query(DataWatermark).filter(DataWatermark.source == BING_SOURCE)
+    }
+    tried = {
+        row[0]
+        for row in db.query(SyncJob.client_id).filter(
+            SyncJob.source == BING_SOURCE, SyncJob.created_at >= now - timedelta(days=BING_RETRY_DAYS)
+        )
+    }
+    clients = (
+        db.query(Client)
+        .join(ClientBingSite, ClientBingSite.client_id == Client.id)
+        .filter(Client.status.in_(WORKED_STATUSES))
+        .all()
+    )
+    enqueued = skipped = errors = due = 0
+    today = now.date()
+    for client in clients:
+        ok = last_ok.get(client.id)
+        if (ok is not None and now - ok < timedelta(days=BING_SYNC_INTERVAL_DAYS)) or client.id in tried:
+            continue
+        due += 1
+        try:
+            enqueue_sync_job(db, client.id, SyncJobCreate(source=BING_SOURCE, start_date=today, end_date=today))
+            enqueued += 1
+        except OverlappingJobError:
+            skipped += 1
+        except Exception:  # noqa: BLE001
+            errors += 1
+            logger.exception("Bing sync enqueue failed client=%s", client.id)
+    return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
+
+
 def enqueue_due_keyword_metrics(db: Session) -> dict[str, int]:
     """Price every client's tracked keywords, monthly.
 
@@ -437,6 +486,7 @@ def maybe_run_daily_sync(db: Session) -> bool:
 
     stats = enqueue_daily_syncs(db)
     crawl_stats = enqueue_due_site_crawls(db)
+    bing_stats = enqueue_due_bing_syncs(db)
     metric_stats = enqueue_due_keyword_metrics(db)
     competitor_stats = enqueue_due_competitor_keywords(db)
     checkpoint.last_run_date = today
@@ -459,6 +509,14 @@ def maybe_run_daily_sync(db: Session) -> bool:
             crawl_stats["enqueued"],
             crawl_stats["skipped"],
             crawl_stats["errors"],
+        )
+    if bing_stats["due"]:
+        logger.info(
+            "Bing syncs due=%s enqueued=%s skipped=%s errors=%s",
+            bing_stats["due"],
+            bing_stats["enqueued"],
+            bing_stats["skipped"],
+            bing_stats["errors"],
         )
     if metric_stats["due"]:
         logger.info(

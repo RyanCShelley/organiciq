@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { ReviewScreen } from "@/components/ReviewScreen";
+import { DataFreshness } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { ClientFocus } from "@/lib/focus";
@@ -43,6 +44,8 @@ export default async function ReviewPage({
   ]);
 
   return (
+    <>
+    <DataFreshness clientId={client.id} />
     <ReviewScreen
       client={client}
       month={month}
@@ -53,5 +56,6 @@ export default async function ReviewPage({
       buckets={watchlist.buckets.map((b) => ({ id: b.id, name: b.name }))}
       reach={reach.buckets}
     />
+    </>
   );
 }

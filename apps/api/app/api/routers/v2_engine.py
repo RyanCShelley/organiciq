@@ -14,10 +14,20 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
 from app.models.client import Client
-from app.services import crawl_link_facts, page_diagnostic
+from app.services import crawl_link_facts, data_freshness, page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
+
+
+@router.get("/freshness")
+def data_freshness_for(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict]:
+    """The newest data each source holds for this client."""
+    return data_freshness.build(db, client)
 
 
 @router.get("/visibility")
