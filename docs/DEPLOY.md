@@ -20,7 +20,7 @@ Use with [README → Deploy](../README.md#deploy-railway--vercel) and [`.env.exa
 | `AUTH_URL` / `NEXTAUTH_URL` | `https://<vercel-host>` | — | — |
 | `AUTH_TRUST_HOST` | `true` | — | — |
 | `API_URL` / `NEXT_PUBLIC_API_URL` | `https://<api-host>` | — | — |
-| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.net` | `smamarketing.net` | `smamarketing.net` |
+| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.com` | `smamarketing.com` | `smamarketing.com` |
 | `DATABASE_URL` | — | from Postgres | from Postgres |
 | `INTEGRATION_TOKEN_KEY` | — | required (shared) | required (shared) |
 | `SMA_ADMIN_EMAILS` | — | required | required |
@@ -54,7 +54,7 @@ Confirm: `curl -s https://<api-host>/health` → `{"status":"ok"}`.
 
 ## Smoke test
 
-- [ ] Vercel login with `@smamarketing.net`
+- [ ] Vercel login with `@smamarketing.com`
 - [ ] Client switcher shows SMA Marketing (after seed)
 - [ ] Dashboard / Decision Engine load without hard errors
 - [ ] GSC or GA4 OAuth connect completes and returns to web
@@ -90,7 +90,7 @@ framework preset on Next.js.
 | `AUTH_TRUST_HOST` | `true` |
 | `API_URL` / `NEXT_PUBLIC_API_URL` | `https://<api-host>` |
 | `INTERNAL_API_SECRET` | same value as the API's (v2 refuses to sign anyone in without it) |
-| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.net` |
+| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.com` |
 
 ## Railway env: new for v2
 
@@ -117,6 +117,13 @@ A platform with no key is skipped, not failed. A key typed with a missing `=` is
 (`tests/test_migrations_additive_only.py`) refuses anything else. Run them against a **copy of the production
 database first** if Railway lets you, and confirm `/health` answers `{"status":"ok","migrations":"..."}` after.
 
+## Sign-in domain
+
+Production uses `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com` on the API, the worker and web-v2. The code's own default
+still accepts both `.com` and `.net` while accounts move over, so **setting only `.com` refuses any staff account that
+is still on `.net`**. Before narrowing it, check every person who signs in has a `.com` account, and that
+`SMA_ADMIN_EMAILS` lists `.com` addresses.
+
 ## Google Console
 
 | Client | Add |
@@ -135,7 +142,7 @@ platforms). Check the keys before the first scheduled day.
 
 ## v2 smoke test
 
-- [ ] Sign in at the v2 address with `@smamarketing.net`; the client switcher lists the clients
+- [ ] Sign in at the v2 address with `@smamarketing.com`; the client switcher lists the clients
 - [ ] Monthly review loads, with the "Data through" line under the header
 - [ ] Settings → Connections: Google, Search Console, Bing and Teamwork show their state
 - [ ] Decision engine: a candidate list loads; diagnose one page; the growth action builds

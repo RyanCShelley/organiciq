@@ -50,7 +50,7 @@ Printable env matrix + smoke checklist: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 4. Set env on **api** and **worker** (see Production section in [`.env.example`](.env.example)):
    - `DATABASE_URL` from the Postgres plugin (Railway `postgresql://` is normalized to `postgresql+psycopg://` in app settings)
    - Shared secrets: `AUTH_SECRET`, `INTEGRATION_TOKEN_KEY` (32+ bytes, stable)
-   - `SMA_ADMIN_EMAILS`, `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.net`
+   - `SMA_ADMIN_EMAILS`, `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com`
    - `ALLOWED_ORIGINS` / `WEB_APP_URL` = your Vercel URL (update after Vercel deploy if needed)
    - Google data OAuth + `GOOGLE_DATA_OAUTH_REDIRECT_URI=https://<api-host>/oauth/google/callback`
    - `SE_RANKING_API_KEY`, `DECISION_ENGINE_ENABLED=true`
@@ -72,7 +72,7 @@ Printable env matrix + smoke checklist: [`docs/DEPLOY.md`](docs/DEPLOY.md).
    - `AUTH_URL` / `NEXTAUTH_URL` = `https://<vercel-host>`
    - `AUTH_TRUST_HOST=true`
    - `API_URL` / `NEXT_PUBLIC_API_URL` = `https://<railway-api-host>`
-   - `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.net`
+   - `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com`
 5. Deploy; copy the production URL into Railway `ALLOWED_ORIGINS` and `WEB_APP_URL` if you had placeholders.
 
 ### 3. Google Cloud OAuth (before first prod login)
@@ -88,7 +88,7 @@ Keep **two** OAuth web clients (login vs data), as in local setup.
 
 ### 4. Smoke test
 
-1. Open the Vercel URL → Google Workspace login (`@smamarketing.net`).
+1. Open the Vercel URL → Google Workspace login (`@smamarketing.com`).
 2. SMA Marketing client loads; Dashboard / Decision Engine do not hard-fail.
 3. Client settings → connect GSC or GA4; OAuth returns to the web app.
 4. Enqueue a short sync; worker claims the job; Data Health updates.
