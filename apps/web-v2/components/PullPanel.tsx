@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 
-import { pullStatusAction, startPullAction } from "@/app/(app)/admin/actions";
+import { pullStatusAction, startPullAction, stopPullAction } from "@/app/(app)/admin/actions";
 import type { PullSource, PullStatus } from "@/lib/admin";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -21,6 +21,8 @@ const STATE: Record<PullSource["state"], { text: string; cls: string }> = {
   not_started: { text: "Not pulled yet", cls: "text-[var(--text-tertiary)]" },
   queued: { text: "Waiting", cls: "text-[var(--text-secondary)]" },
   running: { text: "Pulling", cls: "text-blue-700" },
+  stopping: { text: "Stopping", cls: "text-amber-700" },
+  stopped: { text: "Stopped", cls: "text-[var(--text-secondary)]" },
   done: { text: "Done", cls: "text-green-700" },
   partial: { text: "Done, with gaps", cls: "text-amber-700" },
   failed: { text: "Failed", cls: "text-red-700" },
@@ -80,6 +82,18 @@ export function PullPanel({ clientId }: { clientId: string }) {
       } else setError(r.error);
     });
 
+  const stop = () => {
+    if (!window.confirm("Stop this pull? What is waiting is cancelled. What is running stops at its next step, within seconds if it is fetching. Data already saved stays.")) return;
+    start(async () => {
+      setError(null);
+      const r = await stopPullAction(clientId);
+      if (r.ok) {
+        setStatus(r.value);
+        watch(r.value);
+      } else setError(r.error);
+    });
+  };
+
   const pct = status && status.jobs_total ? Math.round((status.jobs_done / status.jobs_total) * 100) : 0;
   const headline = !status
     ? "Loading…"
@@ -116,6 +130,11 @@ export function PullPanel({ clientId }: { clientId: string }) {
           >
             {pending ? <><Spinner />Starting…</> : status?.running ? <><Spinner />Pulling…</> : "Pull data"}
           </button>
+          {status?.running ? (
+            <button type="button" onClick={stop} disabled={pending || status.stopping} className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40">
+              {status.stopping ? <><Spinner />Stopping…</> : "Stop pull"}
+            </button>
+          ) : null}
           {status && !status.running && status.up_to_date ? (
             <button type="button" onClick={() => begin(true)} disabled={pending} className="text-xs font-semibold text-[var(--text-secondary)] underline disabled:opacity-40">
               Pull everything again
@@ -137,9 +156,9 @@ export function PullPanel({ clientId }: { clientId: string }) {
                 <span className="ml-2 text-xs text-[var(--text-tertiary)]">{reach(s)}</span>
               </div>
               <div className="text-xs">
-                <span className={`font-semibold ${STATE[s.state].cls}`}>{s.state === "running" ? <Spinner /> : null}{STATE[s.state].text}</span>
-                {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
-                {s.state === "running" && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
+                <span className={`font-semibold ${STATE[s.state].cls}`}>{s.state === "running" || s.state === "stopping" ? <Spinner /> : null}{STATE[s.state].text}</span>
+                {(s.state === "running" || s.state === "stopping") && s.stage ? ` · ${s.stage}` : ""}
+                {(s.state === "running" || s.state === "stopping") && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
                 {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
                 {s.finished_at && (s.state === "done" || s.state === "partial") ? ` · pulled ${ago(s.finished_at)}` : ""}
                 {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}

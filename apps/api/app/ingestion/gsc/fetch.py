@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
@@ -54,6 +57,25 @@ def gsc_site_urls_for_integration(integration: Integration) -> list[str]:
     return sites
 
 
+STAGING_CHUNK = 5000
+
+
+def _stage(db: Session, model: type, rows: Iterator[dict]) -> int:
+    """Insert staged rows in chunks as they arrive: one compiled statement, and never more than a chunk in memory."""
+    written = 0
+    chunk: list[dict] = []
+    for row in rows:
+        chunk.append(row)
+        if len(chunk) >= STAGING_CHUNK:
+            db.execute(insert(model), chunk)
+            written += len(chunk)
+            chunk = []
+    if chunk:
+        db.execute(insert(model), chunk)
+        written += len(chunk)
+    return written
+
+
 def _metric(row: dict, key: str) -> Decimal:
     return Decimal(str(row.get(key) or 0))
 
@@ -73,27 +95,28 @@ def fetch_gsc_pages(db: Session, job: SyncJob) -> int:
             end_date=job.end_date,
             dimensions=["date", "page", "country", "device"],
         )
-        for row in rows:
-            keys = row.get("keys") or []
-            if len(keys) < 4:
-                continue
-            db.add(
-                StagingGscPage(
-                    job_id=job.id,
-                    client_id=job.client_id,
-                    raw=row,
-                    date=date.fromisoformat(str(keys[0])),
-                    page=str(keys[1]),
-                    country=str(keys[2] or ""),
-                    device=str(keys[3] or ""),
-                    gsc_site_url=site_url,
-                    impressions=_metric(row, "impressions"),
-                    clicks=_metric(row, "clicks"),
-                    ctr=_metric(row, "ctr"),
-                    average_position=_metric(row, "position"),
-                )
-            )
-            written += 1
+
+        def staged(rows=rows, site_url=site_url):
+            for row in rows:
+                keys = row.get("keys") or []
+                if len(keys) < 4:
+                    continue
+                yield {
+                    "job_id": job.id,
+                    "client_id": job.client_id,
+                    "raw": row,
+                    "date": date.fromisoformat(str(keys[0])),
+                    "page": str(keys[1]),
+                    "country": str(keys[2] or ""),
+                    "device": str(keys[3] or ""),
+                    "gsc_site_url": site_url,
+                    "impressions": _metric(row, "impressions"),
+                    "clicks": _metric(row, "clicks"),
+                    "ctr": _metric(row, "ctr"),
+                    "average_position": _metric(row, "position"),
+                }
+
+        written += _stage(db, StagingGscPage, staged())
     db.commit()
     return written
 
@@ -113,24 +136,25 @@ def fetch_gsc_daily(db: Session, job: SyncJob) -> int:
             end_date=job.end_date,
             dimensions=["date"],
         )
-        for row in rows:
-            keys = row.get("keys") or []
-            if len(keys) < 1:
-                continue
-            db.add(
-                StagingGscDaily(
-                    job_id=job.id,
-                    client_id=job.client_id,
-                    raw=row,
-                    date=date.fromisoformat(str(keys[0])),
-                    gsc_site_url=site_url,
-                    impressions=_metric(row, "impressions"),
-                    clicks=_metric(row, "clicks"),
-                    ctr=_metric(row, "ctr"),
-                    average_position=_metric(row, "position"),
-                )
-            )
-            written += 1
+
+        def staged(rows=rows, site_url=site_url):
+            for row in rows:
+                keys = row.get("keys") or []
+                if len(keys) < 1:
+                    continue
+                yield {
+                    "job_id": job.id,
+                    "client_id": job.client_id,
+                    "raw": row,
+                    "date": date.fromisoformat(str(keys[0])),
+                    "gsc_site_url": site_url,
+                    "impressions": _metric(row, "impressions"),
+                    "clicks": _metric(row, "clicks"),
+                    "ctr": _metric(row, "ctr"),
+                    "average_position": _metric(row, "position"),
+                }
+
+        written += _stage(db, StagingGscDaily, staged())
     db.commit()
     return written
 
@@ -150,31 +174,32 @@ def fetch_gsc_queries(db: Session, job: SyncJob) -> int:
             end_date=job.end_date,
             dimensions=["date", "query", "page", "country", "device"],
         )
-        for row in rows:
-            keys = row.get("keys") or []
-            if len(keys) < 5:
-                continue
-            query = str(keys[1] or "").strip()
-            if not query:
-                # Never stage blank queries as query records.
-                continue
-            db.add(
-                StagingGscQueryPage(
-                    job_id=job.id,
-                    client_id=job.client_id,
-                    raw=row,
-                    date=date.fromisoformat(str(keys[0])),
-                    query=query,
-                    page=str(keys[2]),
-                    country=str(keys[3] or ""),
-                    device=str(keys[4] or ""),
-                    gsc_site_url=site_url,
-                    impressions=_metric(row, "impressions"),
-                    clicks=_metric(row, "clicks"),
-                    ctr=_metric(row, "ctr"),
-                    average_position=_metric(row, "position"),
-                )
-            )
-            written += 1
+
+        def staged(rows=rows, site_url=site_url):
+            for row in rows:
+                keys = row.get("keys") or []
+                if len(keys) < 5:
+                    continue
+                query = str(keys[1] or "").strip()
+                if not query:
+                    # Never stage blank queries as query records.
+                    continue
+                yield {
+                    "job_id": job.id,
+                    "client_id": job.client_id,
+                    "raw": row,
+                    "date": date.fromisoformat(str(keys[0])),
+                    "query": query,
+                    "page": str(keys[2]),
+                    "country": str(keys[3] or ""),
+                    "device": str(keys[4] or ""),
+                    "gsc_site_url": site_url,
+                    "impressions": _metric(row, "impressions"),
+                    "clicks": _metric(row, "clicks"),
+                    "ctr": _metric(row, "ctr"),
+                    "average_position": _metric(row, "position"),
+                }
+
+        written += _stage(db, StagingGscQueryPage, staged())
     db.commit()
     return written

@@ -32,7 +32,7 @@ export type PullSource = {
   reach: string;
   from: string;
   to: string;
-  state: "not_started" | "queued" | "running" | "done" | "partial" | "failed";
+  state: "not_started" | "queued" | "running" | "stopping" | "done" | "partial" | "failed" | "stopped";
   stage: string | null;
   running_seconds: number | null;
   error: string | null;
@@ -46,6 +46,7 @@ export type PullStatus = {
   running: boolean;
   finished: boolean;
   up_to_date: boolean;
+  stopping: boolean;
   failed: string[];
   jobs_done: number;
   jobs_total: number;

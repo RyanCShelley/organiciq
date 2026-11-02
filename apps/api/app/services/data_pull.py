@@ -19,6 +19,7 @@ from app.models.integration import Integration
 from app.models.job import SyncJob, SyncJobStatus
 from app.schemas import SyncJobCreate
 from app.services.daily_sync import _PROVIDER_SOURCES
+from app.services.jobs import lane_of
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
 
 GSC_BACKFILL_MONTHS = 13
@@ -98,11 +99,17 @@ def _orphans(db: Session, client_id) -> list[SyncJob]:
     """Jobs still marked running that cannot be: the worker has started a later job (of any client, finished or not) and
     this one has been silent for a while. A deploy restarts the worker and leaves its running job like this until the 45-minute stale clear."""
     now = datetime.now(timezone.utc)
-    latest_start = db.query(func.max(SyncJob.started_at)).scalar()
+    # Jobs run one at a time per lane, so "a later job started" only proves anything about jobs in the same lane.
+    latest_start: dict[str, datetime] = {}
+    for source, started in db.query(SyncJob.source, func.max(SyncJob.started_at)).group_by(SyncJob.source):
+        lane = lane_of(source)
+        if started is not None and (lane not in latest_start or started > latest_start[lane]):
+            latest_start[lane] = started
     out = []
     for job in db.query(SyncJob).filter(SyncJob.client_id == client_id, SyncJob.status.in_(RUNNING)):
         silent = (now - job.updated_at).total_seconds() / 60 if job.updated_at else 0
-        if job.started_at and latest_start and latest_start > job.started_at and silent >= ORPHAN_SILENT_MINUTES:
+        later = latest_start.get(lane_of(job.source))
+        if job.started_at and later and later > job.started_at and silent >= ORPHAN_SILENT_MINUTES:
             out.append(job)
     return out
 
@@ -124,6 +131,23 @@ def _latest_jobs(db: Session, client_id) -> dict[str, SyncJob]:
     for job in db.query(SyncJob).filter(SyncJob.client_id == client_id).order_by(SyncJob.created_at):
         latest[job.source] = job
     return latest
+
+
+def stop_pull(db: Session, client: Any, who: str) -> dict[str, int]:
+    """Stop this client's pull. Jobs still waiting are cancelled now; a running one is asked to stop and does at its next
+    page, batch or call (within seconds while fetching; after the save, if it is already saving rows)."""
+    sources = {item["source"] for item in pull_plan(db, client)}
+    cancelled = asked = 0
+    now = datetime.now(timezone.utc)
+    for job in db.query(SyncJob).filter(SyncJob.client_id == client.id, SyncJob.source.in_(sources), SyncJob.status.in_(ACTIVE)):
+        if job.status == SyncJobStatus.QUEUED:
+            job.status, job.completed_at, job.error_message = SyncJobStatus.FAILED, now, f"Stopped by {who} before it started."
+            cancelled += 1
+        elif not (job.params_json or {}).get("stop_requested_by"):
+            job.params_json = {**(job.params_json or {}), "stop_requested_by": who}
+            asked += 1
+    db.commit()
+    return {"cancelled": cancelled, "asked_to_stop": asked}
 
 
 def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
@@ -162,12 +186,17 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
     orphan_ids = {j.id for j in _orphans(db, client.id)}
 
     # Jobs for other clients queued before ours: they run first, in the one queue.
-    mine = [j.created_at for j in jobs.values() if j.status == SyncJobStatus.QUEUED]
+    mine = [j for j in jobs.values() if j.status == SyncJobStatus.QUEUED]
     ahead = 0
     if mine:
-        ahead = db.query(func.count()).select_from(SyncJob).filter(
-            SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id, SyncJob.created_at < min(mine)
-        ).scalar() or 0
+        first = min(mine, key=lambda j: j.created_at)
+        ahead = sum(
+            1
+            for source, in db.query(SyncJob.source).filter(
+                SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id, SyncJob.created_at < first.created_at
+            )
+            if lane_of(source) == lane_of(first.source)
+        )
 
     sources = []
     for item in plan:
@@ -181,18 +210,19 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
             if job.id in orphan_ids:
                 row["state"], row["error"], row["stage"] = "failed", RESTART_NOTE, STAGE_TEXT[SyncJobStatus.FAILED]
             elif status in ACTIVE:
-                row["state"] = "queued" if status == SyncJobStatus.QUEUED else "running"
+                row["state"] = "queued" if status == SyncJobStatus.QUEUED else "stopping" if (job.params_json or {}).get("stop_requested_by") else "running"
                 if job.started_at is not None:
                     row["running_seconds"] = int((now - job.started_at).total_seconds())
             elif status == SyncJobStatus.FAILED:
-                row["state"], row["error"] = "failed", job.error_message
+                stopped = (job.error_message or "").startswith("Stopped by")
+                row["state"], row["error"] = ("stopped" if stopped else "failed"), job.error_message
             else:
                 row["state"] = "done" if status == SyncJobStatus.SUCCESSFUL else "partial"
                 row["finished_at"] = job.completed_at.isoformat() if job.completed_at else None
             row["current"] = _is_current(job, item, now)
         sources.append(row)
 
-    active = [s for s in sources if s["state"] in ("queued", "running")]
+    active = [s for s in sources if s["state"] in ("queued", "running", "stopping")]
     done = [s for s in sources if s["state"] in ("done", "partial")]
     return {
         "sources": sources,
@@ -200,6 +230,7 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
         "finished": bool(sources) and not active and len(done) == len(sources),
         "up_to_date": bool(sources) and all(s["current"] for s in sources),
         "failed": [s["label"] for s in sources if s["state"] == "failed"],
+        "stopping": any(s["state"] == "stopping" for s in sources),
         "jobs_done": len(done),
         "jobs_total": len(sources),
         "jobs_ahead": ahead,

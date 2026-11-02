@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.llm_visibility import analyze as analysis
 from app.llm_visibility import platforms
 from app.models.client import Client
+from app.services.jobs import check_stop
 from app.models.job import SyncJob, SyncJobStatus, ValidationStatus
 from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
@@ -143,6 +144,7 @@ def run_for_client(db: Session, client: Client, *, triggered_by: str = "schedule
         try:
             futures = [pools[p].submit(_ask_one, p, item, config) for p in chosen for item in items]
             for future in as_completed(futures):
+                check_stop()
                 row = future.result()
                 errors += 1 if row["visibility_type"] == "Error" else 0
                 cost += float(row.get("estimated_cost_usd") or 0)
@@ -150,7 +152,8 @@ def run_for_client(db: Session, client: Client, *, triggered_by: str = "schedule
                 db.commit()
         finally:
             for pool in pools.values():
-                pool.shutdown(wait=True)
+                # cancel_futures: on a stop, the answers not yet asked are dropped instead of all being paid for.
+                pool.shutdown(wait=True, cancel_futures=True)
         status, message = "completed", None
     except Exception as exc:  # noqa: BLE001
         db.rollback()

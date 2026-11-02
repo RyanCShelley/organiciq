@@ -149,3 +149,16 @@ def start_pull(
     queued = data_pull.queue_pull(db, client, force=force)
     logger.info("Pull started for %s by %s%s: %s", client.client_name, user.email, " (forced)" if force else "", ", ".join(queued) or "nothing missing")
     return {"queued": queued, **data_pull.pull_status(db, client)}
+
+
+@router.post("/clients/{client_id}/pull/stop")
+def stop_pull(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Stop the pull: cancel what is waiting and ask what is running to stop at its next page."""
+    client = _client(db, client_id)
+    result = data_pull.stop_pull(db, client, user.email)
+    logger.warning("Pull stopped for %s by %s: %s", client.client_name, user.email, result)
+    return {**result, **data_pull.pull_status(db, client)}

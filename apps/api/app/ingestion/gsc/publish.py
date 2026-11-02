@@ -23,6 +23,8 @@ from app.models.job import SyncJob
 
 # psycopg limit is 65535 bind params; keep batches well under that.
 UPSERT_BATCH_SIZE = 1000
+STREAM_BATCH_SIZE = 20000
+INSERT_BATCH_SIZE = 5000
 
 
 def _chunked(items: Sequence[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
@@ -303,31 +305,57 @@ def publish_gsc_daily(db: Session, job: SyncJob) -> int:
     return _write_daily(db, payloads, job)
 
 
-def publish_gsc_pages(db: Session, job: SyncJob) -> int:
-    rows = (
-        db.query(StagingGscPage)
-        .filter(StagingGscPage.job_id == job.id, StagingGscPage.client_id == job.client_id)
-        .all()
-    )
-    if not rows:
-        return 0
+class _UrlCache:
+    """Each distinct page address is canonicalised once. A property has far fewer pages than rows."""
 
-    primary_site_url = _primary_site_url(db, job.client_id)
-    client_domain = _client_domain(db, job.client_id)
-    scope = _client_scope(db, job.client_id)
+    def __init__(self, *, primary_site_url: str | None, client_domain: str | None, scope: str | None) -> None:
+        self.primary_site_url, self.client_domain, self.scope = primary_site_url, client_domain, scope
+        self._seen: dict[tuple[str, str], str | None] = {}
+
+    def normalized(self, page: str, site: str) -> str | None:
+        key = (page, site)
+        if key not in self._seen:
+            _, normalized = _canonical_page_url(
+                page, gsc_site_url=site or None, primary_site_url=self.primary_site_url, client_domain=self.client_domain
+            )
+            self._seen[key] = normalized if normalized and url_in_scope(normalized, self.scope) else None
+        return self._seen[key]
+
+    def is_primary(self, site: str) -> bool:
+        return not self.primary_site_url or not site or site == self.primary_site_url
+
+
+def _upsert(db: Session, model, constraint: str, columns: tuple[str, ...], payloads: list[dict[str, Any]]) -> None:
+    """One statement, many parameter sets: compiled once. Passing each batch to .values() recompiled it every time."""
+    stmt = insert(model)
+    stmt = stmt.on_conflict_do_update(constraint=constraint, set_={c: getattr(stmt.excluded, c) for c in columns})
+    for batch in _chunked(payloads, INSERT_BATCH_SIZE):
+        db.execute(stmt, batch)
+
+
+def publish_gsc_pages(db: Session, job: SyncJob) -> int:
+    urls = _UrlCache(
+        primary_site_url=_primary_site_url(db, job.client_id),
+        client_domain=_client_domain(db, job.client_id),
+        scope=_client_scope(db, job.client_id),
+    )
     payloads: list[dict[str, Any]] = []
-    for row in rows:
+    seen_any = False
+    # Only the columns used, streamed, not the raw JSON copy of every row loaded as an object.
+    for row in (
+        db.query(
+            StagingGscPage.date, StagingGscPage.page, StagingGscPage.country, StagingGscPage.device, StagingGscPage.gsc_site_url,
+            StagingGscPage.impressions, StagingGscPage.clicks, StagingGscPage.ctr, StagingGscPage.average_position,
+        )
+        .filter(StagingGscPage.job_id == job.id, StagingGscPage.client_id == job.client_id)
+        .yield_per(STREAM_BATCH_SIZE)
+    ):
+        seen_any = True
         if row.date is None or not row.page:
             continue
         site = (row.gsc_site_url or "").strip()
-        is_primary = not primary_site_url or not site or site == primary_site_url
-        raw_url, normalized_url = _canonical_page_url(
-            row.page,
-            gsc_site_url=site or None,
-            primary_site_url=primary_site_url,
-            client_domain=client_domain,
-        )
-        if not normalized_url or not url_in_scope(normalized_url, scope):
+        normalized_url = urls.normalized(row.page, site)
+        if not normalized_url:
             continue
         payloads.append(
             {
@@ -341,63 +369,42 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
                 "clicks": row.clicks or Decimal(0),
                 "ctr": row.ctr or Decimal(0),
                 "average_position": row.average_position or Decimal(0),
-                "is_primary": is_primary,
+                "is_primary": urls.is_primary(site),
                 "gsc_site_url": site,
             }
         )
-
-    if not payloads:
+    if not seen_any or not payloads:
         return 0
 
     payloads = _dedupe_payloads(payloads, _page_grain_key)
     _replace_scope(db, FactGscPage, job, payloads)
-
-    for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
-        stmt = insert(FactGscPage).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_facts_gsc_pages_grain",
-            set_={
-                "raw_url": stmt.excluded.raw_url,
-                "impressions": stmt.excluded.impressions,
-                "clicks": stmt.excluded.clicks,
-                "ctr": stmt.excluded.ctr,
-                "average_position": stmt.excluded.average_position,
-            },
-        )
-        db.execute(stmt)
+    _upsert(db, FactGscPage, "uq_facts_gsc_pages_grain", ("raw_url", "impressions", "clicks", "ctr", "average_position"), payloads)
     db.commit()
     return len(payloads)
 
 
 def publish_gsc_queries(db: Session, job: SyncJob) -> int:
-    rows = (
-        db.query(StagingGscQueryPage)
-        .filter(
-            StagingGscQueryPage.job_id == job.id,
-            StagingGscQueryPage.client_id == job.client_id,
-        )
-        .all()
+    urls = _UrlCache(
+        primary_site_url=_primary_site_url(db, job.client_id),
+        client_domain=_client_domain(db, job.client_id),
+        scope=_client_scope(db, job.client_id),
     )
-    if not rows:
-        return 0
-
-    primary_site_url = _primary_site_url(db, job.client_id)
-    client_domain = _client_domain(db, job.client_id)
-    scope = _client_scope(db, job.client_id)
     payloads: list[dict[str, Any]] = []
-    for row in rows:
+    for row in (
+        db.query(
+            StagingGscQueryPage.date, StagingGscQueryPage.query, StagingGscQueryPage.page, StagingGscQueryPage.country,
+            StagingGscQueryPage.device, StagingGscQueryPage.gsc_site_url, StagingGscQueryPage.impressions,
+            StagingGscQueryPage.clicks, StagingGscQueryPage.ctr, StagingGscQueryPage.average_position,
+        )
+        .filter(StagingGscQueryPage.job_id == job.id, StagingGscQueryPage.client_id == job.client_id)
+        .yield_per(STREAM_BATCH_SIZE)
+    ):
         query = (row.query or "").strip()
         if row.date is None or not query or not row.page:
             continue
         site = (row.gsc_site_url or "").strip()
-        is_primary = not primary_site_url or not site or site == primary_site_url
-        raw_url, normalized_url = _canonical_page_url(
-            row.page,
-            gsc_site_url=site or None,
-            primary_site_url=primary_site_url,
-            client_domain=client_domain,
-        )
-        if not normalized_url or not url_in_scope(normalized_url, scope):
+        normalized_url = urls.normalized(row.page, site)
+        if not normalized_url:
             continue
         payloads.append(
             {
@@ -412,30 +419,16 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
                 "clicks": row.clicks or Decimal(0),
                 "ctr": row.ctr or Decimal(0),
                 "average_position": row.average_position or Decimal(0),
-                "is_primary": is_primary,
+                "is_primary": urls.is_primary(site),
                 "gsc_site_url": site,
             }
         )
-
     if not payloads:
         return 0
 
     payloads = _dedupe_payloads(payloads, _query_grain_key)
     _replace_scope(db, FactGscQueryPage, job, payloads)
-
-    for batch in _chunked(payloads, UPSERT_BATCH_SIZE):
-        stmt = insert(FactGscQueryPage).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_facts_gsc_query_pages_grain",
-            set_={
-                "raw_url": stmt.excluded.raw_url,
-                "impressions": stmt.excluded.impressions,
-                "clicks": stmt.excluded.clicks,
-                "ctr": stmt.excluded.ctr,
-                "average_position": stmt.excluded.average_position,
-            },
-        )
-        db.execute(stmt)
+    _upsert(db, FactGscQueryPage, "uq_facts_gsc_query_pages_grain", ("raw_url", "impressions", "clicks", "ctr", "average_position"), payloads)
     db.commit()
     return len(payloads)
 

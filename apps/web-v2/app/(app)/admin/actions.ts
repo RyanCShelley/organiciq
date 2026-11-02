@@ -44,3 +44,11 @@ export async function startPullAction(clientId: string, force = false): Promise<
     return failure(error, "The pull could not be started: the API did not answer.");
   }
 }
+
+export async function stopPullAction(clientId: string): Promise<Result<PullStatus>> {
+  try {
+    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull/stop`, { method: "POST" }) };
+  } catch (error) {
+    return failure(error, "The pull could not be stopped: the API did not answer.");
+  }
+}

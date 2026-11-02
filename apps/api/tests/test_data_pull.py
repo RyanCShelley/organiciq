@@ -182,3 +182,64 @@ def test_connecting_a_source_pulls_only_what_it_feeds_even_if_pulled_today(clien
     out = client.post("/v2/connections/pull", json={"sources": ["ga4", "not_a_source"]}, headers=h).json()
     assert out["queued"] == ["ga4"]
     assert client.post("/v2/connections/pull", json={"sources": ["not_a_source"]}, headers=h).json()["queued"] == []
+
+
+def test_a_long_pull_is_not_called_interrupted_just_because_a_job_in_another_lane_started_after_it(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    now = datetime.now(timezone.utc)
+    client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h)
+    long_pull = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "gsc_queries").one()
+    long_pull.status, long_pull.started_at = SyncJobStatus.FETCHING, now - timedelta(minutes=40)
+    crawl = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "site_crawl").one()
+    crawl.status, crawl.started_at = SyncJobStatus.FETCHING, now - timedelta(minutes=5)
+    db.commit()
+    db.execute(__import__("sqlalchemy").text("update sync_jobs set updated_at = :t where id = :i"), {"t": now - timedelta(minutes=35), "i": long_pull.id})
+    db.commit()
+    shown = {s["source"]: s for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    assert shown["gsc_queries"]["state"] == "running" and shown["site_crawl"]["state"] == "running"
+
+
+def test_stopping_cancels_what_is_waiting_and_asks_what_is_running_to_stop(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h)
+    running = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "gsc_queries").one()
+    running.status, running.started_at = SyncJobStatus.FETCHING, datetime.now(timezone.utc)
+    db.commit()
+
+    out = client.post(f"/v2/admin/clients/{client_a.id}/pull/stop", headers=h).json()
+    by = {s["source"]: s for s in out["sources"]}
+    assert by["gsc_queries"]["state"] == "stopping" and out["stopping"] is True and out["running"] is True
+    waiting = [s for s in out["sources"] if s["source"] != "gsc_queries"]
+    assert waiting and all(s["state"] == "stopped" and "Stopped by" in s["error"] for s in waiting)
+    assert out["failed"] == []  # a stop is not a failure
+
+    # Once the worker honours the request the job ends as stopped, and pulling again queues everything that did not finish.
+    db.refresh(running)
+    running.status, running.error_message, running.completed_at = SyncJobStatus.FAILED, "Stopped by admin", datetime.now(timezone.utc)
+    db.commit()
+    again = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    assert len(again["queued"]) == len(out["sources"])
+
+
+def test_a_job_checks_for_a_stop_request_and_raises_when_there_is_one(db, client_a):
+    import pytest
+
+    from app.services import jobs
+
+    job = SyncJob(client_id=client_a.id, source="gsc_queries", start_date=datetime.now().date(), end_date=datetime.now().date(),
+                  status=SyncJobStatus.FETCHING, params_json={})
+    db.add(job)
+    db.commit()
+    jobs.check_stop()  # no job running on this thread: nothing happens
+    jobs._running.job_id, jobs._running.checked_at = job.id, 0.0
+    try:
+        jobs.check_stop()  # no request yet
+        job.params_json = {"stop_requested_by": "ryan@example.com"}
+        db.commit()
+        jobs._running.checked_at = 0.0
+        with pytest.raises(jobs.JobStopped, match="Stopped by ryan@example.com"):
+            jobs.check_stop()
+    finally:
+        jobs._running.job_id = None

@@ -21,6 +21,8 @@ import zlib
 
 import httpx
 
+from app.services.jobs import check_stop
+
 from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
 from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 from app.ingestion.crawler.safe_http import PublicOnlyTransport
@@ -679,6 +681,7 @@ async def crawl_site(
                 )
 
         while queue and len(pages) < page_limit:
+            check_stop()
             batch = queue[: max(1, concurrency)]
             del queue[: len(batch)]
             batch = [u for u in batch if normalize_url(u) not in pages]

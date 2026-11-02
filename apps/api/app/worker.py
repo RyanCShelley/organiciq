@@ -1,5 +1,6 @@
 import importlib
 import logging
+import threading
 import time
 
 from app.core.db import SessionLocal
@@ -52,11 +53,11 @@ def _jobs_module():
     return jobs
 
 
-def run_once() -> bool:
+def run_once(lane: str = "main") -> bool:
     jobs = _jobs_module()
     db = SessionLocal()
     try:
-        stale = jobs.fail_stale_active_jobs(db)
+        stale = jobs.fail_stale_active_jobs(db) if lane == "main" else []
         for job in stale:
             logger.warning(
                 "Cleared stale job %s source=%s client=%s",
@@ -64,7 +65,7 @@ def run_once() -> bool:
                 job.source,
                 job.client_id,
             )
-        job = jobs.claim_next_job(db)
+        job = jobs.claim_next_job(db, lane)
         if job is None:
             return False
         job_id = job.id
@@ -166,6 +167,19 @@ def _maybe_run_month() -> None:
         db.close()
 
 
+def _run_lane(lane: str) -> None:
+    """A side lane: its own loop, so a long pull on the main lane never holds it up."""
+    settings = get_settings()
+    while True:
+        try:
+            worked = run_once(lane)
+        except Exception:  # noqa: BLE001 — a lane must not die on one bad job
+            logger.exception("Lane %s failed", lane)
+            worked = False
+        if not worked:
+            time.sleep(settings.worker_poll_interval_seconds)
+
+
 def main() -> None:
     settings = get_settings()
     logger.warning(
@@ -180,6 +194,11 @@ def main() -> None:
         settings.daily_sync_hour_utc,
         settings.daily_sync_lookback_days,
     )
+    from app.services.jobs import LANES
+
+    for lane in LANES:
+        threading.Thread(target=_run_lane, args=(lane,), name=f"lane-{lane}", daemon=True).start()
+        logger.info("Lane %s running beside the main lane: %s", lane, ", ".join(sorted(LANES[lane])))
     while True:
         _maybe_daily_sync()
         _maybe_check_results()

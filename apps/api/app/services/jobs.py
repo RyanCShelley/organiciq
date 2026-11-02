@@ -1,3 +1,5 @@
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -159,11 +161,31 @@ def fail_stale_active_jobs(
     return stale
 
 
-def claim_next_job(db: Session) -> SyncJob | None:
+#: Jobs that do not need to wait behind a long data pull, each on its own lane. The worker runs one job at a time per
+#: lane, in the order queued, and the lanes run side by side. An AI platform run talks to other companies' APIs and a
+#: site crawl talks to the client's own site; neither touches the Google or SE Ranking limits a pull is slow because of.
+#: Everything else (Search Console, GA4, SE Ranking, Bing) shares the main lane, where order still matters.
+LANES: dict[str, frozenset[str]] = {
+    "llm": frozenset({"llm_visibility"}),
+    "crawl": frozenset({"site_crawl"}),
+}
+
+
+def lane_of(source: str) -> str:
+    for name, sources in LANES.items():
+        if source in sources:
+            return name
+    return "main"
+
+
+def claim_next_job(db: Session, lane: str = "main") -> SyncJob | None:
+    query = db.query(SyncJob).filter(SyncJob.status == SyncJobStatus.QUEUED)
+    if lane == "main":
+        query = query.filter(SyncJob.source.notin_([src for sources in LANES.values() for src in sources]))
+    else:
+        query = query.filter(SyncJob.source.in_(LANES[lane]))
     job = (
-        db.query(SyncJob)
-        .filter(SyncJob.status == SyncJobStatus.QUEUED)
-        .order_by(SyncJob.created_at.asc())
+        query.order_by(SyncJob.created_at.asc())
         .with_for_update(skip_locked=True)
         .first()
     )
@@ -243,10 +265,44 @@ def _job_handlers() -> dict[str, object]:
     }
 
 
+class JobStopped(Exception):
+    """A person asked for this job to stop. Raised from inside a long loop; the job's own failure handling records it."""
+
+
+_running = threading.local()
+_STOP_CHECK_EVERY_SECONDS = 2.0
+
+
 def process_job(db: Session, job: SyncJob) -> SyncJob:
     handler = _job_handlers().get(job.source)
     if handler is None:
         return mark_job_failed(db, job, f"Unknown source: {job.source}")
-    return handler(db, job)  # type: ignore[operator]
+    _running.job_id, _running.checked_at = job.id, 0.0
+    try:
+        return handler(db, job)  # type: ignore[operator]
+    finally:
+        _running.job_id = None
+
+
+def check_stop() -> None:
+    """Called at the top of each page, batch or call in a long job: stop if a person asked. A job that is saving rows to
+    the database is not interrupted until the save ends; the next check is the first chance after it.
+
+    Reads the job's flag in its own short session, at most once every couple of seconds, so it costs next to nothing.
+    """
+    job_id = getattr(_running, "job_id", None)
+    if job_id is None:
+        return
+    now = time.monotonic()
+    if now - getattr(_running, "checked_at", 0.0) < _STOP_CHECK_EVERY_SECONDS:
+        return
+    _running.checked_at = now
+    from app.core.db import SessionLocal
+
+    with SessionLocal() as session:
+        params = session.query(SyncJob.params_json).filter(SyncJob.id == job_id).scalar()
+    who = (params or {}).get("stop_requested_by")
+    if who:
+        raise JobStopped(f"Stopped by {who}")
 
 
