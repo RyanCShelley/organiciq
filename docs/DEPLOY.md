@@ -152,3 +152,35 @@ platforms). Check the keys before the first scheduled day.
 - [ ] Confirm a growth action and send it to Teamwork; the task appears in the client's tasklist
 - [ ] LLM visibility: Setup shows each platform as ready; Run now queues a job and the worker picks it up
 - [ ] The live tool still loads for a client (nothing in v2 should have changed it)
+
+
+---
+
+# Resetting a client (fresh start in v2)
+
+`python -m app.reset_client_data` clears one client's synced data and set-up data and keeps who they are and how they
+connect. It is **not reversible**: take a Postgres backup first. It changes what the live tool shows for that client too,
+because the database is shared.
+
+| Cleared | Kept |
+|---------|------|
+| Search Console, GA4, SE Ranking, crawl, Bing and SERP facts, staging tables, sync jobs and watermarks | the client record (name, domain, tier, business model, competitors) |
+| baselines and goals, conversions, completion patterns, feeds | people with access, Google and other integrations |
+| watchlist, monthly focus, AI visibility prompts, settings and runs | the Bing site and Teamwork tasklist |
+| Decision Engine tasks, actions, records, thresholds, overrides, excluded pages, page stages, keyword targets, topics, decisions, old watch targets | annotations (links to deleted decisions and topics are cleared), Copilot conversations |
+
+```bash
+# 1. See what would go, for every client. Deletes nothing.
+python -m app.reset_client_data --all
+
+# 2. One client: dry run, then delete (type the exact client name)
+python -m app.reset_client_data --client-slug <slug>
+python -m app.reset_client_data --client-slug <slug> --apply --confirm "<exact client name>"
+
+# 3. Pull the data again: one job per connected source with long windows
+python -m app.reset_client_data --client-slug <slug> --backfill
+```
+
+`--apply` takes one client at a time. A table that holds client data and is not in the tool's lists stops the run, so
+a table added later gets decided, not guessed. The backfill asks Search Console for 13 months and GA4 for 26, then
+the site crawl and the Bing pull; the worker runs them, and the crawl takes the longest.
