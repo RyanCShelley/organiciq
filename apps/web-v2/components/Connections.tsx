@@ -242,16 +242,16 @@ export function ConnectionsPanel({
 
       <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
         <Row logo="search-console" name="Search Console" value={gsc?.external_property_id ?? null} {...rowState(gsc)} error={gsc?.error_message} action={gsc?.external_property_id ? "Change" : "Choose"} open={open === "gsc"} onToggle={() => toggle("gsc")}>
-          <Picker label="Search Console site" load={() => act.loadGscSitesAction(client.id)} save={(v) => act.saveGscAction(client.id, client.slug, v)} empty="This Google account has no Search Console sites." onSaved={close} />
+          <Picker label="Search Console site" load={() => act.loadGscSitesAction(client.id)} save={(v) => act.saveGscAction(client.id, client.slug, v, gsc?.external_property_id ?? null)} empty="This Google account has no Search Console sites." onSaved={close} />
         </Row>
 
         <Row logo="ga4" name="Google Analytics 4" value={ga4?.external_property_id ?? null} {...rowState(ga4)} error={ga4?.error_message} action={ga4?.external_property_id ? "Change" : "Choose"} open={open === "ga4"} onToggle={() => toggle("ga4")}>
-          <Picker label="GA4 property" load={() => act.loadGa4Action(client.id)} save={(v) => act.saveGa4Action(client.id, client.slug, v)} empty="This Google account has no GA4 properties." onSaved={close} />
+          <Picker label="GA4 property" load={() => act.loadGa4Action(client.id)} save={(v) => act.saveGa4Action(client.id, client.slug, v, ga4?.external_property_id ?? null)} empty="This Google account has no GA4 properties." onSaved={close} />
         </Row>
 
         <Row logo="se-ranking" name="SE Ranking" value={ser?.external_account_id ?? ser?.external_property_id ?? null} {...rowState(ser)} action={ser?.external_property_id ? "Change" : "Choose"} open={open === "ser"} onToggle={() => toggle("ser")}>
           {connections.se_ranking_key_configured ? (
-            <Picker label="SE Ranking project" load={() => act.loadSeRankingAction(client.id)} save={(v, l) => act.saveSeRankingAction(client.id, client.slug, v, l)} onSaved={close} />
+            <Picker label="SE Ranking project" load={() => act.loadSeRankingAction(client.id)} save={(v, l) => act.saveSeRankingAction(client.id, client.slug, v, l, ser?.external_property_id ?? null)} onSaved={close} />
           ) : (
             <p className="text-sm text-amber-800">Not configured on this install: SE_RANKING_API_KEY is missing.</p>
           )}
@@ -259,11 +259,11 @@ export function ConnectionsPanel({
 
         <Row logo="bing" name="Bing Webmaster" value={bing?.site_url ?? null} {...bingTone} error={bing?.error} action={bing ? "Change" : "Choose"} open={open === "bing"} onToggle={() => toggle("bing")}>
           {connections.bing_key_configured ? (
-            <Picker label="Site in the Bing account" load={() => act.loadBingSitesAction(client.id)} save={(v) => act.saveBingAction(client.id, client.slug, v)} onSaved={close} />
+            <Picker label="Site in the Bing account" load={() => act.loadBingSitesAction(client.id)} save={(v) => act.saveBingAction(client.id, client.slug, v, bing?.site_url ?? null)} onSaved={close} />
           ) : (
             <div>
               <p className="mb-2 text-sm text-amber-800">BING_WEBMASTER_API_KEY is not set on this install, so the site can be saved but not checked.</p>
-              <TypedValue placeholder="https://example.com/" initial={bing?.site_url ?? ""} save={(v) => act.saveBingAction(client.id, client.slug, v)} onSaved={close} />
+              <TypedValue placeholder="https://example.com/" initial={bing?.site_url ?? ""} save={(v) => act.saveBingAction(client.id, client.slug, v, bing?.site_url ?? null)} onSaved={close} />
             </div>
           )}
           {bing ? (

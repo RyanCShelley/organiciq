@@ -41,6 +41,17 @@ async function save(
   }
 }
 
+/** After a source is chosen or changed, pull what it feeds. Best effort: the save already worked, so a failure here is not reported as one. */
+async function pullAfterSave(clientId: string, slug: string, sources: string[], previous: string | null, chosen: string): Promise<void> {
+  if (previous === chosen) return;
+  try {
+    await apiFetch("/v2/connections/pull", { method: "POST", clientId, body: { sources } });
+    revalidatePath(`/${slug}/settings/connections`);
+  } catch {
+    /* the Pull data button is still there */
+  }
+}
+
 export async function startGoogleConnectAction(clientId: string): Promise<ConnectResult> {
   try {
     const res = await apiFetch<{ authorization_url: string }>(
@@ -60,8 +71,10 @@ export async function loadGscSitesAction(clientId: string): Promise<OptionsResul
   );
 }
 
-export async function saveGscAction(clientId: string, slug: string, siteUrl: string): Promise<ActionResult> {
-  return save(slug, "/integrations/gsc/property", clientId, { site_url: siteUrl, role: "primary" });
+export async function saveGscAction(clientId: string, slug: string, siteUrl: string, previous: string | null = null): Promise<ActionResult> {
+  const result = await save(slug, "/integrations/gsc/property", clientId, { site_url: siteUrl, role: "primary" });
+  if (result.ok) await pullAfterSave(clientId, slug, ["gsc_pages", "gsc_queries"], previous, siteUrl);
+  return result;
 }
 
 export async function loadGa4Action(clientId: string): Promise<OptionsResult> {
@@ -72,8 +85,11 @@ export async function loadGa4Action(clientId: string): Promise<OptionsResult> {
   );
 }
 
-export async function saveGa4Action(clientId: string, slug: string, propertyId: string): Promise<ActionResult> {
-  return save(slug, "/integrations/ga4/property", clientId, { property_id: propertyId });
+export async function saveGa4Action(clientId: string, slug: string, propertyId: string, previous: string | null = null): Promise<ActionResult> {
+  const result = await save(slug, "/integrations/ga4/property", clientId, { property_id: propertyId });
+  const normalized = propertyId.startsWith("properties/") ? propertyId : `properties/${propertyId}`;
+  if (result.ok) await pullAfterSave(clientId, slug, ["ga4"], previous, normalized);
+  return result;
 }
 
 export async function loadSeRankingAction(clientId: string): Promise<OptionsResult> {
@@ -89,8 +105,11 @@ export async function saveSeRankingAction(
   slug: string,
   siteId: string,
   name: string,
+  previous: string | null = null,
 ): Promise<ActionResult> {
-  return save(slug, "/integrations/seranking/property", clientId, { site_id: siteId, project_name: name });
+  const result = await save(slug, "/integrations/seranking/property", clientId, { site_id: siteId, project_name: name });
+  if (result.ok) await pullAfterSave(clientId, slug, ["se_ranking_search", "se_ranking_ai"], previous, siteId);
+  return result;
 }
 
 export async function loadBingSitesAction(clientId: string): Promise<OptionsResult> {
@@ -100,8 +119,10 @@ export async function loadBingSitesAction(clientId: string): Promise<OptionsResu
   }));
 }
 
-export async function saveBingAction(clientId: string, slug: string, siteUrl: string): Promise<ActionResult> {
-  return save(slug, "/v2/connections/bing", clientId, { site_url: siteUrl }, "PUT");
+export async function saveBingAction(clientId: string, slug: string, siteUrl: string, previous: string | null = null): Promise<ActionResult> {
+  const result = await save(slug, "/v2/connections/bing", clientId, { site_url: siteUrl }, "PUT");
+  if (result.ok) await pullAfterSave(clientId, slug, ["bing_query_stats"], previous, siteUrl);
+  return result;
 }
 
 export async function clearBingAction(clientId: string, slug: string): Promise<ActionResult> {

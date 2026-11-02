@@ -135,14 +135,16 @@ def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
     return job.start_date <= item["start"] + timedelta(days=3)
 
 
-def queue_pull(db: Session, client: Any, today: date | None = None, force: bool = False) -> list[str]:
+def queue_pull(db: Session, client: Any, today: date | None = None, force: bool = False, only: set[str] | None = None) -> list[str]:
     """Queue a job for each planned source that is missing: never pulled, failed, interrupted or older than a day.
-    A source already pulling, or already pulled today, is left alone unless force is set."""
+    A source already pulling, or already pulled today, is left alone unless force is set. `only` limits it to those sources."""
     _clear_orphans(db, client.id)
     now = datetime.now(timezone.utc)
     latest = _latest_jobs(db, client.id)
     queued: list[str] = []
     for item in pull_plan(db, client, today):
+        if only is not None and item["source"] not in only:
+            continue
         if not force and _is_current(latest.get(item["source"]), item, now):
             continue
         try:

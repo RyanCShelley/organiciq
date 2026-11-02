@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -139,3 +140,22 @@ def sync_bing(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except bing.BingError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+class PullSources(BaseModel):
+    sources: list[str]
+
+
+@router.post("/pull")
+def pull_after_connect(
+    payload: PullSources,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Pull the sources a connection just fed. Forced: a changed site or property makes any earlier pull the wrong data."""
+    from app.services import data_pull
+
+    known = {item["source"] for item in data_pull.pull_plan(db, client)}
+    wanted = {s for s in payload.sources if s in known}
+    return {"queued": data_pull.queue_pull(db, client, force=True, only=wanted) if wanted else []}

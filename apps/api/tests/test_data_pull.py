@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models.integration import Integration
 from app.models.job import SyncJob, SyncJobStatus
-from tests.conftest import auth_header
+from tests.conftest import auth_header, client_header
 
 
 def connect(db, client):
@@ -172,3 +172,13 @@ def test_connecting_another_source_makes_only_that_source_missing(client, db, cl
     assert status["up_to_date"] is False
     assert [s["source"] for s in status["sources"] if not s["current"]] == ["bing_query_stats"]
     assert client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["queued"] == ["bing_query_stats"]
+
+
+def test_connecting_a_source_pulls_only_what_it_feeds_even_if_pulled_today(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    for source in {s["source"] for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=auth_header(admin_user.email)).json()["sources"]}:
+        finish(db, client_a, source, start_days_back=800)
+    out = client.post("/v2/connections/pull", json={"sources": ["ga4", "not_a_source"]}, headers=h).json()
+    assert out["queued"] == ["ga4"]
+    assert client.post("/v2/connections/pull", json={"sources": ["not_a_source"]}, headers=h).json()["queued"] == []
