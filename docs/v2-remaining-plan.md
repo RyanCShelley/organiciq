@@ -1,156 +1,163 @@
 # Organic IQ v2: the rest of the plan (DRAFT for review)
 
-Status: draft. Nothing here is built. Items marked **DECIDE** need an answer from Ryan and are not assumed. Sizes are rough
-and are my estimates: S is 1 to 2 days, M is 3 to 5, L is 1 to 2 weeks.
+Status: draft, organised around the navigation and order Ryan gave on 2026-11-02. Nothing here is built. Items marked
+**OPEN** need an answer and are not assumed. Sizes are my rough estimates: S is 1 to 2 days, M is 3 to 5, L is 1 to 2 weeks.
 
-Builds on `docs/rebuild-plan.md` (decisions, phases) and replaces its phase order for what is left. Rule codes (A-1, S-4)
-never appear in anything the team sees.
+Builds on `docs/rebuild-plan.md` (decisions, original phases) and replaces its phase order for what is left. Rule codes
+(A-1, S-4) never appear in anything the team sees.
 
-## 1. Where we are
+## 1. Navigation (Ryan's structure)
 
-Built and in use: Monthly review (the client's home), Decision engine (Visibility, Traffic and Leads candidates, diagnosis,
-growth actions, Teamwork, results after 28 days), LLM visibility (four platforms, brand check, prompt suggestions),
-Watchlist, Focus, Settings (connections, conversions, baseline, competitors, content sources, team), Admin (add, remove,
-pull data) and the scheduled data pulls (Search Console, GA4, SE Ranking daily; crawl and Bing weekly; LLM every 28 days).
+| Group | Screen | State |
+|---|---|---|
+| **OrganicIQ Analytics** | Monthly review | built |
+| | Business Intelligence: deeper, ad hoc reporting, with an LLM to question the data | to build (replaces the Dashboard placeholder) |
+| | Decision engine | built |
+| **Visibility** | Search visibility report: Search Console, Bing and SE Ranking compared together | to build |
+| | LLM visibility | built |
+| **Dual optimization** (search and AI) | Site health: SEO crawler and GEO crawler | to build |
+| | Schema and knowledge graph: analyse the current site, suggest optimizations | to build |
+| | CTR optimizer | to build |
+| | Inlink suggester | to build |
+| **Content engine** | Content gaps | to build |
+| | Content refreshes | to build |
 
-Greyed in the sidebar and still to build: **Dashboard, Site Health, Search Visibility, CTR Optimizer, Content Hub**. The
-algorithm overlay (Google's incident feed on the charts) is also left.
-
-Before any of it: the **end-to-end run on Absolutely Natural** (section 7). New screens come after that is trusted.
+**OPEN A.** Where Focus, Watchlist, Settings and Admin sit. Suggestion: Focus lives inside Monthly review (it is chosen
+there), Watchlist and Settings go in a "Setup" group at the bottom, Admin stays in the header for admins. The content
+calendar, post history and change log from the original plan are not in your list; they could sit under Content engine
+as a third item. Tell me where you want them.
 
 ## 2. One pattern for every screen
 
-The five screens should feel like one tool, not five. Every screen is built from the same parts, in the same order:
+The new screens must feel like one tool. Every screen is built from the same parts, in the same order:
 
-1. **Header strip.** Client, "data through" dates per source, month picker (later: quarter, custom range, year over year).
+1. **Header strip.** Client, "data through" per source, month picker (later: quarter, custom range, year over year).
 2. **Headline numbers.** Four at most, each with its change and what it is compared with.
-3. **A table you can filter.** Filter chips, one line per thing, no sideways scroll, no hunting for the next step.
+3. **A filterable table.** Filter chips, one line per thing, no sideways scroll.
 4. **Click a row for the evidence.** What the data says, where it came from, how old it is.
-5. **One action: send to the plan.** Any finding on any screen can become a candidate in the Decision engine, so Site
-   Health, CTR and Content findings flow through the same plan, allowance, Teamwork and 28-day results loop. No second
-   task system.
+5. **One action: send to the plan.** A finding on any screen becomes a candidate in the Decision engine, so Site health,
+   CTR, links, schema and content findings use the same plan, monthly allowance, Teamwork and 28-day results loop. There is
+   no second task system.
 
-Rules that apply everywhere: something running shows a spinner and progress (built); no rule codes; empty states say what
-to connect or do next; numbers say what they are compared with; every error is shown next to the thing that caused it.
+Everywhere: something running shows a spinner and progress (built); empty states say what to connect or do next; numbers say
+what they are compared with; errors appear next to what caused them; no rule codes.
 
-## 3. Sidebar
+## 3. The screens, in build order
 
-Today the sidebar is a flat list. Proposed, grouped by what the person is doing:
+Order follows your navigation top to bottom, skipping what is built. The end-to-end run on Absolutely Natural (section 5)
+comes first.
 
-| Group | Screens |
-|---|---|
-| **Review** | Monthly review, Dashboard (the explorer behind it) |
-| **Work** | Focus, Decision engine (with the plan) |
-| **Measure** | Search visibility, CTR optimizer, LLM visibility, Site health |
-| **Content** | Content hub, Watchlist |
-| **Setup** | Settings |
+### 3.1 Business Intelligence
 
-Placeholders disappear from the sidebar once their screen exists; a screen that is not ready is not shown to the team.
-**DECIDE 1:** is this grouping right, or do you want it flat?
+- **Answers:** why did a number move, and any question the fixed screens do not answer.
+- **Two parts.** (1) **Drill-downs** behind the Monthly review's numbers: landing pages by channel with visits, key actions
+  and conversion rate; conversion sources and engagement; keyword position at month start against month end; time frames
+  (quarter, custom range, year over year); annotations drawn on the charts. Reuses `dashboard.py` and
+  `dashboard_exploration.py` (dated, source-backed drill-downs) and `monthly_review.py`. (2) **Ask the data:** a chat box that
+  answers questions about this client's data with the numbers and where they came from.
+- **Ask the data builds on the Copilot module** (`app/copilot`: chat, tools, playbook), which is already planned for every
+  screen. **OPEN B:** which model answers (the Copilot gateway speaks the OpenAI-compatible protocol and is not configured;
+  the four AI platform keys already on the install are another option), and the safety rules: read-only, this client only,
+  every figure cited to its table, a monthly cost cap. You linked an article on the best LLM for data analysis; I have not
+  read it, so tell me if it should decide the model.
+- **Size:** M for the drill-downs, M for Ask the data.
 
-## 4. The screens
+### 3.2 Search visibility report
 
-### 4.1 Dashboard (the explorer behind the Monthly review)
+- **Answers:** where does the client show up in Google, Bing and SE Ranking for the terms that matter, and do the sources
+  agree.
+- **Reuses:** watchlist, Search Console and SE Ranking facts, Bing query stats (weekly), `serp_features.py`, the Monthly
+  review's visibility section.
+- **To build:** the three sources compared side by side per term (position, impressions, clicks) with disagreements flagged;
+  ranking trends per bucket and term; position distribution (1 to 3, 4 to 10, 11 to 20, beyond); winners and losers; the
+  Google algorithm overlay (Google's incident feed drawn on the trend; check `incident_signals.py` first so there is one feed).
+- **Layout:** headline (terms showing, on page one, average position, clicks); bucket selector; one table with a column per
+  source and a sparkline; click a term for its pages, the competitors in the top 10 and SERP features.
+- **Size:** M, plus S for the overlay. **Depends on:** Bing and SE Ranking pulled for the client (done for Absolutely Natural).
 
-The Monthly review already does the "monthly report" job: results, traffic, search, channels, top pages, visibility, a plain
-summary. **DECIDE 2:** keep one place and make Dashboard its drill-down, or keep them as two screens? I recommend one:
-Monthly review stays the home, and each number on it opens the Dashboard view for that number.
+### 3.3 Site health (SEO crawler and GEO crawler)
 
-- **Answers:** why did this number move, and which pages, channels and terms moved it.
-- **Reuses:** `dashboard.py`, `dashboard_exploration.py` (dated, source-backed drill-downs), `monthly_review.py`.
-- **To build:** landing pages by channel (visits, key actions, conversion rate); conversion sources and engagement;
-  keyword position at month start against month end; recap and wins; time frames (quarter, custom range, year over year);
-  annotations drawn on the charts (the annotation tables already exist).
-- **Layout:** the headline strip, then one tab per question (Channels, Pages, Conversions, Keywords), each a filterable
-  table with a small trend chart above it.
-- **Size:** M. **Depends on:** nothing new.
+- **Answers:** is the site technically sound for search, and ready for AI answers, and what changed since last month.
+- **Reuses:** the first-party crawl (pages, issues, schema, internal links, redirects, robots), the Site crawl API, and from
+  GEO Grader the retrieval-readiness signals (schema, FAQ, entity clarity, AI-crawler access).
+- **To build:** **two scores, each locked monthly:** SEO health (titles, indexation, structured data, 301s, 404s, redirect
+  chains, broken internal links) and GEO readiness (what the site offers an AI answer). Weights written down and shown. New and
+  fixed issues since last month; issues grouped by what to do, not by crawler label.
+- **Layout:** two headline scores with their change; issue groups ordered by pages affected; click a group for the pages and
+  the fix; Send to plan.
+- **OPEN C.** The weights for both scores. I propose them; you approve, as with the engine thresholds.
+- **Size:** M to L. **Caution:** the crawl stops at its page limit (500 by default) and is slow on Shopify because the host
+  rate-limits. A score on a partial crawl must say so.
 
-### 4.2 Search visibility
+### 3.4 Schema and knowledge graph
 
-- **Answers:** where does the client show up in Google and Bing for the terms that matter, and is that moving.
-- **Reuses:** watchlist, Search Console and SE Ranking facts, Bing query stats (weekly), `serp_features.py`, the monthly
-  review's visibility section (term table with Google, Bing and AI columns).
-- **To build:** ranking trends per bucket and term (position over time, month start against end); position distribution
-  (how many terms in 1 to 3, 4 to 10, 11 to 20, beyond); winners and losers; Google and Bing side by side; the algorithm
-  overlay on the trend.
-- **Layout:** headline (terms showing, on page one, average position, clicks); a bucket selector; the term table with a
-  sparkline per row; click a term for its pages, competitors in the top 10, and SERP features.
-- **Size:** M. **Depends on:** Bing data pulled for the client (done for Absolutely Natural).
-- **Note:** this screen and the monthly review's visibility section overlap. The review keeps the one-screen summary; this
-  screen is where you go for the trends.
+- **Answers:** what structured data does the site declare, what should it, and does the brand read as one clear entity.
+- **Reuses:** crawl schema blocks (`/schema`, `schema_types.py`) and Topic Hub's schema audit.
+- **To build:** current schema by page type; missing or wrong types by page intent; entity checks (the brand's name, same-as
+  links, organisation and product markup, consistency across pages); suggested markup the team can paste. Reads the live
+  page; the suggestion is a draft a person checks.
+- **Size:** M. **Depends on:** Site health's crawl.
 
-### 4.3 CTR optimizer
+### 3.5 CTR optimizer
 
-- **Answers:** which pages and searches show up a lot and get clicked too little for their position.
+- **Answers:** which pages and searches show a lot and get clicked too little for their position.
 - **Reuses:** `ctr_diagnostic.py` (industry CTR reference), the Visibility candidate bands, Bing impressions and clicks.
-- **To build:** a table of searches and pages with click-through against the expected rate at that position, ranked by
-  extra clicks if fixed; a site-level clickability score tracked monthly; Google and Bing together; a before-and-after on
-  title or description changes (tied to the plan's results loop).
-- **Layout:** headline (clickability score, extra clicks available, pages below benchmark); the ranked table; click a row to
-  see the current title and description, what the page ranks for, and **Send to plan** for a title and description action.
-- **DECIDE 3:** should CTR be its own screen, or a lens inside the Decision engine's Visibility tab? The engine already
-  ranks by expected extra clicks, so most of the work exists. I recommend a small screen for the score and trend, with the
-  actions living in the engine.
-- **Size:** S to M. **Depends on:** Search visibility's trend data for the score history.
+- **To build:** searches and pages with click-through against the expected rate at their position, ranked by extra clicks if
+  fixed; a site clickability score tracked monthly; Google and Bing together; before and after on title or description
+  changes (tied to the plan's results loop).
+- **Layout:** headline (score, extra clicks available, pages below benchmark); the ranked table; click a row for the current
+  title and description, what it ranks for, and Send to plan.
+- **OPEN D.** You answered "see other notes" on whether CTR is its own screen or part of the engine. Your navigation lists it
+  as its own screen, so I have planned it that way. If your other notes say more, send them.
+- **Size:** S to M.
 
-### 4.4 Site health
+### 3.6 Inlink suggester
 
-- **Answers:** is the site technically in good shape, and what changed since last month.
-- **Reuses:** the first-party crawl (pages, issues, schema, internal links, redirects, robots), the Site crawl API
-  (`/pages`, `/schema`), `crawl_link_facts.py`, `link_gaps.py`.
-- **To build:** a **health score locked each month** (titles, indexation, structured data, 301s, 404s, redirect chains,
-  broken internal links) with the weights written down and shown; the schema check by page intent; new and fixed issues
-  since last month; issues grouped by what to do, not by what the crawler calls them.
-- **Layout:** headline (score, change, new issues, fixed); issue groups as a list ordered by pages affected; click a group
-  for the pages and the fix; **Send to plan**.
-- **DECIDE 4:** how the score is weighted. I will propose weights; you approve them, as with the engine thresholds.
-- **Size:** M to L. **Depends on:** a full crawl. Note the crawl stops at the page limit (500 by default) and was slow on
-  Shopify because the host rate-limits; a score on a partial crawl has to say so.
+- **Answers:** which page should link to which.
+- **Reuses:** `link_gaps.py` (two pages ranking for one query), `crawl_link_facts.py` (links to a page, in-content, navigation
+  and template links separated), Topic Hub's link recommendations.
+- **To build:** suggestions of the form "link from this page to that page with this anchor", ranked by what the target gains;
+  orphan and thin-link pages; cannibalization pairs; Send to plan.
+- **Size:** M.
 
-### 4.5 Content hub
+### 3.7 Content gaps
 
-- **Answers:** what has been published, what is missing, what should be updated, and what is competing with itself.
-- **Reuses:** blog feeds (stored per client), `content_gap_signals.py`, `demand_gaps.py`, `link_gaps.py`, the keyword map and
-  `automatic_keyword_map.py`, annotations.
-- **To build:** the post history from the feed (every entry stored permanently, backfilled from the crawl); the content
-  calendar from the account sheet; lifecycle labels per page (new, growing, plateau, decaying); gap analysis against watchlist
-  subtopics; cannibalization (two pages ranking for one query); internal-link recommendations; the change log (annotations).
-  Port from Topic Hub: clusters, cannibalization, link recommendations.
-- **Layout:** tabs for Calendar, Pages (lifecycle), Gaps, Links. Each row has Send to plan.
-- **DECIDE 5:** content calendar source. The plan says it is imported from the account sheet; confirm the sheet format
-  before building, starting with Absolutely Natural.
-- **Size:** L. **Depends on:** Search visibility (query data per page) and Site health (links).
+- **Answers:** what demand does the site have no page for.
+- **Reuses:** `content_gap_signals.py` (watchlist terms with no page), `demand_gaps.py` (searches shown for with no page about
+  them), competitor top-ten terms.
+- **To build:** a ranked list of gaps with the evidence (volume, competitors ranking, the nearest existing page), grouped by
+  watchlist bucket; Send to plan as a "new page" growth action; match against the content calendar if it is built.
+- **Size:** M.
 
-### 4.6 Algorithm overlay
+### 3.8 Content refreshes
 
-Google's Search Status Dashboard feed (`incidents.json`) drawn as bands on the trend charts in Dashboard and Search
-visibility. To verify first: what `incident_signals.py` already reads, so we do not build a second feed. **Size:** S.
+- **Answers:** which existing pages are decaying and worth updating, and what to change.
+- **Reuses:** the Traffic candidates (year-over-year and slow-bleed tests), annotations, the diagnosis.
+- **To build:** lifecycle labels per page (new, growing, plateau, decaying); a ranked refresh list with the reason and what
+  changed since the page last moved; Send to plan; the change log (annotations) shows what was done and when.
+- **Size:** M. **Note:** this overlaps the engine's Traffic tab; the difference is intent. The engine answers "what dropped
+  this month"; Refreshes answers "what should we update next, dropped or not".
 
-## 5. Order, and why
+## 4. Build order
 
-| # | Work | Why here | Size |
-|---|---|---|---|
-| 0 | End-to-end run on Absolutely Natural (section 7) | Nothing new is trusted until the engine, review and results loop are | in progress |
-| 1 | Search visibility, then the algorithm overlay | The data is already in; it feeds CTR, Dashboard and Content | M + S |
-| 2 | CTR optimizer | Mostly the engine's own ranking, shown as a score and a trend | S to M |
-| 3 | Dashboard | Drill-downs behind numbers the review already shows | M |
-| 4 | Site health | Largest unknown is the weighting; the crawl is ready | M to L |
-| 5 | Content hub | Largest; needs query data and links from the earlier screens | L |
+| # | Work | Size |
+|---|---|---|
+| 0 | End-to-end run on Absolutely Natural (section 5) | in progress |
+| 1 | Business Intelligence: drill-downs, then Ask the data | M + M |
+| 2 | Search visibility report, with the algorithm overlay | M + S |
+| 3 | Site health (SEO and GEO scores) | M to L |
+| 4 | Schema and knowledge graph | M |
+| 5 | CTR optimizer | S to M |
+| 6 | Inlink suggester | M |
+| 7 | Content gaps | M |
+| 8 | Content refreshes | M |
 
-This is a recommendation. **DECIDE 6:** the order, if you want Site health or Content earlier for a client reason.
+Dependencies that could force a swap: Schema needs Site health's crawl; CTR's score history needs Search visibility's trend
+data; Content gaps use link and query data from the screens before it. If a swap is needed, I will say so before doing it.
 
-## 6. Also still open (not screens)
+## 5. End-to-end acceptance on one client (Absolutely Natural)
 
-- Copilot panel on every v2 screen (decided earlier, not built).
-- Topic Hub mapping port (the keyword map's matching logic).
-- Client-facing access (roles exist): every screen above is read-only friendly, but sign-off on what a client sees is later.
-- Cutover: remove the old tool's Watch List and `watch_targets`, drop `.net` from the sign-in domain list, open the pull
-  request to main, rotate the OpenAI and Perplexity keys that were printed once by mistake.
-- Docs: `DEPLOY.md` still lists a variable v2 does not need and does not say the API address must start with `https://`.
-
-## 7. End-to-end acceptance on one client (Absolutely Natural)
-
-The tool is "working end to end" when each step below has been done by a person on real data and the result is right:
+The tool is "working end to end" when a person has done each step on real data and the result is right:
 
 1. Connect all five sources and **Pull data**; every source shows done and the Data through strip is current.
 2. Save the LLM brand and competitors; **Suggest prompts**; run LLM visibility; the review shows the AI numbers.
@@ -162,3 +169,12 @@ The tool is "working end to end" when each step below has been done by a person 
 
 Steps 1 to 5 can be done this week; 6 needs a night; 7 needs the month. Anything that fails goes on a list and is fixed
 before the next screen starts.
+
+## 6. Also still open (not screens)
+
+- Copilot panel on every v2 screen (decided earlier, not built); Ask the data (3.1) is the same capability.
+- Topic Hub keyword-map matching port.
+- Client-facing access (roles exist): every screen is read-only friendly; what a client sees is signed off later.
+- Cutover: remove the old tool's Watch List and `watch_targets`, drop `.net` from the sign-in domain list, open the pull
+  request to main, rotate the OpenAI and Perplexity keys that were printed once by mistake.
+- Docs: `DEPLOY.md` still lists a variable v2 does not need and does not say the API address must start with `https://`.
