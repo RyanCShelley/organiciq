@@ -144,7 +144,7 @@ def suggest_llm_prompts(
     """Propose brand-check and niche questions from the client's brand, competitors, watchlist and pages. Saves nothing."""
     settings = db.query(ClientLlmSettings).filter(ClientLlmSettings.client_id == client.id).one_or_none()
     if settings is None or not settings.brand_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Set the brand name and its spellings above first; the questions are written around them.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Save the brand name and its spellings in the brand section of this Setup tab first; the questions are written around them.")
     try:
         return suggest.suggest(db, client, settings)
     except suggest.SuggestError as exc:

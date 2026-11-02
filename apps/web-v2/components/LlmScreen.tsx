@@ -324,6 +324,7 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
   const [pending, start] = useTransition();
   const [suggesting, startSuggest] = useTransition();
   const [suggested, setSuggested] = useState<SuggestedGroup[] | null>(null);
+  const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const groups = Array.from(new Set(settings.extra_prompts.map((p) => p.topic_cluster)));
   const add = () =>
@@ -339,14 +340,15 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
   const suggest = () =>
     startSuggest(async () => {
       setMessage(null);
+      setSuggestMessage(null);
       const r = await suggestLlmPromptsAction(client.id);
       if (!r.ok) {
-        setMessage(r.error);
+        setSuggestMessage(r.error);
         return;
       }
       setSuggested(r.value.groups);
       setTicked(new Set(r.value.groups.flatMap((g) => g.prompts.map((p) => `${g.topic_cluster}|${p}`))));
-      if (r.value.groups.every((g) => g.prompts.length === 0)) setMessage("The model gave nothing new that passed the checks. Try again.");
+      if (r.value.groups.every((g) => g.prompts.length === 0)) setSuggestMessage("The model gave nothing new that passed the checks. Try again.");
     });
   const addSuggested = () =>
     start(async () => {
@@ -391,6 +393,7 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
             {suggesting ? "Writing questions…" : suggested ? "Suggest again" : "Suggest prompts"}
           </button>
         </div>
+        {suggestMessage ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{suggestMessage}</p> : null}
         {suggested ? (
           <div className="mt-3 space-y-3">
             {suggested.filter((g) => g.prompts.length > 0).map((g) => (
