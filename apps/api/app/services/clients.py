@@ -91,6 +91,8 @@ def create_client(db: Session, payload: ClientCreate) -> Client:
     )
     desired_slug = data.pop("slug", None) or data["client_name"]
     data["slug"] = allocate_client_slug(db, desired=desired_slug)
+    # New clients pull Search Console lean (see Client.gsc_lean_pull); existing ones keep the full pull until switched.
+    data["gsc_lean_pull"] = True
     client = Client(**data)
     db.add(client)
     db.flush()

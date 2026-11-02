@@ -70,6 +70,7 @@ def admin_clients(
                 "bing": bing.get(c.id, 0) > 0,
                 "watchlist_keywords": watchlist.get(c.id, 0),
                 "has_baseline": baselines.get(c.id, 0) > 0,
+                "gsc_lean": bool(c.gsc_lean_pull),
                 "team": team.get(c.id, 0),
                 "gsc_through": gsc[c.id].isoformat() if gsc.get(c.id) else None,
                 "ga4_through": ga4[c.id].isoformat() if ga4.get(c.id) else None,
@@ -162,3 +163,21 @@ def stop_pull(
     result = data_pull.stop_pull(db, client, user.email)
     logger.warning("Pull stopped for %s by %s: %s", client.client_name, user.email, result)
     return {**result, **data_pull.pull_status(db, client)}
+
+
+class LeanIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/clients/{client_id}/gsc-lean")
+def set_gsc_lean(
+    client_id: UUID,
+    payload: LeanIn,
+    user: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Switch this client's Search Console pull between lean and full. It clears the client's pages and searches and pulls them again."""
+    client = _client(db, client_id)
+    queued = data_pull.set_lean_pull(db, client, payload.enabled)
+    logger.warning("Search Console pull set to %s for %s by %s; queued %s", "lean" if payload.enabled else "full", client.client_name, user.email, queued)
+    return {"gsc_lean": bool(client.gsc_lean_pull), "queued": queued}

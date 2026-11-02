@@ -52,3 +52,11 @@ export async function stopPullAction(clientId: string): Promise<Result<PullStatu
     return failure(error, "The pull could not be stopped: the API did not answer.");
   }
 }
+
+export async function setGscLeanAction(clientId: string, enabled: boolean): Promise<Result<{ gsc_lean: boolean; queued: string[] }>> {
+  try {
+    return { ok: true, value: await apiFetch(`/v2/admin/clients/${clientId}/gsc-lean`, { method: "POST", body: { enabled } }) };
+  } catch (error) {
+    return failure(error, "The Search Console pull could not be switched: the API did not answer.");
+  }
+}

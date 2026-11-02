@@ -10,6 +10,7 @@ export type AdminClient = {
   bing: boolean;
   watchlist_keywords: number;
   has_baseline: boolean;
+  gsc_lean: boolean;
   team: number;
   gsc_through: string | null;
   ga4_through: string | null;

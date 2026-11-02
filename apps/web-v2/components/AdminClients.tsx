@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { deleteClientAction, deletePreviewAction } from "@/app/(app)/admin/actions";
+import { deleteClientAction, deletePreviewAction, setGscLeanAction } from "@/app/(app)/admin/actions";
 import type { AdminClient, DeletePreview } from "@/lib/admin";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -78,6 +78,34 @@ function DeletePanel({ client, onDone, onCancel }: { client: AdminClient; onDone
   );
 }
 
+function LeanSwitch({ client }: { client: AdminClient }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const flip = () => {
+    const to = !client.gsc_lean;
+    const ask = to
+      ? `Switch ${client.name} to the lean Search Console pull?\n\nIt keeps day-by-day searches for the last 120 days and one row per month before that, and leaves out country and device. About 70% fewer rows.\n\nIt clears this client's Search Console pages and searches and pulls them again.`
+      : `Switch ${client.name} back to the full Search Console pull?\n\nIt clears this client's Search Console pages and searches and pulls them again, day by day, with country and device.`;
+    if (!window.confirm(ask)) return;
+    start(async () => {
+      setError(null);
+      const r = await setGscLeanAction(client.id, to);
+      if (r.ok) router.refresh();
+      else setError(r.error);
+    });
+  };
+  return (
+    <div className="mt-1 text-xs text-[var(--text-tertiary)]">
+      Search Console pull: <strong>{client.gsc_lean ? "lean" : "full"}</strong>{" "}
+      <button type="button" onClick={flip} disabled={pending} className="font-semibold underline disabled:opacity-50">
+        {pending ? "Switching…" : client.gsc_lean ? "Switch to full" : "Switch to lean"}
+      </button>
+      {error ? <span role="alert" className="ml-2 text-red-700">{error}</span> : null}
+    </div>
+  );
+}
+
 export function AdminClients({ clients }: { clients: AdminClient[] }) {
   const router = useRouter();
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -113,6 +141,7 @@ export function AdminClients({ clients }: { clients: AdminClient[] }) {
                   <Chip on={c.has_baseline}>{c.has_baseline ? "Baseline" : "No baseline"}</Chip>
                   <Chip on={c.team > 0}>{c.team} on the team</Chip>
                 </div>
+                <LeanSwitch client={c} />
                 <div className="mt-1 text-xs text-[var(--text-tertiary)]">
                   Search Console through {day(c.gsc_through)} · GA4 through {day(c.ga4_through)}
                 </div>

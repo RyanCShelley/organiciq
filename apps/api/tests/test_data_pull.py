@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.models.integration import Integration
 from app.models.job import SyncJob, SyncJobStatus
@@ -243,3 +243,86 @@ def test_a_job_checks_for_a_stop_request_and_raises_when_there_is_one(db, client
             jobs.check_stop()
     finally:
         jobs._running.job_id = None
+
+
+# ---- the lean Search Console pull ------------------------------------------------------------------------
+
+def test_lean_windows_are_daily_for_120_days_and_monthly_before():
+    from app.ingestion.gsc.fetch import lean_windows
+
+    daily, months = lean_windows(date(2025, 10, 3), date(2026, 10, 30))
+    assert daily == (date(2026, 7, 3), date(2026, 10, 30))  # the last 120 days
+    assert months[0] == (date(2025, 10, 3), date(2025, 10, 31))  # the first month may start mid-month
+    assert months[1] == (date(2025, 11, 1), date(2025, 11, 30))
+    assert months[-1] == (date(2026, 7, 1), date(2026, 7, 2))  # the last stops where the daily stretch begins
+    assert len(months) == 10
+    spans = [w for w in months] + [daily]
+    assert all(a_end < b_start for (_, a_end), (b_start, _) in zip(spans, spans[1:]))  # no day twice, none missing
+    assert all((b_start - a_end).days == 1 for (_, a_end), (b_start, _) in zip(spans, spans[1:]))
+    short_daily, short_months = lean_windows(date(2026, 10, 27), date(2026, 10, 30))  # the daily top-up window
+    assert short_daily == (date(2026, 10, 27), date(2026, 10, 30)) and short_months == []
+
+
+def test_a_lean_client_pulls_searches_daily_then_monthly_without_country_or_device(db, client_a):
+    from unittest.mock import patch
+    from uuid import uuid4
+
+    from app.ingestion.gsc.fetch import fetch_gsc_queries
+    from app.models.gsc import StagingGscQueryPage
+    from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
+
+    row = db.query(Integration).filter(Integration.client_id == client_a.id, Integration.provider == IntegrationProvider.GSC).one()
+    row.external_property_id, row.connection_status = "sc-domain:example.com", ConnectionStatus.CONNECTED
+    client_a.gsc_lean_pull = True
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="gsc_queries", start_date=date(2026, 3, 1), end_date=date(2026, 10, 30), status=SyncJobStatus.FETCHING)
+    db.add(job)
+    db.commit()
+
+    seen = []
+
+    def fake(*, dimensions, start_date, end_date, **_):
+        seen.append((dimensions, start_date, end_date))
+        return [{"keys": ["2026-10-02", "natural sunscreen", "https://example.com/spf"] if dimensions[0] == "date" else ["natural sunscreen", "https://example.com/spf"],
+                 "impressions": 10, "clicks": 1, "ctr": 0.1, "position": 8.0}]
+
+    with patch("app.ingestion.gsc.fetch.access_token_for_client", return_value="t"), patch("app.ingestion.gsc.fetch.client_has_google_credentials", return_value=True), patch("app.ingestion.gsc.fetch.query_search_analytics", side_effect=fake):
+        fetch_gsc_queries(db, job)
+
+    assert seen[0][0] == ["date", "query", "page"] and all(d == ["query", "page"] for d, _, _ in seen[1:])
+    rows = db.query(StagingGscQueryPage).filter(StagingGscQueryPage.job_id == job.id).order_by(StagingGscQueryPage.date).all()
+    assert len(rows) == len(seen) and all(r.country == "" and r.device == "" and r.query == "natural sunscreen" for r in rows)
+    assert rows[0].date == date(2026, 3, 1) and rows[-1].date == date(2026, 10, 2)  # a month's row carries the first day of its window
+
+
+def test_a_client_not_switched_keeps_the_full_pull(db, client_a):
+    from unittest.mock import patch
+    from uuid import uuid4
+
+    from app.ingestion.gsc.fetch import fetch_gsc_queries
+    from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
+
+    row = db.query(Integration).filter(Integration.client_id == client_a.id, Integration.provider == IntegrationProvider.GSC).one()
+    row.external_property_id, row.connection_status = "sc-domain:example.com", ConnectionStatus.CONNECTED
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="gsc_queries", start_date=date(2026, 3, 1), end_date=date(2026, 10, 30), status=SyncJobStatus.FETCHING)
+    db.add(job)
+    db.commit()
+    with patch("app.ingestion.gsc.fetch.access_token_for_client", return_value="t"), patch("app.ingestion.gsc.fetch.client_has_google_credentials", return_value=True), patch("app.ingestion.gsc.fetch.query_search_analytics", return_value=[]) as q:
+        fetch_gsc_queries(db, job)
+    assert q.call_count == 1 and q.call_args.kwargs["dimensions"] == ["date", "query", "page", "country", "device"]
+    assert q.call_args.kwargs["start_date"] == date(2026, 3, 1)
+
+
+def test_switching_a_client_to_lean_clears_its_pages_and_searches_and_pulls_them_again(client, db, client_a, admin_user):
+    from app.models.gsc import FactGscQueryPage
+
+    connect(db, client_a)
+    db.add(FactGscQueryPage(client_id=client_a.id, date=date(2026, 9, 1), query="q", raw_url="https://x.example/", normalized_url="https://x.example/",
+                            country="usa", device="DESKTOP", impressions=5, clicks=1, ctr=0, average_position=4))
+    db.commit()
+    h = auth_header(admin_user.email)
+    out = client.post(f"/v2/admin/clients/{client_a.id}/gsc-lean", json={"enabled": True}, headers=h).json()
+    assert out["gsc_lean"] is True and sorted(out["queued"]) == ["gsc_pages", "gsc_queries"]
+    assert db.query(FactGscQueryPage).count() == 0
+    again = client.post(f"/v2/admin/clients/{client_a.id}/gsc-lean", json={"enabled": True}, headers=h).json()
+    assert again["queued"] == []  # already lean: nothing cleared, nothing queued
+    assert any(c["gsc_lean"] for c in client.get("/v2/admin/clients", headers=h).json())

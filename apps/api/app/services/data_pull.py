@@ -150,6 +150,20 @@ def stop_pull(db: Session, client: Any, who: str) -> dict[str, int]:
     return {"cancelled": cancelled, "asked_to_stop": asked}
 
 
+def set_lean_pull(db: Session, client: Any, enabled: bool) -> list[str]:
+    """Switch the client's Search Console pull between lean and full. The two store different rows, so the pages and
+    searches already held are cleared and pulled again; the daily totals are the same either way and stay."""
+    from app.models.gsc import FactGscPage, FactGscQueryPage, StagingGscPage, StagingGscQueryPage
+
+    if bool(client.gsc_lean_pull) == enabled:
+        return []
+    client.gsc_lean_pull = enabled
+    for model in (StagingGscQueryPage, StagingGscPage, FactGscQueryPage, FactGscPage):
+        db.query(model).filter(model.client_id == client.id).delete(synchronize_session=False)
+    db.commit()
+    return queue_pull(db, client, force=True, only={"gsc_pages", "gsc_queries"})
+
+
 def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
     """Already pulled: the newest job finished, within the last day, and reached back as far as this pull would."""
     if job is None or job.status not in (SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL) or job.completed_at is None:
