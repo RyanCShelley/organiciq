@@ -546,13 +546,36 @@ export function ReviewScreen({
                   {copied ? "Copied" : "Copy"}
                 </button>
               </div>
-              <ul className="mt-3 space-y-2 text-sm">
-                {review.summary.map((line) => (
-                  <li key={line} className="text-[var(--text-secondary)]">
-                    {line}
-                  </li>
+              <div className="mt-3 space-y-4">
+                {review.summary_sections.map((section) => (
+                  <div key={section.title}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{section.title}</h3>
+                    <dl className="mt-1 divide-y divide-[var(--border)]">
+                      {section.rows.map((row) => (
+                        <div key={row.label} className="py-2">
+                          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                            <dt className="text-sm font-semibold">{row.label}</dt>
+                            <dd className="flex flex-wrap items-baseline gap-2 text-right">
+                              <span className="text-base font-semibold tabular-nums">{row.value}</span>
+                              {row.change ? (
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-xs font-semibold ${row.change.tone === "good" ? "bg-green-50 text-green-800" : row.change.tone === "bad" ? "bg-red-50 text-red-800" : "bg-[var(--bg)] text-[var(--text-secondary)]"}`}
+                                  title={row.change.against}
+                                >
+                                  {row.change.tone === "good" ? "▲ " : row.change.tone === "bad" ? "▼ " : "• "}
+                                  {row.change.text}
+                                </span>
+                              ) : null}
+                            </dd>
+                          </div>
+                          {row.change ? <p className="text-xs text-[var(--text-tertiary)]">{row.change.against}</p> : null}
+                          {row.detail ? <p className="text-xs text-[var(--text-secondary)]">{row.detail}</p> : null}
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
                 ))}
-              </ul>
+              </div>
               <p className="mt-3 text-xs text-[var(--text-tertiary)]">
                 Worked out from the numbers below. It says what moved, not why.
               </p>

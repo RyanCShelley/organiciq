@@ -52,6 +52,14 @@ export type Visibility = {
   llm: VisibilityAi | null;
 };
 
+export type SummaryRow = {
+  label: string;
+  value: string;
+  change: { text: string; tone: "good" | "bad" | "flat"; against: string } | null;
+  detail: string | null;
+};
+export type SummarySection = { title: string; rows: SummaryRow[] };
+
 export type Review = {
   month: string;
   previous_month: string;
@@ -83,6 +91,7 @@ export type Review = {
   revenue: RevenueBlock | null;
   visibility: Visibility | null;
   summary: string[];
+  summary_sections: SummarySection[];
 };
 
 export function nextMonth(month: string): string {
