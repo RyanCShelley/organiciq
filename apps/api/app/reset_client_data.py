@@ -79,8 +79,6 @@ KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "cop
 UNLINK_ANNOTATIONS = "update annotations set decision_id = null, topic_id = null where client_id = :c"
 
 #: Windows for the pull-again step. Search Console keeps about sixteen months; GA4 keeps what the property does.
-GSC_BACKFILL_MONTHS = 13
-GA4_BACKFILL_MONTHS = 26
 
 
 class UnclassifiedTable(Exception):
@@ -156,34 +154,9 @@ def purge(db: Session, client: Any) -> dict[str, int]:
 
 def enqueue_backfill(db: Session, client: Any, today: date | None = None) -> list[str]:
     """Queue one job per source with a long window. A source with no connection for this client is skipped."""
-    from app.models.client_bing_site import ClientBingSite
-    from app.schemas import SyncJobCreate
-    from app.services.daily_sync import _mapped_sources_by_client
-    from app.services.jobs import OverlappingJobError, enqueue_sync_job
+    from app.services.data_pull import queue_pull
 
-    today = today or date.today()
-    mapped = _mapped_sources_by_client(db).get(client.id, set())
-    plan_: list[tuple[str, date, date]] = []
-    for source in sorted(mapped):
-        if source.startswith("gsc"):
-            plan_.append((source, today - timedelta(days=30 * GSC_BACKFILL_MONTHS), today - timedelta(days=3)))
-        elif source == "ga4":
-            plan_.append((source, today - timedelta(days=30 * GA4_BACKFILL_MONTHS), today - timedelta(days=1)))
-        else:
-            plan_.append((source, today - timedelta(days=2), today))
-    if (client.domain or "").strip():
-        plan_.append(("site_crawl", today, today))
-    if db.query(ClientBingSite).filter(ClientBingSite.client_id == client.id).first() is not None:
-        plan_.append(("bing_query_stats", today, today))
-
-    queued: list[str] = []
-    for source, start, end in plan_:
-        try:
-            enqueue_sync_job(db, client.id, SyncJobCreate(source=source, start_date=start, end_date=end))
-            queued.append(source)
-        except OverlappingJobError:
-            logger.info("%s: a %s job is already waiting", client.client_name, source)
-    return queued
+    return queue_pull(db, client, today)
 
 
 def _print_plan(client: Any, counts: dict[str, dict[str, int]]) -> None:

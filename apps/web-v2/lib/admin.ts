@@ -25,3 +25,28 @@ export type DeletePreview = {
   annotations: number;
   copilot_conversations: number;
 };
+
+export type PullSource = {
+  source: string;
+  label: string;
+  reach: string;
+  from: string;
+  to: string;
+  state: "not_started" | "queued" | "running" | "done" | "partial" | "failed";
+  stage: string | null;
+  seconds_left: number | null;
+  error: string | null;
+  rows: number | null;
+};
+
+export type PullStatus = {
+  sources: PullSource[];
+  started_at: string | null;
+  running: boolean;
+  finished: boolean;
+  failed: string[];
+  jobs_done: number;
+  jobs_total: number;
+  seconds_left: number | null;
+  jobs_ahead: number;
+};

@@ -25,6 +25,7 @@ from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscDaily
 from app.models.integration import Integration
 from app.models.user import UserClient
+from app.services import data_pull
 from app.models.watchlist import WatchlistKeyword
 
 logger = logging.getLogger("organiciq.admin")
@@ -122,3 +123,28 @@ def delete_client(
     db.commit()
     logger.warning("Client deleted: %s (%s) by %s, %d rows in %d tables", name, client_id, user.email, sum(deleted.values()), len(deleted))
     return {"deleted": name, "rows": sum(deleted.values()), "tables": len(deleted)}
+
+
+@router.get("/clients/{client_id}/pull")
+def pull_status(
+    client_id: UUID,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """What a pull fetches and how far back, plus where the current pull stands and the time left."""
+    return data_pull.pull_status(db, _client(db, client_id))
+
+
+@router.post("/clients/{client_id}/pull")
+def start_pull(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Queue a pull of every connected source. Sources already pulling are left alone."""
+    client = _client(db, client_id)
+    if not data_pull.pull_plan(db, client):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing is connected yet. Connect a data source in Settings first.")
+    queued = data_pull.queue_pull(db, client)
+    logger.info("Pull started for %s by %s: %s", client.client_name, user.email, ", ".join(queued) or "nothing new")
+    return {"queued": queued, **data_pull.pull_status(db, client)}

@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { DeletePreview } from "@/lib/admin";
+import type { DeletePreview, PullStatus } from "@/lib/admin";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -26,5 +26,21 @@ export async function deleteClientAction(clientId: string, confirmName: string):
     return { ok: true, value };
   } catch (error) {
     return failure(error, "The client could not be deleted: the API did not answer.");
+  }
+}
+
+export async function pullStatusAction(clientId: string): Promise<Result<PullStatus>> {
+  try {
+    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull`) };
+  } catch (error) {
+    return failure(error, "The pull status could not be loaded: the API did not answer.");
+  }
+}
+
+export async function startPullAction(clientId: string): Promise<Result<PullStatus>> {
+  try {
+    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull`, { method: "POST" }) };
+  } catch (error) {
+    return failure(error, "The pull could not be started: the API did not answer.");
   }
 }

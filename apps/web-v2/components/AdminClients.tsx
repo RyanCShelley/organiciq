@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { deleteClientAction, deletePreviewAction } from "@/app/(app)/admin/actions";
-import type { AdminClient, DeletePreview } from "@/lib/admin";
+import { deleteClientAction, deletePreviewAction, pullStatusAction, startPullAction } from "@/app/(app)/admin/actions";
+import type { AdminClient, DeletePreview, PullSource, PullStatus } from "@/lib/admin";
 
 const day = (iso: string | null) =>
   iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "none";
@@ -77,9 +77,119 @@ function DeletePanel({ client, onDone, onCancel }: { client: AdminClient; onDone
   );
 }
 
+const span = (secs: number | null) => {
+  if (secs == null) return null;
+  if (secs < 90) return "about a minute";
+  const m = Math.round(secs / 60);
+  return m < 90 ? `about ${m} minutes` : `about ${(m / 60).toFixed(1)} hours`;
+};
+const STATE: Record<PullSource["state"], { text: string; cls: string }> = {
+  not_started: { text: "Not pulled yet", cls: "text-[var(--text-tertiary)]" },
+  queued: { text: "Waiting", cls: "text-[var(--text-secondary)]" },
+  running: { text: "Pulling", cls: "text-blue-700" },
+  done: { text: "Done", cls: "text-green-700" },
+  partial: { text: "Done, with gaps", cls: "text-amber-700" },
+  failed: { text: "Failed", cls: "text-red-700" },
+};
+const range = (a: string, b: string) => (a === b ? day(a) : `${new Date(`${a}T00:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" })} to ${new Date(`${b}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`);
+
+function PullPanel({ client, onClose }: { client: AdminClient; onClose: () => void }) {
+  const [status, setStatus] = useState<PullStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      const r = await pullStatusAction(client.id);
+      if (!live) return;
+      if (r.ok) setStatus(r.value);
+      else setError(r.error);
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [client.id]);
+
+  const begin = () =>
+    start(async () => {
+      setError(null);
+      const r = await startPullAction(client.id);
+      if (r.ok) setStatus(r.value);
+      else setError(r.error);
+    });
+
+  const pct = status && status.jobs_total ? Math.round((status.jobs_done / status.jobs_total) * 100) : 0;
+  const left = status ? span(status.seconds_left) : null;
+  return (
+    <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-semibold">Pull data for {client.name}</p>
+        <button type="button" onClick={onClose} className="text-xs font-semibold text-[var(--text-secondary)] hover:underline">Close</button>
+      </div>
+      {status ? (
+        <>
+          <p className="mt-2">
+            {status.running
+              ? `${status.jobs_done} of ${status.jobs_total} sources done${left ? `, ${left} left` : ", time left unknown until this install has finished a pull"}.`
+              : status.finished
+                ? `Finished: all ${status.jobs_total} sources are in.`
+                : status.failed.length
+                  ? `Stopped: ${status.failed.join(", ")} failed.`
+                  : status.jobs_done > 0
+                    ? `Not pulling now. ${status.jobs_done} of ${status.jobs_total} sources are in from the last pull.`
+                    : "Nothing is pulling. Pulling starts from the sources connected in Settings."}
+            {status.running && status.jobs_ahead > 0 ? ` ${status.jobs_ahead} job${status.jobs_ahead === 1 ? "" : "s"} for other clients are ahead in the queue.` : ""}
+          </p>
+          {status.running || status.finished ? (
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full bg-[var(--brand-teal)]" style={{ width: `${pct}%` }} />
+            </div>
+          ) : null}
+          <ul className="mt-3 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-white">
+            {status.sources.map((s) => (
+              <li key={s.source} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2">
+                <div>
+                  <span className="font-semibold">{s.label}</span>
+                  <span className="ml-2 text-xs text-[var(--text-tertiary)]">{s.reach.startsWith("today") ? s.reach : `${s.reach}: ${range(s.from, s.to)}`}</span>
+                </div>
+                <div className="text-xs">
+                  <span className={`font-semibold ${STATE[s.state].cls}`}>{STATE[s.state].text}</span>
+                  {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
+                  {s.seconds_left != null && (s.state === "running" || s.state === "queued") ? ` · ${span(s.seconds_left)} left` : ""}
+                  {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
+                  {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
+                </div>
+              </li>
+            ))}
+            {status.sources.length === 0 ? <li className="px-3 py-2 text-[var(--text-tertiary)]">No data source is connected yet.</li> : null}
+          </ul>
+        </>
+      ) : error ? null : (
+        <p className="mt-2">Loading…</p>
+      )}
+      {error ? <p role="alert" className="mt-2 font-semibold text-red-700">{error}</p> : null}
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={begin}
+          disabled={pending || !status || status.running || status.sources.length === 0}
+          className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+        >
+          {pending ? "Starting…" : status?.running ? "Pulling…" : status?.finished || status?.failed.length ? "Pull again" : "Pull data"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminClients({ clients }: { clients: AdminClient[] }) {
   const router = useRouter();
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [pulling, setPulling] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const shown = clients.filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()) || c.domain.toLowerCase().includes(filter.toLowerCase()));
@@ -117,6 +227,9 @@ export function AdminClients({ clients }: { clients: AdminClient[] }) {
                 </div>
               </div>
               <div className="flex items-center gap-3 text-sm">
+                <button type="button" onClick={() => setPulling(pulling === c.id ? null : c.id)} className="font-semibold text-[var(--brand-teal)] hover:underline">
+                  Pull data
+                </button>
                 <Link href={`/${c.slug}/settings`} className="font-semibold text-[var(--brand-teal)] hover:underline">Settings</Link>
                 <Link href={`/${c.slug}/review`} className="font-semibold text-[var(--brand-teal)] hover:underline">Open</Link>
                 <button
@@ -131,6 +244,7 @@ export function AdminClients({ clients }: { clients: AdminClient[] }) {
                 </button>
               </div>
             </div>
+            {pulling === c.id ? <PullPanel client={c} onClose={() => setPulling(null)} /> : null}
             {deleting === c.id ? (
               <DeletePanel
                 client={c}
