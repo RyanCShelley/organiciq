@@ -46,6 +46,16 @@ export async function addLlmPromptsAction(
   }
 }
 
+export type SuggestedGroup = { topic_cluster: string; prompts: string[] };
+
+export async function suggestLlmPromptsAction(clientId: string): Promise<LlmResult<{ platform: string; groups: SuggestedGroup[] }>> {
+  try {
+    return { ok: true, value: await apiFetch("/v2/llm/prompts/suggest", { method: "POST", clientId }) };
+  } catch (error) {
+    return failure(error, "Suggestions could not be written: the API did not answer.");
+  }
+}
+
 export async function removeLlmPromptAction(clientId: string, promptId: string): Promise<LlmResult<LlmSettings>> {
   try {
     return { ok: true, value: await apiFetch<LlmSettings>(`/v2/llm/prompts/${promptId}`, { method: "DELETE", clientId }) };

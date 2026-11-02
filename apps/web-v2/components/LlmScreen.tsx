@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { addLlmPromptsAction, llmResponsesAction, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction } from "@/app/(app)/[clientSlug]/llm/actions";
+import { addLlmPromptsAction, llmResponsesAction, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
 import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, Pair, QueryRow } from "@/lib/llm";
 
@@ -322,6 +322,9 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
   const [cluster, setCluster] = useState("Brand check");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [suggesting, startSuggest] = useTransition();
+  const [suggested, setSuggested] = useState<SuggestedGroup[] | null>(null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
   const groups = Array.from(new Set(settings.extra_prompts.map((p) => p.topic_cluster)));
   const add = () =>
     start(async () => {
@@ -330,6 +333,28 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
       if (r.ok) {
         setMessage(`${r.value.added} added${r.value.skipped ? `, ${r.value.skipped} already asked` : ""}.`);
         setText("");
+        router.refresh();
+      } else setMessage(r.error);
+    });
+  const suggest = () =>
+    startSuggest(async () => {
+      setMessage(null);
+      const r = await suggestLlmPromptsAction(client.id);
+      if (!r.ok) {
+        setMessage(r.error);
+        return;
+      }
+      setSuggested(r.value.groups);
+      setTicked(new Set(r.value.groups.flatMap((g) => g.prompts.map((p) => `${g.topic_cluster}|${p}`))));
+      if (r.value.groups.every((g) => g.prompts.length === 0)) setMessage("The model gave nothing new that passed the checks. Try again.");
+    });
+  const addSuggested = () =>
+    start(async () => {
+      const chosen = (suggested ?? []).flatMap((g) => g.prompts.filter((p) => ticked.has(`${g.topic_cluster}|${p}`)).map((prompt) => ({ prompt, topic_cluster: g.topic_cluster })));
+      const r = await addLlmPromptsAction(client.id, chosen);
+      if (r.ok) {
+        setMessage(`${r.value.added} added${r.value.skipped ? `, ${r.value.skipped} already asked` : ""}.`);
+        setSuggested(null);
         router.refresh();
       } else setMessage(r.error);
     });
@@ -359,6 +384,47 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
           </ul>
         </div>
       ))}
+      <div className="mt-4 rounded-lg bg-[var(--bg)] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[var(--text-secondary)]">Write brand-check and niche questions from this client&apos;s brand, competitors, watchlist and pages. You tick what to keep.</p>
+          <button type="button" onClick={suggest} disabled={suggesting || pending} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
+            {suggesting ? "Writing questions…" : suggested ? "Suggest again" : "Suggest prompts"}
+          </button>
+        </div>
+        {suggested ? (
+          <div className="mt-3 space-y-3">
+            {suggested.filter((g) => g.prompts.length > 0).map((g) => (
+              <div key={g.topic_cluster}>
+                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{g.topic_cluster}</div>
+                <ul className="mt-1 space-y-1">
+                  {g.prompts.map((p) => {
+                    const key = `${g.topic_cluster}|${p}`;
+                    return (
+                      <li key={key}>
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={ticked.has(key)}
+                            onChange={() => setTicked((cur) => { const next = new Set(cur); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
+                            className="mt-1"
+                          />
+                          <span>{p}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            <div className="flex gap-3">
+              <button type="button" onClick={addSuggested} disabled={pending || ticked.size === 0} className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Add {ticked.size} selected
+              </button>
+              <button type="button" onClick={() => setSuggested(null)} className="text-sm text-[var(--text-secondary)] hover:underline">Discard</button>
+            </div>
+          </div>
+        ) : null}
+      </div>
       <label className="mt-4 block">
         <span className="font-semibold">Add prompts, one per line</span>
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className={`mt-1 ${input}`} />

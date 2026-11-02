@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
-from app.llm_visibility import platforms, report, runner
+from app.llm_visibility import platforms, report, runner, suggest
 from app.models.client import Client
 from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmRun
 from app.schemas import SyncJobCreate
@@ -133,6 +133,22 @@ def add_llm_prompts(
         added += 1
     db.commit()
     return {"added": added, "skipped": skipped, "settings": get_llm_settings(client, _, db)}
+
+
+@router.post("/prompts/suggest")
+def suggest_llm_prompts(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Propose brand-check and niche questions from the client's brand, competitors, watchlist and pages. Saves nothing."""
+    settings = db.query(ClientLlmSettings).filter(ClientLlmSettings.client_id == client.id).one_or_none()
+    if settings is None or not settings.brand_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Set the brand name and its spellings above first; the questions are written around them.")
+    try:
+        return suggest.suggest(db, client, settings)
+    except suggest.SuggestError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.delete("/prompts/{prompt_id}")
