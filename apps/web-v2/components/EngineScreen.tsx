@@ -211,6 +211,18 @@ export function EngineScreen({
     });
   }
 
+  /** Drop this diagnosis and untick it. With none left, bring the candidate list back to pick another. */
+  function removeDiagnosis(d: Diagnosis) {
+    const key = `${d.search}|${d.page}`;
+    setPicked((current) => current.filter((k) => k !== key));
+    const rest = (diagnoses ?? []).filter((x) => `${x.search}|${x.page}` !== key);
+    if (rest.length === 0) {
+      setDiagnoses(null);
+      setCollapsed(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else setDiagnoses(rest);
+  }
+
   function scopeTo(bucketKey: string) {
     router.push(`/${client.slug}/engine?bucket=${bucketKey}${kind && kind !== focus?.focus ? `&show=${kind}` : ""}`);
   }
@@ -580,12 +592,21 @@ export function EngineScreen({
               <h2 className="text-sm font-semibold">Diagnosis</h2>
               {diagnoses.map((d) => (
                 <div key={`${d.search}|${d.page}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="font-semibold">{d.search.startsWith("(") ? shortPage(d.page) : d.search}</h3>
-                    <span className="text-xs text-[var(--text-secondary)]">
-                      {d.search.startsWith("(") ? d.page.replace(/^https?:\/\//, "") : shortPage(d.page)}
-                      {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
-                    </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold">{d.search.startsWith("(") ? shortPage(d.page) : d.search}</h3>
+                      <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                        {d.search.startsWith("(") ? d.page.replace(/^https?:\/\//, "") : shortPage(d.page)}
+                        {d.position != null ? ` · position ${d.position} · ${num(d.impressions)} impressions · ${num(d.clicks)} clicks` : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeDiagnosis(d)}
+                      className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg)] hover:text-red-700"
+                    >
+                      Remove and choose a different one
+                    </button>
                   </div>
                   {!d.read.ok ? (
                     <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
