@@ -61,6 +61,8 @@ export function BaselineBuilder({
   const needsSync = counted.some((c) => c.type !== "lead");
 
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
+  // First month to count. Empty means everything in the window; months before it are left out of the baseline.
+  const [regimeStart, setRegimeStart] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, startLoading] = useTransition();
@@ -81,13 +83,13 @@ export function BaselineBuilder({
   useEffect(() => {
     setLoadError(null);
     startLoading(async () => {
-      const result = await loadBaselineAction(clientId, events, "", acknowledged);
+      const result = await loadBaselineAction(clientId, events, regimeStart, acknowledged);
       if (result.ok) setAnalysis(result.analysis);
       else setLoadError(result.error);
     });
     // The event list comes from the server and does not change while this is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, acknowledged.join("|")]);
+  }, [clientId, acknowledged.join("|"), regimeStart]);
 
   const maxLeads = Math.max(1, ...(analysis?.series.map((m) => m.leads) ?? [1]));
   const openBlockers = analysis?.flags.filter((f) => f.level === "blocker" && !f.acknowledged) ?? [];
@@ -133,6 +135,47 @@ export function BaselineBuilder({
               month.
             </p>
 
+            <div className="mt-4 rounded-lg bg-[var(--bg)] p-4">
+              <label className="block text-sm">
+                <span className="font-semibold">Count from</span>
+                <span className="mt-1 flex flex-wrap items-center gap-3">
+                  <input
+                    type="month"
+                    value={regimeStart}
+                    min={analysis.window.from.slice(0, 7)}
+                    max={analysis.window.to.slice(0, 7)}
+                    onChange={(e) => {
+                      setAcknowledged([]);
+                      setRegimeStart(e.target.value);
+                    }}
+                    className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
+                  />
+                  {analysis.window.suggested_regime_start && regimeStart !== analysis.window.suggested_regime_start.slice(0, 7) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAcknowledged([]);
+                        setRegimeStart(analysis.window.suggested_regime_start!.slice(0, 7));
+                      }}
+                      className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm font-semibold hover:bg-white/60"
+                    >
+                      Use {analysis.window.suggested_regime_start.slice(0, 7)} (where the numbers stepped)
+                    </button>
+                  ) : null}
+                  {regimeStart ? (
+                    <button type="button" onClick={() => { setAcknowledged([]); setRegimeStart(""); }} className="text-sm text-[var(--text-secondary)] underline">
+                      Count everything
+                    </button>
+                  ) : null}
+                </span>
+                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
+                  {regimeStart
+                    ? `Months before ${regimeStart} are left out of the baseline, for example from before a relaunch or before tracking worked. They stay in the data.`
+                    : "Leave empty to count every month in the window. Set it to the first month that is comparable with today, for example after a relaunch or once tracking worked."}
+                </span>
+              </label>
+            </div>
+
             {analysis.flags
               .filter((flag) => flag.level === "warning")
               .map((flag) => (
@@ -168,6 +211,7 @@ export function BaselineBuilder({
                 </li>
               ))}
           </ul>
+          <p className="mt-3 text-xs text-red-800">To move the baseline start instead, set <strong>Count from</strong> in the card above.</p>
         </div>
       ) : null}
 
@@ -267,7 +311,7 @@ export function BaselineBuilder({
             startLock(async () => {
               const result = await lockBaselineAction(clientId, slug, {
                 lead_events: events,
-                regime_start: null,
+                regime_start: regimeStart || null,
                 acknowledged,
                 reason_code: isFirst ? null : reason,
                 reason_note: isFirst ? null : note.trim() || null,
