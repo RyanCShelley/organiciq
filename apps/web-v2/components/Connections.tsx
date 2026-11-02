@@ -25,8 +25,7 @@ function Problem({ text }: { text: string | null }) {
 
 /** One row per source, all alike: a mark, what it is connected to, whether it is working, and a way to change it. */
 function Row({
-  mark,
-  color,
+  logo,
   name,
   value,
   tone,
@@ -37,8 +36,7 @@ function Row({
   onToggle,
   children,
 }: {
-  mark: string;
-  color: string;
+  logo: string;
   name: string;
   value: string | null;
   tone: Tone;
@@ -52,9 +50,8 @@ function Row({
   return (
     <li className="p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white ${color}`} aria-hidden>
-          {mark}
-        </span>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/logos/${logo}.png`} alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-lg border border-[var(--border)] bg-white object-contain p-1" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{name}</div>
           <div className="truncate text-sm text-[var(--text-secondary)]">{value ?? "Not chosen yet"}</div>
@@ -243,15 +240,15 @@ export function ConnectionsPanel({
       ) : null}
 
       <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-        <Row mark="SC" color="bg-blue-600" name="Search Console" value={gsc?.external_property_id ?? null} {...rowState(gsc)} error={gsc?.error_message} action={gsc?.external_property_id ? "Change" : "Choose"} open={open === "gsc"} onToggle={() => toggle("gsc")}>
+        <Row logo="search-console" name="Search Console" value={gsc?.external_property_id ?? null} {...rowState(gsc)} error={gsc?.error_message} action={gsc?.external_property_id ? "Change" : "Choose"} open={open === "gsc"} onToggle={() => toggle("gsc")}>
           <Picker label="Search Console site" load={() => act.loadGscSitesAction(client.id)} save={(v) => act.saveGscAction(client.id, client.slug, v)} empty="This Google account has no Search Console sites." onSaved={close} />
         </Row>
 
-        <Row mark="GA" color="bg-orange-500" name="Google Analytics 4" value={ga4?.external_property_id ?? null} {...rowState(ga4)} error={ga4?.error_message} action={ga4?.external_property_id ? "Change" : "Choose"} open={open === "ga4"} onToggle={() => toggle("ga4")}>
+        <Row logo="ga4" name="Google Analytics 4" value={ga4?.external_property_id ?? null} {...rowState(ga4)} error={ga4?.error_message} action={ga4?.external_property_id ? "Change" : "Choose"} open={open === "ga4"} onToggle={() => toggle("ga4")}>
           <Picker label="GA4 property" load={() => act.loadGa4Action(client.id)} save={(v) => act.saveGa4Action(client.id, client.slug, v)} empty="This Google account has no GA4 properties." onSaved={close} />
         </Row>
 
-        <Row mark="SR" color="bg-emerald-600" name="SE Ranking" value={ser?.external_account_id ?? ser?.external_property_id ?? null} {...rowState(ser)} action={ser?.external_property_id ? "Change" : "Choose"} open={open === "ser"} onToggle={() => toggle("ser")}>
+        <Row logo="se-ranking" name="SE Ranking" value={ser?.external_account_id ?? ser?.external_property_id ?? null} {...rowState(ser)} action={ser?.external_property_id ? "Change" : "Choose"} open={open === "ser"} onToggle={() => toggle("ser")}>
           {connections.se_ranking_key_configured ? (
             <Picker label="SE Ranking project" load={() => act.loadSeRankingAction(client.id)} save={(v, l) => act.saveSeRankingAction(client.id, client.slug, v, l)} onSaved={close} />
           ) : (
@@ -259,7 +256,7 @@ export function ConnectionsPanel({
           )}
         </Row>
 
-        <Row mark="BW" color="bg-cyan-600" name="Bing Webmaster" value={bing?.site_url ?? null} {...bingTone} error={bing?.error} action={bing ? "Change" : "Choose"} open={open === "bing"} onToggle={() => toggle("bing")}>
+        <Row logo="bing" name="Bing Webmaster" value={bing?.site_url ?? null} {...bingTone} error={bing?.error} action={bing ? "Change" : "Choose"} open={open === "bing"} onToggle={() => toggle("bing")}>
           {connections.bing_key_configured ? (
             <Picker label="Site in the Bing account" load={() => act.loadBingSitesAction(client.id)} save={(v) => act.saveBingAction(client.id, client.slug, v)} onSaved={close} />
           ) : (
@@ -286,8 +283,7 @@ export function ConnectionsPanel({
         </Row>
 
         <Row
-          mark="TW"
-          color="bg-violet-600"
+          logo="teamwork"
           name="Teamwork"
           value={connections.teamwork_tasklist_id ? `Tasklist ${connections.teamwork_tasklist_id}` : null}
           tone={!connections.teamwork_configured ? "bad" : connections.teamwork_tasklist_id ? "ok" : "off"}
