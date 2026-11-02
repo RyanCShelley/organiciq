@@ -184,3 +184,19 @@ python -m app.reset_client_data --client-slug <slug> --backfill
 `--apply` takes one client at a time. A table that holds client data and is not in the tool's lists stops the run, so
 a table added later gets decided, not guessed. The backfill asks Search Console for 13 months and GA4 for 26, then
 the site crawl and the Bing pull; the worker runs them, and the crawl takes the longest.
+
+
+---
+
+# Admin (v2): add and remove clients
+
+An **Admin** link appears in the v2 header for SMA admins. It lists every client with what is set up (Google and Bing
+connected, watchlist, baseline, team) and how current its data is, with **Add a client**, **Settings**, **Open** and **Delete**.
+
+- **Add** uses the Add client screen (`POST /clients`, admin only).
+- **Delete** shows what will be removed (synced rows, set-up rows, connections, team access, annotations), then needs the
+  client's exact name typed in. It removes the client from the live tool too, because the database is shared, and it cannot be
+  undone: back up first. The delete uses the same table lists as the reset command, so it stops on any client table it has not
+  been told about instead of leaving rows behind. (The old hand-kept list had fallen behind, so deleting a client that had a
+  watchlist or a task would have failed.)
+- Both routes are admin only: `GET /v2/admin/clients`, `GET /v2/admin/clients/{id}/delete-preview`, `DELETE /v2/admin/clients/{id}`.

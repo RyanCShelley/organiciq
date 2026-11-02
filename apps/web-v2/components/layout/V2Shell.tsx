@@ -17,11 +17,13 @@ export const V2_SECTIONS = [
 export function V2Shell({
   clients,
   userEmail,
+  isAdmin = false,
   signOutAction,
   children,
 }: {
   clients: Client[];
   userEmail?: string | null;
+  isAdmin?: boolean;
   signOutAction: () => Promise<void>;
   children: React.ReactNode;
 }) {
@@ -40,6 +42,11 @@ export function V2Shell({
         <Link href="/new-client" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
           + Add client
         </Link>
+        {isAdmin ? (
+          <Link href="/admin" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
+            Admin
+          </Link>
+        ) : null}
         <div className="ml-auto flex items-center gap-4 text-sm text-[var(--sidebar-fg-muted)]">
           {userEmail ? <span>{userEmail}</span> : null}
           <form action={signOutAction}>

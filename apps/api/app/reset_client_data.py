@@ -134,6 +134,26 @@ def apply(db: Session, client: Any) -> dict[str, int]:
     return deleted
 
 
+def purge(db: Session, client: Any) -> dict[str, int]:
+    """Delete a client and everything of its: the reset, then the rows that reset keeps, then the client. The caller commits.
+
+    The hand-kept list this replaces had fallen behind the tables, so a client with a watchlist or a task could not be
+    deleted. This one stops on any table it has not been told about (see `check_every_table_is_classified`).
+    """
+    deleted = apply(db, client)
+    c = {"c": str(client.id)}
+    result = db.execute(text("delete from copilot_messages where conversation_id in (select id from copilot_conversations where client_id = :c)"), c)
+    if result.rowcount:
+        deleted["copilot_messages"] = result.rowcount
+    for table in ("annotations", "copilot_conversations", "client_bing_sites", "user_clients", "integrations"):
+        result = db.execute(text(f'delete from "{table}" where client_id = :c'), c)
+        if result.rowcount:
+            deleted[table] = result.rowcount
+    db.execute(text("delete from clients where id = :c"), {"c": str(client.id)})
+    deleted["clients"] = 1
+    return deleted
+
+
 def enqueue_backfill(db: Session, client: Any, today: date | None = None) -> list[str]:
     """Queue one job per source with a long window. A source with no connection for this client is skipped."""
     from app.models.client_bing_site import ClientBingSite
