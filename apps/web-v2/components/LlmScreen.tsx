@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { addLlmPromptsAction, llmResponsesAction, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
 import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, Pair, QueryRow } from "@/lib/llm";
+import { Spinner } from "@/components/ui/Spinner";
 
 type Tab = "overview" | "queries" | "sov" | "run" | "setup";
 
@@ -316,6 +317,30 @@ function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
   );
 }
 
+function RunProgress({ overview }: { overview: LlmOverview | null }) {
+  const run = overview?.running ?? null;
+  const total = run?.total_calls ?? 0;
+  const answered = run?.answered ?? 0;
+  const pct = total ? Math.min(100, Math.round((answered / total) * 100)) : 0;
+  return (
+    <div role="status" className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 text-sm">
+      <div className="flex items-center gap-2 font-semibold">
+        <Spinner className="!mr-0 h-4 w-4" />
+        {run ? `Run in progress: ${answered} of ${total} answers back` : "A run is queued and will start shortly"}
+      </div>
+      {run ? (
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full bg-[var(--brand-teal)] transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
+      <p className="mt-2 text-xs text-[var(--text-secondary)]">
+        {run ? `Started ${new Date(run.started_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. ` : ""}
+        It takes a few minutes. This page checks every few seconds and shows the results when they land.
+      </p>
+    </div>
+  );
+}
+
 function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSettings }) {
   const router = useRouter();
   const [text, setText] = useState("");
@@ -390,7 +415,7 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-[var(--text-secondary)]">Write brand-check and niche questions from this client&apos;s brand, competitors, watchlist and pages. You tick what to keep.</p>
           <button type="button" onClick={suggest} disabled={suggesting || pending} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
-            {suggesting ? "Writing questions…" : suggested ? "Suggest again" : "Suggest prompts"}
+            {suggesting ? <><Spinner />Writing questions…</> : suggested ? "Suggest again" : "Suggest prompts"}
           </button>
         </div>
         {suggestMessage ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{suggestMessage}</p> : null}
@@ -518,7 +543,7 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
   const [pending, start] = useTransition();
   const [runError, setRunError] = useState<string | null>(null);
   const [queued, setQueued] = useState(false);
-  const running = Boolean(overview?.running) || queued;
+  const running = Boolean(overview?.running) || Boolean(overview?.queued) || queued;
 
   // A run takes minutes; look again until it lands.
   useEffect(() => {
@@ -564,12 +589,12 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
             </select>
           ) : null}
           <button type="button" onClick={startRun} disabled={pending || running} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            {running ? "Running…" : "Run now"}
+            {running ? <><Spinner />Running…</> : "Run now"}
           </button>
         </div>
       </header>
 
-      {running ? <p className="rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">A run is queued or in progress. It takes a few minutes and this page updates when it lands.</p> : null}
+      {running ? <RunProgress overview={overview} /> : null}
       {runError ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{runError}</p> : null}
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
 

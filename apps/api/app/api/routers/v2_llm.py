@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -14,12 +15,14 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.llm_visibility import platforms, report, runner, suggest
 from app.models.client import Client
-from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmRun
+from app.models.job import SyncJob, SyncJobStatus
+from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.schemas import SyncJobCreate
 from app.services.competitors import bare_domain
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
 from datetime import date
 
+ACTIVE_JOB = (SyncJobStatus.QUEUED, SyncJobStatus.FETCHING, SyncJobStatus.STAGING, SyncJobStatus.NORMALIZING, SyncJobStatus.VALIDATING)
 router = APIRouter(prefix="/v2/llm", tags=["v2 llm visibility"])
 
 
@@ -173,7 +176,12 @@ def llm_overview(
     db: Annotated[Session, Depends(get_db)],
     run_id: UUID | None = None,
 ) -> dict:
-    return report.overview(db, client, runner.brand_config(db, client).brand_name, run_id)
+    out = report.overview(db, client, runner.brand_config(db, client).brand_name, run_id)
+    # What the screen needs to show something is happening: a job queued or under way, and how far a running run has got.
+    out["queued"] = db.query(SyncJob.id).filter(SyncJob.client_id == client.id, SyncJob.source == "llm_visibility", SyncJob.status.in_(ACTIVE_JOB)).first() is not None
+    if out.get("running"):
+        out["running"]["answered"] = db.query(func.count()).select_from(LlmResponse).filter(LlmResponse.run_id == UUID(out["running"]["id"])).scalar() or 0
+    return out
 
 
 @router.get("/runs/{run_id}/responses")

@@ -6,6 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 
 import { deleteClientAction, deletePreviewAction } from "@/app/(app)/admin/actions";
 import type { AdminClient, DeletePreview } from "@/lib/admin";
+import { Spinner } from "@/components/ui/Spinner";
 
 const day = (iso: string | null) =>
   iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "none";
@@ -67,7 +68,7 @@ function DeletePanel({ client, onDone, onCancel }: { client: AdminClient; onDone
       {error ? <p role="alert" className="mt-2 font-semibold">{error}</p> : null}
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={remove} disabled={pending || typed !== client.name} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
-          {pending ? "Deleting…" : "Delete forever"}
+          {pending ? <><Spinner />Deleting…</> : "Delete forever"}
         </button>
         <button type="button" onClick={onCancel} disabled={pending} className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold">
           Cancel

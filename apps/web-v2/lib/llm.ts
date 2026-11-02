@@ -48,7 +48,10 @@ export type QueryRow = {
 export type LlmOverview = {
   brand: string;
   runs: LlmRunInfo[];
-  running: LlmRunInfo | null;
+  /** A run in progress; `answered` is how many of its calls have come back. */
+  running: (LlmRunInfo & { answered?: number }) | null;
+  /** A run job is waiting its turn or under way on the worker. */
+  queued?: boolean;
   run: LlmRunInfo | null;
   previous_run?: LlmRunInfo | null;
   summary?: { mentions: Pair; citations: Pair; visibility_rate: Pair; responses: number };

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { buildGrowthActionAction, confirmTaskAction, topicForAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import type { CandidateTopic, EngineTask, GrowthActionBundle, GrowthPart, TaskDraft } from "@/lib/engine";
+import { Spinner } from "@/components/ui/Spinner";
 
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
 const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
@@ -225,7 +226,7 @@ export function GrowthActionPlanner({
               <span className="font-semibold text-green-800">✓ This page is already in the plan.</span>
             ) : (
               <button type="button" onClick={confirm} disabled={pending || kept === 0} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                {pending ? "Adding…" : `Confirm as a growth action (${kept} part${kept === 1 ? "" : "s"})`}
+                {pending ? <><Spinner />Adding…</> : `Confirm as a growth action (${kept} part${kept === 1 ? "" : "s"})`}
               </button>
             )}
           </div>

@@ -75,3 +75,25 @@ def test_a_json_answer_wrapped_in_a_code_fence_is_read(client, db, client_a, adm
     out = call(client, db, client_a, admin_user).json()
     assert out["platform"] == "openai" and out["groups"][0]["prompts"] == ["Is Acme Soap goat milk soap good for eczema?"]
 
+
+
+def test_the_overview_says_when_a_run_is_queued_and_how_far_a_running_one_has_got(client, db, client_a, admin_user):
+    from datetime import date
+
+    from app.models.job import SyncJob, SyncJobStatus
+    from app.models.llm_visibility import LlmResponse, LlmRun
+
+    h = client_header(client_a.id, admin_user.email)
+    assert client.get("/v2/llm/overview", headers=h).json()["queued"] is False
+    db.add(SyncJob(client_id=client_a.id, source="llm_visibility", start_date=date.today(), end_date=date.today(), status=SyncJobStatus.QUEUED))
+    db.commit()
+    assert client.get("/v2/llm/overview", headers=h).json()["queued"] is True
+
+    run = LlmRun(client_id=client_a.id, status="running", platforms=["openai"], total_calls=10)
+    db.add(run)
+    db.commit()
+    for i in range(4):
+        db.add(LlmResponse(run_id=run.id, client_id=client_a.id, platform="openai", query_text=f"q{i}", topic_cluster="T", visibility_type="Not visible"))
+    db.commit()
+    running = client.get("/v2/llm/overview", headers=h).json()["running"]
+    assert running["total_calls"] == 10 and running["answered"] == 4

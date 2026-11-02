@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { pullStatusAction, startPullAction } from "@/app/(app)/admin/actions";
 import type { PullSource, PullStatus } from "@/lib/admin";
+import { Spinner } from "@/components/ui/Spinner";
 
 const num = (n: number) => n.toLocaleString();
 const day = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -100,7 +101,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Pull data</h2>
+          <h2 className="text-sm font-semibold">{status?.running ? <Spinner /> : null}Pull data</h2>
           <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
             {headline}
             {status?.running && status.jobs_ahead > 0 ? ` ${status.jobs_ahead} job${status.jobs_ahead === 1 ? "" : "s"} for other clients are ahead in the queue.` : ""}
@@ -113,7 +114,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
             disabled={pending || !status || status.running || status.sources.length === 0 || status.up_to_date}
             className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {pending ? "Starting…" : status?.running ? "Pulling…" : "Pull data"}
+            {pending ? <><Spinner />Starting…</> : status?.running ? <><Spinner />Pulling…</> : "Pull data"}
           </button>
           {status && !status.running && status.up_to_date ? (
             <button type="button" onClick={() => begin(true)} disabled={pending} className="text-xs font-semibold text-[var(--text-secondary)] underline disabled:opacity-40">
@@ -136,7 +137,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
                 <span className="ml-2 text-xs text-[var(--text-tertiary)]">{reach(s)}</span>
               </div>
               <div className="text-xs">
-                <span className={`font-semibold ${STATE[s.state].cls}`}>{STATE[s.state].text}</span>
+                <span className={`font-semibold ${STATE[s.state].cls}`}>{s.state === "running" ? <Spinner /> : null}{STATE[s.state].text}</span>
                 {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
                 {s.state === "running" && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
                 {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}

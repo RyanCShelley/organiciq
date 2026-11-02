@@ -24,6 +24,7 @@ import type {
   VisibilityCandidates,
 } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus } from "@/lib/focus";
+import { Spinner } from "@/components/ui/Spinner";
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -129,7 +130,7 @@ function ConfirmButton({
         }
         className="rounded-lg bg-[var(--brand-dark)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
       >
-        {pending ? "Adding…" : draft.kind === "suggestion" ? "Confirm as a task" : "Add to the plan"}
+        {pending ? <><Spinner />Adding…</> : draft.kind === "suggestion" ? "Confirm as a task" : "Add to the plan"}
       </button>
       {error ? <span className="max-w-[16rem] text-right text-xs text-red-800">{error}</span> : null}
     </span>
@@ -521,7 +522,7 @@ export function EngineScreen({
                 onClick={diagnose}
                 className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
-                {diagnosing ? "Reading the pages…" : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
+                {diagnosing ? <><Spinner />Reading the pages…</> : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
               </button>
               <span className="text-xs text-[var(--text-secondary)]">
                 Tick up to {MAX_PICKS}. Each page is read live from the client&apos;s site and checked against the rules.

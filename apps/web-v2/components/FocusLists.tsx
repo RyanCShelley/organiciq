@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { LeadsCandidates, TrafficCandidates } from "@/lib/engine";
+import { Spinner } from "@/components/ui/Spinner";
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -39,7 +40,7 @@ function PickBar({
         onClick={onDiagnose}
         className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
       >
-        {diagnosing ? "Reading the pages…" : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
+        {diagnosing ? <><Spinner />Reading the pages…</> : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
       </button>
       <span className="text-xs text-[var(--text-secondary)]">
         Tick up to {max} pages. Each is read live from the client&apos;s site, with what is worth checking on it.

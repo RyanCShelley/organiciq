@@ -9,6 +9,7 @@ import {
   saveConversionPagesAction,
 } from "@/app/(app)/[clientSlug]/settings/conversions/actions";
 import { SaveBar, inputClass } from "@/components/ui/form";
+import { Spinner } from "@/components/ui/Spinner";
 import {
   CONVERSION_TYPES,
   labelFromPath,
@@ -447,7 +448,7 @@ function Ga4PagesPanel({
           onClick={load}
           className="rounded-lg bg-[var(--brand-dark)] px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {pending ? "Asking GA4…" : "Show pages"}
+          {pending ? <><Spinner />Asking GA4…</> : "Show pages"}
         </button>
       </div>
       {error ? (

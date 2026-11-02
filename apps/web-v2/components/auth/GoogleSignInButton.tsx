@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
+import { Spinner } from "@/components/ui/Spinner";
 
 /**
  * Client sign-in hits `/api/auth/signin/google` so Auth.js applies AUTH_URL
@@ -25,7 +26,7 @@ export function GoogleSignInButton({ callbackUrl }: { callbackUrl: string }) {
         }
       }}
     >
-      {pending ? "Redirecting to Google…" : "Continue with Google"}
+      {pending ? <><Spinner />Redirecting to Google…</> : "Continue with Google"}
     </button>
   );
 }

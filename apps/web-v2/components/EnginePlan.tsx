@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { monthLabel } from "@/lib/focus";
 import type { Allowance, EngineTask, TaskPlan } from "@/lib/engine";
+import { Spinner } from "@/components/ui/Spinner";
 
 const STATUS_STYLE: Record<string, string> = {
   confirmed: "bg-[var(--bg)] text-[var(--text-secondary)]",
@@ -109,7 +110,7 @@ function TaskRow({
             onClick={() => run(() => sendTaskAction(clientId, task.id))}
             className="rounded-lg bg-[var(--brand-teal)] px-3 py-1 font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Sending…" : "Send to Teamwork"}
+            {pending ? <><Spinner />Sending…</> : "Send to Teamwork"}
           </button>
         ) : (
           <span className="text-[var(--text-tertiary)]">

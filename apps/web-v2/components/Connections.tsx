@@ -10,6 +10,7 @@ import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
 import type { Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
+import { Spinner } from "@/components/ui/Spinner";
 
 type Tone = "ok" | "warn" | "bad" | "off";
 const DOT: Record<Tone, string> = { ok: "bg-green-500", warn: "bg-amber-500", bad: "bg-red-500", off: "bg-gray-300" };
@@ -123,7 +124,7 @@ function Picker({
             }
             className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Saving…" : `Save${choice ? ` “${chosenLabel.slice(0, 40)}”` : ""}`}
+            {pending ? <><Spinner />Saving…</> : `Save${choice ? ` “${chosenLabel.slice(0, 40)}”` : ""}`}
           </button>
         </div>
       ) : null}
@@ -154,7 +155,7 @@ function TypedValue({ placeholder, initial, save, onSaved }: { placeholder: stri
           }
           className="shrink-0 rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {pending ? "Saving…" : "Save"}
+          {pending ? <><Spinner />Saving…</> : "Save"}
         </button>
       </div>
       <Problem text={error} />
@@ -230,7 +231,7 @@ export function ConnectionsPanel({
           </p>
           {connections.google_connect_configured ? (
             <button type="button" disabled={connecting} onClick={connectGoogle} className="mt-3 rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-              {connecting ? "Opening Google…" : "Connect Google"}
+              {connecting ? <><Spinner />Opening Google…</> : "Connect Google"}
             </button>
           ) : (
             <p className="mt-3 text-sm text-amber-800">Not configured on this install: GOOGLE_DATA_OAUTH_CLIENT_ID and SECRET are missing.</p>
@@ -319,7 +320,7 @@ export function ConnectionsPanel({
         <p className="text-xs text-[var(--text-tertiary)]">
           Google is connected for every client.{" "}
           <button type="button" disabled={connecting} onClick={connectGoogle} className="font-semibold underline disabled:opacity-50">
-            {connecting ? "Opening Google…" : "Reconnect Google"}
+            {connecting ? <><Spinner />Opening Google…</> : "Reconnect Google"}
           </button>{" "}
           only if its sign-in has expired; it replaces the shared sign-in.
           {connectError ? <span className="ml-1 text-red-700">{connectError}</span> : null}
