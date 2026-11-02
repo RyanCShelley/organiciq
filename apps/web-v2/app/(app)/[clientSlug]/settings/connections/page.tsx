@@ -19,9 +19,10 @@ export default async function ConnectionsPage({
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
-  const [integrations, connections] = await Promise.all([
+  const [integrations, connections, me] = await Promise.all([
     apiFetch<IntegrationRow[]>("/integrations", { clientId: client.id }),
     apiFetch<Connections>("/v2/connections", { clientId: client.id }),
+    apiFetch<{ role: string }>("/auth/me").catch(() => null),
   ]);
 
   return (
@@ -29,6 +30,7 @@ export default async function ConnectionsPage({
       client={client}
       integrations={integrations}
       connections={connections}
+      isAdmin={me?.role === "sma_admin"}
       oauth={oauth ? { status: oauth, message } : undefined}
     />
   );
