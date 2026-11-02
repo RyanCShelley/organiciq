@@ -16,13 +16,6 @@ def connect(db, client):
     db.commit()
 
 
-def done_job(db, client, source, seconds, days=400):
-    now = datetime.now(timezone.utc)
-    db.add(SyncJob(client_id=client.id, source=source, start_date=(now - timedelta(days=days)).date(), end_date=now.date(),
-                   status=SyncJobStatus.SUCCESSFUL, started_at=now - timedelta(seconds=seconds + 5), completed_at=now - timedelta(seconds=5), created_at=now - timedelta(days=3)))
-    db.commit()
-
-
 def test_a_team_member_cannot_pull(client, db, client_a, team_user):
     h = auth_header(team_user.email)
     assert client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).status_code == 403
@@ -54,18 +47,6 @@ def test_starting_queues_every_source_and_a_second_press_adds_nothing(client, db
     assert client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["queued"] == []
 
 
-def test_time_left_comes_from_past_runs_and_is_unknown_without_any(client, db, client_a, admin_user):
-    connect(db, client_a)
-    h = auth_header(admin_user.email)
-    unknown = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
-    assert unknown["seconds_left"] is None
-
-    for source in [s["source"] for s in unknown["sources"]]:
-        done_job(db, client_a, source, seconds=120)
-    known = client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
-    assert known["seconds_left"] == 120 * len(known["sources"])
-
-
 def test_progress_counts_finished_sources_and_reports_failures(client, db, client_a, admin_user):
     connect(db, client_a)
     h = auth_header(admin_user.email)
@@ -91,16 +72,13 @@ def test_jobs_queued_for_other_clients_ahead_of_ours_are_counted(client, db, cli
     assert out["jobs_ahead"] == 1
 
 
-def test_a_job_running_past_its_usual_time_says_so_instead_of_a_time_left(client, db, client_a, admin_user):
+def test_a_running_source_says_how_long_it_has_been_going_and_no_time_left_is_promised(client, db, client_a, admin_user):
     connect(db, client_a)
     h = auth_header(admin_user.email)
-    first = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
-    for source in [s["source"] for s in first["sources"]]:
-        done_job(db, client_a, source, seconds=30)
-    job = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "ga4", SyncJob.status == SyncJobStatus.QUEUED).one()
+    client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h)
+    job = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "ga4").one()
     job.status, job.started_at = SyncJobStatus.FETCHING, datetime.now(timezone.utc) - timedelta(minutes=5)
     db.commit()
     out = client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
     ga4 = next(s for s in out["sources"] if s["source"] == "ga4")
-    assert ga4["overrun"] is True and ga4["usual_seconds"] == 30 and ga4["seconds_left"] is None
-    assert out["overrun"] is True and out["seconds_left"] is None
+    assert 295 <= ga4["running_seconds"] <= 310 and "seconds_left" not in ga4 and "seconds_left" not in out

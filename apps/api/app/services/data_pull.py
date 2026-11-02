@@ -1,15 +1,13 @@
 """Pull a client's data from every connected source, and say where the pull stands.
 
 The plan (what is pulled and how far back) is one function so the button, the queueing and the reset tool agree.
-Progress comes from the client's sync jobs. A job reports its stage, not a percentage, so time left is an estimate
-from how long past jobs of the same source took on this install; with no history yet it says so instead of guessing.
-The worker runs one job at a time, so the time left is the sum of the jobs still ahead, including other clients'
-jobs queued before ours.
+Progress comes from the client's sync jobs. A job reports its stage, not a percentage, and how long a source takes
+depends on how much data the client has, so there is no time-left estimate: the status is what is measured (sources
+done, the stage each is in, and how long a running one has been going).
 """
 
 from __future__ import annotations
 
-import statistics
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -51,14 +49,6 @@ STAGE_TEXT = {
     SyncJobStatus.SUCCESSFUL: "Done",
     SyncJobStatus.PARTIAL: "Done, with some gaps",
     SyncJobStatus.FAILED: "Failed",
-}
-# How far through the work each stage is, as a share of a job's typical length. Honest as a rough guide only.
-STAGE_SHARE = {
-    SyncJobStatus.QUEUED: 0.0,
-    SyncJobStatus.FETCHING: 0.1,
-    SyncJobStatus.STAGING: 0.6,
-    SyncJobStatus.NORMALIZING: 0.8,
-    SyncJobStatus.VALIDATING: 0.95,
 }
 
 
@@ -111,22 +101,6 @@ def queue_pull(db: Session, client: Any, today: date | None = None) -> list[str]
     return queued
 
 
-def _typical_seconds(db: Session, source: str, days: int) -> float | None:
-    """Median time past successful jobs of this source took, preferring ones with a similar window."""
-    rows = (
-        db.query(SyncJob.started_at, SyncJob.completed_at, SyncJob.start_date, SyncJob.end_date)
-        .filter(SyncJob.source == source, SyncJob.status == SyncJobStatus.SUCCESSFUL)
-        .filter(SyncJob.started_at.isnot(None), SyncJob.completed_at.isnot(None))
-        .order_by(SyncJob.completed_at.desc())
-        .limit(40)
-        .all()
-    )
-    spans = [((done - began).total_seconds(), (end - start).days) for began, done, start, end in rows]
-    similar = [s for s, d in spans if d >= days * 0.5]
-    pool = similar or [s for s, _ in spans]
-    return statistics.median(pool) if pool else None
-
-
 def _pull_started(db: Session, client_id) -> datetime | None:
     """When the current pull began: the first job of the newest batch (jobs queued within a minute of each other)."""
     newest = db.query(func.max(SyncJob.created_at)).filter(SyncJob.client_id == client_id).scalar()
@@ -145,45 +119,29 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
             jobs[job.source] = job
 
     # Jobs ahead of ours in the one queue, from every client.
-    ahead_rows = db.query(SyncJob.source, SyncJob.start_date, SyncJob.end_date).filter(
-        SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id
-    )
+    ahead = db.query(func.count()).select_from(SyncJob).filter(SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id)
     if began is not None:
-        ahead_rows = ahead_rows.filter(SyncJob.created_at < began)
-    queue_ahead = ahead_rows.all()
+        ahead = ahead.filter(SyncJob.created_at < began)
 
-    sources, remaining, unknown, overrun = [], 0.0, False, False
+    sources = []
     for item in plan:
         job = jobs.get(item["source"])
-        typical = _typical_seconds(db, item["source"], (item["end"] - item["start"]).days)
-        row = {"source": item["source"], "label": item["label"], "reach": item["reach"], "from": item["start"].isoformat(), "to": item["end"].isoformat(), "state": "not_started", "stage": None, "seconds_left": None, "error": None, "rows": None, "overrun": False, "usual_seconds": None}
+        row = {"source": item["source"], "label": item["label"], "reach": item["reach"], "from": item["start"].isoformat(), "to": item["end"].isoformat(),
+               "state": "not_started", "stage": None, "running_seconds": None, "error": None, "rows": None}
         if job is not None:
             status = job.status
             row["stage"] = STAGE_TEXT.get(status)
             row["rows"] = job.records_written
             if status in ACTIVE:
                 row["state"] = "queued" if status == SyncJobStatus.QUEUED else "running"
-                if typical is not None:
-                    elapsed = (now - job.started_at).total_seconds() if job.started_at else 0.0
-                    if status != SyncJobStatus.QUEUED and elapsed > typical:
-                        # Past its usual time: say so instead of promising "a minute left" for ever.
-                        row["overrun"], row["usual_seconds"] = True, int(typical)
-                        overrun = True
-                    else:
-                        row["seconds_left"] = typical if status == SyncJobStatus.QUEUED else typical - elapsed
-                        remaining += row["seconds_left"]
-                else:
-                    unknown = True
+                if job.started_at is not None:
+                    row["running_seconds"] = int((now - job.started_at).total_seconds())
             elif status == SyncJobStatus.FAILED:
                 row["state"], row["error"] = "failed", job.error_message
             else:
                 row["state"] = "done" if status == SyncJobStatus.SUCCESSFUL else "partial"
         sources.append(row)
 
-    ahead_seconds = 0.0
-    for source, start, end in queue_ahead:
-        typical = _typical_seconds(db, source, (end - start).days)
-        ahead_seconds += typical or 0.0
     active = [s for s in sources if s["state"] in ("queued", "running")]
     done = [s for s in sources if s["state"] in ("done", "partial")]
     return {
@@ -194,7 +152,5 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
         "failed": [s["label"] for s in sources if s["state"] == "failed"],
         "jobs_done": len(done),
         "jobs_total": len(sources),
-        "overrun": overrun,
-        "seconds_left": None if ((unknown or overrun) and active) else int(remaining + ahead_seconds) if active else 0,
-        "jobs_ahead": len(queue_ahead),
+        "jobs_ahead": ahead.scalar() or 0,
     }

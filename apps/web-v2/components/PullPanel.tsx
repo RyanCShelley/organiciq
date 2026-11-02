@@ -9,11 +9,11 @@ const num = (n: number) => n.toLocaleString();
 const day = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const month = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
 
-const span = (secs: number | null) => {
+const elapsed = (secs: number | null) => {
   if (secs == null) return null;
-  if (secs < 90) return "about a minute";
+  if (secs < 90) return "under a minute";
   const m = Math.round(secs / 60);
-  return m < 90 ? `about ${m} minutes` : `about ${(m / 60).toFixed(1)} hours`;
+  return m < 90 ? `${m} min` : `${(m / 60).toFixed(1)} hours`;
 };
 
 const STATE: Record<PullSource["state"], { text: string; cls: string }> = {
@@ -71,11 +71,10 @@ export function PullPanel({ clientId }: { clientId: string }) {
     });
 
   const pct = status && status.jobs_total ? Math.round((status.jobs_done / status.jobs_total) * 100) : 0;
-  const left = status ? span(status.seconds_left) : null;
   const headline = !status
     ? "Loading…"
     : status.running
-      ? `${status.jobs_done} of ${status.jobs_total} sources done${left ? `, ${left} left` : status.overrun ? ". A source is taking longer than past pulls, so this client has more data than the ones before it. It is still working" : ". Time left shows after this install has finished one pull"}.`
+      ? `${status.jobs_done} of ${status.jobs_total} sources done.`
       : status.finished
         ? `Finished. All ${status.jobs_total} sources are in.`
         : status.failed.length
@@ -121,7 +120,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
               <div className="text-xs">
                 <span className={`font-semibold ${STATE[s.state].cls}`}>{STATE[s.state].text}</span>
                 {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
-                {s.overrun ? ` · past the usual ${span(s.usual_seconds)}, still working` : s.seconds_left != null && (s.state === "running" || s.state === "queued") ? ` · ${span(s.seconds_left)} left` : ""}
+                {s.state === "running" && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
                 {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
                 {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
               </div>
