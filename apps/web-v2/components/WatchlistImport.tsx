@@ -37,19 +37,23 @@ export function WatchlistImport({ clientId, slug }: { clientId: string; slug: st
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <input
-          type="file"
-          accept=".csv,text/csv"
-          aria-label="Watchlist CSV"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            setReport(null);
-            setError("");
-            setFileName(file?.name ?? "");
-            setCsvText(file ? await file.text() : "");
-          }}
-          className="text-sm"
-        />
+        <label className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed px-4 py-3 text-sm focus-within:ring-2 focus-within:ring-[var(--brand-teal)] ${fileName ? "border-[var(--brand-teal)] bg-teal-50" : "border-[var(--brand-teal)] bg-white hover:bg-teal-50"}`}>
+          <span className="shrink-0 rounded-lg bg-[var(--brand-dark)] px-4 py-2 font-semibold text-white">{fileName ? "Choose a different file" : "Choose CSV file"}</span>
+          <span className="truncate font-medium">{fileName || "No file chosen yet"}</span>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            aria-label="Watchlist CSV"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              setReport(null);
+              setError("");
+              setFileName(file?.name ?? "");
+              setCsvText(file ? await file.text() : "");
+            }}
+            className="sr-only"
+          />
+        </label>
         <button
           type="button"
           className="btn border border-[var(--border)] px-4 py-2"
