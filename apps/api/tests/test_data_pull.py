@@ -82,3 +82,35 @@ def test_a_running_source_says_how_long_it_has_been_going_and_no_time_left_is_pr
     out = client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
     ga4 = next(s for s in out["sources"] if s["source"] == "ga4")
     assert 295 <= ga4["running_seconds"] <= 310 and "seconds_left" not in ga4 and "seconds_left" not in out
+
+
+def test_a_job_orphaned_by_a_restart_shows_as_interrupted_and_pulling_again_replaces_it(client, db, client_a, client_b, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    now = datetime.now(timezone.utc)
+    client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h)
+    dead = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "ga4").one()
+    dead.status, dead.started_at = SyncJobStatus.NORMALIZING, now - timedelta(minutes=30)
+    # The worker has since started a later job, so the first cannot still be running.
+    db.add(SyncJob(client_id=client_b.id, source="ga4", start_date=now.date(), end_date=now.date(), status=SyncJobStatus.SUCCESSFUL, started_at=now - timedelta(minutes=20), completed_at=now - timedelta(minutes=19)))
+    db.commit()
+    db.execute(__import__("sqlalchemy").text("update sync_jobs set updated_at = :t where id = :i"), {"t": now - timedelta(minutes=25), "i": dead.id})
+    db.commit()
+
+    shown = {s["source"]: s for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    assert shown["ga4"]["state"] == "failed" and "restart" in shown["ga4"]["error"]
+    again = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    assert again["queued"] == ["ga4"]
+    db.refresh(dead)
+    assert dead.status == SyncJobStatus.FAILED
+
+
+def test_a_running_job_is_not_called_interrupted_when_nothing_started_after_it(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h)
+    job = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "ga4").one()
+    job.status, job.started_at = SyncJobStatus.NORMALIZING, datetime.now(timezone.utc) - timedelta(minutes=30)
+    db.commit()
+    shown = {s["source"]: s for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    assert shown["ga4"]["state"] == "running"

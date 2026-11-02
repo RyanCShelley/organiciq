@@ -89,8 +89,35 @@ def pull_plan(db: Session, client: Any, today: date | None = None) -> list[dict]
     return plan
 
 
+ORPHAN_SILENT_MINUTES = 10
+RUNNING = (SyncJobStatus.FETCHING, SyncJobStatus.STAGING, SyncJobStatus.NORMALIZING, SyncJobStatus.VALIDATING)
+RESTART_NOTE = "Interrupted by a restart while it was running. Pull again."
+
+
+def _orphans(db: Session, client_id) -> list[SyncJob]:
+    """Jobs still marked running that cannot be: the worker has started a later job (of any client, finished or not) and
+    this one has been silent for a while. A deploy restarts the worker and leaves its running job like this until the 45-minute stale clear."""
+    now = datetime.now(timezone.utc)
+    latest_start = db.query(func.max(SyncJob.started_at)).scalar()
+    out = []
+    for job in db.query(SyncJob).filter(SyncJob.client_id == client_id, SyncJob.status.in_(RUNNING)):
+        silent = (now - job.updated_at).total_seconds() / 60 if job.updated_at else 0
+        if job.started_at and latest_start and latest_start > job.started_at and silent >= ORPHAN_SILENT_MINUTES:
+            out.append(job)
+    return out
+
+
+def _clear_orphans(db: Session, client_id) -> None:
+    jobs = _orphans(db, client_id)
+    for job in jobs:
+        job.status, job.error_message, job.completed_at = SyncJobStatus.FAILED, RESTART_NOTE, datetime.now(timezone.utc)
+    if jobs:
+        db.commit()
+
+
 def queue_pull(db: Session, client: Any, today: date | None = None) -> list[str]:
     """Queue one job per planned source. A source that already has an active job is left alone."""
+    _clear_orphans(db, client.id)
     queued: list[str] = []
     for item in pull_plan(db, client, today):
         try:
@@ -123,6 +150,7 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
     if began is not None:
         ahead = ahead.filter(SyncJob.created_at < began)
 
+    orphan_ids = {j.id for j in _orphans(db, client.id)}
     sources = []
     for item in plan:
         job = jobs.get(item["source"])
@@ -132,7 +160,9 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
             status = job.status
             row["stage"] = STAGE_TEXT.get(status)
             row["rows"] = job.records_written
-            if status in ACTIVE:
+            if job.id in orphan_ids:
+                row["state"], row["error"], row["stage"] = "failed", RESTART_NOTE, STAGE_TEXT[SyncJobStatus.FAILED]
+            elif status in ACTIVE:
                 row["state"] = "queued" if status == SyncJobStatus.QUEUED else "running"
                 if job.started_at is not None:
                     row["running_seconds"] = int((now - job.started_at).total_seconds())

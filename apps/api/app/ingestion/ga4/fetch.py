@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from app.ingestion.ga4.client import run_report
@@ -11,6 +12,15 @@ from app.ingestion.google_credentials import access_token_for_client, client_has
 from app.models.ga4 import StagingGa4Event, StagingGa4Traffic
 from app.models.integration import Integration, IntegrationProvider
 from app.models.job import SyncJob
+
+
+STAGING_CHUNK = 5000
+
+
+def _bulk_stage(db: Session, model: type, rows: list[dict]) -> None:
+    """Insert staged rows in chunks with one compiled statement. Adding 600,000 ORM objects one by one took minutes."""
+    for i in range(0, len(rows), STAGING_CHUNK):
+        db.execute(insert(model), rows[i : i + STAGING_CHUNK])
 
 
 def _load_ga4_integration(db: Session, client_id: UUID) -> Integration:
@@ -118,56 +128,34 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     db.query(StagingGa4Traffic).filter(StagingGa4Traffic.job_id == job.id).delete()
     db.query(StagingGa4Event).filter(StagingGa4Event.job_id == job.id).delete()
 
+    base = {"job_id": job.id, "client_id": job.client_id}
+    traffic_staged: list[dict] = []
     for row in traffic_rows:
         raw_date = _dim(row, 0)
         if not raw_date:
             continue
-        db.add(
-            StagingGa4Traffic(
-                job_id=job.id,
-                client_id=job.client_id,
-                raw=row,
-                date=_parse_ga4_date(raw_date),
-                landing_page=_dim(row, 1),
-                session_source=_dim(row, 2),
-                session_medium=_dim(row, 3),
-                sessions=_metric(row, 0),
-                active_users=_metric(row, 1),
-                views=_metric(row, 2),
-                engaged_sessions=_metric(row, 3),
-            )
-        )
-
+        traffic_staged.append({**base, "raw": row, "date": _parse_ga4_date(raw_date), "landing_page": _dim(row, 1),
+            "session_source": _dim(row, 2), "session_medium": _dim(row, 3),
+            "sessions": _metric(row, 0), "active_users": _metric(row, 1), "views": _metric(row, 2), "engaged_sessions": _metric(row, 3)})
+    event_staged: list[dict] = []
     for row in event_rows:
         raw_date = _dim(row, 0)
         event_name = _dim(row, 4)
         if not raw_date or not event_name:
             continue
-        db.add(
-            StagingGa4Event(
-                job_id=job.id,
-                client_id=job.client_id,
-                raw=row,
-                date=_parse_ga4_date(raw_date),
-                landing_page=_dim(row, 1),
-                session_source=_dim(row, 2),
-                session_medium=_dim(row, 3),
-                event_name=event_name,
-                event_count=int(_metric(row, 0)),
-            )
-        )
-    for row in native_traffic:
-        db.add(StagingGa4Traffic(job_id=job.id, client_id=job.client_id, raw=row,
-            date=_parse_ga4_date(_dim(row, 0)), landing_page=_dim(row, 1),
-            session_source=_dim(row, 2), session_medium=_dim(row, 3),
-            session_default_channel_group=_dim(row, 4), report_basis="native",
-            sessions=_metric(row, 0), active_users=_metric(row, 1), views=_metric(row, 2), engaged_sessions=_metric(row, 3)))
-    for row in native_events:
-        db.add(StagingGa4Event(job_id=job.id, client_id=job.client_id, raw=row,
-            date=_parse_ga4_date(_dim(row, 0)), landing_page=_dim(row, 1),
-            session_source=_dim(row, 2), session_medium=_dim(row, 3),
-            event_name=_dim(row, 4), session_default_channel_group=_dim(row, 5),
-            report_basis="native", event_count=int(_metric(row, 0))))
+        event_staged.append({**base, "raw": row, "date": _parse_ga4_date(raw_date), "landing_page": _dim(row, 1),
+            "session_source": _dim(row, 2), "session_medium": _dim(row, 3),
+            "event_name": event_name, "event_count": int(_metric(row, 0))})
+    _bulk_stage(db, StagingGa4Traffic, traffic_staged)
+    _bulk_stage(db, StagingGa4Event, event_staged)
+    _bulk_stage(db, StagingGa4Traffic, [{**base, "raw": row, "date": _parse_ga4_date(_dim(row, 0)), "landing_page": _dim(row, 1),
+        "session_source": _dim(row, 2), "session_medium": _dim(row, 3), "session_default_channel_group": _dim(row, 4),
+        "report_basis": "native", "sessions": _metric(row, 0), "active_users": _metric(row, 1), "views": _metric(row, 2),
+        "engaged_sessions": _metric(row, 3)} for row in native_traffic])
+    _bulk_stage(db, StagingGa4Event, [{**base, "raw": row, "date": _parse_ga4_date(_dim(row, 0)), "landing_page": _dim(row, 1),
+        "session_source": _dim(row, 2), "session_medium": _dim(row, 3), "event_name": _dim(row, 4),
+        "session_default_channel_group": _dim(row, 5), "report_basis": "native", "event_count": int(_metric(row, 0))}
+        for row in native_events])
     job.params_json = {**(job.params_json or {}), "ga4_extract": {
         "complete": complete, "start": job.start_date.isoformat(), "end": job.end_date.isoformat(),
         "property": property_id, "native_complete": native_enabled, "native_traffic_rows": len(native_traffic),
