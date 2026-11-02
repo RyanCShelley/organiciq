@@ -89,3 +89,18 @@ def test_jobs_queued_for_other_clients_ahead_of_ours_are_counted(client, db, cli
     db.commit()
     out = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=auth_header(admin_user.email)).json()
     assert out["jobs_ahead"] == 1
+
+
+def test_a_job_running_past_its_usual_time_says_so_instead_of_a_time_left(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    first = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    for source in [s["source"] for s in first["sources"]]:
+        done_job(db, client_a, source, seconds=30)
+    job = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source == "ga4", SyncJob.status == SyncJobStatus.QUEUED).one()
+    job.status, job.started_at = SyncJobStatus.FETCHING, datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.commit()
+    out = client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    ga4 = next(s for s in out["sources"] if s["source"] == "ga4")
+    assert ga4["overrun"] is True and ga4["usual_seconds"] == 30 and ga4["seconds_left"] is None
+    assert out["overrun"] is True and out["seconds_left"] is None

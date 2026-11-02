@@ -37,6 +37,8 @@ export type PullSource = {
   seconds_left: number | null;
   error: string | null;
   rows: number | null;
+  overrun: boolean;
+  usual_seconds: number | null;
 };
 
 export type PullStatus = {
@@ -48,5 +50,6 @@ export type PullStatus = {
   jobs_done: number;
   jobs_total: number;
   seconds_left: number | null;
+  overrun: boolean;
   jobs_ahead: number;
 };

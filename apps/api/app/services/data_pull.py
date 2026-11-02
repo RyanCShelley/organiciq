@@ -152,11 +152,11 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
         ahead_rows = ahead_rows.filter(SyncJob.created_at < began)
     queue_ahead = ahead_rows.all()
 
-    sources, remaining, unknown = [], 0.0, False
+    sources, remaining, unknown, overrun = [], 0.0, False, False
     for item in plan:
         job = jobs.get(item["source"])
         typical = _typical_seconds(db, item["source"], (item["end"] - item["start"]).days)
-        row = {"source": item["source"], "label": item["label"], "reach": item["reach"], "from": item["start"].isoformat(), "to": item["end"].isoformat(), "state": "not_started", "stage": None, "seconds_left": None, "error": None, "rows": None}
+        row = {"source": item["source"], "label": item["label"], "reach": item["reach"], "from": item["start"].isoformat(), "to": item["end"].isoformat(), "state": "not_started", "stage": None, "seconds_left": None, "error": None, "rows": None, "overrun": False, "usual_seconds": None}
         if job is not None:
             status = job.status
             row["stage"] = STAGE_TEXT.get(status)
@@ -165,8 +165,13 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
                 row["state"] = "queued" if status == SyncJobStatus.QUEUED else "running"
                 if typical is not None:
                     elapsed = (now - job.started_at).total_seconds() if job.started_at else 0.0
-                    row["seconds_left"] = typical if status == SyncJobStatus.QUEUED else max(typical - elapsed, 5.0)
-                    remaining += row["seconds_left"]
+                    if status != SyncJobStatus.QUEUED and elapsed > typical:
+                        # Past its usual time: say so instead of promising "a minute left" for ever.
+                        row["overrun"], row["usual_seconds"] = True, int(typical)
+                        overrun = True
+                    else:
+                        row["seconds_left"] = typical if status == SyncJobStatus.QUEUED else typical - elapsed
+                        remaining += row["seconds_left"]
                 else:
                     unknown = True
             elif status == SyncJobStatus.FAILED:
@@ -189,6 +194,7 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
         "failed": [s["label"] for s in sources if s["state"] == "failed"],
         "jobs_done": len(done),
         "jobs_total": len(sources),
-        "seconds_left": None if (unknown and active) else int(remaining + ahead_seconds) if active else 0,
+        "overrun": overrun,
+        "seconds_left": None if ((unknown or overrun) and active) else int(remaining + ahead_seconds) if active else 0,
         "jobs_ahead": len(queue_ahead),
     }

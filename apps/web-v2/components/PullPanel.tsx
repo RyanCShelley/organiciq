@@ -75,7 +75,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
   const headline = !status
     ? "Loading…"
     : status.running
-      ? `${status.jobs_done} of ${status.jobs_total} sources done${left ? `, ${left} left` : ". Time left shows after this install has finished one pull"}.`
+      ? `${status.jobs_done} of ${status.jobs_total} sources done${left ? `, ${left} left` : status.overrun ? ". A source is taking longer than past pulls, so this client has more data than the ones before it. It is still working" : ". Time left shows after this install has finished one pull"}.`
       : status.finished
         ? `Finished. All ${status.jobs_total} sources are in.`
         : status.failed.length
@@ -121,7 +121,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
               <div className="text-xs">
                 <span className={`font-semibold ${STATE[s.state].cls}`}>{STATE[s.state].text}</span>
                 {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
-                {s.seconds_left != null && (s.state === "running" || s.state === "queued") ? ` · ${span(s.seconds_left)} left` : ""}
+                {s.overrun ? ` · past the usual ${span(s.usual_seconds)}, still working` : s.seconds_left != null && (s.state === "running" || s.state === "queued") ? ` · ${span(s.seconds_left)} left` : ""}
                 {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
                 {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
               </div>
