@@ -151,17 +151,14 @@ def stop_pull(db: Session, client: Any, who: str) -> dict[str, int]:
 
 
 def set_lean_pull(db: Session, client: Any, enabled: bool) -> list[str]:
-    """Switch the client's Search Console pull between lean and full. The two store different rows, so the pages and
-    searches already held are cleared and pulled again; the daily totals are the same either way and stay."""
-    from app.models.gsc import FactGscPage, FactGscQueryPage, StagingGscPage, StagingGscQueryPage
-
+    """Switch the client's Search Console pull between lean and full, at once. The two store different rows, so the pull
+    queued here replaces the whole window (`replace_gsc_window`): the old rows are removed inside the save, after the new
+    ones have arrived, so nothing is cleared up front and the screen is never empty. The daily totals are the same either way."""
     if bool(client.gsc_lean_pull) == enabled:
         return []
     client.gsc_lean_pull = enabled
-    for model in (StagingGscQueryPage, StagingGscPage, FactGscQueryPage, FactGscPage):
-        db.query(model).filter(model.client_id == client.id).delete(synchronize_session=False)
     db.commit()
-    return queue_pull(db, client, force=True, only={"gsc_pages", "gsc_queries"})
+    return queue_pull(db, client, force=True, only={"gsc_pages", "gsc_queries"}, params={"replace_gsc_window": True})
 
 
 def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
@@ -173,7 +170,7 @@ def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
     return job.start_date <= item["start"] + timedelta(days=3)
 
 
-def queue_pull(db: Session, client: Any, today: date | None = None, force: bool = False, only: set[str] | None = None) -> list[str]:
+def queue_pull(db: Session, client: Any, today: date | None = None, force: bool = False, only: set[str] | None = None, params: dict | None = None) -> list[str]:
     """Queue a job for each planned source that is missing: never pulled, failed, interrupted or older than a day.
     A source already pulling, or already pulled today, is left alone unless force is set. `only` limits it to those sources."""
     _clear_orphans(db, client.id)
@@ -186,7 +183,7 @@ def queue_pull(db: Session, client: Any, today: date | None = None, force: bool 
         if not force and _is_current(latest.get(item["source"]), item, now):
             continue
         try:
-            enqueue_sync_job(db, client.id, SyncJobCreate(source=item["source"], start_date=item["start"], end_date=item["end"]))
+            enqueue_sync_job(db, client.id, SyncJobCreate(source=item["source"], start_date=item["start"], end_date=item["end"], params=params))
             queued.append(item["source"])
         except OverlappingJobError:
             pass

@@ -295,6 +295,8 @@ def test_a_lean_client_pulls_searches_daily_then_monthly_without_country_or_devi
 
 
 def test_a_client_not_switched_keeps_the_full_pull(db, client_a):
+    client_a.gsc_lean_pull = False
+    db.commit()
     from unittest.mock import patch
     from uuid import uuid4
 
@@ -312,17 +314,43 @@ def test_a_client_not_switched_keeps_the_full_pull(db, client_a):
     assert q.call_args.kwargs["start_date"] == date(2026, 3, 1)
 
 
-def test_switching_a_client_to_lean_clears_its_pages_and_searches_and_pulls_them_again(client, db, client_a, admin_user):
+def test_switching_a_client_to_lean_is_instant_and_the_pull_replaces_its_rows_when_it_lands(client, db, client_a, admin_user):
     from app.models.gsc import FactGscQueryPage
 
     connect(db, client_a)
+    client_a.gsc_lean_pull = False
     db.add(FactGscQueryPage(client_id=client_a.id, date=date(2026, 9, 1), query="q", raw_url="https://x.example/", normalized_url="https://x.example/",
                             country="usa", device="DESKTOP", impressions=5, clicks=1, ctr=0, average_position=4))
     db.commit()
     h = auth_header(admin_user.email)
     out = client.post(f"/v2/admin/clients/{client_a.id}/gsc-lean", json={"enabled": True}, headers=h).json()
     assert out["gsc_lean"] is True and sorted(out["queued"]) == ["gsc_pages", "gsc_queries"]
-    assert db.query(FactGscQueryPage).count() == 0
+    # Nothing is cleared by the click: the queued pull replaces the window itself, once the new rows have arrived.
+    assert db.query(FactGscQueryPage).count() == 1
+    jobs = db.query(SyncJob).filter(SyncJob.client_id == client_a.id, SyncJob.source.in_(["gsc_pages", "gsc_queries"])).all()
+    assert jobs and all((j.params_json or {}).get("replace_gsc_window") is True for j in jobs)
     again = client.post(f"/v2/admin/clients/{client_a.id}/gsc-lean", json={"enabled": True}, headers=h).json()
     assert again["queued"] == []  # already lean: nothing cleared, nothing queued
     assert any(c["gsc_lean"] for c in client.get("/v2/admin/clients", headers=h).json())
+
+
+def test_a_lean_pull_with_the_replace_flag_removes_the_old_full_rows_and_keeps_the_new(db, client_a):
+    from uuid import uuid4
+
+    from app.ingestion.gsc.publish import publish_gsc_queries
+    from app.models.gsc import FactGscQueryPage, StagingGscQueryPage
+
+    old = dict(client_id=client_a.id, raw_url="https://example.com/spf", normalized_url="https://example.com/spf", impressions=5, clicks=1, ctr=0, average_position=4)
+    db.add(FactGscQueryPage(date=date(2026, 9, 1), query="natural sunscreen", country="usa", device="DESKTOP", gsc_site_url="sc-domain:example.com", **old))
+    db.add(FactGscQueryPage(date=date(2026, 9, 1), query="natural sunscreen", country="usa", device="MOBILE", gsc_site_url="sc-domain:example.com", **old))
+    db.commit()
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="gsc_queries", start_date=date(2026, 8, 1), end_date=date(2026, 10, 30),
+                  status=SyncJobStatus.NORMALIZING, params_json={"replace_gsc_window": True})
+    db.add(job)
+    db.commit()
+    db.add(StagingGscQueryPage(job_id=job.id, client_id=client_a.id, raw={}, date=date(2026, 9, 1), query="natural sunscreen", page="https://example.com/spf",
+                               country="", device="", gsc_site_url="sc-domain:example.com", impressions=9, clicks=2, ctr=0.2, average_position=4.1))
+    db.commit()
+    publish_gsc_queries(db, job)
+    rows = db.query(FactGscQueryPage).filter(FactGscQueryPage.client_id == client_a.id).all()
+    assert [(r.country, r.device, int(r.impressions)) for r in rows] == [("", "", 9)]  # the two full-grain rows are gone: no double counting

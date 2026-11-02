@@ -61,7 +61,7 @@ class Client(Base):
     primary_market: Mapped[str | None] = mapped_column(String(255), nullable=True)
     #: Pull Search Console searches lean: daily for the last 120 days and monthly before, no country or device. Nothing
     #: in the tool reads country or device, and most rows are a single impression. Changing it rebuilds the client's rows.
-    gsc_lean_pull: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    gsc_lean_pull: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     #: lead_gen | ecommerce | both. Null is "not said yet". An ecommerce client is measured on
     #: orders and revenue, a lead-gen client on leads; the dashboard and baseline read this.
     business_model: Mapped[str | None] = mapped_column(String(16), nullable=True)

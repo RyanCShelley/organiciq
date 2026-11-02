@@ -80,28 +80,43 @@ function DeletePanel({ client, onDone, onCancel }: { client: AdminClient; onDone
 
 function LeanSwitch({ client }: { client: AdminClient }) {
   const router = useRouter();
+  const [on, setOn] = useState(client.gsc_lean);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const flip = () => {
-    const to = !client.gsc_lean;
-    const ask = to
-      ? `Switch ${client.name} to the lean Search Console pull?\n\nIt keeps day-by-day searches for the last 120 days and one row per month before that, and leaves out country and device. About 70% fewer rows.\n\nIt clears this client's Search Console pages and searches and pulls them again.`
-      : `Switch ${client.name} back to the full Search Console pull?\n\nIt clears this client's Search Console pages and searches and pulls them again, day by day, with country and device.`;
-    if (!window.confirm(ask)) return;
+    const to = !on;
+    setOn(to); // the switch moves at once; the rebuild happens in the pull, and the old rows stay until the new ones arrive
+    setError(null);
     start(async () => {
-      setError(null);
       const r = await setGscLeanAction(client.id, to);
       if (r.ok) router.refresh();
-      else setError(r.error);
+      else {
+        setOn(!to);
+        setError(r.error);
+      }
     });
   };
   return (
-    <div className="mt-1 text-xs text-[var(--text-tertiary)]">
-      Search Console pull: <strong>{client.gsc_lean ? "lean" : "full"}</strong>{" "}
-      <button type="button" onClick={flip} disabled={pending} className="font-semibold underline disabled:opacity-50">
-        {pending ? "Switching…" : client.gsc_lean ? "Switch to full" : "Switch to lean"}
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={`Lean Search Console pull for ${client.name}`}
+        onClick={flip}
+        disabled={pending}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${on ? "bg-[var(--brand-teal)]" : "bg-gray-300"}`}
+      >
+        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
       </button>
-      {error ? <span role="alert" className="ml-2 text-red-700">{error}</span> : null}
+      <span>
+        <strong>Lean Search Console pull</strong>
+        {on
+          ? ": daily searches for 120 days, monthly before, no country or device."
+          : ": full (every day, country and device)."}
+        {pending ? " Switching…" : " Switching pulls Search Console again, and replaces the old rows when it lands."}
+      </span>
+      {error ? <span role="alert" className="text-red-700">{error}</span> : null}
     </div>
   );
 }
