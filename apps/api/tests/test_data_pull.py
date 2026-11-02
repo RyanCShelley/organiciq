@@ -155,3 +155,20 @@ def test_everything_current_queues_nothing_and_force_pulls_everything(client, db
     assert out["queued"] == [] and out["up_to_date"] is True and out["running"] is False
     forced = client.post(f"/v2/admin/clients/{client_a.id}/pull?force=true", headers=h).json()
     assert sorted(forced["queued"]) == sorted(plan)
+
+
+def test_connecting_another_source_makes_only_that_source_missing(client, db, client_a, admin_user):
+    from app.models.client_bing_site import ClientBingSite
+
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    for source in {s["source"] for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}:
+        finish(db, client_a, source, start_days_back=800)
+    assert client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["up_to_date"] is True
+
+    db.add(ClientBingSite(client_id=client_a.id, site_url="https://example.com/", status="unchecked"))
+    db.commit()
+    status = client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    assert status["up_to_date"] is False
+    assert [s["source"] for s in status["sources"] if not s["current"]] == ["bing_query_stats"]
+    assert client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["queued"] == ["bing_query_stats"]

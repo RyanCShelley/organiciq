@@ -314,7 +314,8 @@ export function ConnectionsPanel({
         </Row>
       </ul>
 
-      {isAdmin ? <PullPanel clientId={client.id} /> : null}
+      {/* Keyed by what is connected, so choosing or changing a source reloads what there is to pull. */}
+      {isAdmin ? <PullPanel key={[gsc?.external_property_id, ga4?.external_property_id, ser?.external_property_id, bing?.site_url].join("|")} clientId={client.id} /> : null}
 
       {googleLinked && connections.google_connect_configured ? (
         <p className="text-xs text-[var(--text-tertiary)]">
