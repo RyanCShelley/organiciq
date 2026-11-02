@@ -37,13 +37,15 @@ export type PullSource = {
   running_seconds: number | null;
   error: string | null;
   rows: number | null;
+  finished_at: string | null;
+  current: boolean;
 };
 
 export type PullStatus = {
   sources: PullSource[];
-  started_at: string | null;
   running: boolean;
   finished: boolean;
+  up_to_date: boolean;
   failed: string[];
   jobs_done: number;
   jobs_total: number;

@@ -37,9 +37,9 @@ export async function pullStatusAction(clientId: string): Promise<Result<PullSta
   }
 }
 
-export async function startPullAction(clientId: string): Promise<Result<PullStatus>> {
+export async function startPullAction(clientId: string, force = false): Promise<Result<PullStatus>> {
   try {
-    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull`, { method: "POST" }) };
+    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull${force ? "?force=true" : ""}`, { method: "POST" }) };
   } catch (error) {
     return failure(error, "The pull could not be started: the API did not answer.");
   }

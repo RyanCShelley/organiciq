@@ -25,6 +25,15 @@ const STATE: Record<PullSource["state"], { text: string; cls: string }> = {
   failed: { text: "Failed", cls: "text-red-700" },
 };
 
+const ago = (iso: string | null) => {
+  if (!iso) return null;
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 2) return "just now";
+  if (mins < 90) return `${mins} min ago`;
+  const hours = mins / 60;
+  return hours < 36 ? `${Math.round(hours)} hours ago` : `${Math.round(hours / 24)} days ago`;
+};
+
 const reach = (s: PullSource) => (s.reach.startsWith("today") || s.from === s.to ? s.reach : `${s.reach}, ${month(s.from)} to ${day(s.to)}`);
 
 /** Pull every connected source for one client, and show where the pull stands. Admin only. */
@@ -60,10 +69,10 @@ export function PullPanel({ clientId }: { clientId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
-  const begin = () =>
+  const begin = (force = false) =>
     start(async () => {
       setError(null);
-      const r = await startPullAction(clientId);
+      const r = await startPullAction(clientId, force);
       if (r.ok) {
         setStatus(r.value);
         watch(r.value);
@@ -75,14 +84,16 @@ export function PullPanel({ clientId }: { clientId: string }) {
     ? "Loading…"
     : status.running
       ? `${status.jobs_done} of ${status.jobs_total} sources done.`
-      : status.finished
-        ? `Finished. All ${status.jobs_total} sources are in.`
+      : status.up_to_date
+        ? `Up to date. All ${status.jobs_total} sources were pulled in the last day, so there is nothing to fetch.`
+        : status.finished
+        ? `All ${status.jobs_total} sources are in, but some are over a day old. Pull data fetches only those.`
         : status.failed.length
           ? `Stopped. ${status.failed.join(", ")} failed.`
           : status.jobs_done > 0
             ? `Not pulling now. ${status.jobs_done} of ${status.jobs_total} sources are in from the last pull.`
             : status.sources.length
-              ? "Nothing pulled yet. Pull data fetches every source below."
+              ? "Pull data fetches whatever is missing or older than a day."
               : "Choose a site or property for at least one source below, then pull.";
 
   return (
@@ -95,14 +106,21 @@ export function PullPanel({ clientId }: { clientId: string }) {
             {status?.running && status.jobs_ahead > 0 ? ` ${status.jobs_ahead} job${status.jobs_ahead === 1 ? "" : "s"} for other clients are ahead in the queue.` : ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={begin}
-          disabled={pending || !status || status.running || status.sources.length === 0}
-          className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-        >
-          {pending ? "Starting…" : status?.running ? "Pulling…" : status?.finished || status?.failed.length ? "Pull again" : "Pull data"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => begin(false)}
+            disabled={pending || !status || status.running || status.sources.length === 0 || status.up_to_date}
+            className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {pending ? "Starting…" : status?.running ? "Pulling…" : "Pull data"}
+          </button>
+          {status && !status.running && status.up_to_date ? (
+            <button type="button" onClick={() => begin(true)} disabled={pending} className="text-xs font-semibold text-[var(--text-secondary)] underline disabled:opacity-40">
+              Pull everything again
+            </button>
+          ) : null}
+        </div>
       </div>
       {status && (status.running || status.finished) ? (
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
@@ -122,6 +140,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
                 {s.state === "running" && s.stage ? ` · ${s.stage}` : ""}
                 {s.state === "running" && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
                 {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
+                {s.finished_at && (s.state === "done" || s.state === "partial") ? ` · pulled ${ago(s.finished_at)}` : ""}
                 {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
               </div>
             </li>

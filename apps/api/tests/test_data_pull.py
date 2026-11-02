@@ -114,3 +114,44 @@ def test_a_running_job_is_not_called_interrupted_when_nothing_started_after_it(c
     db.commit()
     shown = {s["source"]: s for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
     assert shown["ga4"]["state"] == "running"
+
+
+def finish(db, client, source, start_days_back, hours_ago=1, status=SyncJobStatus.SUCCESSFUL):
+    now = datetime.now(timezone.utc)
+    db.add(SyncJob(client_id=client.id, source=source, start_date=(now - timedelta(days=start_days_back)).date(), end_date=now.date(), status=status,
+                   started_at=now - timedelta(hours=hours_ago, minutes=5), completed_at=now - timedelta(hours=hours_ago)))
+    db.commit()
+
+
+def test_pulling_queues_only_what_is_missing(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    plan = {s["source"] for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    for source in plan - {"ga4", "site_crawl"}:
+        finish(db, client_a, source, start_days_back=800)
+    finish(db, client_a, "site_crawl", start_days_back=0, status=SyncJobStatus.FAILED)
+    queued = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["queued"]
+    assert sorted(queued) == ["ga4", "site_crawl"]
+
+
+def test_a_source_pulled_over_a_day_ago_or_over_a_shorter_window_is_pulled_again(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    plan = {s["source"] for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    for source in plan:
+        finish(db, client_a, source, start_days_back=800)
+    finish(db, client_a, "ga4", start_days_back=800, hours_ago=30)       # stale
+    finish(db, client_a, "gsc_pages", start_days_back=30, hours_ago=1)   # newest job only went back a month
+    assert sorted(client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["queued"]) == ["ga4", "gsc_pages"]
+
+
+def test_everything_current_queues_nothing_and_force_pulls_everything(client, db, client_a, admin_user):
+    connect(db, client_a)
+    h = auth_header(admin_user.email)
+    plan = {s["source"] for s in client.get(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()["sources"]}
+    for source in plan:
+        finish(db, client_a, source, start_days_back=800)
+    out = client.post(f"/v2/admin/clients/{client_a.id}/pull", headers=h).json()
+    assert out["queued"] == [] and out["up_to_date"] is True and out["running"] is False
+    forced = client.post(f"/v2/admin/clients/{client_a.id}/pull?force=true", headers=h).json()
+    assert sorted(forced["queued"]) == sorted(plan)

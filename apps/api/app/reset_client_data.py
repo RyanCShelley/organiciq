@@ -156,7 +156,8 @@ def enqueue_backfill(db: Session, client: Any, today: date | None = None) -> lis
     """Queue one job per source with a long window. A source with no connection for this client is skipped."""
     from app.services.data_pull import queue_pull
 
-    return queue_pull(db, client, today)
+    # The data was just cleared, so earlier successful jobs say nothing about what is there now.
+    return queue_pull(db, client, today, force=True)
 
 
 def _print_plan(client: Any, counts: dict[str, dict[str, int]]) -> None:

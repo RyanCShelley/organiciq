@@ -115,11 +115,36 @@ def _clear_orphans(db: Session, client_id) -> None:
         db.commit()
 
 
-def queue_pull(db: Session, client: Any, today: date | None = None) -> list[str]:
-    """Queue one job per planned source. A source that already has an active job is left alone."""
+FRESH_HOURS = 24
+
+
+def _latest_jobs(db: Session, client_id) -> dict[str, SyncJob]:
+    """This client's newest job per source."""
+    latest: dict[str, SyncJob] = {}
+    for job in db.query(SyncJob).filter(SyncJob.client_id == client_id).order_by(SyncJob.created_at):
+        latest[job.source] = job
+    return latest
+
+
+def _is_current(job: SyncJob | None, item: dict, now: datetime) -> bool:
+    """Already pulled: the newest job finished, within the last day, and reached back as far as this pull would."""
+    if job is None or job.status not in (SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL) or job.completed_at is None:
+        return False
+    if (now - job.completed_at).total_seconds() > FRESH_HOURS * 3600:
+        return False
+    return job.start_date <= item["start"] + timedelta(days=3)
+
+
+def queue_pull(db: Session, client: Any, today: date | None = None, force: bool = False) -> list[str]:
+    """Queue a job for each planned source that is missing: never pulled, failed, interrupted or older than a day.
+    A source already pulling, or already pulled today, is left alone unless force is set."""
     _clear_orphans(db, client.id)
+    now = datetime.now(timezone.utc)
+    latest = _latest_jobs(db, client.id)
     queued: list[str] = []
     for item in pull_plan(db, client, today):
+        if not force and _is_current(latest.get(item["source"]), item, now):
+            continue
         try:
             enqueue_sync_job(db, client.id, SyncJobCreate(source=item["source"], start_date=item["start"], end_date=item["end"]))
             queued.append(item["source"])
@@ -128,34 +153,25 @@ def queue_pull(db: Session, client: Any, today: date | None = None) -> list[str]
     return queued
 
 
-def _pull_started(db: Session, client_id) -> datetime | None:
-    """When the current pull began: the first job of the newest batch (jobs queued within a minute of each other)."""
-    newest = db.query(func.max(SyncJob.created_at)).filter(SyncJob.client_id == client_id).scalar()
-    if newest is None:
-        return None
-    return db.query(func.min(SyncJob.created_at)).filter(SyncJob.client_id == client_id, SyncJob.created_at >= newest - timedelta(minutes=2)).scalar()
-
-
 def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
     now = datetime.now(timezone.utc)
     plan = pull_plan(db, client, today)
-    began = _pull_started(db, client.id)
-    jobs: dict[str, SyncJob] = {}
-    if began is not None:
-        for job in db.query(SyncJob).filter(SyncJob.client_id == client.id, SyncJob.created_at >= began).order_by(SyncJob.created_at):
-            jobs[job.source] = job
-
-    # Jobs ahead of ours in the one queue, from every client.
-    ahead = db.query(func.count()).select_from(SyncJob).filter(SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id)
-    if began is not None:
-        ahead = ahead.filter(SyncJob.created_at < began)
-
+    jobs = _latest_jobs(db, client.id)
     orphan_ids = {j.id for j in _orphans(db, client.id)}
+
+    # Jobs for other clients queued before ours: they run first, in the one queue.
+    mine = [j.created_at for j in jobs.values() if j.status == SyncJobStatus.QUEUED]
+    ahead = 0
+    if mine:
+        ahead = db.query(func.count()).select_from(SyncJob).filter(
+            SyncJob.status == SyncJobStatus.QUEUED, SyncJob.client_id != client.id, SyncJob.created_at < min(mine)
+        ).scalar() or 0
+
     sources = []
     for item in plan:
         job = jobs.get(item["source"])
         row = {"source": item["source"], "label": item["label"], "reach": item["reach"], "from": item["start"].isoformat(), "to": item["end"].isoformat(),
-               "state": "not_started", "stage": None, "running_seconds": None, "error": None, "rows": None}
+               "state": "not_started", "stage": None, "running_seconds": None, "error": None, "rows": None, "finished_at": None, "current": False}
         if job is not None:
             status = job.status
             row["stage"] = STAGE_TEXT.get(status)
@@ -170,17 +186,19 @@ def pull_status(db: Session, client: Any, today: date | None = None) -> dict:
                 row["state"], row["error"] = "failed", job.error_message
             else:
                 row["state"] = "done" if status == SyncJobStatus.SUCCESSFUL else "partial"
+                row["finished_at"] = job.completed_at.isoformat() if job.completed_at else None
+            row["current"] = _is_current(job, item, now)
         sources.append(row)
 
     active = [s for s in sources if s["state"] in ("queued", "running")]
     done = [s for s in sources if s["state"] in ("done", "partial")]
     return {
         "sources": sources,
-        "started_at": began.isoformat() if began else None,
         "running": bool(active),
-        "finished": bool(sources) and not active and len(done) == len(sources) and began is not None,
+        "finished": bool(sources) and not active and len(done) == len(sources),
+        "up_to_date": bool(sources) and all(s["current"] for s in sources),
         "failed": [s["label"] for s in sources if s["state"] == "failed"],
         "jobs_done": len(done),
         "jobs_total": len(sources),
-        "jobs_ahead": ahead.scalar() or 0,
+        "jobs_ahead": ahead,
     }
