@@ -25,6 +25,20 @@ def monthly_review_for(
 ) -> dict:
     chosen = month or monthly_review.last_complete_month()
     try:
-        return monthly_review.build_review(db, client, chosen)
+        return monthly_review.review_for(db, client, chosen)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/rerun")
+def rerun_monthly_review(
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: Annotated[str, Query(description="YYYY-MM")],
+) -> dict:
+    """Throw away the locked review of a month and work it out again from the data held now."""
+    try:
+        return monthly_review.review_for(db, client, month, rerun=True, who=user.email)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

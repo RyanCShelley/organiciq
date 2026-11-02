@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { Fragment, useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
+import { rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
+import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
 import { FOCUSES, monthLabel, type ClientFocus, type FocusValue } from "@/lib/focus";
@@ -480,6 +482,39 @@ function VisibilityPanel({ visibility, prior, href }: { visibility: Visibility; 
   );
 }
 
+function LockLine({ review, clientId, slug, month }: { review: Review; clientId: string; slug: string; month: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const rerun = () => {
+    if (!window.confirm("Work this month out again from the data held now? It replaces the review that was kept.")) return;
+    start(async () => {
+      setError(null);
+      const r = await rerunReviewAction(clientId, slug, month);
+      if (r.ok) router.refresh();
+      else setError(r.error);
+    });
+  };
+  return (
+    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+      {review.locked ? (
+        <>
+          <span className="font-semibold text-green-800">Locked</span> on {review.locked_at ? new Date(review.locked_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "an earlier day"}
+          {review.data_through?.search_console ? `, from data through ${new Date(`${review.data_through.search_console}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}.{" "}
+          <button type="button" onClick={rerun} disabled={pending} className="font-semibold underline disabled:opacity-50">
+            {pending ? <><Spinner />Working it out again…</> : "Work it out again"}
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="font-semibold text-amber-800">Not locked.</span> {review.lock_note}
+        </>
+      )}
+      {error ? <span role="alert" className="ml-2 text-red-700">{error}</span> : null}
+    </p>
+  );
+}
+
 export function ReviewScreen({
   client,
   month,
@@ -512,6 +547,7 @@ export function ReviewScreen({
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">{client.client_name}</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">Monthly review · {monthLabel(month)}</p>
+          {review ? <LockLine review={review} clientId={client.id} slug={client.slug} month={month} /> : null}
         </div>
         <input
           type="month"

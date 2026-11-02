@@ -16,7 +16,7 @@ from __future__ import annotations
 import calendar
 import re
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -439,3 +439,71 @@ def build_review(db: Session, client: Client, month: str) -> dict:
     result["summary"] = summarise(result)
     result["summary_sections"] = sections(result)
     return result
+
+
+def _last_day(month: str) -> date:
+    first, last = parse_month(month)
+    return last
+
+
+def data_through(db: Session, client: Client) -> dict[str, date | None]:
+    """The newest Search Console and GA4 day held for the client. What a review of a month can honestly say it covers."""
+    from sqlalchemy import func
+
+    from app.models.ga4 import FactGa4Traffic
+    from app.models.gsc import FactGscDaily
+
+    return {
+        "search_console": db.query(func.max(FactGscDaily.date)).filter(FactGscDaily.client_id == client.id).scalar(),
+        "ga4": db.query(func.max(FactGa4Traffic.date)).filter(FactGa4Traffic.client_id == client.id).scalar(),
+    }
+
+
+def lock_status(month: str, through: dict[str, date | None], today: date | None = None) -> tuple[bool, str | None]:
+    """Whether the review of `month` can be locked now, and if not, why. It locks once the month is over and every
+    source that has data for the client reaches the month's last day, so a review is never kept half-built."""
+    today = today or date.today()
+    last = _last_day(month)
+    if last >= today:
+        return False, f"{month} is not over yet, so the review is worked out fresh each time. It locks once the month is over and the data is in."
+    behind = {"search_console": "Search Console", "ga4": "GA4"}
+    waiting = [f"{behind[k]} reaches {v:%b} {v.day}" for k, v in through.items() if v is not None and v < last]
+    missing = [behind[k] for k, v in through.items() if v is None]
+    if waiting or len(missing) == len(through):
+        what = "; ".join(waiting) if waiting else "no Search Console or GA4 data is held yet"
+        return False, f"{what[0].upper()}{what[1:]}. It locks by itself once the data reaches {last:%b} {last.day}."
+    return True, None
+
+
+def review_for(db: Session, client: Client, month: str, *, rerun: bool = False, who: str | None = None) -> dict:
+    """The month's review: read back if it was already locked, otherwise worked out (and locked when it can be).
+
+    `rerun` throws the locked copy away and works it out again, for when the data or a connection was wrong.
+    """
+    from app.models.monthly_review import MonthlyReviewSnapshot
+
+    snap = db.query(MonthlyReviewSnapshot).filter(MonthlyReviewSnapshot.client_id == client.id, MonthlyReviewSnapshot.month == month).one_or_none()
+    if snap is not None and not rerun:
+        return {**snap.payload, "locked": True, "locked_at": snap.created_at.isoformat(), "locked_by": snap.created_by, "lock_note": None, "data_through": snap.data_through}
+
+    parse_month(month)  # a bad month is a ValueError before any work is done
+    through = data_through(db, client)
+    lockable, note = lock_status(month, through)
+    review = build_review(db, client, month)
+    stamp = {k: v.isoformat() if v else None for k, v in through.items()}
+    if not lockable:
+        if snap is not None:
+            db.delete(snap)
+            db.commit()
+        return {**review, "locked": False, "locked_at": None, "locked_by": None, "lock_note": note, "data_through": stamp}
+
+    if snap is None:
+        snap = MonthlyReviewSnapshot(client_id=client.id, month=month)
+        db.add(snap)
+    from fastapi.encoders import jsonable_encoder
+
+    snap.payload, snap.data_through, snap.created_by = jsonable_encoder(review), stamp, who
+    snap.created_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(snap)
+    return {**review, "locked": True, "locked_at": snap.created_at.isoformat(), "locked_by": who, "lock_note": None, "data_through": stamp}

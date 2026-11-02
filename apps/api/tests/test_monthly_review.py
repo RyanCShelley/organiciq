@@ -214,3 +214,73 @@ def test_the_visibility_section_names_each_ai_platform_and_the_brand_check():
     assert rows["AI platforms"]["change"]["text"] == "down 10 points" and "after 2026-10" in rows["AI platforms"]["detail"]
     assert rows["By platform"]["value"] == "ChatGPT 0% · Claude 25%"
     assert rows["Brand check"]["value"] == "3 of 12 answers"
+
+
+# ---- a finished month is worked out once and kept ----------------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+from app.models.monthly_review import MonthlyReviewSnapshot  # noqa: E402
+
+
+def _stub(monkeypatch, through, built):
+    monkeypatch.setattr(mr, "data_through", lambda db, client: through)
+
+    def build(db, client, month):
+        built.append(month)
+        return {"month": month, "summary": [f"built {len(built)} times"], "summary_sections": []}
+
+    monkeypatch.setattr(mr, "build_review", build)
+
+
+def test_a_finished_month_with_complete_data_is_built_once_and_then_read_back(db, client_a, monkeypatch):
+    built = []
+    _stub(monkeypatch, {"search_console": _date(2026, 10, 31), "ga4": _date(2026, 11, 1)}, built)
+    monkeypatch.setattr(mr, "lock_status", lambda m, t, today=None: (True, None))
+    first = mr.review_for(db, client_a, "2026-10", who="ryan@example.com")
+    again = mr.review_for(db, client_a, "2026-10")
+    assert built == ["2026-10"]  # the second call read the kept copy
+    assert first["locked"] is True and again["locked"] is True and again["summary"] == ["built 1 times"]
+    assert again["locked_by"] == "ryan@example.com" and again["data_through"]["search_console"] == "2026-10-31"
+    assert db.query(MonthlyReviewSnapshot).count() == 1
+
+
+def test_a_month_whose_data_is_not_complete_yet_is_not_locked_and_says_why(db, client_a, monkeypatch):
+    built = []
+    _stub(monkeypatch, {"search_console": _date(2026, 10, 28), "ga4": _date(2026, 11, 1)}, built)
+    out = mr.review_for(db, client_a, "2026-10")
+    mr.review_for(db, client_a, "2026-10")
+    assert out["locked"] is False and "Search Console reaches Oct 28" in out["lock_note"] and "Not locked" not in out["lock_note"] and "Oct 31" in out["lock_note"]
+    assert built == ["2026-10", "2026-10"] and db.query(MonthlyReviewSnapshot).count() == 0
+
+
+def test_the_lock_rule_by_itself():
+    full = {"search_console": _date(2026, 10, 31), "ga4": _date(2026, 10, 31)}
+    assert mr.lock_status("2026-10", full, today=_date(2026, 11, 2)) == (True, None)
+    assert mr.lock_status("2026-11", full, today=_date(2026, 11, 20))[0] is False  # still in progress
+    assert mr.lock_status("2026-10", {"search_console": None, "ga4": None}, today=_date(2026, 11, 2))[0] is False
+    only_ga4 = {"search_console": None, "ga4": _date(2026, 10, 31)}
+    assert mr.lock_status("2026-10", only_ga4, today=_date(2026, 11, 2)) == (True, None)  # a client without Search Console data
+
+
+def test_running_again_replaces_the_kept_copy(db, client_a, monkeypatch):
+    built = []
+    _stub(monkeypatch, {"search_console": _date(2026, 10, 31), "ga4": _date(2026, 10, 31)}, built)
+    monkeypatch.setattr(mr, "lock_status", lambda m, t, today=None: (True, None))
+    mr.review_for(db, client_a, "2026-10")
+    out = mr.review_for(db, client_a, "2026-10", rerun=True, who="ryan@example.com")
+    assert built == ["2026-10", "2026-10"] and out["summary"] == ["built 2 times"] and out["locked_by"] == "ryan@example.com"
+    assert db.query(MonthlyReviewSnapshot).count() == 1
+
+
+def test_the_review_endpoint_reads_the_kept_copy_and_rerun_is_available(client, db, client_a, admin_user, monkeypatch):
+    from tests.conftest import client_header
+
+    built = []
+    _stub(monkeypatch, {"search_console": _date(2026, 10, 31), "ga4": _date(2026, 10, 31)}, built)
+    monkeypatch.setattr(mr, "lock_status", lambda m, t, today=None: (True, None))
+    h = client_header(client_a.id, admin_user.email)
+    assert client.get("/v2/review?month=2026-10", headers=h).json()["locked"] is True
+    assert client.get("/v2/review?month=2026-10", headers=h).json()["summary"] == ["built 1 times"]
+    assert client.post("/v2/review/rerun?month=2026-10", headers=h).json()["summary"] == ["built 2 times"]
+    assert client.post("/v2/review/rerun?month=nope", headers=h).status_code == 400

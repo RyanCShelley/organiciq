@@ -35,6 +35,7 @@ from app.models.user import User, UserClient, UserRole
 from app.models.bing_stats import FactBingQueryStat
 from app.models.client_bing_site import ClientBingSite
 from app.models.engine_task import EngineTask
+from app.models.monthly_review import MonthlyReviewSnapshot
 from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.models.client_completion_pattern import ClientCompletionPattern
 from app.models.client_feed import ClientFeed

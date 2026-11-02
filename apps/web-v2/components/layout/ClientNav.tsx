@@ -7,7 +7,6 @@ const PAGES = [
   { label: "Monthly review", path: "/review" },
   { label: "Decision engine", path: "/engine" },
   { label: "LLM visibility", path: "/llm" },
-  { label: "Focus", path: "/focus" },
   { label: "Watchlist", path: "/watchlist" },
   { label: "Settings", path: "/settings" },
 ] as const;

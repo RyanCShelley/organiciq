@@ -61,6 +61,13 @@ export type SummaryRow = {
 export type SummarySection = { title: string; rows: SummaryRow[] };
 
 export type Review = {
+  /** True once the month is over and its data complete: the review was worked out once and is read back. */
+  locked?: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
+  /** Why a finished month is not locked yet, or that the month is still in progress. */
+  lock_note?: string | null;
+  data_through?: { search_console: string | null; ga4: string | null };
   month: string;
   previous_month: string;
   model: "lead_gen" | "ecommerce" | "both" | null;
