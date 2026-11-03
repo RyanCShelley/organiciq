@@ -3,13 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { draftAction, refreshPageAction, setAsideAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
+import { draftAction, refreshPageAction, setAsideAction, splitSearchAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
 import { WeeklyLine } from "@/components/bi/Charts";
 import { AddToCalendar, StatusChip } from "@/components/content/AddToCalendar";
 import { AskModel, DEPTH, Kpi, List, SidePane, card, day, num, shortPage, td, th } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { CalendarStatus, ClickWindow, Competing, ContentDepthChoice, RefreshDetail, RefreshPage, Refreshes } from "@/lib/content";
+import type { CalendarStatus, ClickWindow, Competing, ContentDepthChoice, RefreshDetail, RefreshPage, Refreshes, SplitSearch } from "@/lib/content";
 import { monthLabel } from "@/lib/focus";
 
 const TONE: Record<string, string> = { losing: "bg-red-100 text-red-800", quiet: "bg-red-100 text-red-800", slipping: "bg-amber-100 text-amber-900", growing: "bg-green-100 text-green-800", steady: "bg-gray-100 text-gray-700", new: "bg-blue-100 text-blue-800" };
@@ -18,18 +18,121 @@ function Clicks({ w }: { w: ClickWindow }) {
   return w ? <span className="tabular-nums">{num(w.clicks)} clicks of {num(w.impressions)}</span> : <span className="text-[var(--text-tertiary)]">too little data</span>;
 }
 
-function CompetingList({ rows, here }: { rows: Competing[]; here?: string }) {
+function CompetingList({ rows, here, onOpen }: { rows: Competing[]; here?: string; onOpen?: (query: string) => void }) {
   return (
     <ul className="space-y-2 text-xs">
       {rows.map((c) => (
-        <li key={c.query} className="rounded-lg border border-[var(--border)] p-2">
-          <div className="font-semibold">{c.query} <span className="font-normal text-[var(--text-tertiary)]">· {num(c.impressions)} impressions</span></div>
+        <li key={c.query} className={`rounded-lg border border-[var(--border)] p-2 ${onOpen ? "cursor-pointer hover:bg-[var(--bg)]" : ""}`} onClick={onOpen ? () => onOpen(c.query) : undefined}>
+          <div className="font-semibold">{c.query} <span className="font-normal text-[var(--text-tertiary)]">· {num(c.impressions)} impressions</span>{onOpen ? <span className="ml-2 font-semibold text-[var(--brand-teal-hover)]">Open</span> : null}</div>
           {c.pages.map((p) => (
             <div key={p.url} className={p.url === here ? "font-semibold" : "text-[var(--text-secondary)]"}>{shortPage(p.url)} · position {p.position} · {num(p.impressions)} impr. · {num(p.clicks)} clicks</div>
           ))}
         </li>
       ))}
     </ul>
+  );
+}
+
+function SearchPane({ client, query, month, onOpenSearch, onOpenPage }: { client: Client; query: string; month: string; onOpenSearch: (q: string) => void; onOpenPage: (url: string) => void }) {
+  const [d, setD] = useState<SplitSearch | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setD(null);
+    setError(null);
+    void splitSearchAction(client.id, query, month).then((r) => (r.ok ? setD(r.value) : setError(r.error)));
+  }, [client.id, query, month]);
+  const lead = d?.pages[0];
+  const months = d?.pages[0]?.months.map((m) => m.month) ?? [];
+  const leaderOf = (m: string) => d?.leaders.find((l) => l.month === m)?.url;
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-lg font-bold">{query}</p>
+        <p className="text-xs text-[var(--text-secondary)]">A search shown for more than one page.</p>
+      </div>
+      {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
+      {!d && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Reading the search…</p> : null}
+      {d ? (
+        <>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-[var(--bg)] p-2"><div className="text-xs text-[var(--text-secondary)]">Shown, 90 days</div><div className="text-lg font-bold tabular-nums">{num(d.impressions)}</div></div>
+            <div className="rounded-lg bg-[var(--bg)] p-2"><div className="text-xs text-[var(--text-secondary)]">Clicks</div><div className="text-lg font-bold tabular-nums">{num(d.clicks)}</div></div>
+            <div className="rounded-lg bg-[var(--bg)] p-2"><div className="text-xs text-[var(--text-secondary)]">Pages</div><div className="text-lg font-bold tabular-nums">{d.pages.length}</div></div>
+          </div>
+          <p className="rounded-lg bg-[var(--bg)] p-3 text-xs">
+            {d.swapped
+              ? `${d.swaps.map((s) => `In ${s.month}, ${shortPage(s.to)} took the lead from ${shortPage(s.from)}.`).join(" ")} Compare what each page says about the search before changing either.`
+              : `No page took the other's place over the months shown: ${lead ? shortPage(lead.url) : "one page"} leads and the rest share the search. They may be one page, or serve different needs.`}
+          </p>
+
+          <div>
+            <h3 className="font-bold">The pages, for this search</h3>
+            <div className="overflow-x-auto">
+              <table className="mt-1 w-full text-xs">
+                <thead><tr><th className={th}>Page</th><th className={th}>Shown</th><th className={th}>Clicks</th><th className={th}>CTR</th><th className={th}>Position</th></tr></thead>
+                <tbody>
+                  {d.pages.map((p) => (
+                    <tr key={p.url} className="border-t border-[var(--border)] align-top">
+                      <td className="max-w-[14rem] px-3 py-2"><div className="break-all font-semibold">{shortPage(p.url)}</div><div className="truncate text-[var(--text-tertiary)]" title={p.title ?? undefined}>{p.title ?? "no title found"}</div></td>
+                      <td className={td}>{num(p.impressions)}</td><td className={td}>{num(p.clicks)}</td><td className={td}>{p.ctr}%</td><td className={td}>{p.position}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-bold">Month by month</h3>
+            <p className="text-xs text-[var(--text-tertiary)]">Clicks and position for this search. Bold marks the page shown most that month.</p>
+            <div className="overflow-x-auto">
+              <table className="mt-1 w-full text-xs">
+                <thead><tr><th className={th}>Page</th>{months.map((m) => <th key={m} className={th}>{m.slice(5)}</th>)}</tr></thead>
+                <tbody>
+                  {d.pages.map((p) => (
+                    <tr key={p.url} className="border-t border-[var(--border)]">
+                      <td className="max-w-[10rem] break-all px-3 py-2">{shortPage(p.url)}</td>
+                      {p.months.map((m) => (
+                        <td key={m.month} className={`px-3 py-2 tabular-nums ${leaderOf(m.month) === p.url ? "font-bold" : "text-[var(--text-secondary)]"}`}>{m.impressions ? <>{m.clicks}<span className="text-[var(--text-tertiary)]"> · {m.position}</span></> : "–"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-bold">What each page earns overall</h3>
+            <div className="overflow-x-auto">
+              <table className="mt-1 w-full text-xs">
+                <thead><tr><th className={th}>Page</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>Words</th><th className={th}>Updated</th></tr></thead>
+                <tbody>
+                  {d.pages.map((p) => (
+                    <tr key={p.url} className="border-t border-[var(--border)] align-top">
+                      <td className="max-w-[10rem] break-all px-3 py-2"><button type="button" onClick={() => onOpenPage(p.url)} className="text-left font-semibold underline">{shortPage(p.url)}</button></td>
+                      <td className={td}>{num(p.sessions.current)}</td>
+                      <td className={td}>{num(p.sessions.last_year)}{p.sessions.change_pct != null ? <span className={`ml-1 ${p.sessions.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{p.sessions.change_pct > 0 ? "+" : ""}{p.sessions.change_pct}%</span> : null}</td>
+                      <td className={td}>{num(p.words)}</td>
+                      <td className="px-3 py-2">{p.last_updated ? day(p.last_updated) : "–"}{p.months_since_update != null && p.months_since_update >= 18 ? <span className="ml-1 text-amber-700">stale</span> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">Select a page to open its refresh plan.</p>
+          </div>
+
+          {d.other_searches.length ? (
+            <div>
+              <h3 className="font-bold">Other searches these pages share</h3>
+              <div className="mt-1"><CompetingList rows={d.other_searches} onOpen={onOpenSearch} /></div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -181,19 +284,25 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
   const router = useRouter();
   const [search, setSearch] = useState(q);
   const [open, setOpen] = useState<string | null>(null);
+  const [openSearch, setOpenSearch] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
+    if (!open && !openSearch) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (setOpen(null), setOpenSearch(null));
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, openSearch]);
   const go = (m = month, query = q, showIgnored = ignored) => {
     const params = new URLSearchParams({ month: m });
     if (query) params.set("q", query);
     if (showIgnored) params.set("ignored", "1");
     router.push(`/${client.slug}/content-refreshes?${params}`);
   };
-  const page = data?.pages.find((p) => p.url === open) ?? null;
+  // A page opened from a split search may not be on the refresh list; it opens with what is known of it.
+  const stub = (url: string): RefreshPage => ({
+    url, title: null, label: "steady", status: "Not on the list", sessions: { current: 0, previous: 0, change_pct: null }, three_months: { current: 0, last_year: 0, change_pct: null }, at_stake: 0,
+    last_updated: null, months_since_update: null, words: null, stale: false, thin: false, reasons: [], ignored: false, watch: [], watch_slipping: false,
+  });
+  const page = open ? (data?.pages.find((p) => p.url === open) ?? stub(open)) : null;
   const c = data?.counts;
 
   return (
@@ -264,13 +373,16 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
             <section className={`${card} p-5`}>
               <h2 className="text-lg font-bold">Pages competing for the same search</h2>
               <p className="text-xs text-[var(--text-tertiary)]">Searches two or more pages are shown for in the top 30 over 90 days. One may be taking the other&apos;s place, or they may be one page. Brand searches are left out.</p>
-              <div className="mt-3">{data.competing.length ? <CompetingList rows={data.competing.slice(0, 12)} /> : <p className="text-sm font-semibold text-green-700">Clean: no search is split between pages.</p>}</div>
+              <div className="mt-3">{data.competing.length ? <CompetingList rows={data.competing.slice(0, 12)} onOpen={setOpenSearch} /> : <p className="text-sm font-semibold text-green-700">Clean: no search is split between pages.</p>}</div>
             </section>
           ) : null}
           <ul className="list-disc space-y-1 pl-5 text-xs text-[var(--text-tertiary)]">{data.notes.map((n) => <li key={n}>{n}</li>)}</ul>
         </>
       ) : null}
 
+      <SidePane open={!!openSearch} label="Split search" onClose={() => setOpenSearch(null)}>
+        {openSearch ? <SearchPane client={client} query={openSearch} month={month} onOpenSearch={setOpenSearch} onOpenPage={(url) => { setOpenSearch(null); setOpen(url); }} /> : null}
+      </SidePane>
       <SidePane open={!!page} label="Page" onClose={() => setOpen(null)}>
         {page ? <PagePane client={client} page={page} month={month} ready={data?.model_ready ?? false} canEdit={data?.can_edit ?? false} onCalendar={data?.calendar[page.url]} onRefresh={() => router.refresh()} onChanged={() => { setOpen(null); router.refresh(); }} /> : null}
       </SidePane>

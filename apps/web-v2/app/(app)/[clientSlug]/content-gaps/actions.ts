@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Brief, ContentDepthChoice, RefreshDetail, TopicDetail, TopicsResponse } from "@/lib/content";
+import type { Brief, ContentDepthChoice, RefreshDetail, SplitSearch, TopicDetail, TopicsResponse } from "@/lib/content";
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: unknown, fallback: string): { ok: false; error: string } => ({ ok: false, error: error instanceof ApiError ? error.message : fallback });
@@ -66,5 +66,14 @@ export async function refreshPageAction(clientId: string, url: string, month: st
     return { ok: true, value: await apiFetch<RefreshDetail>(`/v2/content/refreshes/page?${q}`, { clientId }) };
   } catch (e) {
     return fail(e, "The page could not be read: the API did not answer.");
+  }
+}
+
+export async function splitSearchAction(clientId: string, query: string, month: string): Promise<R<SplitSearch>> {
+  try {
+    const q = new URLSearchParams({ query, month });
+    return { ok: true, value: await apiFetch<SplitSearch>(`/v2/content/refreshes/search?${q}`, { clientId }) };
+  } catch (e) {
+    return fail(e, "The search could not be read: the API did not answer.");
   }
 }

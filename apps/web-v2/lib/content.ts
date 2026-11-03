@@ -82,6 +82,30 @@ export type RefreshPage = {
 };
 export type WatchTerm = { term: string; position: number; change: number | null; slipping: boolean; striking: boolean; volume: number | null };
 export type Competing = { query: string; impressions: number; pages: { url: string; impressions: number; clicks: number; position: number }[] };
+export type SplitSearchPage = {
+  url: string;
+  title: string | null;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  position: number;
+  months: { month: string; impressions: number; clicks: number; position: number | null }[];
+  sessions: { current: number; last_year: number; change_pct: number | null };
+  words: number | null;
+  last_updated: string | null;
+  months_since_update: number | null;
+};
+export type SplitSearch = {
+  query: string;
+  month: string;
+  impressions: number;
+  clicks: number;
+  pages: SplitSearchPage[];
+  leaders: { month: string; url: string | null }[];
+  swapped: boolean;
+  swaps: { from: string; to: string; month: string }[];
+  other_searches: Competing[];
+};
 export type Refreshes = {
   month: string;
   q: string | null;

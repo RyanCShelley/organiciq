@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
@@ -151,3 +152,22 @@ def test_a_topic_opens_to_its_searches_gets_a_brief_and_goes_on_the_calendar(cli
     item = client.post("/v2/content/calendar", json={"kind": "new_page", "title": "Schema Audits Explained", "target": "Schema audits", "source_area": "topic", "source_key": "Schema audits"}, headers=hd).json()
     assert "Working title: Schema Audits Explained" in item["notes"] and "- Fixing errors" in item["notes"]
     assert client.get("/v2/content/topics/detail", params={"label": "Schema audits"}, headers=hd).json()["calendar"] == "idea"
+
+
+def test_a_split_search_opens_to_each_pages_months_and_who_took_whose_place(client, db, client_a, admin_user):
+    from tests.test_content import gsc
+
+    seed_refresh(db, client_a)
+    gsc(db, client_a, date(2026, 9, 10), "shared search", STEADY, 300, 12, 5.0)   # September: the steady page led
+    gsc(db, client_a, date(2026, 9, 10), "shared search", OLD, 100, 2, 7.0)
+    db.commit()
+    a = h(client_a, admin_user)
+    out = client.get("/v2/content/refreshes/search", params={"query": "Shared Search", "month": "2026-10"}, headers=a).json()
+    assert out["query"] == "shared search" and {p["url"] for p in out["pages"]} == {OLD, STEADY}
+    old = next(p for p in out["pages"] if p["url"] == OLD)
+    assert old["impressions"] == 300 and old["clicks"] == 7 and old["words"] == 250 and old["sessions"]["current"] > 0
+    assert [m["month"] for m in old["months"]][-2:] == ["2026-09", "2026-10"] and old["months"][-1]["impressions"] == 200
+    leaders = {l["month"]: l["url"] for l in out["leaders"]}
+    assert leaders["2026-09"] == STEADY and leaders["2026-10"] == OLD
+    assert out["swapped"] is True and out["swaps"][0] == {"from": STEADY, "to": OLD, "month": "2026-10"}
+    assert client.get("/v2/content/refreshes/search", params={"query": "no such search"}, headers=a).status_code == 404

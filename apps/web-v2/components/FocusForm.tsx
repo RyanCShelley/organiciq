@@ -119,7 +119,7 @@ export function FocusForm({
           type="button"
           disabled={pending || !focus}
           onClick={save}
-          className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:hover:bg-[#00a99d]"
         >
           Save focus
         </button>

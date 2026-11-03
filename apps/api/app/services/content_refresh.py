@@ -243,6 +243,70 @@ def competing(db: Session, client: Client, today: date | None = None) -> list[di
     return out[:COMPETING_SHOWN]
 
 
+def competing_detail(db: Session, client: Client, month: str, query: str) -> dict[str, Any] | None:
+    """One split search opened: how each page does for it (90 days and month by month), what each page earns overall, and who has led it, month by month.
+
+    Month by month is what shows whether one page took the other's place, or both have always shared it.
+    """
+    needle = " ".join(query.lower().split())
+    today = date.today()
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    month_key = func.to_char(FactGscQueryPage.date, "YYYY-MM")
+    since = add_months(date(today.year, today.month, 1), -5)
+    rows = (
+        db.query(FactGscQueryPage.normalized_url, month_key, func.sum(FactGscQueryPage.impressions), func.sum(FactGscQueryPage.clicks), func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions))
+        .filter(FactGscQueryPage.client_id == client.id, q == needle, FactGscQueryPage.date >= since, FactGscQueryPage.date <= today)
+        .group_by(FactGscQueryPage.normalized_url, month_key)
+        .all()
+    )
+    if not rows:
+        return None
+    months = sorted({m for _, m, *_ in rows})
+    by_page: dict[str, dict[str, dict[str, float]]] = defaultdict(dict)
+    for url, m, imp, clk, weighted in rows:
+        imp = float(imp or 0)
+        by_page[url][m] = {"impressions": imp, "clicks": float(clk or 0), "position": (float(weighted or 0) / imp) if imp else 0.0}
+    cutoff = (today - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m")
+    year, mon = int(month[:4]), int(month[5:7])
+    month_start = date(year, mon, 1)
+    cur3, ly3 = tc._months_back(month_start, 3), [tc._month_key(add_months(month_start, -(i + 12))) for i in range(3)]
+    pages_sessions = tc.monthly_sessions(db, client.id, add_months(month_start, -14), add_months(month_start, 1).replace(day=1) - timedelta(days=1))
+    snaps = _snapshots(db, client)
+    out = []
+    for url, series in by_page.items():
+        recent = [v for m, v in series.items() if m >= cutoff]
+        imp = sum(v["impressions"] for v in recent)
+        clk = sum(v["clicks"] for v in recent)
+        if imp < 1:
+            continue
+        sess = pages_sessions.get(url, {})
+        cur, last = sum(sess.get(k, 0) for k in cur3), sum(sess.get(k, 0) for k in ly3)
+        snap = snaps.get(url)
+        age = _months_since(snap.content_updated_on, today) if snap else None
+        out.append({
+            "url": url, "title": snap.title if snap else None, "impressions": round(imp), "clicks": round(clk), "ctr": round(clk / imp * 100, 1),
+            "position": round(sum(v["position"] * v["impressions"] for v in recent) / imp, 1),
+            "months": [{"month": m, "impressions": round(series[m]["impressions"]) if m in series else 0, "clicks": round(series[m]["clicks"]) if m in series else 0,
+                        "position": round(series[m]["position"], 1) if m in series and series[m]["impressions"] else None} for m in months],
+            "sessions": {"current": round(cur), "last_year": round(last), "change_pct": tc._pct(cur, last)},
+            "words": snap.word_count if snap else None, "last_updated": snap.content_updated_on.isoformat() if snap and snap.content_updated_on else None, "months_since_update": age,
+        })
+    if not out:
+        return None
+    out.sort(key=lambda r: (-r["clicks"], -r["impressions"]))
+    # Who led each month: the page shown most, with the better position settling a tie.
+    leaders = []
+    for m in months:
+        best = max(((u, s_[m]) for u, s_ in by_page.items() if m in s_ and s_[m]["impressions"] > 0), key=lambda t: (t[1]["impressions"], -t[1]["position"]), default=None)
+        leaders.append({"month": m, "url": best[0] if best else None})
+    swaps = [(a, b) for a, b in zip(leaders, leaders[1:]) if a["url"] and b["url"] and a["url"] != b["url"]]
+    others = [c for c in competing(db, client) if c["query"] != needle and {p["url"] for p in c["pages"]} & {p["url"] for p in out}][:5]
+    return {
+        "query": needle, "impressions": sum(p["impressions"] for p in out), "clicks": sum(p["clicks"] for p in out), "pages": out[:6], "leaders": leaders,
+        "swapped": bool(swaps), "swaps": [{"from": a["url"], "to": b["url"], "month": b["month"]} for a, b in swaps][:3], "other_searches": others, "month": month,
+    }
+
+
 def structured_text(body: str) -> str:
     """The page's words one block to a line, with list items marked, so the depth score can see lists and tables."""
     try:

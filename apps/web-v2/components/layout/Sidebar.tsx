@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, LogOut, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -12,9 +12,9 @@ import type { Client } from "@/lib/api";
 
 const SHUT_KEY = "oiq-nav-shut";
 
-const link = "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm";
+const link = "flex items-center gap-2 rounded-full px-3 py-1.5 text-sm";
 const idle = "text-[var(--brand-teal-soft)] hover:bg-[var(--brand-navy-hover)] hover:text-white";
-const active = "bg-[var(--brand-teal-soft)] font-semibold text-[var(--brand-navy)]";
+const active = "bg-[rgba(200,242,236,0.16)] font-semibold text-white";
 
 /** The deep navy sidebar: logo, client picker, collapsible groups, then client settings, admin and the account. */
 export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { clients: Client[]; userEmail?: string | null; isAdmin: boolean; signOutAction: () => Promise<void> }) {
@@ -65,7 +65,7 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
                     type="button"
                     aria-expanded={!isShut}
                     onClick={() => toggle(group.title)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-white hover:bg-[var(--brand-navy-hover)]"
+                    className="flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--brand-navy-hover)]"
                   >
                     <Icon size={16} className="text-[var(--brand-teal-soft)]" aria-hidden />
                     {group.title}
@@ -77,6 +77,7 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
                         <li key={item.label}>
                           <Link href={`/${clientSlug}${item.path}`} aria-current={isActive(item.path) ? "page" : undefined} className={`${link} pl-8 ${isActive(item.path) ? active : idle}`}>
                             {item.label}
+                            {isActive(item.path) ? <ChevronRight size={14} className="ml-auto text-[var(--brand-teal-soft)]" aria-hidden /> : null}
                           </Link>
                         </li>
                       ))}

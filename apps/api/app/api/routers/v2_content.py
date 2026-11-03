@@ -101,6 +101,21 @@ def refresh_page(
     return {**content_refresh.page_detail(db, client, month, url), "month": month, "plan": content_briefs.latest(db, client, "refresh", url)}
 
 
+@router.get("/refreshes/search")
+def refresh_search(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    query: Annotated[str, Query(min_length=1, max_length=300)],
+    month: Annotated[str | None, Query()] = None,
+) -> dict:
+    """A search two or more pages are shown for, opened: each page's numbers, month by month, and who has led it."""
+    found = content_refresh.competing_detail(db, client, _month(month or content_briefs.last_complete_month()), query)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Search Console has no data for that search. Reload the list.")
+    return found
+
+
 class SetAside(BaseModel):
     area: Area
     key: str = Field(min_length=1, max_length=2048)
