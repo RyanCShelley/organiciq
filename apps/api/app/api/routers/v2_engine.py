@@ -250,7 +250,7 @@ def topic_for(
     topic = growth_action.resolve_topic(db, client, month, search, page)
     if topic["keyword"] is None:
         return {**topic, "pages": None}
-    return {**topic, "pages": growth_action.topic_pages(db, client, month, topic["keyword"])}
+    return {**topic, "pages": growth_action.topic_pages(db, client, month, topic["keyword"], include=page)}
 
 
 @router.get("/topic-pages")

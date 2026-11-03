@@ -31,6 +31,8 @@ from app.services import llm_evidence
 
 #: A page whose title already says the topic counts for this much more than its impressions alone.
 FIT_WEIGHT = 1.5
+#: How many pages of a topic are listed (the highest scoring), plus the page the person came from.
+PAGES_SHOWN = 50
 #: Parts that join the bundle when the page read produces them, in the order they are listed.
 CORE = ("A-1", "S-1", "S-2", "V-7")
 EXTRAS = ("P-1", "S-5", "S-4")
@@ -97,7 +99,7 @@ def resolve_topic(db: Session, client: Client, month: str, search: str, page: st
     return {"keyword": None, "source": "no search in Search Console brings this page impressions"}
 
 
-def topic_pages(db: Session, client: Client, month: str, keyword: str) -> dict[str, Any]:
+def topic_pages(db: Session, client: Client, month: str, keyword: str, include: str | None = None) -> dict[str, Any]:
     """The pages that show for searches containing `keyword`, with the one the tool would work on first.
 
     Brand searches are left out: no page work moves them. A page scores its impressions, times 1.5
@@ -149,11 +151,15 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str) -> dict[s
             }
         )
     out.sort(key=lambda r: -r["score"])
+    shown = out[:PAGES_SHOWN]
+    # The page being planned from is always on the list, however few impressions it has: it is the one a person came to choose.
+    if include and all(r["url"] != include for r in shown):
+        shown += [r for r in out if r["url"] == include]
     return {
         "keyword": kw,
         "window": {"from": start.isoformat(), "to": end.isoformat()},
         "recommended": out[0]["url"] if out else None,
-        "pages": out[:8],
+        "pages": shown,
         "total_pages": len(out),
         "rule": f"Impressions for searches containing “{kw}” over three months, counted {FIT_WEIGHT:g}× when the page's title already says the topic. Brand searches are left out.",
     }
@@ -193,7 +199,7 @@ def build(
     `diagnose(search, url, row, evidence)` and `evidence_for(search, url)` are the page reader and the
     evidence builder, passed in so this module stays free of HTTP and of the router.
     """
-    topic = topic_pages(db, client, month, keyword)
+    topic = topic_pages(db, client, month, keyword, include=page)
     if not topic["pages"]:
         return {"ok": False, "error": f"No page shows for a search containing “{topic['keyword']}” in Search Console over the last three months."}
     chosen = next((p for p in topic["pages"] if p["url"] == page), None) if page else topic["pages"][0]

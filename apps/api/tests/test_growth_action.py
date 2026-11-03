@@ -53,6 +53,17 @@ def data(db, client_a):
 # ── choosing the page ────────────────────────────────────────────────────────
 
 
+def test_a_low_impression_page_is_still_listed_and_can_be_chosen(db, client_a, monkeypatch):
+    data(db, client_a)
+    small = "https://shop.example/blogs/small"
+    gsc(db, client_a, "natural sunscreen for pilots", small, 6, clicks=0, position=5.2)
+    db.commit()
+    monkeypatch.setattr(ga, "PAGES_SHOWN", 2)
+    out = ga.topic_pages(db, client_a, SEP, "natural sunscreen", include=small)
+    assert [p["url"] for p in out["pages"]][-1] == small and len(out["pages"]) == 3
+    assert all(p["url"] != small for p in ga.topic_pages(db, client_a, SEP, "natural sunscreen")["pages"])
+
+
 def test_the_page_with_the_most_impressions_is_recommended_and_a_title_that_says_the_topic_counts_extra(db, client_a):
     data(db, client_a)
     out = ga.topic_pages(db, client_a, SEP, "Natural  Sunscreen")

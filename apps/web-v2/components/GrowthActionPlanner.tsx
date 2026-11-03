@@ -55,6 +55,7 @@ export function GrowthActionPlanner({
   const [bundle, setBundle] = useState<GrowthActionBundle | null>(null);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [showPages, setShowPages] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [pending, start] = useTransition();
@@ -182,7 +183,7 @@ export function GrowthActionPlanner({
             <>
               <p className="mt-1 text-xs text-[var(--text-tertiary)]">{pages.rule}</p>
               <ul className="mt-2 divide-y divide-[var(--border)]">
-                {pages.pages.slice(0, 6).map((p) => (
+                {(showAll ? pages.pages : [...pages.pages.slice(0, 6), ...pages.pages.slice(6).filter((p) => p.url === page)]).map((p) => (
                   <li key={p.url} className="flex flex-wrap items-center gap-3 py-1.5">
                     <input type="radio" name={`pick-${search}-${page}`} checked={chosen === p.url} onChange={() => setChosen(p.url)} aria-label={`Work on ${shortPage(p.url)}`} />
                     <span className="min-w-0 flex-1 break-all font-medium">{shortPage(p.url)}</span>
@@ -195,6 +196,11 @@ export function GrowthActionPlanner({
                   </li>
                 ))}
               </ul>
+              {pages.pages.length > 6 ? (
+                <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-2 text-xs font-semibold underline">
+                  {showAll ? "Show fewer pages" : `Show all ${pages.pages.length} pages`}
+                </button>
+              ) : null}
             </>
           ) : null}
         </div>
