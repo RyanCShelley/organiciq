@@ -74,7 +74,7 @@ SETUP = (
     "decisions", "topics",
 )
 #: Never touched.
-KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log")
+KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "client_schema_concepts", "schema_page_reports")
 #: Annotations point at decisions and topics, which are deleted, so the links go and the notes stay.
 UNLINK_ANNOTATIONS = "update annotations set decision_id = null, topic_id = null where client_id = :c"
 
