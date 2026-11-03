@@ -347,7 +347,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
   return (
     <section className="max-w-6xl space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">Schema &amp; knowledge graph</h1>
+        <h1 className="text-2xl font-bold">Machine Readability</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           What structured data each kind of page carries against what it should, and whether the brand reads as one known entity. Built on the Topic Hub schema audit.
         </p>

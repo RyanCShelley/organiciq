@@ -262,7 +262,7 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
     <section className="max-w-6xl space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Business Intelligence</h1>
+          <h1 className="text-2xl font-bold">OrganicIQ Insights</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">How visible are we, who is arriving, and do those visits stay and act? Compared with the same number of days before.</p>
         </div>
         <div className="flex gap-2">

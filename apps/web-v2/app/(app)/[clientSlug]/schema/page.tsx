@@ -6,7 +6,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { ScResponse } from "@/lib/schema";
 
-export const metadata = { title: "Schema & knowledge graph" };
+export const metadata = { title: "Machine Readability" };
 
 export default async function SchemaPage({ params }: { params: Promise<{ clientSlug: string }> }) {
   const { clientSlug } = await params;

@@ -150,7 +150,7 @@ function PagePane({ client, url, from, to }: { client: Client; url: string; from
           <div>
             <h3 className="font-bold">Changes to this page</h3>
             {d.changes.length === 0 ? (
-              <p className="text-xs text-[var(--text-secondary)]">No shipped task or change-log note is recorded for this page. When you change the title or description, add a note in Business Intelligence&apos;s change log, and the before and after click-through appears here.</p>
+              <p className="text-xs text-[var(--text-secondary)]">No shipped task or change-log note is recorded for this page. When you change the title or description, add a note in OrganicIQ Insights&apos;s change log, and the before and after click-through appears here.</p>
             ) : (
               <ul className="mt-2 space-y-2 text-xs">
                 {d.changes.map((c, i) => (

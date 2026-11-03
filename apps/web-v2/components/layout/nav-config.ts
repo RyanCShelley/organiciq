@@ -6,11 +6,11 @@ export type NavGroup = { title: string; icon: LucideIcon; items: NavItem[] };
 /** The order Ryan set: what each group answers. */
 export const GROUPS: NavGroup[] = [
   {
-    title: "Organic IQ analytics",
+    title: "Analytics",
     icon: BarChart3,
     items: [
       { label: "Monthly review", path: "/review" },
-      { label: "Business Intelligence", path: "/bi" },
+      { label: "OrganicIQ Insights", path: "/bi" },
       { label: "Decision engine", path: "/engine" },
     ],
   },
@@ -27,7 +27,7 @@ export const GROUPS: NavGroup[] = [
     icon: Target,
     items: [
       { label: "Site health", path: "/site-health" },
-      { label: "Schema & knowledge graph", path: "/schema" },
+      { label: "Machine Readability", path: "/schema" },
       { label: "CTR optimizer", path: "/ctr" },
       { label: "Inlink suggester", path: "/inlinks" },
     ],
