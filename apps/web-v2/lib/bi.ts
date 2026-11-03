@@ -31,14 +31,42 @@ export type BiKeyword = {
 
 export type BiChange = { id: string; date: string; type: string; description: string; page: string | null; from_task: boolean };
 
+export type BiTotals = {
+  sessions: number;
+  engaged: number;
+  engagement_rate: number | null;
+  avg_seconds: number | null;
+  conversions: number;
+  conversion_rate: number | null;
+};
+
+export type BiDay = { date: string; sessions: number; sessions_before: number; engaged: number; conversions: number; conversions_before: number };
+
+export type BiBands = { top3: number; top10: number; top20: number; top100: number; outside: number };
+
+export type BiAi = {
+  date: string;
+  checks: number;
+  mention_rate: number | null;
+  cited_rate: number | null;
+  mention_rate_before: number | null;
+  cited_rate_before: number | null;
+  date_before: string | null;
+  platforms: { platform: string; checks: number; mentioned: number; cited: number }[];
+};
+
 export type Bi = {
+  totals: BiTotals;
+  totals_before: BiTotals;
+  daily: BiDay[];
+  ai: BiAi | null;
   from: string;
   to: string;
   key_events: { event: string; name: string; type: string }[];
   has_engagement_time: boolean;
   channels: BiChannel[];
   pages: BiPage[];
-  keywords: { from: string | null; to: string | null; keywords: BiKeyword[] };
+  keywords: { from: string | null; to: string | null; coverage: { start: BiBands; end: BiBands; tracked: number } | null; keywords: BiKeyword[] };
   changes: BiChange[];
 };
 

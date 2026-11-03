@@ -103,3 +103,30 @@ def test_a_bad_range_or_channel_is_refused(client, db, client_a, admin_user):
     hd = h(client_a, admin_user)
     assert client.get("/v2/bi", params={"from": "2026-10-31", "to": "2026-10-01"}, headers=hd).status_code == 400
     assert client.get("/v2/bi", params={"from": "2026-10-01", "to": "2026-10-31", "channel": "nope"}, headers=hd).status_code == 400
+
+
+def test_totals_daily_coverage_and_ai_mentions_feed_the_overview(client, db, client_a, admin_user):
+    from app.models.llm_visibility import LlmResponse, LlmRun
+
+    seed(db, client_a)
+    for kw, a, b in (("a", 2, 3), ("b", 9, 25), ("c", 0, 0)):
+        for day, pos in ((date(2026, 10, 2), a), (date(2026, 10, 30), b)):
+            db.add(FactSerRanking(client_id=client_a.id, date=day, site_engine_id="1", keyword_id=kw, keyword=kw, position=Decimal(pos), volume=Decimal(10)))
+    old = LlmRun(client_id=client_a.id, status="completed")
+    new = LlmRun(client_id=client_a.id, status="completed")
+    db.add_all([old, new])
+    db.flush()
+    db.execute(__import__("sqlalchemy").text("update llm_runs set started_at='2026-09-20' where id=:i"), {"i": old.id})
+    db.execute(__import__("sqlalchemy").text("update llm_runs set started_at='2026-10-20' where id=:i"), {"i": new.id})
+    for run, mentioned in ((old, 0), (new, 1)):
+        for i in range(2):
+            db.add(LlmResponse(run_id=run.id, client_id=client_a.id, query_text=f"q{i}", platform="openai", visibility_type="Mentioned", brand_mentioned=bool(mentioned and i == 0), url_cited=False))
+    db.commit()
+    out = client.get("/v2/bi", params={"from": START.isoformat(), "to": END.isoformat()}, headers=h(client_a, admin_user)).json()
+    assert out["totals"]["sessions"] == 350 and out["totals_before"]["sessions"] == 80
+    assert out["totals"]["avg_seconds"] == 15.7 and out["totals"]["conversions"] == 7
+    assert len(out["daily"]) == 31 and out["daily"][4]["sessions"] == 100 and out["daily"][5]["conversions"] == 7
+    cov = out["keywords"]["coverage"]
+    assert cov["start"] == {"top3": 1, "top10": 1, "top20": 0, "top100": 0, "outside": 1} and cov["end"] == {"top3": 1, "top10": 0, "top20": 0, "top100": 1, "outside": 1}
+    ai = out["ai"]
+    assert ai["date"] == "2026-10-20" and ai["mention_rate"] == 50.0 and ai["mention_rate_before"] == 0.0 and ai["platforms"][0]["checks"] == 2

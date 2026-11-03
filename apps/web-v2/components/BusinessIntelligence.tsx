@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 
 import { addChangeAction, removeChangeAction } from "@/app/(app)/[clientSlug]/bi/actions";
 import { Spinner } from "@/components/ui/Spinner";
+import { CoverageDonut, TrendChart } from "@/components/bi/Charts";
 import type { Client } from "@/lib/api";
 import { presets, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
 
@@ -44,14 +45,60 @@ function Delta({ now, before }: { now: number; before: number }) {
   );
 }
 
-function Stat({ label, value, note }: { label: string; value: string; note?: React.ReactNode }) {
+/** Percentage-point change, for rates. */
+function Points({ now, before }: { now: number | null; before: number | null }) {
+  if (now == null || before == null) return <span className="text-xs text-[var(--text-tertiary)]">no earlier figure</span>;
+  const d = now - before;
+  const flat = Math.abs(d) < 0.05;
+  return (
+    <span className={`text-xs font-semibold ${flat ? "text-[var(--text-secondary)]" : d > 0 ? "text-green-700" : "text-red-700"}`}>
+      {flat ? "flat" : `${d > 0 ? "+" : "−"}${Math.abs(d).toFixed(1)} pp`} <span className="font-normal text-[var(--text-secondary)]">vs before</span>
+    </span>
+  );
+}
+
+function Kpi({ label, value, change, note }: { label: string; value: string; change?: React.ReactNode; note?: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">{label}</div>
-      <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
-      {note ? <div className="mt-1 text-xs">{note}</div> : null}
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{label}</div>
+      <div className="mt-1 text-3xl font-bold tabular-nums">{value}</div>
+      {change ? <div className="mt-1">{change}</div> : null}
+      {note ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{note}</div> : null}
     </div>
   );
+}
+
+function Section({ n, title, sub, children }: { n: string; title: string; sub: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-bold"><span className="mr-2 text-xs font-semibold text-[var(--text-tertiary)]">{n}</span>{title}</h2>
+        <p className="text-sm text-[var(--text-secondary)]">{sub}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const card = "rounded-xl border border-[var(--border)] bg-[var(--surface)]";
+
+/** The tables on screen as a CSV, to open in a spreadsheet. */
+function toCsv(data: Bi, noEvents: boolean) {
+  const q = (v: string | number | null) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows: (string | number | null)[][] = [
+    ["Channels", data.from, data.to],
+    ["Channel", "Visits", "Visits before", "Engaged %", "Avg seconds", "Key actions", "Conversion %"],
+    ...data.channels.map((c) => [c.label, c.sessions, c.sessions_before, c.engagement_rate, c.avg_seconds, noEvents ? null : c.conversions, noEvents ? null : c.conversion_rate]),
+    [],
+    ["Landing pages"],
+    ["Page", "Visits", "Engaged %", "Avg seconds", "Key actions", "Conversion %"],
+    ...data.pages.map((p) => [p.url, p.sessions, p.engagement_rate, p.avg_seconds, noEvents ? null : p.conversions, noEvents ? null : p.conversion_rate]),
+    [],
+    ["Keywords", data.keywords.from, data.keywords.to],
+    ["Keyword", "Start position", "End position", "Searches per month"],
+    ...data.keywords.keywords.map((k) => [k.keyword, k.start, k.end, k.volume]),
+  ];
+  return rows.map((r) => r.map(q).join(",")).join("\n");
 }
 
 const th = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]";
@@ -98,7 +145,7 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
   const input = "rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm";
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <h2 className="font-semibold">Change log</h2>
+      <h3 className="text-sm font-semibold">Change log</h3>
       <p className="mt-1 text-xs text-[var(--text-tertiary)]">
         What changed on the site or in the work, so a movement in the numbers above can be tied to something. Shipping a task adds its entry here; add anything else by hand.
       </p>
@@ -155,58 +202,71 @@ export function BusinessIntelligence({ client, from, to, channel, data, error }:
   };
   const ranges = presets();
   const active = ranges.find((r) => r.from === from && r.to === to)?.key ?? "custom";
-
-  const sessions = data?.channels.reduce((n, c) => n + c.sessions, 0) ?? 0;
-  const before = data?.channels.reduce((n, c) => n + c.sessions_before, 0) ?? 0;
-  const conversions = data?.channels.reduce((n, c) => n + c.conversions, 0) ?? 0;
-  const conversionsBefore = data?.channels.reduce((n, c) => n + c.conversions_before, 0) ?? 0;
-  const timed = data?.channels.filter((c) => c.avg_seconds != null) ?? [];
-  const timedSessions = timed.reduce((n, c) => n + c.sessions, 0);
-  const avgSeconds = timedSessions > 0 ? timed.reduce((n, c) => n + (c.avg_seconds ?? 0) * c.sessions, 0) / timedSessions : null;
   const noEvents = data != null && data.key_events.length === 0;
+  const download = () => {
+    if (!data) return;
+    const url = URL.createObjectURL(new Blob([toCsv(data, noEvents)], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `business-intelligence-${client.slug}-${from}-to-${to}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const cov = data?.keywords.coverage;
+  const top10 = (b: { top3: number; top10: number }, n: number) => (n > 0 ? ((b.top3 + b.top10) / n) * 100 : null);
+  const marks = data?.changes.map((c) => ({ date: c.date, text: c.description })) ?? [];
+  const t = data?.totals, tb = data?.totals_before;
+  const moved = data?.keywords.keywords ?? [];
+  const improved = moved.filter((k) => k.state === "up" || k.state === "new").length;
+  const declined = moved.filter((k) => k.state === "down" || k.state === "lost").length;
 
   return (
-    <section className="max-w-6xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">Business Intelligence</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Behind the monthly review: where visits and conversions come from, which pages carry them, and how tracked keywords moved. Compared with the same number of days before.
-        </p>
+    <section className="max-w-6xl space-y-8">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Business Intelligence</h1>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">How visible are we, who is arriving, and do those visits stay and act? Compared with the same number of days before.</p>
+        </div>
+        <button type="button" onClick={download} disabled={!data} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Export data</button>
       </header>
 
       <div className="flex flex-wrap items-end gap-2 text-sm">
         {ranges.map((r) => (
-          <button
-            key={r.key}
-            type="button"
-            onClick={() => go(r.from, r.to)}
-            className={`rounded-lg border px-3 py-1.5 font-semibold ${active === r.key ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] bg-white"}`}
-          >
+          <button key={r.key} type="button" onClick={() => go(r.from, r.to)} className={`rounded-lg border px-3 py-1.5 font-semibold ${active === r.key ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] bg-white"}`}>
             {r.label}
           </button>
         ))}
-        <label className="text-xs font-semibold">
-          From
-          <input type="date" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-1.5 text-sm" />
-        </label>
-        <label className="text-xs font-semibold">
-          To
-          <input type="date" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-1.5 text-sm" />
-        </label>
-        <button type="button" onClick={() => go(custom.from, custom.to)} disabled={!custom.from || !custom.to || custom.to < custom.from} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 font-semibold disabled:opacity-50">
-          Apply
-        </button>
+        <label className="text-xs font-semibold">From<input type="date" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-1.5 text-sm" /></label>
+        <label className="text-xs font-semibold">To<input type="date" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-1.5 text-sm" /></label>
+        <button type="button" onClick={() => go(custom.from, custom.to)} disabled={!custom.from || !custom.to || custom.to < custom.from} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 font-semibold disabled:opacity-50">Apply</button>
+        <span className="pb-2 text-xs text-[var(--text-tertiary)]">{day(from)} to {day(to)}</span>
       </div>
 
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
 
-      {data ? (
+      {data && t && tb ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Visits" value={num(sessions)} note={<Delta now={sessions} before={before} />} />
-            <Stat label="Key actions" value={noEvents ? "–" : num(conversions)} note={noEvents ? <span className="text-[var(--text-tertiary)]">none chosen yet</span> : <Delta now={conversions} before={conversionsBefore} />} />
-            <Stat label="Conversion rate" value={noEvents ? "–" : pct(sessions > 0 ? (conversions / sessions) * 100 : null)} />
-            <Stat label="Time on site" value={duration(avgSeconds)} note={!data.has_engagement_time ? <span className="text-[var(--text-tertiary)]">pull Google Analytics again to fill this</span> : <span className="text-[var(--text-tertiary)]">engaged time per visit</span>} />
+            <Kpi
+              label="Visibility: top 10"
+              value={cov ? pct(top10(cov.end, cov.tracked)) : "–"}
+              change={cov ? <Points now={top10(cov.end, cov.tracked)} before={top10(cov.start, cov.tracked)} /> : undefined}
+              note={cov ? `${cov.end.top3 + cov.end.top10} of ${cov.tracked} tracked keywords` : "the rank tracker has no check in this range"}
+            />
+            <Kpi label="Traffic: site visits" value={num(t.sessions)} change={<Delta now={t.sessions} before={tb.sessions} />} note={`${num(tb.sessions)} before`} />
+            <Kpi
+              label="Engagement"
+              value={pct(t.engagement_rate)}
+              change={<Points now={t.engagement_rate} before={tb.engagement_rate} />}
+              note={data.has_engagement_time ? `${duration(t.avg_seconds)} engaged time per visit` : "time on site: pull Google Analytics again"}
+            />
+            <Kpi
+              label="Visits with a key action"
+              value={noEvents ? "–" : pct(t.conversion_rate)}
+              change={noEvents ? undefined : <Points now={t.conversion_rate} before={tb.conversion_rate} />}
+              note={noEvents ? "none chosen yet" : `${num(t.conversions)} key actions (${num(tb.conversions)} before)`}
+            />
           </div>
 
           {noEvents ? (
@@ -215,109 +275,183 @@ export function BusinessIntelligence({ client, from, to, channel, data, error }:
               <Link href={`/${client.slug}/settings/conversions`} className="font-semibold underline">Settings → Conversions</Link>.
             </p>
           ) : (
-            <p className="text-xs text-[var(--text-tertiary)]">Key actions counted: {data.key_events.map((e) => e.name).join(", ")}.</p>
+            <p className="-mt-4 text-xs text-[var(--text-tertiary)]">Key actions counted: {data.key_events.map((e) => e.name).join(", ")}.</p>
           )}
 
-          <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-            <h2 className="px-5 pt-4 font-semibold">Channels</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">Choose a channel to see its landing pages below.</p>
-            <div className="overflow-x-auto">
-              <table className="mt-2 w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className={th}>Channel</th>
-                    <th className={th}>Visits</th>
-                    <th className={th}>Engaged</th>
-                    <th className={th}>Time</th>
-                    <th className={th}>Key actions</th>
-                    <th className={th}>Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.channels.map((c) => (
-                    <tr key={c.channel} className={`border-t border-[var(--border)] ${channel === c.channel ? "bg-[var(--bg)]" : ""}`}>
-                      <td className="px-3 py-2">
-                        <button type="button" onClick={() => go(from, to, channel === c.channel ? "" : c.channel)} className="font-semibold underline-offset-2 hover:underline">
-                          {c.label}
-                        </button>
-                      </td>
-                      <td className={td}>
-                        {num(c.sessions)} <Delta now={c.sessions} before={c.sessions_before} />
-                      </td>
-                      <td className={td}>{pct(c.engagement_rate)}</td>
-                      <td className={td}>{duration(c.avg_seconds)}</td>
-                      <td className={td}>{noEvents ? "–" : num(c.conversions)}</td>
-                      <td className={td}>{noEvents ? "–" : pct(c.conversion_rate)}</td>
-                    </tr>
-                  ))}
-                  {data.channels.length === 0 ? (
-                    <tr><td colSpan={6} className="px-5 py-4 text-[var(--text-secondary)]">No Google Analytics data between {day(from)} and {day(to)}.</td></tr>
-                  ) : null}
-                </tbody>
-              </table>
+          <Section n="01" title="Where are we showing up?" sub="Search rankings and AI answers are separate measures of visibility.">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className={`${card} p-5`}>
+                <h3 className="text-sm font-semibold">Search ranking coverage</h3>
+                {cov ? (
+                  <>
+                    <div className="mt-3"><CoverageDonut bands={cov.end} tracked={cov.tracked} /></div>
+                    <p className="mt-3 text-xs text-[var(--text-secondary)]">
+                      <strong>{improved}</strong> improving, <strong>{declined}</strong> declining, of {cov.tracked} tracked keywords. Positions on {data.keywords.to ? day(data.keywords.to) : ""}; a keyword not found in the top 100 counts as outside.
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-[var(--text-secondary)]">The rank tracker has no check inside this range.</p>
+                )}
+              </div>
+              <div className={`${card} p-5`}>
+                <h3 className="text-sm font-semibold">AI mentions and citations</h3>
+                {data.ai ? (
+                  <>
+                    <div className="mt-3 flex flex-wrap gap-8">
+                      <div>
+                        <div className="text-3xl font-bold tabular-nums">{pct(data.ai.mention_rate)}</div>
+                        <div className="text-xs text-[var(--text-secondary)]">answers that name the brand</div>
+                        <Points now={data.ai.mention_rate} before={data.ai.mention_rate_before} />
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold tabular-nums">{pct(data.ai.cited_rate)}</div>
+                        <div className="text-xs text-[var(--text-secondary)]">answers that cite the site</div>
+                        <Points now={data.ai.cited_rate} before={data.ai.cited_rate_before} />
+                      </div>
+                    </div>
+                    <table className="mt-4 w-full text-sm">
+                      <thead><tr><th className={th}>Platform</th><th className={th}>Named</th><th className={th}>Cited</th><th className={th}>Checks</th></tr></thead>
+                      <tbody>
+                        {data.ai.platforms.map((p) => (
+                          <tr key={p.platform} className="border-t border-[var(--border)]">
+                            <td className="px-3 py-2 font-medium">{p.platform}</td>
+                            <td className={td}>{p.mentioned}</td>
+                            <td className={td}>{p.cited}</td>
+                            <td className={td}>{p.checks}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="mt-2 text-xs text-[var(--text-tertiary)]">From the run on {day(data.ai.date)}{data.ai.date_before ? `, against the run on ${day(data.ai.date_before)}` : ""}. Questions that name the brand are left out.</p>
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-[var(--text-secondary)]">No LLM visibility run has finished by {day(to)}.</p>
+                )}
+              </div>
             </div>
-          </section>
 
-          <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-            <h2 className="px-5 pt-4 font-semibold">
-              Landing pages{channel ? `: ${data.channels.find((c) => c.channel === channel)?.label ?? channel}` : ""}
-            </h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">The 25 busiest pages people arrive on.{channel ? " Showing one channel." : ""}</p>
-            <div className="overflow-x-auto">
-              <table className="mt-2 w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className={th}>Page</th>
-                    <th className={th}>Visits</th>
-                    <th className={th}>Engaged</th>
-                    <th className={th}>Time</th>
-                    <th className={th}>Key actions</th>
-                    <th className={th}>Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.pages.map((p) => (
-                    <tr key={p.url} className="border-t border-[var(--border)]">
-                      <td className="max-w-md break-all px-3 py-2 font-medium" title={p.url}>{shortPage(p.url)}</td>
-                      <td className={td}>{num(p.sessions)}</td>
-                      <td className={td}>{pct(p.engagement_rate)}</td>
-                      <td className={td}>{duration(p.avg_seconds)}</td>
-                      <td className={td}>{noEvents ? "–" : num(p.conversions)}</td>
-                      <td className={td}>{noEvents ? "–" : pct(p.conversion_rate)}</td>
-                    </tr>
-                  ))}
-                  {data.pages.length === 0 ? <tr><td colSpan={6} className="px-5 py-4 text-[var(--text-secondary)]">No pages for this range.</td></tr> : null}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
-            <h2 className="px-5 pt-4 font-semibold">Tracked keywords: start of the range against the end</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">
-              {data.keywords.from && data.keywords.to
-                ? `Positions on ${day(data.keywords.from)} and ${day(data.keywords.to)}, the first and last days the rank tracker checked in this range. A dash means not ranking.`
-                : "The rank tracker has no check inside this range."}
-            </p>
             {data.keywords.keywords.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="mt-2 w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th className={th}>Keyword</th>
-                      <th className={th}>Start</th>
-                      <th className={th}>End</th>
-                      <th className={th}>Move</th>
-                      <th className={th}>Searches / month</th>
-                    </tr>
-                  </thead>
-                  <tbody>{data.keywords.keywords.map((k) => <KeywordRow key={k.keyword} k={k} />)}</tbody>
-                </table>
+              <div className={card}>
+                <h3 className="px-5 pt-4 text-sm font-semibold">Keyword movement</h3>
+                <p className="px-5 text-xs text-[var(--text-tertiary)]">Positions on {data.keywords.from ? day(data.keywords.from) : ""} and {data.keywords.to ? day(data.keywords.to) : ""}, the first and last days the rank tracker checked in this range. A dash means not ranking.</p>
+                <div className="overflow-x-auto">
+                  <table className="mt-2 w-full text-sm">
+                    <thead><tr><th className={th}>Keyword</th><th className={th}>Start</th><th className={th}>End</th><th className={th}>Move</th><th className={th}>Searches / month</th></tr></thead>
+                    <tbody>{data.keywords.keywords.map((k) => <KeywordRow key={k.keyword} k={k} />)}</tbody>
+                  </table>
+                </div>
               </div>
             ) : null}
-          </section>
+          </Section>
 
-          <ChangeLog clientId={client.id} slug={client.slug} from={from} to={to} changes={data.changes} />
+          <Section n="02" title="Where are people coming from?" sub="The trend first, then the channels behind it.">
+            <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+              <div className={`${card} p-5`}>
+                <h3 className="text-sm font-semibold">Visits over the period</h3>
+                <div className="text-3xl font-bold tabular-nums">{num(t.sessions)} <span className="text-sm font-normal text-[var(--text-secondary)]">visits in daily detail</span></div>
+                <div className="mt-2"><TrendChart label="Visits per day, this period against the one before" data={data.daily.map((d) => ({ date: d.date, now: d.sessions, before: d.sessions_before }))} marks={marks} /></div>
+              </div>
+              <div className={card}>
+                <h3 className="px-5 pt-4 text-sm font-semibold">Traffic by channel</h3>
+                <p className="px-5 text-xs text-[var(--text-tertiary)]">Choose one to filter the pages below.</p>
+                <table className="mt-2 w-full text-sm">
+                  <thead><tr><th className={th}>Channel</th><th className={th}>Visits</th><th className={th}>Before</th><th className={th}>Change</th></tr></thead>
+                  <tbody>
+                    {data.channels.map((c) => (
+                      <tr key={c.channel} className={`border-t border-[var(--border)] ${channel === c.channel ? "bg-[var(--bg)]" : ""}`}>
+                        <td className="px-3 py-2">
+                          <button type="button" onClick={() => go(from, to, channel === c.channel ? "" : c.channel)} className="text-left font-semibold underline-offset-2 hover:underline">{c.label}</button>
+                        </td>
+                        <td className={td}>{num(c.sessions)}</td>
+                        <td className={`${td} text-[var(--text-secondary)]`}>{num(c.sessions_before)}</td>
+                        <td className={td}><Delta now={c.sessions} before={c.sessions_before} /></td>
+                      </tr>
+                    ))}
+                    {data.channels.length === 0 ? <tr><td colSpan={4} className="px-5 py-4 text-[var(--text-secondary)]">No Google Analytics data in this range.</td></tr> : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Section>
+
+          <Section n="03" title="Does the traffic engage?" sub="Engagement gives context; visits that take a key action show the business outcome.">
+            <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+              <div className={`${card} p-5`}>
+                <h3 className="text-sm font-semibold">Key actions over the period</h3>
+                {noEvents ? (
+                  <p className="mt-3 text-sm text-[var(--text-secondary)]">Choose key actions in Settings → Conversions to see them here.</p>
+                ) : (
+                  <>
+                    <div className="text-3xl font-bold tabular-nums">{num(t.conversions)} <span className="text-sm font-normal text-[var(--text-secondary)]">key actions in daily detail</span></div>
+                    <div className="mt-2"><TrendChart label="Key actions per day, this period against the one before" data={data.daily.map((d) => ({ date: d.date, now: d.conversions, before: d.conversions_before }))} marks={marks} /></div>
+                  </>
+                )}
+              </div>
+              <div className={`${card} p-5`}>
+                <h3 className="text-sm font-semibold">From visits to key actions</h3>
+                <ol className="mt-3 space-y-2 text-sm">
+                  <li className="rounded-lg bg-[var(--bg)] p-3"><div className="flex justify-between"><span>Site visits</span><span className="font-bold tabular-nums">{num(t.sessions)}</span></div><div className="text-xs text-[var(--text-secondary)]">{num(tb.sessions)} before</div></li>
+                  <li className="rounded-lg bg-[var(--bg)] p-3"><div className="flex justify-between"><span>Engaged visits</span><span className="font-bold tabular-nums">{num(t.engaged)}</span></div><div className="text-xs text-[var(--text-secondary)]">{pct(t.engagement_rate)} of visits stayed 10 seconds, viewed 2 pages, or took a key action</div></li>
+                  <li className="rounded-lg bg-[var(--bg)] p-3"><div className="flex justify-between"><span>Key actions</span><span className="font-bold tabular-nums">{noEvents ? "–" : num(t.conversions)}</span></div><div className="text-xs text-[var(--text-secondary)]">{noEvents ? "none chosen yet" : `${pct(t.conversion_rate)} of visits`}</div></li>
+                </ol>
+                <p className="mt-3 text-xs text-[var(--text-tertiary)]">{data.has_engagement_time ? `On average a visit holds attention for ${duration(t.avg_seconds)}.` : "Engaged time per visit appears once Google Analytics has been pulled again."}</p>
+              </div>
+            </div>
+
+            <div className={card}>
+              <h3 className="px-5 pt-4 text-sm font-semibold">Engagement by channel</h3>
+              <div className="overflow-x-auto">
+                <table className="mt-2 w-full text-sm">
+                  <thead><tr><th className={th}>Channel</th><th className={th}>Visits</th><th className={th}>Engaged</th><th className={th}>Time per visit</th><th className={th}>Key actions</th><th className={th}>Rate</th></tr></thead>
+                  <tbody>
+                    {data.channels.map((c) => (
+                      <tr key={c.channel} className="border-t border-[var(--border)]">
+                        <td className="px-3 py-2 font-medium">{c.label}</td>
+                        <td className={td}>{num(c.sessions)}</td>
+                        <td className={td}>{pct(c.engagement_rate)}</td>
+                        <td className={td}>{duration(c.avg_seconds)}</td>
+                        <td className={td}>{noEvents ? "–" : num(c.conversions)}</td>
+                        <td className={td}>{noEvents ? "–" : pct(c.conversion_rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className={card}>
+              <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+                <h3 className="text-sm font-semibold">Pages contributing visits and key actions{channel ? `: ${data.channels.find((c) => c.channel === channel)?.label ?? channel}` : ""}</h3>
+                <select value={channel} onChange={(e) => go(from, to, e.target.value)} aria-label="Channel" className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 text-sm">
+                  <option value="">All channels</option>
+                  {data.channels.map((c) => <option key={c.channel} value={c.channel}>{c.label}</option>)}
+                </select>
+              </div>
+              <p className="px-5 text-xs text-[var(--text-tertiary)]">The 25 busiest pages people arrive on. Time is engaged time per visit; pages with the least time are where visits leave soonest.</p>
+              <div className="overflow-x-auto">
+                <table className="mt-2 w-full text-sm">
+                  <thead><tr><th className={th}>Page</th><th className={th}>Visits</th><th className={th}>Engaged</th><th className={th}>Time per visit</th><th className={th}>Key actions</th><th className={th}>Per 100 visits</th></tr></thead>
+                  <tbody>
+                    {data.pages.map((p) => (
+                      <tr key={p.url} className="border-t border-[var(--border)]">
+                        <td className="max-w-md break-all px-3 py-2 font-medium" title={p.url}>{shortPage(p.url)}</td>
+                        <td className={td}>{num(p.sessions)}</td>
+                        <td className={td}>{pct(p.engagement_rate)}</td>
+                        <td className={td}>{duration(p.avg_seconds)}</td>
+                        <td className={td}>{noEvents ? "–" : num(p.conversions)}</td>
+                        <td className={td}>{noEvents || p.conversion_rate == null ? "–" : p.conversion_rate.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                    {data.pages.length === 0 ? <tr><td colSpan={6} className="px-5 py-4 text-[var(--text-secondary)]">No pages for this range.</td></tr> : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Section>
+
+          <Section n="04" title="What changed?" sub="Work shipped and changes made to the site, so a movement above can be tied to something. Marked on the charts.">
+            <ChangeLog clientId={client.id} slug={client.slug} from={from} to={to} changes={data.changes} />
+          </Section>
         </>
       ) : null}
     </section>
