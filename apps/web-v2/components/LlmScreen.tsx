@@ -6,6 +6,8 @@ import { useEffect, useState, useTransition } from "react";
 import { addLlmPromptsAction, addSeenCompetitorAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
 import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, Pair, QueryRow } from "@/lib/llm";
+import { Markdown } from "@/components/bi/Markdown";
+import { SidePane } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Tab = "overview" | "queries" | "sov" | "run" | "setup";
@@ -231,29 +233,135 @@ function Queries({ data }: { data: LlmOverview }) {
   );
 }
 
-function ShareOfVoice({ data }: { data: LlmOverview }) {
+const host = (url: string) => {
+  try {
+    return new URL(url.includes("://") ? url : `https://${url}`).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+const CHIP = (v: string | null) => CODE_STYLE[v === "Cited + Mentioned" ? "C+M" : v === "Cited" ? "C" : v === "Mentioned" ? "M" : "—"];
+
+/** The answers behind a share-of-voice box: who each platform named, who it cited, and the answer as given. */
+function VoicePane({ client, data, cluster, brand }: { client: Client; data: LlmOverview; cluster: string; brand: string | null }) {
+  const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const runId = data.run?.id;
+  useEffect(() => {
+    setRows(null);
+    setError(null);
+    setOpen(null);
+    if (runId) void llmResponsesAction(client.id, runId).then((r) => (r.ok ? setRows(r.value) : setError(r.error)));
+  }, [client.id, runId]);
+
+  const self = data.brand;
+  const mine = (rows ?? []).filter((r) => r.visibility && r.visibility !== "Error" && !r.asked_by_name && (r.topic_cluster ?? "Uncategorized") === cluster);
+  const shown = brand ? mine.filter((r) => (brand === self ? r.brand_mentioned : r.competitors.includes(brand))) : mine;
+  const named = new Map<string, number>();
+  const cited = new Map<string, number>();
+  for (const r of shown) {
+    for (const b of [...(r.brand_mentioned ? [self] : []), ...r.competitors, ...r.other_brands]) named.set(b, (named.get(b) ?? 0) + 1);
+    for (const h of new Set(r.cited_urls.map(host))) cited.set(h, (cited.get(h) ?? 0) + 1);
+  }
+  const top = (m: Map<string, number>) => Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const mySite = host(client.domain);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-lg font-bold">{brand ?? cluster}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{brand ? `Answers in ${cluster} that name ${brand}.` : `Every answer counted in ${cluster}.`} {runId ? `From the run on ${day(data.run!.started_at)}.` : ""}</p>
+      </div>
+      {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
+      {!rows && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Loading the answers…</p> : null}
+      {rows ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg bg-[var(--bg)] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Brands named</h3>
+              <ul className="mt-1 space-y-0.5 text-xs">{top(named).map(([b, n]) => <li key={b} className={b === self ? "font-bold" : ""}>{b} <span className="text-[var(--text-tertiary)]">· {n} of {shown.length}</span></li>)}{named.size === 0 ? <li className="text-[var(--text-tertiary)]">No brand named.</li> : null}</ul>
+            </div>
+            <div className="rounded-lg bg-[var(--bg)] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sites cited</h3>
+              <ul className="mt-1 space-y-0.5 text-xs">{top(cited).map(([h, n]) => <li key={h} className={h === mySite ? "font-bold text-[#006b63]" : ""}>{h}{h === mySite ? " (this site)" : ""} <span className="text-[var(--text-tertiary)]">· {n} {n === 1 ? "answer" : "answers"}</span></li>)}{cited.size === 0 ? <li className="text-[var(--text-tertiary)]">No source cited.</li> : null}</ul>
+            </div>
+          </div>
+          <div>
+            <h3 className="font-bold">{shown.length} {shown.length === 1 ? "answer" : "answers"}</h3>
+            <ul className="mt-1 divide-y divide-[var(--border)]">
+              {shown.map((r) => {
+                const key = `${r.query}|${r.platform}`;
+                const brands = [...(r.brand_mentioned ? [self] : []), ...r.competitors, ...r.other_brands];
+                return (
+                  <li key={key} className="py-3">
+                    <button type="button" onClick={() => setOpen(open === key ? null : key)} aria-expanded={open === key} className="flex w-full items-start justify-between gap-3 text-left">
+                      <span>
+                        <span className="block font-medium">{r.query}</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">{r.platform}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
+                      </span>
+                      <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${CHIP(r.visibility)}`}>{r.visibility}</span>
+                    </button>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      <span className="font-semibold">Named:</span> {brands.length ? brands.join(", ") : "no brand"}
+                    </p>
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      <span className="font-semibold">Cited:</span>{" "}
+                      {r.cited_urls.length ? r.cited_urls.slice(0, 6).map((u, i) => (
+                        <span key={u}>{i ? ", " : ""}<a href={u.includes("://") ? u : `https://${u}`} target="_blank" rel="noreferrer" className="underline">{host(u)}</a></span>
+                      )) : "no source"}
+                    </p>
+                    {open === key ? (
+                      <div className="mt-2 rounded-lg border border-[var(--border)] bg-white p-3">
+                        {r.answer ? <Markdown text={r.answer} /> : <p className="text-[var(--text-tertiary)]">No answer was kept.</p>}
+                        {r.cited_urls.length > 6 ? <p className="mt-2 text-xs text-[var(--text-tertiary)]">All cited: {r.cited_urls.join(", ")}</p> : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+              {shown.length === 0 ? <li className="py-3 text-[var(--text-secondary)]">No answer matches.</li> : null}
+            </ul>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
   const clusters = Array.from(new Set(data.share_of_voice!.map((r) => r.topic_cluster)));
+  const [open, setOpen] = useState<{ cluster: string; brand: string | null } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--text-secondary)]">
-        Share of voice is the share of a topic&apos;s answers that name each brand. The topic is the watchlist bucket the prompt belongs to.
+        Share of voice is the share of a topic&apos;s answers that name each brand. The topic is the watchlist bucket the prompt belongs to. Select a topic or a brand to read the answers behind it and see who is cited.
       </p>
       {clusters.map((cluster) => {
         const rows = data.share_of_voice!.filter((r) => r.topic_cluster === cluster);
         return (
           <div key={cluster} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <h3 className="text-sm font-semibold">
-              {cluster} <span className="font-normal text-[var(--text-tertiary)]">· {rows[0].responses} answers</span>
+              <button type="button" onClick={() => setOpen({ cluster, brand: null })} className="text-left hover:underline">{cluster}</button>{" "}
+              <span className="font-normal text-[var(--text-tertiary)]">· {rows[0].responses} answers</span>
             </h3>
-            <ul className="mt-3 space-y-2">
+            <ul className="mt-3 space-y-1">
               {rows.map((r) => (
-                <li key={r.brand} className="flex items-center gap-3 text-sm">
-                  <span className={`w-40 shrink-0 truncate ${r.is_self ? "font-bold" : ""}`}>{r.brand}</span>
-                  <div className="h-3 flex-1 rounded bg-[var(--bg)]">
-                    <div className={`h-3 rounded ${r.is_self ? "bg-[var(--brand-teal)]" : "bg-[var(--text-tertiary)]"}`} style={{ width: `${Math.min(100, r.share.current * 100)}%` }} />
-                  </div>
-                  <span className="w-12 text-right tabular-nums">{pct(r.share.current)}</span>
-                  <span className="w-20 text-right"><Delta pair={r.share} percent /></span>
+                <li key={r.brand}>
+                  <button type="button" onClick={() => setOpen({ cluster, brand: r.brand })} className="flex w-full items-center gap-3 rounded-md px-1 py-1 text-left text-sm hover:bg-[var(--bg)]" aria-label={`Answers in ${cluster} that name ${r.brand}`}>
+                    <span className={`w-40 shrink-0 truncate ${r.is_self ? "font-bold" : ""}`}>{r.brand}</span>
+                    <div className="h-3 flex-1 rounded bg-[var(--bg)]">
+                      <div className={`h-3 rounded ${r.is_self ? "bg-[var(--brand-teal)]" : "bg-[var(--text-tertiary)]"}`} style={{ width: `${Math.min(100, r.share.current * 100)}%` }} />
+                    </div>
+                    <span className="w-12 text-right tabular-nums">{pct(r.share.current)}</span>
+                    <span className="w-20 text-right"><Delta pair={r.share} percent /></span>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -261,6 +369,9 @@ function ShareOfVoice({ data }: { data: LlmOverview }) {
         );
       })}
       {clusters.length === 0 ? <p className="text-sm text-[var(--text-tertiary)]">No answers to count yet.</p> : null}
+      <SidePane open={!!open} label="Answers" onClose={() => setOpen(null)}>
+        {open ? <VoicePane client={client} data={data} cluster={open.cluster} brand={open.brand} /> : null}
+      </SidePane>
     </div>
   );
 }
@@ -687,7 +798,7 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
       ) : tab === "queries" ? (
         <Queries data={overview!} />
       ) : tab === "sov" ? (
-        <ShareOfVoice data={overview!} />
+        <ShareOfVoice client={client} data={overview!} />
       ) : (
         <FullRun client={client} run={run} />
       )}
