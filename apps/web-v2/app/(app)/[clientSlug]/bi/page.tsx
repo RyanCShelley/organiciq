@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { BusinessIntelligence } from "@/components/BusinessIntelligence";
 import { ApiError, apiFetch } from "@/lib/api";
-import { presets, type AskInfo, type Bi } from "@/lib/bi";
+import { presets, type Bi } from "@/lib/bi";
 import { getClients } from "@/lib/clients";
 
 export const metadata = { title: "OrganicIQ insights" };
@@ -25,7 +25,6 @@ export default async function BusinessIntelligencePage({
   const start = from && DATE.test(from) ? from : first.from;
   const end = to && DATE.test(to) ? to : first.to;
 
-  const askPromise = apiFetch<AskInfo>("/v2/ask", { clientId: client.id }).catch(() => null); // optional, asked beside the data
   let data: Bi | null = null;
   let error: string | null = null;
   try {
@@ -37,11 +36,10 @@ export default async function BusinessIntelligencePage({
   }
 
   // Questions are optional: without them the screen still works.
-  const ask = await askPromise;
 
   return (
     <>
-      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} ask={ask} />
+      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} />
     </>
   );
 }

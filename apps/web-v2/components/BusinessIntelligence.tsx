@@ -6,10 +6,9 @@ import { useEffect, useState, useTransition } from "react";
 
 import { addChangeAction, removeChangeAction } from "@/app/(app)/[clientSlug]/bi/actions";
 import { Spinner } from "@/components/ui/Spinner";
-import { AskTheData } from "@/components/bi/AskTheData";
 import { CoverageDonut, TrendChart } from "@/components/bi/Charts";
 import type { Client } from "@/lib/api";
-import { presets, type AskInfo, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
+import { presets, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
 
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${n.toFixed(1)}%`);
@@ -222,16 +221,9 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
   );
 }
 
-export function BusinessIntelligence({ client, from, to, channel, data, error, ask }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null; ask: AskInfo | null }) {
+export function BusinessIntelligence({ client, from, to, channel, data, error }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null }) {
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
-  const [paneOpen, setPaneOpen] = useState(false);
-  useEffect(() => {
-    if (!paneOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPaneOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [paneOpen]);
   const go = (f: string, t: string, c = channel) => {
     const q = new URLSearchParams({ from: f, to: t });
     if (c) q.set("channel", c);
@@ -266,9 +258,6 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
           <p className="mt-1 text-sm text-[var(--text-secondary)]">How visible are we, who is arriving, and do those visits stay and act? Compared with the same number of days before.</p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setPaneOpen((v) => !v)} aria-expanded={paneOpen} aria-controls="ask-pane" className="rounded-lg border border-[var(--brand-teal)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)]">
-            Ask the data
-          </button>
           <button type="button" onClick={download} disabled={!data} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Export data</button>
         </div>
       </header>
@@ -496,20 +485,6 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
           </Section>
         </>
       ) : null}
-      <aside
-        id="ask-pane"
-        aria-label="Ask the data"
-        aria-hidden={!paneOpen}
-        className={`fixed right-0 top-0 z-30 flex h-full w-full max-w-xl flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-xl transition-transform duration-200 ${paneOpen ? "translate-x-0" : "pointer-events-none translate-x-full"}`}
-      >
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-          <h2 className="font-bold">Ask the data</h2>
-          <button type="button" onClick={() => setPaneOpen(false)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-sm font-semibold">Close</button>
-        </div>
-        <div className="min-h-0 flex-1 p-5">
-          <AskTheData clientId={client.id} info={ask} embedded />
-        </div>
-      </aside>
     </section>
   );
 }
