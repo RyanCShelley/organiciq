@@ -152,6 +152,11 @@ def test_each_geo_signal_lists_what_to_fix(db, client_a):
     assert any(t.startswith("Claude gave no usable answer") for t in texts) and any(t.startswith("ChatGPT answered 1 times") or t.startswith("Gemini answered 1 times") for t in texts)
     assert "Gemini: never names the brand" in by["graph"]["summary"] and "Claude: no usable answer" in by["graph"]["summary"]
     assert by["citation"]["summary"] == "0 of 2 answers carry the site's address."
+    # Every item says what it is about, what is wrong and what to do, in plain words.
+    assert cite["subject"] == "“What is the best natural SPF?”" and cite["problem"] == "None of 2 AI answers carry the site's address." and cite["fix"].startswith("Strengthen this page for “natural spf”")
+    assert by["depth"]["items"][0]["problem"].startswith("The answers give little specific detail") and "numbers" in by["depth"]["items"][0]["fix"]
+    assert by["faq"]["items"][0]["problem"] == "Shown 900 times in Google in 90 days, and the page has no FAQ markup." and "FAQPage" in by["faq"]["items"][0]["fix"]
+    assert all(i["problem"] and i["fix"] for sig in by.values() for i in sig["items"])
 
 
 def test_faq_is_scored_page_by_page_on_the_pages_google_shows_most(db, client_a):
@@ -195,3 +200,22 @@ def test_numbered_list_pages_are_not_judged_in_seo_health_but_broken_ones_still_
     for key in ("titles", "descriptions", "indexation", "schema"):
         assert after[key]["total"] == before[key]["total"] and after[key]["affected"] == before[key]["affected"], key
     assert after["errors"]["affected"] == before["errors"]["affected"] + 1, "a broken list page is still a broken page"
+
+
+def test_a_saved_month_written_before_items_had_advice_is_rebuilt_from_the_same_crawl(db, client_a):
+    seed(db, client_a)
+    row = sh.record(db, client_a)
+    first = sh.for_month(db, client_a, "2026-10", today=date(2026, 11, 3))
+    payload = row.payload
+    for sig in payload["geo"]["signals"]:
+        for item in sig["items"]:
+            item.pop("problem", None)
+            item.pop("fix", None)
+    row.payload = payload
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(row, "payload")
+    db.commit()
+    again = sh.for_month(db, client_a, "2026-10", today=date(2026, 11, 3))
+    assert again["crawl_date"] == first["crawl_date"] and again["seo"]["score"] == first["seo"]["score"]
+    assert all(i["problem"] for sig in again["geo"]["signals"] for i in sig["items"])

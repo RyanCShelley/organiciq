@@ -1,5 +1,5 @@
 export type ShCheck = { key: string; label: string; weight: number; score: number; affected: number; total: number; detail: string; urls: string[] };
-export type ShItem = { text: string; url: string | null };
+export type ShItem = { text: string; url: string | null; subject?: string | null; problem?: string | null; fix?: string | null };
 export type ShSignal = { key: string; label: string; weight: number; score: number | null; measured: boolean; detail: Record<string, unknown>; note: string; summary: string | null; items: ShItem[]; affected: number };
 export type ShChange = { key: string; label: string; new: string[]; fixed: string[]; new_count: number; fixed_count: number };
 

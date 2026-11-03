@@ -105,14 +105,28 @@ function Signal({ s }: { s: ShSignal }) {
         )}
       </div>
       {open ? (
-        <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
+        <ul className="mt-2 max-h-96 divide-y divide-[var(--border)] overflow-y-auto rounded-lg bg-[var(--bg)] px-4 py-1 text-sm">
           {s.items.map((i, k) => (
-            <li key={k}>
-              {i.url ? <span className="mr-2 break-all font-semibold">{shortPage(i.url)}</span> : null}
-              <span className="text-[var(--text-secondary)]">{i.text}</span>
+            <li key={k} className="py-3">
+              {i.subject ? (
+                <div className="font-semibold text-[var(--text-primary)]">{i.subject}</div>
+              ) : i.url ? (
+                <a href={i.url} target="_blank" rel="noreferrer" className="block break-all font-semibold text-[var(--text-primary)] underline-offset-2 hover:underline">{shortPage(i.url)}</a>
+              ) : null}
+              {i.subject && i.url ? (
+                <div className="mt-0.5 text-xs text-[var(--text-secondary)]">Page: <a href={i.url} target="_blank" rel="noreferrer" className="break-all underline underline-offset-2">{shortPage(i.url)}</a></div>
+              ) : null}
+              {i.problem || i.fix ? (
+                <dl className="mt-1.5 grid grid-cols-[3.5rem_1fr] gap-x-3 gap-y-1">
+                  {i.problem ? (<><dt className="text-xs font-semibold uppercase tracking-wide text-red-700">Problem</dt><dd className="text-[var(--text-secondary)]">{i.problem}</dd></>) : null}
+                  {i.fix ? (<><dt className="text-xs font-semibold uppercase tracking-wide text-[#006b63]">Fix</dt><dd>{i.fix}</dd></>) : null}
+                </dl>
+              ) : (
+                <div className="mt-0.5 text-[var(--text-secondary)]">{i.text}</div>
+              )}
             </li>
           ))}
-          {s.affected > s.items.length ? <li className="text-[var(--text-tertiary)]">and {s.affected - s.items.length} more</li> : null}
+          {s.affected > s.items.length ? <li className="py-2.5 text-xs text-[var(--text-tertiary)]">and {s.affected - s.items.length} more</li> : null}
         </ul>
       ) : null}
     </li>

@@ -282,8 +282,10 @@ def _answer_signals(db: Session, client: Client) -> dict[str, Any] | None:
     }
 
 
-def _item(text: str, url: str | None = None) -> dict[str, str | None]:
-    return {"text": text, "url": url}
+def _item(text: str, url: str | None = None, *, subject: str | None = None, problem: str | None = None, fix: str | None = None) -> dict[str, str | None]:
+    """One thing to fix. `subject` is what it is about (a prompt, a platform), `problem` what is wrong and `fix` what to do, each in plain words.
+    `text` keeps the whole sentence for anything that only reads that."""
+    return {"text": text, "url": url, "subject": subject, "problem": problem, "fix": fix}
 
 
 def _prompt_pages(db: Session, client: Client) -> dict[str, tuple[str, str | None]]:
@@ -316,31 +318,33 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
     items: dict[str, list[dict[str, str | None]]] = {}
 
     with_ld = {r.normalized_url for r in rows if r.syntax == "json_ld" and not r.parse_error}
-    items["schema"] = [_item("No structured data on this page", s.normalized_url) for s in ok if s.normalized_url not in with_ld]
+    items["schema"] = [_item("No structured data on this page", s.normalized_url, problem="The page has no structured data.", fix="Add JSON-LD markup for what the page is (Product, Article or Organization) so search and AI can read it.") for s in ok if s.normalized_url not in with_ld]
     text = " ".join(((r.schema_type or "") + " " + (r.raw_text or "")).lower() for r in rows if r.syntax == "json_ld")
     if "organization" not in text and "localbusiness" not in text:
-        items["schema"].insert(0, _item("No Organization markup anywhere: add it to the homepage so the brand reads as one entity", home))
+        items["schema"].insert(0, _item("No Organization markup anywhere: add it to the homepage so the brand reads as one entity", home, problem="No Organization markup anywhere on the site.", fix="Add Organization markup (name, logo, address, phone, social profiles) to the homepage so the brand reads as one entity."))
 
     pages, faq_urls = _faq_pages(db, client, rows, snaps)
     items["faq"] = [
-        _item(f"Shows {round(imp):,} times in Google in 90 days and has no FAQ markup" if imp is not None else "No FAQ markup on this page", u)
+        _item(f"Shows {round(imp):,} times in Google in 90 days and has no FAQ markup" if imp is not None else "No FAQ markup on this page", u,
+              problem=f"Shown {round(imp):,} times in Google in 90 days, and the page has no FAQ markup." if imp is not None else "The page has no FAQ markup.",
+              fix="Add a short question and answer section for what people ask, and mark it up with FAQPage markup.")
         for u, imp in pages if u not in faq_urls
     ]
 
-    ent = [_item("No title", s.normalized_url) for s in ok if not (s.title or "").strip()] + [_item("No meta description", s.normalized_url) for s in ok if not (s.description or "").strip()]
+    ent = [_item("No title", s.normalized_url, problem="The page has no title.", fix="Write a title of about 55 to 62 characters that names what the page is.") for s in ok if not (s.title or "").strip()] + [_item("No meta description", s.normalized_url, problem="The page has no meta description.", fix="Write a description of 140 to 155 characters that says what the page offers.") for s in ok if not (s.description or "").strip()]
     if not entity_detail.get("about_page"):
-        ent.insert(0, _item("No about page was found in the crawl"))
+        ent.insert(0, _item("No about page was found in the crawl", subject="The site", problem="No about page was found in the crawl.", fix="Add an About page and link it from the main menu."))
     if not entity_detail.get("contact_page"):
-        ent.insert(0, _item("No contact page was found in the crawl"))
+        ent.insert(0, _item("No contact page was found in the crawl", subject="The site", problem="No contact page was found in the crawl.", fix="Add a Contact page and link it from the main menu."))
     if not entity_detail.get("phone_in_markup"):
-        ent.insert(0, _item("No phone number in the structured data: add it to the Organization markup", home))
+        ent.insert(0, _item("No phone number in the structured data: add it to the Organization markup", home, problem="No phone number in the structured data.", fix="Add the phone number to the Organization markup on the homepage."))
     if not entity_detail.get("address_in_markup"):
-        ent.insert(0, _item("No address in the structured data: add it to the Organization markup", home))
+        ent.insert(0, _item("No address in the structured data: add it to the Organization markup", home, problem="No address in the structured data.", fix="Add the business address to the Organization markup on the homepage."))
     items["entity"] = ent
 
     robots = f"https://{bare_domain(client.domain)}/robots.txt"
     names = {"gptbot": "GPTBot", "ccbot": "CCBot", "google-extended": "Google-Extended", "chatgpt-user": "ChatGPT-User", "anthropic": "Anthropic's crawler"}
-    items["crawler"] = [_item(f"{names.get(b, b)} is blocked in robots.txt, so that AI cannot read the site", robots) for b in blocked]
+    items["crawler"] = [_item(f"{names.get(b, b)} is blocked in robots.txt, so that AI cannot read the site", robots, subject=names.get(b, b), problem=f"{names.get(b, b)} is blocked in robots.txt, so that AI cannot read the site.", fix=f"Remove the robots.txt rule that blocks {names.get(b, b)}, unless you chose to block it.") for b in blocked]
 
     for key in ("citation", "depth", "graph", "attribution"):
         items[key] = []
@@ -350,16 +354,24 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
             kw, page = pages.get(prompt, (None, None))
             n = p["answers"]
             if p["cited"] == 0:
-                items["citation"].append(_item(f"“{prompt}”: none of {n} answers carry the site's address" + (f". Page to strengthen for “{kw}”." if page else (f". No page shows for “{kw}” yet." if kw else "")), page))
+                if page:
+                    fix = f"Strengthen this page for “{kw}”: answer the question directly near the top, add specifics, and make it easy to quote."
+                elif kw:
+                    fix = f"No page shows for “{kw}” yet. Write a page that answers the question, then link to it from related pages."
+                else:
+                    fix = "Add or strengthen a page that answers this question directly."
+                items["citation"].append(_item(f"“{prompt}”: none of {n} answers carry the site's address", page, subject=f"“{prompt}”", problem=f"None of {n} AI answers carry the site's address.", fix=fix))
         for prompt, p in sorted(answers["by_prompt"].items(), key=lambda kv: kv[1]["depth"] / max(1, kv[1]["answers"]))[:25]:
             kw, page = pages.get(prompt, (None, None))
             avg = round(p["depth"] / max(1, p["answers"]))
             if avg < 50:
-                items["depth"].append(_item(f"“{prompt}”: answers give little specific detail ({avg} of 100)", page))
+                items["depth"].append(_item(f"“{prompt}”: answers give little specific detail ({avg} of 100)", page, subject=f"“{prompt}”", problem=f"The answers give little specific detail ({avg} of 100).",
+                                            fix="Add specifics to the page that answers it: numbers, ingredients or specifications, comparisons and named sources." if page else "Write or expand a page with specifics: numbers, ingredients or specifications, comparisons and named sources."))
         for prompt, p in answers["by_prompt"].items():
             if p["attributed"] == 0:
                 kw, page = pages.get(prompt, (None, None))
-                items["attribution"].append(_item(f"“{prompt}”: no answer attributes a source", page))
+                items["attribution"].append(_item(f"“{prompt}”: no answer attributes a source", page, subject=f"“{prompt}”", problem="No AI answer names a source for what it says.",
+                                                  fix="Make the page easy to cite: say who stands behind the claims, add dates and sources, and use a clear title."))
         from app.llm_visibility.platforms import DISPLAY
 
         asked = set(answers["platforms_all"])
@@ -367,9 +379,12 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
             if platform in answers["platforms_naming"]:
                 continue
             if platform in asked:
-                items["graph"].append(_item(f"{platform} answered {answers['platform_answers'].get(platform, 0)} times and never named the brand: it may not know the brand as an entity yet"))
+                items["graph"].append(_item(f"{platform} answered {answers['platform_answers'].get(platform, 0)} times and never named the brand: it may not know the brand as an entity yet", subject=platform,
+                                            problem=f"{platform} answered {answers['platform_answers'].get(platform, 0)} times and never named the brand, so it may not know the brand yet.",
+                                            fix="Add Organization markup and keep the brand's name, description and profiles the same everywhere, then earn mentions on sites it reads."))
             else:
-                items["graph"].append(_item(f"{platform} gave no usable answer in the latest run (no key set, or every call failed), so it cannot count toward this score"))
+                items["graph"].append(_item(f"{platform} gave no usable answer in the latest run (no key set, or every call failed), so it cannot count toward this score", subject=platform,
+                                            problem=f"{platform} gave no usable answer in the latest run, so it cannot count toward this score.", fix=f"Check that the key for {platform} is set, then run LLM visibility again."))
     return items
 
 
@@ -464,6 +479,10 @@ def record(db: Session, client: Client, today: date | None = None) -> SiteHealth
     return row
 
 
+def _items_lack_advice(payload: dict[str, Any] | None) -> bool:
+    return any("problem" not in i for sig in (payload or {}).get("geo", {}).get("signals", []) for i in sig.get("items") or [])
+
+
 def _issue_sets(payload: dict[str, Any] | None) -> dict[str, set[str]]:
     sets = {c["key"]: set(c["urls"]) for c in (payload or {}).get("seo", {}).get("checks", [])}
     for sig in (payload or {}).get("geo", {}).get("signals", []):
@@ -489,7 +508,8 @@ def for_month(db: Session, client: Client, month: str, today: date | None = None
     row = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == month).one_or_none()
     info = _crawl_info(db, client)
     # The crawl held now belongs to one month. While that month is running its row follows each look; once it is over the row is kept as it was.
-    if info is not None and _month_of(info["date"]) == month and (row is None or not over):
+    # A month saved before items said what is wrong and how to fix it is written again from the same crawl, so it reads the same as the rest.
+    if info is not None and _month_of(info["date"]) == month and (row is None or not over or _items_lack_advice(row.payload)):
         record(db, client)
     row = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == month).one_or_none()
     if row is None:
