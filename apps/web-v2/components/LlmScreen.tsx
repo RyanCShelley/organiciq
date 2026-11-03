@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { addLlmPromptsAction, llmResponsesAction, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
+import { addLlmPromptsAction, addSeenCompetitorAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
 import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, Pair, QueryRow } from "@/lib/llm";
 import { Spinner } from "@/components/ui/Spinner";
@@ -470,6 +470,67 @@ function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSetti
   );
 }
 
+function SeenCompetitors({ client }: { client: Client }) {
+  const router = useRouter();
+  const [data, setData] = useState<{ run_date: string | null; brands: SeenBrand[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    seenCompetitorsAction(client.id).then((r) => {
+      if (!live) return;
+      if (r.ok) setData(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [client.id]);
+  const add = (b: SeenBrand) => {
+    if (!b.domain) return;
+    setAdding(b.brand);
+    setError(null);
+    addSeenCompetitorAction(client.id, b.domain, b.brand).then((r) => {
+      setAdding(null);
+      if (r.ok) {
+        setData((d) => (d ? { ...d, brands: d.brands.filter((x) => x.brand !== b.brand) } : d));
+        router.refresh();
+      } else setError(r.error);
+    });
+  };
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+      <h3 className="font-semibold">Brands the AI answers name</h3>
+      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+        From the latest run{data?.run_date ? ` (${data.run_date})` : ""}: brands named in answers that are not this client or a listed competitor. Adding one lists its website as a competitor, so its search rankings are read too.
+      </p>
+      {!data && !error ? <p className="mt-3 text-[var(--text-secondary)]"><Spinner />Reading the latest run…</p> : null}
+      {error ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-red-800">{error}</p> : null}
+      {data && data.brands.length === 0 ? <p className="mt-3 text-[var(--text-secondary)]">None yet. Run LLM visibility first; the Anthropic key finds the brands answers name.</p> : null}
+      {data && data.brands.length > 0 ? (
+        <ul className="mt-3 divide-y divide-[var(--border)]">
+          {data.brands.map((b) => (
+            <li key={b.brand} className="flex flex-wrap items-center gap-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold">{b.brand}</span>{" "}
+                <span className="text-xs text-[var(--text-secondary)]">
+                  {b.mentions} answers · {b.prompts} prompt{b.prompts === 1 ? "" : "s"} · {b.platforms.length} platform{b.platforms.length === 1 ? "" : "s"}
+                  {b.domain ? ` · ${b.domain}` : " · website not found in the sources cited"}
+                </span>
+              </span>
+              {b.domain ? (
+                <button type="button" onClick={() => add(b)} disabled={adding !== null} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">
+                  {adding === b.brand ? <><Spinner />Adding…</> : "Add to competitors"}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function Setup({ client, settings }: { client: Client; settings: LlmSettings }) {
   const router = useRouter();
   const [brand, setBrand] = useState(settings.brand_name);
@@ -512,6 +573,7 @@ function Setup({ client, settings }: { client: Client; settings: LlmSettings }) 
         ) : null}
       </div>
       <ExtraPrompts client={client} settings={settings} />
+      <SeenCompetitors client={client} />
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
         <h3 className="font-semibold">How to spot the brand</h3>
         <label className="mt-3 block"><span className="font-semibold">Brand name</span><input value={brand} onChange={(e) => setBrand(e.target.value)} className={`mt-1 ${input}`} /></label>

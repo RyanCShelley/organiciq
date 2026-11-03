@@ -97,3 +97,39 @@ def test_the_overview_says_when_a_run_is_queued_and_how_far_a_running_one_has_go
     db.commit()
     running = client.get("/v2/llm/overview", headers=h).json()["running"]
     assert running["total_calls"] == 10 and running["answered"] == 4
+
+
+def _run_with_brands(db, client):
+    from app.models.llm_visibility import LlmResponse, LlmRun
+
+    run = LlmRun(client_id=client.id, status="complete")
+    db.add(run)
+    db.flush()
+    for platform in ("openai", "gemini", "anthropic"):
+        db.add(LlmResponse(run_id=run.id, client_id=client.id, query_text="best natural sunscreen", platform=platform,
+                           other_brands_mentioned=["Badger", "Rival"], cited_urls=["https://www.badgerbalm.com/spf", "https://rival.com/x"]))
+    db.add(LlmResponse(run_id=run.id, client_id=client.id, query_text="mineral spf", platform="openai", other_brands_mentioned=["Badger"], cited_urls=[]))
+    db.commit()
+
+
+def test_brands_the_ai_names_are_counted_with_a_website_from_the_sources_it_cites(client, db, client_a, admin_user):
+    settings(db, client_a)
+    client_a.competitor_domains = ["rival.com"]  # Rival is already listed, so it is not offered again
+    db.commit()
+    _run_with_brands(db, client_a)
+    out = client.get("/v2/llm/competitors-seen", headers=client_header(client_a.id, admin_user.email)).json()
+    assert [b["brand"] for b in out["brands"]] == ["Badger"]
+    badger = out["brands"][0]
+    assert badger["mentions"] == 4 and badger["prompts"] == 2 and badger["domain"] == "badgerbalm.com" and badger["platforms"] == ["anthropic", "gemini", "openai"]
+
+
+def test_adding_a_seen_brand_lists_it_as_a_competitor_until_the_limit(client, db, client_a, admin_user):
+    settings(db, client_a)
+    client_a.competitor_domains = ["rival.com"]
+    db.commit()
+    h = client_header(client_a.id, admin_user.email)
+    out = client.post("/v2/llm/competitors", json={"domain": "https://www.badgerbalm.com/", "name": "Badger"}, headers=h).json()
+    assert [c["domain"] for c in out["competitors"]] == ["rival.com", "badgerbalm.com"]
+    client.post("/v2/llm/competitors", json={"domain": "third.com", "name": "Third"}, headers=h)
+    full = client.post("/v2/llm/competitors", json={"domain": "fourth.com", "name": "Fourth"}, headers=h)
+    assert full.status_code == 400 and "already has 3" in full.json()["detail"]

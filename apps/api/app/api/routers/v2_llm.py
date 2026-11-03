@@ -18,7 +18,8 @@ from app.models.client import Client
 from app.models.job import SyncJob, SyncJobStatus
 from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
 from app.schemas import SyncJobCreate
-from app.services.competitors import bare_domain
+from app.services import llm_competitors
+from app.services.competitors import MAX_COMPETITORS, bare_domain, clean_competitor_domains
 from app.services.jobs import OverlappingJobError, enqueue_sync_job
 from datetime import date
 
@@ -152,6 +153,50 @@ def suggest_llm_prompts(
         return suggest.suggest(db, client, settings)
     except suggest.SuggestError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.get("/competitors-seen")
+def competitors_seen(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Brands the AI answers named in the latest run that are not the client or a listed competitor."""
+    config = runner.brand_config(db, client)
+    listed = {config.brand_name, *(name for name, _ in config.competitors), *config.brand_patterns}
+    return llm_competitors.seen_in_answers(db, client, listed)
+
+
+class AddCompetitorIn(BaseModel):
+    domain: str = Field(min_length=3, max_length=255)
+    name: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/competitors")
+def add_competitor(
+    payload: AddCompetitorIn,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """List a brand seen in the AI answers as a competitor: its website joins the client's competitors (so its rankings are
+    read) and its name is what later runs look for."""
+    domain = bare_domain(payload.domain)
+    try:
+        cleaned = clean_competitor_domains([*(client.competitor_domains or []), domain], own_domain=client.domain)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This client already has {MAX_COMPETITORS} competitors, the most that are read each month. Remove one in the client's settings first.",
+        ) from None
+    if domain not in cleaned:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{payload.domain} is not a website address.")
+    client.competitor_domains = cleaned
+    row = db.query(ClientLlmSettings).filter(ClientLlmSettings.client_id == client.id).one_or_none()
+    if row is not None:
+        row.competitors = {**(row.competitors or {}), domain: {"name": payload.name.strip(), "patterns": _clean([payload.name])}}
+    db.commit()
+    return get_llm_settings(client, _, db)
 
 
 @router.delete("/prompts/{prompt_id}")

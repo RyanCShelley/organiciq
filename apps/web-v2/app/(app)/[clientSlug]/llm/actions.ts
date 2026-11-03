@@ -63,3 +63,21 @@ export async function removeLlmPromptAction(clientId: string, promptId: string):
     return failure(error, "The prompt could not be removed: the API did not answer.");
   }
 }
+
+export type SeenBrand = { brand: string; mentions: number; platforms: string[]; prompts: number; domain: string | null };
+
+export async function seenCompetitorsAction(clientId: string): Promise<LlmResult<{ run_date: string | null; brands: SeenBrand[] }>> {
+  try {
+    return { ok: true, value: await apiFetch("/v2/llm/competitors-seen", { clientId }) };
+  } catch (error) {
+    return failure(error, "The brands in the AI answers could not be read: the API did not answer.");
+  }
+}
+
+export async function addSeenCompetitorAction(clientId: string, domain: string, name: string): Promise<LlmResult<LlmSettings>> {
+  try {
+    return { ok: true, value: await apiFetch<LlmSettings>("/v2/llm/competitors", { method: "POST", clientId, body: { domain, name } }) };
+  } catch (error) {
+    return failure(error, "The competitor could not be added: the API did not answer.");
+  }
+}
