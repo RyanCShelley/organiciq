@@ -23,6 +23,7 @@ export type InTarget = {
   suggestions: InSuggestion[];
 };
 export type InData = {
+  q: string | null;
   crawl_date: string;
   pages: number;
   summary: { targets: number; suggestions: number; orphans: number; live: number; ignored: number };

@@ -8,8 +8,9 @@ import type { InResponse } from "@/lib/inlinks";
 
 export const metadata = { title: "Inlink suggester" };
 
-export default async function InlinksPage({ params }: { params: Promise<{ clientSlug: string }> }) {
+export default async function InlinksPage({ params, searchParams }: { params: Promise<{ clientSlug: string }>; searchParams: Promise<{ q?: string }> }) {
   const { clientSlug } = await params;
+  const { q } = await searchParams;
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
@@ -17,14 +18,14 @@ export default async function InlinksPage({ params }: { params: Promise<{ client
   let result: InResponse | null = null;
   let error: string | null = null;
   try {
-    result = await apiFetch<InResponse>("/v2/inlinks", { clientId: client.id });
+    result = await apiFetch<InResponse>(`/v2/inlinks${q?.trim() ? `?${new URLSearchParams({ q: q.trim() })}` : ""}`, { clientId: client.id });
   } catch (e) {
     error = e instanceof ApiError ? e.message : "The suggestions could not be built: the API did not answer.";
   }
   return (
     <>
       <DataFreshness clientId={client.id} pending={freshness} />
-      <InlinkSuggester client={client} data={result?.data ?? null} error={error} />
+      <InlinkSuggester client={client} q={q?.trim() ?? ""} data={result?.data ?? null} error={error} />
     </>
   );
 }

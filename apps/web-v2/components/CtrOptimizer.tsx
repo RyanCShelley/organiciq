@@ -186,7 +186,7 @@ function PageRow({ p, onOpen }: { p: CtrPage; onOpen: (url: string) => void }) {
   );
 }
 
-export function CtrOptimizer({ client, from, to, data, error }: { client: Client; from: string; to: string; data: Ctr | null; error: string | null }) {
+export function CtrOptimizer({ client, from, to, q, data, error }: { client: Client; from: string; to: string; q: string; data: Ctr | null; error: string | null }) {
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
   const [filter, setFilter] = useState<"below" | "all">("below");
@@ -197,10 +197,15 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  const go = (f: string, t: string) => router.push(`/${client.slug}/ctr?${new URLSearchParams({ from: f, to: t })}`);
+  const [search, setSearch] = useState(q);
+  const go = (f: string, t: string, query = q) => {
+    const params = new URLSearchParams({ from: f, to: t });
+    if (query) params.set("q", query);
+    router.push(`/${client.slug}/ctr?${params}`);
+  };
   const ranges = presets();
   const active = ranges.find((r) => r.from === from && r.to === to)?.key ?? "custom";
-  const pages = data ? (filter === "below" ? data.pages.filter((p) => p.below) : data.pages) : [];
+  const pages = data ? (filter === "below" && !q ? data.pages.filter((p) => p.below) : data.pages) : [];
   const searches: CtrSearch[] = data?.searches.slice(0, 15) ?? [];
 
   return (
@@ -221,6 +226,25 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
         <button type="button" onClick={() => go(custom.from, custom.to)} disabled={!custom.from || !custom.to || custom.to < custom.from} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 font-semibold disabled:opacity-50">Apply</button>
         <span className="pb-2 text-xs text-[var(--text-tertiary)]">{day(from)} to {day(to)}</span>
       </div>
+
+      <form
+        className="flex flex-wrap items-center gap-2 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          go(from, to, search.trim());
+        }}
+        role="search"
+      >
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Find a page: part of its address, its title, or a search it ranks for"
+          aria-label="Find a page"
+          className="min-w-[20rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-2"
+        />
+        <button type="submit" className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 font-semibold">Find</button>
+        {q ? <button type="button" onClick={() => { setSearch(""); go(from, to, ""); }} className="text-xs font-semibold underline">Clear</button> : null}
+      </form>
 
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
 
@@ -255,8 +279,8 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
 
           <section className={card}>
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
-              <h2 className="text-lg font-bold">Pages to fix, most clicks first</h2>
-              <div className="flex gap-2 text-xs">
+              <h2 className="text-lg font-bold">{q ? `Pages matching “${q}”` : "Pages to fix, most clicks first"}</h2>
+              <div className={`flex gap-2 text-xs ${q ? "hidden" : ""}`}>
                 {(["below", "all"] as const).map((k) => (
                   <button key={k} type="button" onClick={() => setFilter(k)} className={`rounded-full border px-3 py-1 font-semibold ${filter === k ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)] bg-white"}`}>
                     {k === "below" ? `Below benchmark (${data.pages_below})` : "All pages"}
@@ -270,7 +294,7 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
                 <thead><tr><th className={th}>Page</th><th className={th}>Pos.</th><th className={th}>Impr.</th><th className={th}>CTR</th><th className={th}>Clicks</th><th className={th}>To gain</th><th className={th} /></tr></thead>
                 <tbody>
                   {pages.map((p) => <PageRow key={p.url} p={p} onOpen={setOpen} />)}
-                  {pages.length === 0 ? <tr><td colSpan={7} className="px-5 py-4 font-semibold text-green-700">Clean: no page is below the benchmark in this range.</td></tr> : null}
+                  {pages.length === 0 ? <tr><td colSpan={7} className={`px-5 py-4 font-semibold ${q ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{q ? `No page with search data in this range matches “${q}”.` : "Clean: no page is below the benchmark in this range."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -278,7 +302,7 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
 
           {searches.length > 0 ? (
             <section className={card}>
-              <h2 className="px-5 pt-4 text-lg font-bold">Searches below benchmark</h2>
+              <h2 className="px-5 pt-4 text-lg font-bold">{q ? `Searches below benchmark matching “${q}”` : "Searches below benchmark"}</h2>
               <p className="px-5 text-xs text-[var(--text-tertiary)]">The 15 with the most clicks to gain, whichever page they land on.</p>
               <div className="overflow-x-auto">
                 <table className="mt-2 w-full text-sm">

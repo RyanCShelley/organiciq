@@ -185,3 +185,17 @@ def test_the_report_says_how_much_of_the_range_has_search_data(client, db, clien
     seed(db, client_a)
     out = get(client, client_a, admin_user).json()
     assert out["coverage"] == {"first": "2026-10-10", "last": "2026-10-10", "days": 1}
+
+
+def test_a_page_can_be_found_by_address_title_or_a_search_it_ranks_for(client, db, client_a, admin_user):
+    seed(db, client_a)
+    row(db, client_a, date(2026, 10, 11), "obscure zinc balm", "https://shop.example/obscure", 12, 0, 8.0)  # far too small to be on the main list
+    db.commit()
+    assert "https://shop.example/obscure" not in [p["url"] for p in get(client, client_a, admin_user).json()["pages"]]
+    for needle in ("obscure", "zinc balm", "OBSCURE"):
+        out = get(client, client_a, admin_user, q=needle).json()
+        assert [p["url"] for p in out["pages"]] == ["https://shop.example/obscure"] and out["q"] == needle.lower()
+    by_title = get(client, client_a, admin_user, q="sunscreen").json()
+    assert LOW in [p["url"] for p in by_title["pages"]] and all("sunscreen" in s["query"] or "sunscreen" in s["url"] for s in by_title["searches"])
+    assert get(client, client_a, admin_user, q="no such thing").json()["pages"] == []
+    assert get(client, client_a, admin_user, q="fine").json()["pages"][0]["url"] == FINE, "a page that is doing fine can be looked up too"

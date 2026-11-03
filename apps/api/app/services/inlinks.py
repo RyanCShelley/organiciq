@@ -138,7 +138,7 @@ def states(db: Session, client: Client) -> dict[str, Any]:
     return {"pairs": ignored_pairs, "targets": ignored_targets, "live": live, "rows": rows}
 
 
-def build(db: Session, client: Client) -> dict[str, Any] | None:
+def build(db: Session, client: Client, q: str | None = None) -> dict[str, Any] | None:
     pages = [p for p in keyword_matcher.crawled_pages(db, client) if p.status_code == 200 and not is_utility(p.normalized_url) and not is_pagination(p.normalized_url)]
     if len(pages) < 3:
         return None
@@ -174,6 +174,7 @@ def build(db: Session, client: Client) -> dict[str, Any] | None:
     max_clicks = max((g["clicks"] for g in gsc.values()), default=0.0)
 
     # Targets: pages that deserve more links, most worth fixing first.
+    needle = " ".join((q or "").lower().split())
     targets = []
     for url, p in by_url.items():
         if url in st["targets"]:
@@ -181,12 +182,16 @@ def build(db: Session, client: Client) -> dict[str, Any] | None:
         g = gsc.get(url)
         links = len(editorial_in.get(url, ()))
         deficit = max(0, WANTED_LINKS - links)
-        if deficit == 0 or (g is None and links > 0):
+        if needle:
+            # Looking for a page: it matches on its address, its title, or a search it ranks for, and is shown even when it already has enough links.
+            if needle not in url.lower() and needle not in (p.title or "").lower() and not any(needle in qr for qr, _ in top_queries.get(url, [])):
+                continue
+        elif deficit == 0 or (g is None and links > 0):
             continue
         demand = math.log1p(g["impressions"]) * (1.5 if g and 4 <= g["position"] <= 20 else 1.0) if g else 0.0
         targets.append({"url": url, "page": p, "gsc": g, "links": links, "deficit": deficit, "need": round((1 + demand) * deficit, 2)})
     targets.sort(key=lambda t: -t["need"])
-    targets = targets[:TARGETS_SHOWN]
+    targets = targets[: (TARGETS_SHOWN if not needle else 25)]
 
     # Sources: pages with something to lend.
     def authority(url: str) -> float:
@@ -259,7 +264,7 @@ def build(db: Session, client: Client) -> dict[str, Any] | None:
 
     ignored = [{"id": str(r.id), "target": r.target_url, "source": r.source_url or None, "status": r.status} for r in st["rows"] if r.status == "ignored"]
     return {
-        "crawl_date": max(p.snapshot_date for p in pages).isoformat(), "pages": len(pages),
+        "q": needle or None, "crawl_date": max(p.snapshot_date for p in pages).isoformat(), "pages": len(pages),
         "summary": {"targets": len(recommendations), "suggestions": total, "orphans": sum(1 for t in targets if t["links"] == 0), "live": len(st["live"]), "ignored": len(ignored)},
         "targets": recommendations, "ignored": ignored,
         "rule": f"A page is under-linked with fewer than {WANTED_LINKS} editorial links (links in the page's own content, not the menu or footer). A source must be at least {round(MIN_SIMILARITY * 100)}% alike in subject or rank for the same search, earn clicks or have links of its own, and not already link to the target.",

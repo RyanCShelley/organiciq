@@ -93,12 +93,12 @@ function TargetRow({ client, t, onChanged }: { client: Client; t: InTarget; onCh
           <div className="break-all font-semibold">{shortPage(t.target_url)}</div>
           <div className="truncate text-xs text-[var(--text-tertiary)]" title={t.title}>{t.title}</div>
           <div className="text-xs text-[var(--text-secondary)]">
-            {t.inbound === 0 ? <span className="font-semibold text-red-700">No editorial links</span> : <span>{t.inbound} of {t.wanted} editorial links</span>}
+            {t.inbound === 0 ? <span className="font-semibold text-red-700">No editorial links</span> : t.inbound >= t.wanted ? <span className="font-semibold text-green-700">Clean: {t.inbound} editorial links</span> : <span>{t.inbound} of {t.wanted} editorial links</span>}
             {t.impressions > 0 ? ` · ${num(t.impressions)} impressions${t.position != null ? `, best position ${t.position}` : ""}` : ""}
             {t.queries.length > 0 ? ` · ranks for “${t.queries[0]}”` : ""}
           </div>
         </div>
-        <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : `Show ${t.suggestions.length} to fix`}</button>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : t.inbound >= t.wanted ? `Show ${t.suggestions.length} more possible` : `Show ${t.suggestions.length} to fix`}</button>
         <button type="button" onClick={ignorePage} disabled={pending} className="text-xs text-[var(--text-tertiary)] underline">Ignore this page</button>
       </div>
       {open ? <ul className="mt-2 space-y-2">{t.suggestions.map((s) => <Suggestion key={s.source_url} client={client} target={t.target_url} s={s} onChanged={onChanged} />)}</ul> : null}
@@ -106,10 +106,12 @@ function TargetRow({ client, t, onChanged }: { client: Client; t: InTarget; onCh
   );
 }
 
-export function InlinkSuggester({ client, data, error }: { client: Client; data: InData | null; error: string | null }) {
+export function InlinkSuggester({ client, q, data, error }: { client: Client; q: string; data: InData | null; error: string | null }) {
   const router = useRouter();
   const [, start] = useTransition();
   const refresh = () => router.refresh();
+  const [search, setSearch] = useState(q);
+  const find = (query: string) => router.push(`/${client.slug}/inlinks${query ? `?${new URLSearchParams({ q: query })}` : ""}`);
   const restore = (id: string) =>
     start(async () => {
       const r = await restoreInlinkAction(client.id, client.slug, id);
@@ -123,6 +125,17 @@ export function InlinkSuggester({ client, data, error }: { client: Client; data:
           Which page should link to which. It joins the site crawl (what links where now), Search Console (what each page earns) and how alike two pages are in subject, with anchor text from the Topic Hub tool.
         </p>
       </header>
+      <form className="flex flex-wrap items-center gap-2 text-sm" role="search" onSubmit={(e) => { e.preventDefault(); find(search.trim()); }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Find a page: part of its address, its title, or a search it ranks for"
+          aria-label="Find a page"
+          className="min-w-[20rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-2"
+        />
+        <button type="submit" className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 font-semibold">Find</button>
+        {q ? <button type="button" onClick={() => { setSearch(""); find(""); }} className="text-xs font-semibold underline">Clear</button> : null}
+      </form>
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       {!error && !data ? <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">This site has not been crawled yet, or has too few pages, so there is nothing to suggest. Pull data on the Connections page starts a crawl.</p> : null}
       {data ? (
@@ -135,10 +148,10 @@ export function InlinkSuggester({ client, data, error }: { client: Client; data:
           </div>
 
           <section className={card}>
-            <h2 className="px-5 pt-4 text-lg font-bold">Pages that need links, most worth it first</h2>
+            <h2 className="px-5 pt-4 text-lg font-bold">{q ? `Pages matching “${q}”` : "Pages that need links, most worth it first"}</h2>
             <p className="px-5 text-xs text-[var(--text-tertiary)]">{data.rule} Worked out from the crawl of {day(data.crawl_date)}. Add the link, then use Check it&apos;s live to confirm it.</p>
             {data.targets.length === 0 ? (
-              <p className="px-5 py-4 text-sm font-semibold text-green-700">Clean: every page that earns search traffic has enough links, or nothing alike is left to link from.</p>
+              <p className={`px-5 py-4 text-sm font-semibold ${q ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{q ? `No crawled page matches “${q}”, or nothing alike is left to link from it.` : "Clean: every page that earns search traffic has enough links, or nothing alike is left to link from."}</p>
             ) : (
               <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.targets.map((t) => <TargetRow key={t.target_url} client={client} t={t} onChanged={refresh} />)}</ul>
             )}

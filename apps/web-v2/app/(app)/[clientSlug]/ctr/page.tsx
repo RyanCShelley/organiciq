@@ -16,10 +16,10 @@ export default async function CtrPage({
   searchParams,
 }: {
   params: Promise<{ clientSlug: string }>;
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; q?: string }>;
 }) {
   const { clientSlug } = await params;
-  const { from, to } = await searchParams;
+  const { from, to, q } = await searchParams;
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
@@ -32,14 +32,16 @@ export default async function CtrPage({
   let data: Ctr | null = null;
   let error: string | null = null;
   try {
-    data = await apiFetch<Ctr>(`/v2/ctr?${new URLSearchParams({ from: start, to: end })}`, { clientId: client.id });
+    const params = new URLSearchParams({ from: start, to: end });
+    if (q?.trim()) params.set("q", q.trim());
+    data = await apiFetch<Ctr>(`/v2/ctr?${params}`, { clientId: client.id });
   } catch (e) {
     error = e instanceof ApiError ? e.message : "The CTR optimizer could not be built: the API did not answer.";
   }
   return (
     <>
       <DataFreshness clientId={client.id} pending={freshness} />
-      <CtrOptimizer client={client} from={start} to={end} data={data} error={error} />
+      <CtrOptimizer client={client} from={start} to={end} q={q?.trim() ?? ""} data={data} error={error} />
     </>
   );
 }

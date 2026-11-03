@@ -106,7 +106,7 @@ def monthly(db: Session, client: Client, end: date, brand: list[str]) -> list[di
     return out
 
 
-def build(db: Session, client: Client, start: date, end: date) -> dict[str, Any]:
+def build(db: Session, client: Client, start: date, end: date, q: str | None = None) -> dict[str, Any]:
     brand = vc.brand_keys(client)
     pairs = _pairs(db, client, start, end, brand)
     score, clicks, expected = _score(pairs)
@@ -117,10 +117,15 @@ def build(db: Session, client: Client, start: date, end: date) -> dict[str, Any]
     for (query, url), p in pairs.items():
         by_page[url].append((query, p, _grade(p)))
 
+    needle = " ".join((q or "").lower().split())
     pages = []
     for url, rows in by_page.items():
         imp = sum(p["impressions"] for _, p, _ in rows)
-        if imp < MIN_IMPRESSIONS:
+        if needle:
+            # Looking for a page: it matches on its address, its title, or any search it ranks for, however small it is.
+            if needle not in url.lower() and needle not in (titles.get(url, (None, None))[0] or "").lower() and not any(needle in qr for qr, _, _ in rows):
+                continue
+        elif imp < MIN_IMPRESSIONS:
             continue
         clk = sum(p["clicks"] for _, p, _ in rows)
         exp = sum(g["expected_clicks"] for _, _, g in rows)
@@ -141,6 +146,8 @@ def build(db: Session, client: Client, start: date, end: date) -> dict[str, Any]
     searches = []
     for (query, url), p in pairs.items():
         g = _grade(p)
+        if needle and needle not in query and needle not in url.lower():
+            continue
         if g["below"]:
             searches.append({"query": query, "url": url, "impressions": round(p["impressions"]), "clicks": round(p["clicks"]), "position": round(p["position"], 1), **g})
     searches.sort(key=lambda r: -r["extra_clicks"])
@@ -150,7 +157,7 @@ def build(db: Session, client: Client, start: date, end: date) -> dict[str, Any]
         FactGscQueryPage.client_id == client.id, FactGscQueryPage.date >= start, FactGscQueryPage.date <= end).one()
     return {
         "coverage": {"first": first.isoformat() if first else None, "last": last.isoformat() if last else None, "days": int(days or 0)},
-        "from": start.isoformat(), "to": end.isoformat(), "benchmark": REFERENCE_SCENARIO,
+        "q": needle or None, "from": start.isoformat(), "to": end.isoformat(), "benchmark": REFERENCE_SCENARIO,
         "rule": f"A search is below benchmark when it earns under {int(UNDERPERFORMANCE_RATIO * 100)}% of the clicks the reference expects at its position, with at least {MIN_IMPRESSIONS} impressions and {MIN_RECOVERABLE_CLICKS} clicks to gain. Brand searches are left out.",
         "score": score, "clicks": round(clicks), "expected_clicks": round(expected),
         "extra_clicks": round(sum(p["extra_clicks"] for p in pages)), "pages_below": sum(1 for p in pages if p["below"]), "searches_below": len(searches),

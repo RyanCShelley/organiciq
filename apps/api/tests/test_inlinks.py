@@ -126,3 +126,18 @@ def test_checking_a_link_finds_it_live_records_it_and_stops_suggesting_it(client
 
 def test_a_site_that_was_not_crawled_has_no_suggestions(client, db, client_a, admin_user):
     assert get(client, client_a, admin_user).json() == {"data": None}
+
+
+def test_any_page_can_be_looked_up_even_one_with_enough_links(client, db, client_a, admin_user):
+    seed(db, client_a)
+    for i in range(6):  # spf-50 now has plenty of editorial links, so it is not on the main list
+        page(db, client_a, f"/blog/post-{i}", f"Sunscreen note {i}")
+        link(db, client_a, f"/blog/post-{i}", "/products/spf-50")
+    db.commit()
+    h = client_header(client_a.id, admin_user.email)
+    main = client.get("/v2/inlinks", headers=h).json()["data"]
+    assert BASE + "/products/spf-50" not in [t["target_url"] for t in main["targets"]]
+    found = client.get("/v2/inlinks", params={"q": "SPF-50"}, headers=h).json()["data"]
+    assert [t["target_url"] for t in found["targets"]] == [BASE + "/products/spf-50"] and found["q"] == "spf-50" and found["targets"][0]["inbound"] >= 6
+    by_search = client.get("/v2/inlinks", params={"q": "spf 30 sunscreen"}, headers=h).json()["data"]
+    assert BASE + "/products/spf-30" in [t["target_url"] for t in by_search["targets"]]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -25,9 +25,10 @@ def inlink_suggestions(
     client: Annotated[Client, Depends(require_client)],
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
+    q: Annotated[str | None, Query(max_length=200, description="Find a page by address, title, or a search it ranks for")] = None,
 ) -> dict:
     """Pages that deserve more links, each with the pages that should link to it and the anchor text to use. `data` is null when the site was not crawled."""
-    return {"data": inlinks.build(db, client)}
+    return {"data": inlinks.build(db, client, q)}
 
 
 class VerifyIn(BaseModel):

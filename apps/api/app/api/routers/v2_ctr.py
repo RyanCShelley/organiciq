@@ -35,9 +35,10 @@ def ctr_optimizer_report(
     db: Annotated[Session, Depends(get_db)],
     start: Annotated[date, Query(alias="from")],
     end: Annotated[date, Query(alias="to")],
+    q: Annotated[str | None, Query(max_length=200, description="Find pages by address, title, or a search they rank for")] = None,
 ) -> dict:
     _range(start, end)
-    return ctr_optimizer.build(db, client, start, end)
+    return ctr_optimizer.build(db, client, start, end, q)
 
 
 @router.get("/page")
