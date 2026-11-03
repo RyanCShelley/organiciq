@@ -65,7 +65,7 @@ function Answer({ item }: { item: AskItem }) {
  * A box to ask the data in plain words. The answer is worked out in the background (a question takes 15 to 60 seconds)
  * and polled for; every answer shows the lookups behind it.
  */
-export function AskTheData({ clientId, info }: { clientId: string; info: AskInfo | null }) {
+export function AskTheData({ clientId, info, embedded = false }: { clientId: string; info: AskInfo | null; embedded?: boolean }) {
   const [items, setItems] = useState<AskItem[]>(() => (info ? [...info.recent].reverse() : []));
   const [question, setQuestion] = useState("");
   const [depth, setDepth] = useState<AskDepth>("quick");
@@ -108,9 +108,9 @@ export function AskTheData({ clientId, info }: { clientId: string; info: AskInfo
 
   const busy = items.some((i) => i.status === "running");
   return (
-    <section className="rounded-xl border border-[var(--brand-teal)] bg-[var(--surface)] p-5">
-      <h2 className="text-lg font-bold">Ask the data</h2>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">
+    <section className={embedded ? "flex h-full flex-col" : "rounded-xl border border-[var(--brand-teal)] bg-[var(--surface)] p-5"}>
+      {embedded ? null : <h2 className="text-lg font-bold">Ask the data</h2>}
+      <p className={`${embedded ? "" : "mt-1 "}text-sm text-[var(--text-secondary)]`}>
         Ask in plain words. Answers come only from this client&apos;s data, with the figures, the period and where they came from. It cannot change anything.
       </p>
       {!info?.ready ? (
@@ -126,7 +126,7 @@ export function AskTheData({ clientId, info }: { clientId: string; info: AskInfo
               ))}
             </ul>
           ) : (
-            <div className="mt-4 max-h-[36rem] space-y-4 overflow-y-auto pr-1">
+            <div className={`mt-4 space-y-4 overflow-y-auto pr-1 ${embedded ? "min-h-0 flex-1" : "max-h-[36rem]"}`}>
               {items.map((i) => <Answer key={i.id} item={i} />)}
               <div ref={endRef} />
             </div>
