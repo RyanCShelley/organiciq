@@ -240,6 +240,13 @@ def _depth(text: str, brand: str) -> int:
     return min(score, 100)
 
 
+def _platform_name(value: str | None) -> str:
+    """A platform as it is shown (ChatGPT), whether a run stored its key (openai) or its name."""
+    from app.llm_visibility.platforms import DISPLAY
+
+    return DISPLAY.get((value or "").lower(), value or "")
+
+
 def _answer_signals(db: Session, client: Client) -> dict[str, Any] | None:
     """From the latest finished AI run: how often the answers carry the site's address, how much detail they give, whether they
     attribute sources, and how many platforms name the brand."""
@@ -257,7 +264,7 @@ def _answer_signals(db: Session, client: Client) -> dict[str, Any] | None:
     cited = sum(1 for r in rows if bool(r.url_cited) or (domain and domain in (r.full_response or "").lower()))
     attributed = sum(1 for r in rows if any(m in (r.full_response or "").lower() for m in _ATTRIBUTION))
     depth = [_depth(r.full_response or "", brand) for r in rows]
-    platforms = {r.platform for r in rows if r.brand_mentioned}
+    platforms = {_platform_name(r.platform) for r in rows if r.brand_mentioned}
     by_prompt: dict[str, dict[str, Any]] = {}
     for r, d in zip(rows, depth):
         p = by_prompt.setdefault(" ".join((r.query_text or "").split()), {"answers": 0, "cited": 0, "attributed": 0, "depth": 0, "platforms": set()})
@@ -265,9 +272,10 @@ def _answer_signals(db: Session, client: Client) -> dict[str, Any] | None:
         p["cited"] += bool(r.url_cited) or bool(domain and domain in (r.full_response or "").lower())
         p["attributed"] += any(m in (r.full_response or "").lower() for m in _ATTRIBUTION)
         p["depth"] += d
-        p["platforms"].add(r.platform)
+        p["platforms"].add(_platform_name(r.platform))
     return {
-        "by_prompt": by_prompt, "platforms_all": sorted({r.platform for r in rows}),
+        "by_prompt": by_prompt, "platforms_all": sorted({_platform_name(r.platform) for r in rows}), "platform_answers": dict(Counter(_platform_name(r.platform) for r in rows)),
+        "cited_answers": cited, "attributed_answers": attributed, "avg_depth": round(sum(depth) / len(depth)),
         "run_date": run.started_at.date().isoformat(), "answers": len(rows),
         "citation": min(100, round(cited / len(rows) * 100)), "depth": min(100, round(sum(depth) / len(depth))),
         "attribution": min(100, round(attributed / len(rows) * 100)), "graph": min(len(platforms) * 25, 100), "platforms_naming": sorted(platforms),
@@ -352,9 +360,16 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
             if p["attributed"] == 0:
                 kw, page = pages.get(prompt, (None, None))
                 items["attribution"].append(_item(f"“{prompt}”: no answer attributes a source", page))
-        for platform in answers["platforms_all"]:
-            if platform not in answers["platforms_naming"]:
-                items["graph"].append(_item(f"{platform} does not name the brand in any answer: it may not know the brand as an entity yet"))
+        from app.llm_visibility.platforms import DISPLAY
+
+        asked = set(answers["platforms_all"])
+        for platform in sorted(set(DISPLAY.values()) | asked):
+            if platform in answers["platforms_naming"]:
+                continue
+            if platform in asked:
+                items["graph"].append(_item(f"{platform} answered {answers['platform_answers'].get(platform, 0)} times and never named the brand: it may not know the brand as an entity yet"))
+            else:
+                items["graph"].append(_item(f"{platform} gave no usable answer in the latest run (no key set, or every call failed), so it cannot count toward this score"))
     return items
 
 
@@ -380,7 +395,21 @@ def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
     ):
         signals.append({"key": key, "label": label, "weight": GEO_WEIGHTS[key], "score": answers[key] if answers else None, "measured": answers is not None, "detail": {}, "note": note})
     items = _geo_items(db, client, rows, snaps, answers, blocked, entity_detail)
+    summaries: dict[str, str] = {}
+    if answers:
+        from app.llm_visibility.platforms import DISPLAY
+
+        n = answers["answers"]
+        summaries["citation"] = f"{answers['cited_answers']} of {n} answers carry the site's address."
+        summaries["depth"] = f"Average detail across {n} answers: {answers['avg_depth']} of 100."
+        summaries["attribution"] = f"{answers['attributed_answers']} of {n} answers attribute a source."
+        every = sorted(set(DISPLAY.values()) | set(answers["platforms_all"]))
+        summaries["graph"] = "; ".join(
+            f"{p}: " + ("names the brand" if p in answers["platforms_naming"] else "never names the brand" if p in answers["platforms_all"] else "no usable answer")
+            for p in every
+        ) + "."
     for sig in signals:
+        sig["summary"] = summaries.get(sig["key"])
         found = items.get(sig["key"], []) if sig["measured"] else []
         sig["items"] = found[:URLS_KEPT]
         sig["affected"] = len(found)

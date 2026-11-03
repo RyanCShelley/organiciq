@@ -145,8 +145,13 @@ def test_each_geo_signal_lists_what_to_fix(db, client_a):
     assert by["crawler"]["items"][0]["text"].startswith("GPTBot is blocked") and by["crawler"]["items"][0]["url"].endswith("/robots.txt")
     cite = by["citation"]["items"][0]
     assert "none of 2 answers" in cite["text"] and cite["url"] == BASE + "/a", "the page to strengthen is the one that shows most for the keyword"
-    assert by["citation"]["affected"] == 1 and any("does not name the brand" in i["text"] for i in by["graph"]["items"])
+    assert by["citation"]["affected"] == 1 and any("never named the brand" in i["text"] for i in by["graph"]["items"])
     assert by["depth"]["items"][0]["url"] == BASE + "/a"
+    # A platform that gave no answer is listed too, so a score of 75 is never a mystery: the platform is named and the reason given.
+    texts = [i["text"] for i in by["graph"]["items"]]
+    assert any(t.startswith("Claude gave no usable answer") for t in texts) and any(t.startswith("ChatGPT answered 1 times") or t.startswith("Gemini answered 1 times") for t in texts)
+    assert "Gemini: never names the brand" in by["graph"]["summary"] and "Claude: no usable answer" in by["graph"]["summary"]
+    assert by["citation"]["summary"] == "0 of 2 answers carry the site's address."
 
 
 def test_faq_is_scored_page_by_page_on_the_pages_google_shows_most(db, client_a):

@@ -68,7 +68,7 @@ function IssueGroup({ c }: { c: ShCheck }) {
         <div className="w-40"><Bar score={c.score} /></div>
         <div className="w-24 text-right text-sm tabular-nums"><span className="font-bold">{c.score}</span><span className="text-xs text-[var(--text-tertiary)]"> · {c.weight} pts</span></div>
         {!clean && c.urls.length > 0 ? (
-          <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : `Show ${c.affected} ${c.key === "site_files" ? "problem" : "page"}${c.affected === 1 ? "" : "s"}`}</button>
+          <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : `Show ${c.affected} to fix`}</button>
         ) : <span className="w-16 text-right text-xs font-semibold text-green-700">{clean ? "Clean" : ""}</span>}
       </div>
       {open ? (
@@ -90,6 +90,7 @@ function Signal({ s }: { s: ShSignal }) {
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{s.label}</div>
           <div className="text-xs text-[var(--text-secondary)]">{s.note}</div>
+          {s.summary ? <div className="mt-0.5 text-xs font-medium text-[var(--text-primary)]">{s.summary}</div> : null}
         </div>
         {s.measured && s.score != null ? (
           <>
@@ -97,7 +98,7 @@ function Signal({ s }: { s: ShSignal }) {
             <div className="w-24 text-right text-sm tabular-nums"><span className="font-bold">{s.score}</span><span className="text-xs text-[var(--text-tertiary)]"> · {s.weight} pts</span></div>
             {s.affected > 0 ? (
               <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : `Show ${s.affected} to fix`}</button>
-            ) : <span className="w-16 text-right text-xs font-semibold text-green-700">{clean ? "Nothing to fix" : ""}</span>}
+            ) : <span className="w-16 text-right text-xs font-semibold text-green-700">{clean ? "Clean" : ""}</span>}
           </>
         ) : (
           <div className="w-64 text-right text-xs text-[var(--text-tertiary)]">Not measured: needs a finished LLM visibility run ({s.weight} pts)</div>
