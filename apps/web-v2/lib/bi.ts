@@ -85,3 +85,25 @@ export function presets(today = new Date()): { key: string; label: string; from:
     { key: "365", label: "Last 12 months", from: iso(daysAgo(365)), to: iso(yesterday) },
   ];
 }
+
+export type AskQuery = { query: string; rows: number; error: string | null };
+export type AskDepth = "quick" | "deep" | "deepest";
+export type AskItem = {
+  id: string;
+  status: "running" | "done" | "failed";
+  question: string;
+  depth: AskDepth;
+  model: string;
+  answer: string | null;
+  error: string | null;
+  queries: AskQuery[];
+  cost_usd: number;
+  asked_by: string;
+  created_at: string | null;
+};
+export type AskInfo = {
+  spend: { used_usd: number; cap_usd: number; left_usd: number };
+  depths: Record<AskDepth, { model: string }>;
+  ready: boolean;
+  recent: AskItem[];
+};

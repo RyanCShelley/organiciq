@@ -6,9 +6,10 @@ import { useState, useTransition } from "react";
 
 import { addChangeAction, removeChangeAction } from "@/app/(app)/[clientSlug]/bi/actions";
 import { Spinner } from "@/components/ui/Spinner";
+import { AskTheData } from "@/components/bi/AskTheData";
 import { CoverageDonut, TrendChart } from "@/components/bi/Charts";
 import type { Client } from "@/lib/api";
-import { presets, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
+import { presets, type AskInfo, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
 
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${n.toFixed(1)}%`);
@@ -192,7 +193,7 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
   );
 }
 
-export function BusinessIntelligence({ client, from, to, channel, data, error }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null }) {
+export function BusinessIntelligence({ client, from, to, channel, data, error, ask }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null; ask: AskInfo | null }) {
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
   const go = (f: string, t: string, c = channel) => {
@@ -230,6 +231,8 @@ export function BusinessIntelligence({ client, from, to, channel, data, error }:
         </div>
         <button type="button" onClick={download} disabled={!data} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Export data</button>
       </header>
+
+      <AskTheData clientId={client.id} info={ask} />
 
       <div className="flex flex-wrap items-end gap-2 text-sm">
         {ranges.map((r) => (

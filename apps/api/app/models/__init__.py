@@ -1,3 +1,4 @@
+from app.models.ask_data import AskDataLog
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
 from app.models.copilot import CopilotConversation, CopilotMessage
@@ -108,6 +109,7 @@ __all__ = [
     "FactSerAiCheck",
     "FactSerAiPresence",
     "FactSerAiTrackerStats",
+    "AskDataLog",
     "CopilotConversation",
     "CopilotMessage",
 ]

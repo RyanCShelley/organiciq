@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { BusinessIntelligence } from "@/components/BusinessIntelligence";
 import { DataFreshness } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
-import { presets, type Bi } from "@/lib/bi";
+import { presets, type AskInfo, type Bi } from "@/lib/bi";
 import { getClients } from "@/lib/clients";
 
 export const metadata = { title: "Business Intelligence" };
@@ -36,10 +36,13 @@ export default async function BusinessIntelligencePage({
     error = e instanceof ApiError ? e.message : "Business Intelligence could not be built: the API did not answer.";
   }
 
+  // Questions are optional: without them the screen still works.
+  const ask = await apiFetch<AskInfo>("/v2/ask", { clientId: client.id }).catch(() => null);
+
   return (
     <>
       <DataFreshness clientId={client.id} />
-      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} />
+      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} ask={ask} />
     </>
   );
 }

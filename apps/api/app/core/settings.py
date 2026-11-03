@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     perplexity_api_key: str = ""
     gemini_api_key: str = ""
     anthropic_api_key: str = ""
+    #: What questions asked of one client's data may cost in a calendar month (Ask the data). Past it, questions are refused until next month.
+    ask_monthly_cap_usd: float = 20.0
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True
     daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)
