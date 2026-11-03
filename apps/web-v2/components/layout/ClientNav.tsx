@@ -28,7 +28,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
       { label: "Site health", path: "/site-health" },
       { label: "Schema & knowledge graph", path: "/schema" },
       { label: "CTR optimizer", path: "/ctr" },
-      { label: "Inlink suggester", path: "/inlinks", soon: true },
+      { label: "Inlink suggester", path: "/inlinks" },
     ],
   },
   {
