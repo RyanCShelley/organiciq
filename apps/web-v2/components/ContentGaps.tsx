@@ -155,6 +155,9 @@ function Topics({ client }: { client: Client }) {
       else await load();
     });
   const draft = t?.draft;
+  // A subject set aside is gone at once, without asking the model again: the saved draft still holds it, so it is hidden here.
+  const hidden = new Set((t?.dismissed ?? []).map((d) => d.toLowerCase()));
+  const topics = draft?.topics?.filter((tp) => !hidden.has(tp.label.toLowerCase()));
   return (
     <section className={`${card} p-5`}>
       <h2 className="text-lg font-bold">Missing topics</h2>
@@ -164,10 +167,10 @@ function Topics({ client }: { client: Client }) {
       <div className="mt-3"><AskModel ready={t?.model_ready ?? false} depth={depth} onDepth={setDepth} busy={pending || running} again={draft?.status === "done"} label="Find missing topics" onRun={run} /></div>
       {error ? <p role="alert" className="mt-2 text-sm font-semibold text-red-700">{error}</p> : null}
       {draft?.status === "failed" ? <p role="alert" className="mt-2 text-sm font-semibold text-red-700">{draft.error}</p> : null}
-      {draft?.status === "done" && draft.topics ? (
+      {draft?.status === "done" && topics ? (
         <div className="mt-3 space-y-2">
-          {draft.topics.length === 0 ? <p className="text-sm font-semibold text-green-700">Clean: nothing new to suggest.</p> : null}
-          {draft.topics.map((tp) => (
+          {topics.length === 0 ? <p className="text-sm font-semibold text-green-700">Clean: nothing new to suggest.</p> : null}
+          {topics.map((tp) => (
             <div key={tp.label} className="rounded-lg border border-[var(--border)] p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold">{tp.label}</span>
