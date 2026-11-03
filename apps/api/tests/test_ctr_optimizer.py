@@ -179,3 +179,9 @@ def test_the_title_writer_respects_the_key_and_the_monthly_limit(client, db, cli
     db.commit()
     res = client.post("/v2/ctr/title", json=body, headers=h)
     assert res.status_code == 400 and "used its $1" in res.json()["detail"], "questions, schema work and title drafts share one limit"
+
+
+def test_the_report_says_how_much_of_the_range_has_search_data(client, db, client_a, admin_user):
+    seed(db, client_a)
+    out = get(client, client_a, admin_user).json()
+    assert out["coverage"] == {"first": "2026-10-10", "last": "2026-10-10", "days": 1}

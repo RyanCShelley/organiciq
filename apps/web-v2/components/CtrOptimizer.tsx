@@ -224,6 +224,12 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
 
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
 
+      {data && data.coverage.days < 0.5 * ((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000 + 1) ? (
+        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          Search Console holds searches for only {data.coverage.days} day{data.coverage.days === 1 ? "" : "s"} of this range{data.coverage.first ? ` (${day(data.coverage.first)} to ${day(data.coverage.last ?? data.coverage.first)})` : ""}, so these numbers are partial. Pull Search Console again on the Connections page to fill the rest.
+        </p>
+      ) : null}
+
       {data && data.score == null ? (
         <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">There are not enough searches in this range to judge click-through: Search Console needs at least {100} impressions on a search ranking in the top 20. Try a longer range.</p>
       ) : null}

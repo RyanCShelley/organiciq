@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
@@ -23,7 +24,12 @@ from app.models.job import SyncJob
 
 # psycopg limit is 65535 bind params; keep batches well under that.
 UPSERT_BATCH_SIZE = 1000
+logger = logging.getLogger("organiciq.gsc.publish")
 STREAM_BATCH_SIZE = 20000
+#: Postgres will not index a row over 2,704 bytes. A unique index on (search, address, site, country, device) breaks on the one
+#: Search Console row with a very long search or address, and that one row used to fail the whole pull (SMA Marketing's year of
+#: searches never saved). Rows whose key would not fit are skipped, and counted on the job.
+MAX_KEY_BYTES = 2000
 INSERT_BATCH_SIZE = 5000
 
 
@@ -333,6 +339,16 @@ def _upsert(db: Session, model, constraint: str, columns: tuple[str, ...], paylo
         db.execute(stmt, batch)
 
 
+def _oversize(*parts: str) -> bool:
+    return sum(len((p or "").encode("utf-8")) for p in parts) > MAX_KEY_BYTES
+
+
+def _note_skipped(job: SyncJob, skipped: int) -> None:
+    if skipped:
+        logger.warning("GSC publish skipped %d rows whose key is too long to index (job %s)", skipped, job.id)
+        job.params_json = {**(job.params_json or {}), "skipped_oversize_rows": skipped}
+
+
 def publish_gsc_pages(db: Session, job: SyncJob) -> int:
     urls = _UrlCache(
         primary_site_url=_primary_site_url(db, job.client_id),
@@ -341,6 +357,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
     )
     payloads: list[dict[str, Any]] = []
     seen_any = False
+    skipped = 0
     # Only the columns used, streamed, not the raw JSON copy of every row loaded as an object.
     for row in (
         db.query(
@@ -356,6 +373,9 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
         site = (row.gsc_site_url or "").strip()
         normalized_url = urls.normalized(row.page, site)
         if not normalized_url:
+            continue
+        if _oversize(row.page, normalized_url, site, row.country, row.device):
+            skipped += 1
             continue
         payloads.append(
             {
@@ -373,6 +393,7 @@ def publish_gsc_pages(db: Session, job: SyncJob) -> int:
                 "gsc_site_url": site,
             }
         )
+    _note_skipped(job, skipped)
     if not seen_any or not payloads:
         return 0
 
@@ -390,6 +411,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
         scope=_client_scope(db, job.client_id),
     )
     payloads: list[dict[str, Any]] = []
+    skipped = 0
     for row in (
         db.query(
             StagingGscQueryPage.date, StagingGscQueryPage.query, StagingGscQueryPage.page, StagingGscQueryPage.country,
@@ -405,6 +427,9 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
         site = (row.gsc_site_url or "").strip()
         normalized_url = urls.normalized(row.page, site)
         if not normalized_url:
+            continue
+        if _oversize(query, row.page, normalized_url, site, row.country, row.device):
+            skipped += 1
             continue
         payloads.append(
             {
@@ -423,6 +448,7 @@ def publish_gsc_queries(db: Session, job: SyncJob) -> int:
                 "gsc_site_url": site,
             }
         )
+    _note_skipped(job, skipped)
     if not payloads:
         return 0
 

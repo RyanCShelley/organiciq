@@ -146,7 +146,10 @@ def build(db: Session, client: Client, start: date, end: date) -> dict[str, Any]
     searches.sort(key=lambda r: -r["extra_clicks"])
 
     series = monthly(db, client, end, brand)
+    first, last, days = db.query(func.min(FactGscQueryPage.date), func.max(FactGscQueryPage.date), func.count(func.distinct(FactGscQueryPage.date))).filter(
+        FactGscQueryPage.client_id == client.id, FactGscQueryPage.date >= start, FactGscQueryPage.date <= end).one()
     return {
+        "coverage": {"first": first.isoformat() if first else None, "last": last.isoformat() if last else None, "days": int(days or 0)},
         "from": start.isoformat(), "to": end.isoformat(), "benchmark": REFERENCE_SCENARIO,
         "rule": f"A search is below benchmark when it earns under {int(UNDERPERFORMANCE_RATIO * 100)}% of the clicks the reference expects at its position, with at least {MIN_IMPRESSIONS} impressions and {MIN_RECOVERABLE_CLICKS} clicks to gain. Brand searches are left out.",
         "score": score, "clicks": round(clicks), "expected_clicks": round(expected),

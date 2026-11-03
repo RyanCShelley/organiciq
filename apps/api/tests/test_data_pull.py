@@ -367,3 +367,28 @@ def test_a_lean_pull_with_the_replace_flag_removes_the_old_full_rows_and_keeps_t
     publish_gsc_queries(db, job)
     rows = db.query(FactGscQueryPage).filter(FactGscQueryPage.client_id == client_a.id).all()
     assert [(r.country, r.device, int(r.impressions)) for r in rows] == [("", "", 9)]  # the two full-grain rows are gone: no double counting
+
+
+def test_one_search_too_long_to_index_is_skipped_and_counted_and_does_not_fail_the_whole_pull(db, client_a):
+    from uuid import uuid4
+
+    from app.ingestion.gsc.publish import publish_gsc_pages, publish_gsc_queries
+    from app.models.gsc import FactGscPage, FactGscQueryPage, StagingGscPage, StagingGscQueryPage
+
+    job = SyncJob(id=uuid4(), client_id=client_a.id, source="gsc_queries", start_date=date(2026, 8, 1), end_date=date(2026, 10, 30), status=SyncJobStatus.NORMALIZING, params_json={})
+    db.add(job)
+    db.commit()
+    for query, page in (("natural sunscreen", "https://example.com/spf"), ("x" * 2800, "https://example.com/spf"), ("short", "https://example.com/" + "p" * 2600)):
+        db.add(StagingGscQueryPage(job_id=job.id, client_id=client_a.id, raw={}, date=date(2026, 9, 1), query=query, page=page, country="", device="", gsc_site_url="sc-domain:example.com",
+                                   impressions=3, clicks=1, ctr=0.3, average_position=4.0))
+    db.add(StagingGscPage(job_id=job.id, client_id=client_a.id, raw={}, date=date(2026, 9, 1), page="https://example.com/spf", country="", device="", gsc_site_url="sc-domain:example.com",
+                          impressions=3, clicks=1, ctr=0.3, average_position=4.0))
+    db.add(StagingGscPage(job_id=job.id, client_id=client_a.id, raw={}, date=date(2026, 9, 1), page="https://example.com/" + "q" * 2600, country="", device="", gsc_site_url="sc-domain:example.com",
+                          impressions=3, clicks=1, ctr=0.3, average_position=4.0))
+    db.commit()
+    assert publish_gsc_queries(db, job) == 1
+    assert [r.query for r in db.query(FactGscQueryPage).filter(FactGscQueryPage.client_id == client_a.id)] == ["natural sunscreen"]
+    assert job.params_json["skipped_oversize_rows"] == 2
+    job.params_json = {}
+    assert publish_gsc_pages(db, job) == 1 and job.params_json["skipped_oversize_rows"] == 1
+    assert db.query(FactGscPage).filter(FactGscPage.client_id == client_a.id).count() == 1

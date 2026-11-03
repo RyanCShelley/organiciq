@@ -14,6 +14,7 @@ export type CtrPage = {
 };
 export type CtrSearch = { query: string; url: string; impressions: number; clicks: number; position: number; ctr: number; expected_ctr: number; expected_clicks: number; extra_clicks: number; below: boolean };
 export type Ctr = {
+  coverage: { first: string | null; last: string | null; days: number };
   from: string;
   to: string;
   benchmark: string;
