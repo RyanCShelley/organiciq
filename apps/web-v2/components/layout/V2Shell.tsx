@@ -1,9 +1,15 @@
-import Link from "next/link";
+"use client";
 
-import { LogoWordmark } from "@/components/brand/Logo";
-import { ClientNav, SidebarFooter } from "@/components/layout/ClientNav";
-import { ClientSelect } from "@/components/layout/ClientSelect";
+import { ChevronRight, MessageSquare } from "lucide-react";
+import { useParams, usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import { AskPanel } from "@/components/layout/AskPanel";
+import { locate } from "@/components/layout/nav-config";
+import { Sidebar } from "@/components/layout/Sidebar";
 import type { Client } from "@/lib/api";
+
+const ASK_KEY = "oiq-ask-open";
 
 export function V2Shell({
   clients,
@@ -18,38 +24,50 @@ export function V2Shell({
   signOutAction: () => Promise<void>;
   children: React.ReactNode;
 }) {
-  return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex items-center gap-4 bg-[var(--brand-dark)] px-5 py-3">
-        <Link href="/" aria-label="Organic IQ v2 home">
-          <LogoWordmark inverse className="text-xl" />
-        </Link>
-        <span className="rounded bg-[var(--brand-teal)] px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider text-white">
-          v2
-        </span>
-        <div className="ml-4">
-          <ClientSelect clients={clients} />
-        </div>
-        <Link href="/new-client" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
-          + Add client
-        </Link>
-        <div className="ml-auto flex items-center gap-4 text-sm text-[var(--sidebar-fg-muted)]">
-          {userEmail ? <span>{userEmail}</span> : null}
-          <form action={signOutAction}>
-            <button type="submit" className="text-white underline-offset-2 hover:underline">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
+  const { clientSlug } = useParams<{ clientSlug?: string }>();
+  const pathname = usePathname();
+  const [ask, setAsk] = useState(false);
+  useEffect(() => {
+    try {
+      setAsk(localStorage.getItem(ASK_KEY) === "1");
+    } catch {
+      /* closed until opened */
+    }
+  }, []);
+  const setAskOpen = (open: boolean) => {
+    setAsk(open);
+    try {
+      localStorage.setItem(ASK_KEY, open ? "1" : "0");
+    } catch {
+      /* kept for this visit only */
+    }
+  };
 
-      <div className="flex flex-1">
-        <nav aria-label="Sections" className="flex w-60 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] p-3">
-          <ClientNav />
-          <SidebarFooter isAdmin={isAdmin} />
-        </nav>
+  const client = clients.find((c) => c.slug === clientSlug);
+  const { group, page } = locate(pathname, clientSlug);
+
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar clients={clients} userEmail={userEmail} isAdmin={isAdmin} signOutAction={signOutAction} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-[var(--border)] bg-white px-6 py-2.5 text-sm">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[var(--text-secondary)]">
+            {client ? <span className="truncate">{client.client_name}</span> : null}
+            {group ? <><ChevronRight size={14} aria-hidden /><span className="truncate">{group}</span></> : null}
+            {page ? <><ChevronRight size={14} aria-hidden /><span className="truncate font-medium text-[var(--text-primary)]">{page}</span></> : null}
+          </nav>
+          <button
+            type="button"
+            aria-pressed={ask}
+            onClick={() => setAskOpen(!ask)}
+            className={`ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${ask ? "border-[var(--brand-dark)] bg-[var(--brand-dark)] text-white" : "border-[#d6d9de] bg-white text-[var(--text-primary)] hover:bg-[var(--background)]"}`}
+          >
+            <MessageSquare size={14} aria-hidden /> Ask
+          </button>
+        </header>
         <main className="flex-1 p-8">{children}</main>
       </div>
+      {ask ? <AskPanel context={[client?.client_name, page].filter(Boolean).join(" · ") || "Organic IQ"} onClose={() => setAskOpen(false)} /> : null}
     </div>
   );
 }

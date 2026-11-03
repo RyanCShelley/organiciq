@@ -22,7 +22,7 @@ export function LogoWordmark({
       )}
     >
       <span>
-        Organic<span className="brand-gradient-text">IQ</span>
+        Organic<span className={inverse ? "brand-gradient-text-inverse" : "brand-gradient-text"}>IQ</span>
       </span>
       <sup
         className={cn(
