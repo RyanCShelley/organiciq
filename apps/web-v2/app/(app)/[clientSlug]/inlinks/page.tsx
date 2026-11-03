@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { InlinkSuggester } from "@/components/InlinkSuggester";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
@@ -14,7 +13,6 @@ export default async function InlinksPage({ params, searchParams }: { params: Pr
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
-  const freshness = freshnessFor(client.id);
   let result: InResponse | null = null;
   let error: string | null = null;
   try {
@@ -24,7 +22,6 @@ export default async function InlinksPage({ params, searchParams }: { params: Pr
   }
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <InlinkSuggester client={client} q={q?.trim() ?? ""} data={result?.data ?? null} error={error} />
     </>
   );

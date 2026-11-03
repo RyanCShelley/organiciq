@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { ContentRefreshes } from "@/components/ContentRefreshes";
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { Refreshes } from "@/lib/content";
@@ -35,7 +34,6 @@ export default async function ContentRefreshesPage({
 
   const months = lastMonths();
   const month = asked && MONTH.test(asked) ? asked : months[0];
-  const freshness = freshnessFor(client.id);
   let data: Refreshes | null = null;
   let error: string | null = null;
   try {
@@ -48,7 +46,6 @@ export default async function ContentRefreshesPage({
   }
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <ContentRefreshes client={client} month={month} months={months.includes(month) ? months : [month, ...months]} q={q?.trim() ?? ""} ignored={!!ignored} data={data} error={error} />
     </>
   );

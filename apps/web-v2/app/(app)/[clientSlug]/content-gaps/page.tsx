@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { ContentGaps } from "@/components/ContentGaps";
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { Gaps } from "@/lib/content";
@@ -20,7 +19,6 @@ export default async function ContentGapsPage({
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
-  const freshness = freshnessFor(client.id);
   let data: Gaps | null = null;
   let error: string | null = null;
   try {
@@ -33,7 +31,6 @@ export default async function ContentGapsPage({
   }
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <ContentGaps client={client} q={q?.trim() ?? ""} ignored={!!ignored} data={data} error={error} />
     </>
   );

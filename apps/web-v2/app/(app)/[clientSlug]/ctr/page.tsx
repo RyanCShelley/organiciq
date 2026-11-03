@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { CtrOptimizer } from "@/components/CtrOptimizer";
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets } from "@/lib/bi";
 import { getClients } from "@/lib/clients";
@@ -28,7 +27,6 @@ export default async function CtrPage({
   const start = from && DATE.test(from) ? from : fallback.from;
   const end = to && DATE.test(to) ? to : fallback.to;
 
-  const freshness = freshnessFor(client.id);
   let data: Ctr | null = null;
   let error: string | null = null;
   try {
@@ -40,7 +38,6 @@ export default async function CtrPage({
   }
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <CtrOptimizer client={client} from={start} to={end} q={q?.trim() ?? ""} data={data} error={error} />
     </>
   );

@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { ReviewScreen } from "@/components/ReviewScreen";
 import { Suspense } from "react";
 
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { ClientFocus } from "@/lib/focus";
@@ -29,7 +28,6 @@ export default async function ReviewPage({
   const planMonth = nextMonth(month);
 
   // Everything this page needs is asked at once; it waits for the slowest, not for each in turn.
-  const freshness = freshnessFor(client.id);
   const reviewPromise = apiFetch<Review>(`/v2/review?month=${month}`, { clientId: client.id }).then(
     (r) => ({ review: r, error: null as string | null }),
     (e) => ({ review: null as Review | null, error: e instanceof ApiError ? e.message : "The review could not be built: the API did not answer." }),
@@ -44,7 +42,6 @@ export default async function ReviewPage({
   return (
     <>
     <Suspense fallback={null}>
-      <DataFreshness clientId={client.id} pending={freshness} />
     </Suspense>
     <ReviewScreen
       client={client}

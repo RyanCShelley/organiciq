@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { SearchVisibility } from "@/components/SearchVisibility";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets } from "@/lib/bi";
@@ -29,7 +28,6 @@ export default async function SearchVisibilityPage({
   const start = from && DATE.test(from) ? from : fallback.from;
   const end = to && DATE.test(to) ? to : fallback.to;
 
-  const freshness = freshnessFor(client.id); // asked beside the page's own data, not after it
   let data: Sv | null = null;
   let error: string | null = null;
   try {
@@ -42,7 +40,6 @@ export default async function SearchVisibilityPage({
 
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <SearchVisibility client={client} from={start} to={end} bucket={bucket ?? ""} data={data} error={error} />
     </>
   );

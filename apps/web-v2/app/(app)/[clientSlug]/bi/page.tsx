@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { BusinessIntelligence } from "@/components/BusinessIntelligence";
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets, type AskInfo, type Bi } from "@/lib/bi";
 import { getClients } from "@/lib/clients";
@@ -27,7 +26,6 @@ export default async function BusinessIntelligencePage({
   const end = to && DATE.test(to) ? to : first.to;
 
   const askPromise = apiFetch<AskInfo>("/v2/ask", { clientId: client.id }).catch(() => null); // optional, asked beside the data
-  const freshness = freshnessFor(client.id); // asked beside the page's own data, not after it
   let data: Bi | null = null;
   let error: string | null = null;
   try {
@@ -43,7 +41,6 @@ export default async function BusinessIntelligencePage({
 
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} ask={ask} />
     </>
   );

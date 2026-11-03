@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { SchemaScreen } from "@/components/SchemaScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
@@ -13,7 +12,6 @@ export default async function SchemaPage({ params }: { params: Promise<{ clientS
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
-  const freshness = freshnessFor(client.id);
   let result: ScResponse | null = null;
   let error: string | null = null;
   try {
@@ -23,7 +21,6 @@ export default async function SchemaPage({ params }: { params: Promise<{ clientS
   }
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <SchemaScreen client={client} result={result} error={error} />
     </>
   );

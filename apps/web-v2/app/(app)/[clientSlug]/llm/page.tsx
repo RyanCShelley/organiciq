@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 
-import { DataFreshness } from "@/components/DataFreshness";
 import { LlmScreen } from "@/components/LlmScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
@@ -32,7 +31,6 @@ export default async function LlmPage({
 
   return (
     <>
-      <DataFreshness clientId={client.id} />
       <LlmScreen client={client} overview={overview} settings={settings} error={error} />
     </>
   );

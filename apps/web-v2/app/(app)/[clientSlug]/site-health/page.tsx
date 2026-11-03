@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 
-import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { SiteHealth } from "@/components/SiteHealth";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
@@ -20,7 +19,6 @@ export default async function SiteHealthPage({
   const client = (await getClients()).find((c) => c.slug === clientSlug);
   if (!client) notFound();
 
-  const freshness = freshnessFor(client.id);
   let result: ShResponse | null = null;
   let error: string | null = null;
   try {
@@ -32,7 +30,6 @@ export default async function SiteHealthPage({
 
   return (
     <>
-      <DataFreshness clientId={client.id} pending={freshness} />
       <SiteHealth client={client} result={result} error={error} />
     </>
   );
