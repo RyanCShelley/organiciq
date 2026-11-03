@@ -5,6 +5,7 @@ import { useParams, usePathname } from "next/navigation";
 
 const PAGES = [
   { label: "Monthly review", path: "/review" },
+  { label: "Business Intelligence", path: "/bi" },
   { label: "Decision engine", path: "/engine" },
   { label: "LLM visibility", path: "/llm" },
   { label: "Watchlist", path: "/watchlist" },
