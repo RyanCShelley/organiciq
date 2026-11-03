@@ -179,3 +179,14 @@ def test_the_text_version_works_without_teamwork(client, db, client_a, admin_use
     tid = client.post("/v2/engine/tasks", json=BODY, headers=h(client_a, admin_user)).json()["task"]["id"]
     out = client.get(f"/v2/engine/tasks/{tid}/text", headers=h(client_a, admin_user)).json()
     assert out["name"].startswith("Use the phrasing") and "Checklist" in out["text"]
+
+
+def test_the_assignee_picker_lists_everyone_in_teamwork(client, db, client_a, admin_user, monkeypatch):
+    from app.api.routers import v2_tasks
+
+    v2_tasks._PEOPLE_CACHE.update(at=0.0, rows=[])
+    monkeypatch.setattr(teamwork, "configured", lambda: True)
+    monkeypatch.setattr(teamwork, "list_people", lambda *a, **k: [teamwork.Person(id="2", email="zed@x.co", name="Zed"), teamwork.Person(id="1", email="amy@x.co", name="Amy")])
+    res = client.get("/v2/engine/tasks/people", headers=h(client_a, admin_user))
+    assert res.status_code == 200 and [p["name"] for p in res.json()] == ["Amy", "Zed"]
+    v2_tasks._PEOPLE_CACHE.update(at=0.0, rows=[])

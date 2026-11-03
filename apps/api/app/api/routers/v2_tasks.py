@@ -122,6 +122,26 @@ def task_results_list(
     return task_results.list_results(db, client)
 
 
+_PEOPLE_CACHE: dict = {"at": 0.0, "rows": []}
+_PEOPLE_TTL_SECONDS = 600
+
+
+@router.get("/people")
+def teamwork_people(_: Annotated[AuthUser, Depends(require_sma_staff)]) -> list[dict]:
+    """Everyone in the Teamwork workspace, for the assignee picker. Kept for ten minutes so the plan page stays quick."""
+    import time
+
+    if not teamwork.configured():
+        return []
+    if time.time() - _PEOPLE_CACHE["at"] > _PEOPLE_TTL_SECONDS or not _PEOPLE_CACHE["rows"]:
+        try:
+            people = teamwork.list_people()
+        except teamwork.TeamworkError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        _PEOPLE_CACHE.update(at=time.time(), rows=sorted(({"email": p.email, "name": p.name} for p in people), key=lambda r: (r["name"] or r["email"]).lower()))
+    return _PEOPLE_CACHE["rows"]
+
+
 @router.get("")
 def list_tasks(
     client: Annotated[Client, Depends(require_client)],

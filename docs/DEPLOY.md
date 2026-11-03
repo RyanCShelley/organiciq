@@ -88,7 +88,7 @@ framework preset on Next.js.
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | the login OAuth client |
 | `AUTH_URL` / `NEXTAUTH_URL` | `https://<v2-vercel-host>` |
 | `AUTH_TRUST_HOST` | `true` |
-| `API_URL` / `NEXT_PUBLIC_API_URL` | `https://<api-host>` |
+| `API_URL` | `https://<api-host>`: must start with `https://` (v2 only reads this; `NEXT_PUBLIC_API_URL` is for local development) |
 | `INTERNAL_API_SECRET` | same value as the API's (v2 refuses to sign anyone in without it) |
 | `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.com` |
 

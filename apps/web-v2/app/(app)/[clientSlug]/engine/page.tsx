@@ -38,10 +38,14 @@ export default async function EnginePage({
     apiFetch<ClientFocus | null>(`/v2/focus/${workMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
     apiFetch<TaskPlan>(`/v2/engine/tasks?month=${workMonth}`, { clientId: client.id }).catch(() => EMPTY_PLAN),
-    // Who can be assigned. Only an admin can list a client's team, so anyone else simply sees no picker.
-    apiFetch<{ email: string; name: string | null; is_active: boolean }[]>(`/admin/clients/${client.id}/team`)
-      .then((rows) => rows.filter((r) => r.is_active).map((r) => ({ email: r.email, name: r.name })))
-      .catch(() => [] as { email: string; name: string | null }[]),
+    // Who can be assigned: everyone in Teamwork. If Teamwork cannot be reached, fall back to the client's team (admins only).
+    apiFetch<{ email: string; name: string | null }[]>("/v2/engine/tasks/people", { clientId: client.id }).then((rows) =>
+      rows.length > 0 ? rows : Promise.reject(new Error("empty")),
+    ).catch(() =>
+      apiFetch<{ email: string; name: string | null; is_active: boolean }[]>(`/admin/clients/${client.id}/team`)
+        .then((rows) => rows.filter((r) => r.is_active).map((r) => ({ email: r.email, name: r.name })))
+        .catch(() => [] as { email: string; name: string | null }[]),
+    ),
   ]);
 
   // The bucket in the URL wins; otherwise the one chosen with the focus; otherwise the whole site.

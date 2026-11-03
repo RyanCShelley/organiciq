@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { deleteClientAction, deletePreviewAction, setGscLeanAction } from "@/app/(app)/admin/actions";
+import { deleteClientAction, deletePreviewAction, setGscLeanAction, setGscLeanAllAction } from "@/app/(app)/admin/actions";
 import type { AdminClient, DeletePreview } from "@/lib/admin";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -128,9 +128,26 @@ export function AdminClients({ clients }: { clients: AdminClient[] }) {
   const [filter, setFilter] = useState("");
   const shown = clients.filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()) || c.domain.toLowerCase().includes(filter.toLowerCase()));
 
+  const [switching, startSwitch] = useTransition();
+  const full = clients.filter((c) => !c.gsc_lean).length;
+  const switchAll = () => {
+    if (!window.confirm(`Switch ${full} client${full === 1 ? "" : "s"} to the lean Search Console pull? Each queues one Search Console pull that replaces its old rows when it lands.`)) return;
+    setMessage(null);
+    startSwitch(async () => {
+      const r = await setGscLeanAllAction();
+      setMessage(r.ok ? `${r.value.switched} client${r.value.switched === 1 ? "" : "s"} switched to lean. Their pulls are queued.` : r.error);
+      router.refresh();
+    });
+  };
+
   return (
     <div className="space-y-4">
       {message ? <p className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{message}</p> : null}
+      {full > 0 ? (
+        <button type="button" onClick={switchAll} disabled={switching} className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold disabled:opacity-60">
+          {switching ? <><Spinner />Switching…</> : `Switch all to lean (${full} on the full pull)`}
+        </button>
+      ) : null}
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}

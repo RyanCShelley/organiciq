@@ -169,6 +169,20 @@ class LeanIn(BaseModel):
     enabled: bool
 
 
+@router.post("/clients/gsc-lean-all")
+def set_gsc_lean_all(
+    user: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Switch every client that is still on the full Search Console pull to lean. Each one queues one pull that replaces its old rows."""
+    switched = 0
+    for client in db.query(Client).filter(Client.gsc_lean_pull.is_(False)).order_by(Client.client_name).all():
+        data_pull.set_lean_pull(db, client, True)
+        switched += 1
+    logger.warning("Search Console pull set to lean for %s clients by %s", switched, user.email)
+    return {"switched": switched}
+
+
 @router.post("/clients/{client_id}/gsc-lean")
 def set_gsc_lean(
     client_id: UUID,

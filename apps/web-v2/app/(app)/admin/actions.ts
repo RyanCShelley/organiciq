@@ -60,3 +60,11 @@ export async function setGscLeanAction(clientId: string, enabled: boolean): Prom
     return failure(error, "The Search Console pull could not be switched: the API did not answer.");
   }
 }
+
+export async function setGscLeanAllAction(): Promise<Result<{ switched: number }>> {
+  try {
+    return { ok: true, value: await apiFetch("/v2/admin/clients/gsc-lean-all", { method: "POST" }) };
+  } catch (error) {
+    return failure(error, "The clients could not be switched: the API did not answer.");
+  }
+}

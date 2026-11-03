@@ -22,10 +22,9 @@ Builds on `docs/rebuild-plan.md` (decisions, original phases) and replaces its p
 | **Content engine** | Content gaps | to build |
 | | Content refreshes | to build |
 
-**OPEN A.** Where Focus, Watchlist, Settings and Admin sit. Suggestion: Focus lives inside Monthly review (it is chosen
-there), Watchlist and Settings go in a "Setup" group at the bottom, Admin stays in the header for admins. The content
-calendar, post history and change log from the original plan are not in your list; they could sit under Content engine
-as a third item. Tell me where you want them.
+**Decided (A, 2026-11-03).** Focus stays inside Monthly review. Watchlist stays in the client settings, with the other settings.
+Admin sits at the bottom left, as in v1 (the current sidebar placement is right). The content calendar goes under Content
+engine. The change log goes under Business Intelligence, on the analytics side.
 
 ## 2. One pattern for every screen
 
@@ -56,7 +55,7 @@ comes first.
   `dashboard_exploration.py` (dated, source-backed drill-downs) and `monthly_review.py`. (2) **Ask the data:** a chat box that
   answers questions about this client's data with the numbers and where they came from.
 - **Ask the data builds on the Copilot module** (`app/copilot`: chat, tools, playbook), which is already planned for every
-  screen. **OPEN B:** which model answers (the Copilot gateway speaks the OpenAI-compatible protocol and is not configured;
+  screen. **OPEN B (to decide by comparison, 2026-11-03):** which model answers (the Copilot gateway speaks the OpenAI-compatible protocol and is not configured;
   the four AI platform keys already on the install are another option), and the safety rules: read-only, this client only,
   every figure cited to its table, a monthly cost cap. You linked an article on the best LLM for data analysis; I have not
   read it, so tell me if it should decide the model.
@@ -85,7 +84,8 @@ comes first.
   fixed issues since last month; issues grouped by what to do, not by crawler label.
 - **Layout:** two headline scores with their change; issue groups ordered by pages affected; click a group for the pages and
   the fix; Send to plan.
-- **OPEN C.** The weights for both scores. I propose them; you approve, as with the engine thresholds.
+- **Decided (C).** Ryan already has a scoring logic in his SEO crawler and GEO tool. We walk through those two tools and port
+  their logic (checks, weights, thresholds) rather than proposing new ones. Needs: access to both tools or their code.
 - **Size:** M to L. **Caution:** the crawl stops at its page limit (500 by default) and is slow on Shopify because the host
   rate-limits. A score on a partial crawl must say so.
 

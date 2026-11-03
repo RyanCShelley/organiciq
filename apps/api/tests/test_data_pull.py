@@ -334,6 +334,19 @@ def test_switching_a_client_to_lean_is_instant_and_the_pull_replaces_its_rows_wh
     assert any(c["gsc_lean"] for c in client.get("/v2/admin/clients", headers=h).json())
 
 
+def test_switch_all_moves_every_full_client_to_lean_and_queues_their_pulls(client, db, client_a, client_b, admin_user):
+    for c in (client_a, client_b):
+        connect(db, c)
+        c.gsc_lean_pull = False
+    db.commit()
+    h = auth_header(admin_user.email)
+    assert client.post("/v2/admin/clients/gsc-lean-all", headers=h).json()["switched"] >= 2
+    db.expire_all()
+    assert client_a.gsc_lean_pull is True and client_b.gsc_lean_pull is True
+    assert db.query(SyncJob).filter(SyncJob.client_id == client_b.id, SyncJob.source == "gsc_queries").count() == 1
+    assert client.post("/v2/admin/clients/gsc-lean-all", headers=h).json()["switched"] == 0
+
+
 def test_a_lean_pull_with_the_replace_flag_removes_the_old_full_rows_and_keeps_the_new(db, client_a):
     from uuid import uuid4
 
