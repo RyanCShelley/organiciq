@@ -517,6 +517,14 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         db.commit()
 
         _upsert_watermark(db, job.client_id, snapshot_date, ValidationStatus.PASSED)
+        try:
+            # Keep this month's site health scores: the crawl is replaced on every run, so the score is written now.
+            from app.services import site_health
+
+            site_health.record(db, client)
+        except Exception:  # noqa: BLE001 - a scoring problem must never fail a finished crawl
+            db.rollback()
+            logger.exception("Site health scores were not recorded for %s", client.domain)
         logger.info(
             "Crawl %s: pages=%d schema_blocks=%d sitemap_urls=%d sitemap_at=%s hit_limit=%s",
             client.domain,

@@ -1,5 +1,6 @@
 from app.models.ask_data import AskDataLog
 from app.models.google_update import GoogleSearchUpdate
+from app.models.site_health import SiteHealthSnapshot
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
 from app.models.copilot import CopilotConversation, CopilotMessage
@@ -112,6 +113,7 @@ __all__ = [
     "FactSerAiTrackerStats",
     "AskDataLog",
     "GoogleSearchUpdate",
+    "SiteHealthSnapshot",
     "CopilotConversation",
     "CopilotMessage",
 ]

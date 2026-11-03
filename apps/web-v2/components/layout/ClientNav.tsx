@@ -25,7 +25,7 @@ const GROUPS: { title: string; items: Item[] }[] = [
   {
     title: "Dual optimization",
     items: [
-      { label: "Site health", path: "/site-health", soon: true },
+      { label: "Site health", path: "/site-health" },
       { label: "Schema & knowledge graph", path: "/schema", soon: true },
       { label: "CTR optimizer", path: "/ctr", soon: true },
       { label: "Inlink suggester", path: "/inlinks", soon: true },
