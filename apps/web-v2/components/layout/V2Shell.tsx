@@ -8,7 +8,6 @@ import type { Client } from "@/lib/api";
 /** What v2 will contain, in build order. Nothing links anywhere until its phase ships. */
 export const V2_SECTIONS = [
   { label: "Site Health", phase: "Phase 3" },
-  { label: "Search Visibility", phase: "Phase 4" },
   { label: "CTR Optimizer", phase: "Phase 5" },
   { label: "Content Hub", phase: "Phase 7" },
 ] as const;

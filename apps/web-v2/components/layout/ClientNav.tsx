@@ -7,6 +7,7 @@ const PAGES = [
   { label: "Monthly review", path: "/review" },
   { label: "Business Intelligence", path: "/bi" },
   { label: "Decision engine", path: "/engine" },
+  { label: "Search visibility", path: "/search-visibility" },
   { label: "LLM visibility", path: "/llm" },
   { label: "Watchlist", path: "/watchlist" },
   { label: "Settings", path: "/settings" },

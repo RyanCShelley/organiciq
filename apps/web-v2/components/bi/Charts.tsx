@@ -127,3 +127,80 @@ export function CoverageDonut({ bands, tracked }: { bands: { top3: number; top10
     </div>
   );
 }
+
+export type WeekPoint = { week: string; value: number | null };
+
+/**
+ * One value a week. With `invert` a lower number draws higher, which is how a position reads (1 at the top).
+ * Bands are periods, such as Google updates, drawn behind the line.
+ */
+export function WeeklyLine({ points, invert = false, bands = [], label, format = (n: number) => n.toLocaleString() }: { points: WeekPoint[]; invert?: boolean; bands?: { begin: string; end: string | null; title: string }[]; label: string; format?: (n: number) => string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 640, H = 200, L = 44, R = 12, T = 12, B = 26;
+  const values = points.map((p) => p.value).filter((v): v is number => v != null);
+  if (points.length < 2 || values.length === 0) return <p className="text-sm text-[var(--text-secondary)]">Not enough weeks to draw.</p>;
+  const lo = invert ? Math.max(1, Math.floor(Math.min(...values) - 1)) : 0;
+  const hi = invert ? Math.ceil(Math.max(...values) + 1) : niceMax(Math.max(...values, 1));
+  const x = (i: number) => L + (i / (points.length - 1)) * (W - L - R);
+  const y = (v: number) => (invert ? T + ((v - lo) / (hi - lo || 1)) * (H - T - B) : T + (1 - (v - lo) / (hi - lo || 1)) * (H - T - B));
+  const path = points.reduce((acc, p, i) => (p.value == null ? acc : `${acc}${acc && points[i - 1]?.value != null ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)} `), "");
+  const ticks = [0, 0.5, 1].map((f) => lo + f * (hi - lo));
+  const t0 = new Date(`${points[0].week}T00:00:00`).getTime();
+  const tN = new Date(`${points[points.length - 1].week}T00:00:00`).getTime() + 6 * 86400000;
+  const px = (iso: string) => L + ((new Date(`${iso}T00:00:00`).getTime() - t0) / (tN - t0)) * (W - L - R);
+  const short = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const h = hover != null ? points[hover] : null;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} className="w-full" onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const i = Math.round(((((e.clientX - r.left) / r.width) * W - L) / (W - L - R)) * (points.length - 1));
+          setHover(Math.max(0, Math.min(points.length - 1, i)));
+        }}>
+        {bands.map((b) => {
+          const x1 = Math.max(L, px(b.begin));
+          const x2 = Math.min(W - R, px(b.end ?? points[points.length - 1].week));
+          return x2 <= L || x1 >= W - R ? null : (
+            <g key={b.title + b.begin}>
+              <rect x={x1} y={T} width={Math.max(3, x2 - x1)} height={H - T - B} fill="#b45309" opacity="0.14"><title>{`${b.title} (${short(b.begin)}${b.end ? ` to ${short(b.end)}` : ", still rolling out"})`}</title></rect>
+            </g>
+          );
+        })}
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="var(--border)" />
+            <text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill={GRAY}>{invert ? t.toFixed(0) : compact(Math.round(t))}</text>
+          </g>
+        ))}
+        <path d={path} fill="none" stroke={TEAL} strokeWidth="2.5" strokeLinejoin="round" />
+        {points.map((p, i) => (p.value != null ? <circle key={p.week} cx={x(i)} cy={y(p.value)} r={hover === i ? 4 : 2} fill={TEAL} /> : null))}
+        {[0, Math.floor(points.length / 2), points.length - 1].map((i) => (
+          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10" fill={GRAY}>{short(points[i].week)}</text>
+        ))}
+      </svg>
+      {h ? (
+        <div className="pointer-events-none absolute right-2 top-2 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-xs shadow-sm">
+          <div className="font-semibold">Week of {short(h.week)}</div>
+          <div>{h.value == null ? "no data" : format(h.value)}</div>
+        </div>
+      ) : null}
+      {bands.length > 0 ? <div className="mt-1 text-xs text-[var(--text-secondary)]"><span className="mr-1 inline-block h-2.5 w-4 align-middle" style={{ background: "#b45309", opacity: 0.3 }} />Google update rolling out</div> : null}
+    </div>
+  );
+}
+
+/** A tiny line of a term's weekly position. Better (lower) draws higher. */
+export function Spark({ values }: { values: (number | null)[] }) {
+  const pts = values.map((v, i) => ({ v, i })).filter((p): p is { v: number; i: number } => p.v != null);
+  if (pts.length < 2) return <span className="text-xs text-[var(--text-tertiary)]">–</span>;
+  const lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v));
+  const w = 80, h = 22;
+  const x = (i: number) => (i / Math.max(1, values.length - 1)) * w;
+  const y = (v: number) => 2 + ((v - lo) / (hi - lo || 1)) * (h - 4);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-5 w-20" aria-hidden>
+      <path d={pts.map((p, k) => `${k ? "L" : "M"}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ")} fill="none" stroke={TEAL} strokeWidth="1.5" />
+    </svg>
+  );
+}
