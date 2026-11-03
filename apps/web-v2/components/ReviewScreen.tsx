@@ -141,13 +141,13 @@ function FocusPanel({
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <h2 className="text-sm font-semibold">Choose the focus for {monthLabel(planMonth)}</h2>
-      <div className="mt-3 space-y-2">
+    <div className="max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 @4xl:max-w-none">
+      <h2 className="text-sm font-semibold">Focus for {monthLabel(planMonth)}</h2>
+      <div className="mt-2 space-y-1.5">
         {FOCUSES.map((option) => (
           <label
             key={option.value}
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm ${
+            className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 text-sm ${
               choice === option.value ? "border-[var(--brand-teal)] bg-[var(--brand-teal)]/10" : "border-[var(--border)] hover:border-[var(--brand-teal)]"
             }`}
           >
@@ -159,11 +159,11 @@ function FocusPanel({
                 setChoice(option.value);
                 setSaved(false);
               }}
-              className="mt-1"
+              className="shrink-0"
             />
-            <span>
-              <span className="block font-semibold">{option.label}</span>
-              <span className="text-[var(--text-secondary)]">{option.hint}</span>
+            <span className="min-w-0">
+              <span className="block font-semibold leading-tight">{option.label}</span>
+              <span className="block text-xs text-[var(--text-secondary)]">{option.hint}</span>
             </span>
           </label>
         ))}
@@ -334,7 +334,7 @@ function VisibilityPanel({ visibility, prior, href }: { visibility: Visibility; 
         <a href={href} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-2 @3xl:grid-cols-4">
         <div className={tile}>
           <div className="text-xs text-[var(--text-secondary)]">Terms showing in Google</div>
           <div className="text-xl font-semibold tabular-nums">{visibility.summary.showing_in_google} of {visibility.summary.terms}</div>
@@ -550,7 +550,7 @@ export function ReviewScreen({
   const noun = review?.noun ?? "leads";
 
   return (
-    <section className="max-w-6xl">
+    <section className="@container max-w-6xl">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">{client.client_name}</h1>
@@ -572,7 +572,7 @@ export function ReviewScreen({
         </p>
       ) : null}
 
-      <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
+      <div className="mb-6 grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_16rem]">
 
           {review ? (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -702,7 +702,7 @@ export function ReviewScreen({
                 </p>
               )}
 
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-6 @2xl:grid-cols-2">
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
                   <h2 className="text-sm font-semibold">Where visits came from</h2>
                   <table className="mt-3 w-full text-left text-sm">
