@@ -109,3 +109,40 @@ class InlinkState(Base):
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentState(Base):
+    """A content gap or refresh a person set aside (ignored), so it is not listed again until restored."""
+
+    __tablename__ = "content_states"
+    __table_args__ = (UniqueConstraint("client_id", "area", "key", name="uq_content_state"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: gap or refresh.
+    area: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: The search (a gap) or the page address (a refresh).
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentModelRun(Base):
+    """A model's work on one gap or page: a brief for a page to write, a plan for a page to refresh, or the topics a site is missing. A draft for a person."""
+
+    __tablename__ = "content_model_runs"
+    __table_args__ = (Index("ix_content_model_runs_client_key", "client_id", "kind", "key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: brief, refresh or topics.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: running, done or failed.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

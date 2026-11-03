@@ -1,6 +1,6 @@
 from app.models.ask_data import AskDataLog
 from app.models.google_update import GoogleSearchUpdate
-from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, CtrTitleDraft, InlinkState, SchemaPageReport
+from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, ContentModelRun, ContentState, CtrTitleDraft, InlinkState, SchemaPageReport
 from app.models.site_health import SiteHealthSnapshot
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
@@ -116,6 +116,8 @@ __all__ = [
     "GoogleSearchUpdate",
     "ClientSchemaConcept",
     "ClientSchemaIgnore",
+    "ContentModelRun",
+    "ContentState",
     "CtrTitleDraft",
     "InlinkState",
     "SchemaPageReport",

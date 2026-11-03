@@ -34,8 +34,8 @@ const GROUPS: { title: string; items: Item[] }[] = [
   {
     title: "Content engine",
     items: [
-      { label: "Content gaps", path: "/content-gaps", soon: true },
-      { label: "Content refreshes", path: "/content-refreshes", soon: true },
+      { label: "Content gaps", path: "/content-gaps" },
+      { label: "Content refreshes", path: "/content-refreshes" },
       { label: "Content calendar", path: "/content-calendar", soon: true },
     ],
   },
