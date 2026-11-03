@@ -90,6 +90,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         db.query(
             StagingGa4Traffic.date, StagingGa4Traffic.landing_page, StagingGa4Traffic.session_source, StagingGa4Traffic.session_medium,
             StagingGa4Traffic.sessions, StagingGa4Traffic.active_users, StagingGa4Traffic.views, StagingGa4Traffic.engaged_sessions,
+            StagingGa4Traffic.engagement_seconds,
         )
         .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id, StagingGa4Traffic.report_basis == "legacy")
         .yield_per(STREAM_BATCH_SIZE)
@@ -113,6 +114,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                 "active_users": row.active_users or Decimal(0),
                 "views": row.views or Decimal(0),
                 "engaged_sessions": row.engaged_sessions,
+                "engagement_seconds": row.engagement_seconds,
             }
         )
 
@@ -147,7 +149,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         )
 
     traffic_payloads = _merge_on_grain(
-        traffic_payloads, TRAFFIC_GRAIN, ("sessions", "active_users", "views", "engaged_sessions")
+        traffic_payloads, TRAFFIC_GRAIN, ("sessions", "active_users", "views", "engaged_sessions", "engagement_seconds")
     )
     event_payloads = _merge_on_grain(event_payloads, EVENT_GRAIN, ("event_count",))
 
@@ -187,6 +189,7 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
             "active_users": traffic_stmt.excluded.active_users,
             "views": traffic_stmt.excluded.views,
             "engaged_sessions": traffic_stmt.excluded.engaged_sessions,
+            "engagement_seconds": traffic_stmt.excluded.engagement_seconds,
         },
     )
     for batch in _chunked(traffic_payloads, INSERT_BATCH_SIZE):

@@ -85,7 +85,7 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         start_date=job.start_date,
         end_date=job.end_date,
         dimensions=["date", "landingPage", "sessionSource", "sessionMedium"],
-        metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions"],
+        metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions", "userEngagementDuration"],
     )
     event_rows = run_report(
         access_token=token,
@@ -120,7 +120,7 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
 
     complete = bool(getattr(traffic_rows, "complete", False) and getattr(event_rows, "complete", False))
     if complete:
-        _validate_report_rows(traffic_rows, dimensions=4, metrics=4)
+        _validate_report_rows(traffic_rows, dimensions=4, metrics=5)
         _validate_report_rows(event_rows, dimensions=5, metrics=1)
         if any(not _dim(row, 4) for row in event_rows):
             raise ValueError("GA4 event name is missing")
@@ -136,7 +136,8 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
             continue
         traffic_staged.append({**base, "raw": row, "date": _parse_ga4_date(raw_date), "landing_page": _dim(row, 1),
             "session_source": _dim(row, 2), "session_medium": _dim(row, 3),
-            "sessions": _metric(row, 0), "active_users": _metric(row, 1), "views": _metric(row, 2), "engaged_sessions": _metric(row, 3)})
+            "sessions": _metric(row, 0), "active_users": _metric(row, 1), "views": _metric(row, 2), "engaged_sessions": _metric(row, 3),
+            "engagement_seconds": _metric(row, 4)})
     event_staged: list[dict] = []
     for row in event_rows:
         raw_date = _dim(row, 0)
