@@ -82,6 +82,8 @@ function IssueGroup({ c }: { c: ShCheck }) {
 }
 
 function Signal({ s }: { s: ShSignal }) {
+  const [open, setOpen] = useState(false);
+  const clean = s.measured && s.affected === 0;
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -93,11 +95,25 @@ function Signal({ s }: { s: ShSignal }) {
           <>
             <div className="w-40"><Bar score={s.score} /></div>
             <div className="w-24 text-right text-sm tabular-nums"><span className="font-bold">{s.score}</span><span className="text-xs text-[var(--text-tertiary)]"> · {s.weight} pts</span></div>
+            {s.affected > 0 ? (
+              <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold underline">{open ? "Hide" : `Show ${s.affected} to fix`}</button>
+            ) : <span className="w-16 text-right text-xs font-semibold text-green-700">{clean ? "Nothing to fix" : ""}</span>}
           </>
         ) : (
           <div className="w-64 text-right text-xs text-[var(--text-tertiary)]">Not measured: needs a finished LLM visibility run ({s.weight} pts)</div>
         )}
       </div>
+      {open ? (
+        <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
+          {s.items.map((i, k) => (
+            <li key={k}>
+              {i.url ? <span className="mr-2 break-all font-semibold">{shortPage(i.url)}</span> : null}
+              <span className="text-[var(--text-secondary)]">{i.text}</span>
+            </li>
+          ))}
+          {s.affected > s.items.length ? <li className="text-[var(--text-tertiary)]">and {s.affected - s.items.length} more</li> : null}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -126,7 +142,7 @@ function View({ client, data }: { client: Client; data: ShData }) {
 
       <section className={card}>
         <h2 className="px-5 pt-4 text-lg font-bold">GEO readiness, signal by signal</h2>
-        <p className="px-5 text-xs text-[var(--text-tertiary)]">The same signals and weights as the GEO Grader, read from every crawled page and from the latest AI answers{data.geo.answers ? ` (${data.geo.answers.answers} answers, run on ${day(data.geo.answers.run_date)})` : ""}.</p>
+        <p className="px-5 text-xs text-[var(--text-tertiary)]">The same signals and weights as the GEO Grader. Open any line to see the pages or prompts to fix. Read from every crawled page and from the latest AI answers{data.geo.answers ? ` (${data.geo.answers.answers} answers, run on ${day(data.geo.answers.run_date)})` : ""}.</p>
         <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.geo.signals.map((s) => <Signal key={s.key} s={s} />)}</ul>
       </section>
 

@@ -116,3 +116,34 @@ def test_a_site_that_was_never_crawled_has_no_scores(client, db, client_a, admin
     out = client.get("/v2/site-health", headers=client_header(client_a.id, admin_user.email)).json()
     assert out == {"month": None, "months": [], "data": None}
     assert client.get("/v2/site-health", params={"month": "nope"}, headers=client_header(client_a.id, admin_user.email)).status_code == 400
+
+
+def test_each_geo_signal_lists_what_to_fix(db, client_a):
+    from app.models.gsc import FactGscQueryPage
+    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+    seed(db, client_a)  # pages /, /about-us, /pages/contact, /a, /b, /dup1, /nodesc; JSON-LD Product on / and /a
+    db.add(FactCrawlPageIssue(client_id=client_a.id, source=CRAWL_SOURCE_FIRST_PARTY, snapshot_date=CRAWL, issue_code="ai_crawlers_blocked", normalized_url=None, raw={"agents": ["GPTBot"]}))
+    for url, imp in ((BASE + "/a", 900), (BASE + "/b", 300)):
+        db.add(FactGscQueryPage(client_id=client_a.id, date=date(2026, 10, 10), query="natural spf", raw_url=url, normalized_url=url, country="usa", device="DESKTOP",
+                                impressions=Decimal(imp), clicks=Decimal(1), ctr=Decimal(0), average_position=Decimal(5)))
+    b = WatchlistBucket(client_id=client_a.id, name="SPF", name_key="spf", sort_order=0)
+    db.add(b)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=b.id, keyword="natural spf", keyword_key="natural spf", paired_ai_prompt="What is the best natural SPF?"))
+    run = LlmRun(client_id=client_a.id, status="completed")
+    db.add(run)
+    db.flush()
+    for platform in ("openai", "gemini"):
+        db.add(LlmResponse(run_id=run.id, client_id=client_a.id, query_text="What is the best natural SPF?", platform=platform, visibility_type="Not visible", brand_mentioned=False, url_cited=False, full_response="Try Badger."))
+    db.commit()
+    by = {s["key"]: s for s in sh.geo_readiness(db, client_a)["signals"]}
+    schema_urls = [i["url"] for i in by["schema"]["items"]]
+    assert BASE + "/" not in schema_urls[1:] and BASE + "/b" in schema_urls and by["schema"]["items"][0]["text"].startswith("No Organization markup")
+    assert [i["url"] for i in by["faq"]["items"]] == [BASE + "/a", BASE + "/b"] and "900" in by["faq"]["items"][0]["text"]
+    assert any("No phone number" in i["text"] for i in by["entity"]["items"]) and any(i["url"] == BASE + "/nodesc" for i in by["entity"]["items"])
+    assert by["crawler"]["items"][0]["text"].startswith("GPTBot is blocked") and by["crawler"]["items"][0]["url"].endswith("/robots.txt")
+    cite = by["citation"]["items"][0]
+    assert "none of 2 answers" in cite["text"] and cite["url"] == BASE + "/a", "the page to strengthen is the one that shows most for the keyword"
+    assert by["citation"]["affected"] == 1 and any("does not name the brand" in i["text"] for i in by["graph"]["items"])
+    assert by["depth"]["items"][0]["url"] == BASE + "/a"

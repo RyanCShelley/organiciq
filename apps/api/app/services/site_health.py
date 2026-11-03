@@ -223,11 +223,108 @@ def _answer_signals(db: Session, client: Client) -> dict[str, Any] | None:
     attributed = sum(1 for r in rows if any(m in (r.full_response or "").lower() for m in _ATTRIBUTION))
     depth = [_depth(r.full_response or "", brand) for r in rows]
     platforms = {r.platform for r in rows if r.brand_mentioned}
+    by_prompt: dict[str, dict[str, Any]] = {}
+    for r, d in zip(rows, depth):
+        p = by_prompt.setdefault(" ".join((r.query_text or "").split()), {"answers": 0, "cited": 0, "attributed": 0, "depth": 0, "platforms": set()})
+        p["answers"] += 1
+        p["cited"] += bool(r.url_cited) or bool(domain and domain in (r.full_response or "").lower())
+        p["attributed"] += any(m in (r.full_response or "").lower() for m in _ATTRIBUTION)
+        p["depth"] += d
+        p["platforms"].add(r.platform)
     return {
+        "by_prompt": by_prompt, "platforms_all": sorted({r.platform for r in rows}),
         "run_date": run.started_at.date().isoformat(), "answers": len(rows),
         "citation": min(100, round(cited / len(rows) * 100)), "depth": min(100, round(sum(depth) / len(depth))),
         "attribution": min(100, round(attributed / len(rows) * 100)), "graph": min(len(platforms) * 25, 100), "platforms_naming": sorted(platforms),
     }
+
+
+def _item(text: str, url: str | None = None) -> dict[str, str | None]:
+    return {"text": text, "url": url}
+
+
+def _prompt_pages(db: Session, client: Client) -> dict[str, tuple[str, str | None]]:
+    """Each watchlist prompt, with its keyword and the page that shows most for that keyword in Search Console (the page to improve)."""
+    from app.models.gsc import FactGscQueryPage
+    from app.models.watchlist import WatchlistKeyword
+    from app.services.review_visibility import key_of
+
+    pairs = {" ".join(p.split()): k for k, p in db.query(WatchlistKeyword.keyword, WatchlistKeyword.paired_ai_prompt).filter(WatchlistKeyword.client_id == client.id, WatchlistKeyword.paired_ai_prompt.isnot(None)) if p}
+    if not pairs:
+        return {}
+    keys = {key_of(k) for k in pairs.values()}
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
+    best: dict[str, tuple[str, float]] = {}
+    if newest:
+        for key, url, imp in db.query(q, FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions)).filter(
+            FactGscQueryPage.client_id == client.id, FactGscQueryPage.date > date.fromordinal(newest.toordinal() - 90), q.in_(keys)).group_by(q, FactGscQueryPage.normalized_url):
+            if float(imp or 0) > best.get(key, ("", 0.0))[1]:
+                best[key] = (url, float(imp or 0))
+    return {prompt: (kw, best.get(key_of(kw), (None, 0))[0]) for prompt, kw in pairs.items()}
+
+
+def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], answers: dict[str, Any] | None, blocked: list[str], entity_detail: dict[str, Any]) -> dict[str, list[dict[str, str | None]]]:
+    """What to fix, per signal: pages for the page-level signals, prompts (with the page to improve) for the answer-based ones."""
+    from app.models.gsc import FactGscQueryPage
+
+    home = f"https://{bare_domain(client.domain)}/"
+    ok = [s for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable]
+    items: dict[str, list[dict[str, str | None]]] = {}
+
+    with_ld = {r.normalized_url for r in rows if r.syntax == "json_ld" and not r.parse_error}
+    items["schema"] = [_item("No structured data on this page", s.normalized_url) for s in ok if s.normalized_url not in with_ld]
+    text = " ".join(((r.schema_type or "") + " " + (r.raw_text or "")).lower() for r in rows if r.syntax == "json_ld")
+    if "organization" not in text and "localbusiness" not in text:
+        items["schema"].insert(0, _item("No Organization markup anywhere: add it to the homepage so the brand reads as one entity", home))
+
+    faq_urls = {r.normalized_url for r in rows if r.syntax == "json_ld" and "faqpage" in ((r.schema_type or "") + (r.raw_text or "")).lower()}
+    newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
+    faq: list[dict[str, str | None]] = []
+    if newest:
+        top = db.query(FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions)).filter(
+            FactGscQueryPage.client_id == client.id, FactGscQueryPage.date > date.fromordinal(newest.toordinal() - 90)).group_by(FactGscQueryPage.normalized_url).order_by(func.sum(FactGscQueryPage.impressions).desc()).limit(60).all()
+        okset = {s.normalized_url for s in ok}
+        faq = [_item(f"Shows {round(float(i)):,} times in Google in 90 days and has no FAQ markup", u) for u, i in top if u in okset and u not in faq_urls][:25]
+    items["faq"] = faq
+
+    ent = [_item("No title", s.normalized_url) for s in ok if not (s.title or "").strip()] + [_item("No meta description", s.normalized_url) for s in ok if not (s.description or "").strip()]
+    if not entity_detail.get("about_page"):
+        ent.insert(0, _item("No about page was found in the crawl"))
+    if not entity_detail.get("contact_page"):
+        ent.insert(0, _item("No contact page was found in the crawl"))
+    if not entity_detail.get("phone_in_markup"):
+        ent.insert(0, _item("No phone number in the structured data: add it to the Organization markup", home))
+    if not entity_detail.get("address_in_markup"):
+        ent.insert(0, _item("No address in the structured data: add it to the Organization markup", home))
+    items["entity"] = ent
+
+    robots = f"https://{bare_domain(client.domain)}/robots.txt"
+    names = {"gptbot": "GPTBot", "ccbot": "CCBot", "google-extended": "Google-Extended", "chatgpt-user": "ChatGPT-User", "anthropic": "Anthropic's crawler"}
+    items["crawler"] = [_item(f"{names.get(b, b)} is blocked in robots.txt, so that AI cannot read the site", robots) for b in blocked]
+
+    for key in ("citation", "depth", "graph", "attribution"):
+        items[key] = []
+    if answers:
+        pages = _prompt_pages(db, client)
+        for prompt, p in sorted(answers["by_prompt"].items(), key=lambda kv: kv[1]["cited"] / max(1, kv[1]["answers"])):
+            kw, page = pages.get(prompt, (None, None))
+            n = p["answers"]
+            if p["cited"] == 0:
+                items["citation"].append(_item(f"“{prompt}”: none of {n} answers carry the site's address" + (f". Page to strengthen for “{kw}”." if page else (f". No page shows for “{kw}” yet." if kw else "")), page))
+        for prompt, p in sorted(answers["by_prompt"].items(), key=lambda kv: kv[1]["depth"] / max(1, kv[1]["answers"]))[:25]:
+            kw, page = pages.get(prompt, (None, None))
+            avg = round(p["depth"] / max(1, p["answers"]))
+            if avg < 50:
+                items["depth"].append(_item(f"“{prompt}”: answers give little specific detail ({avg} of 100)", page))
+        for prompt, p in answers["by_prompt"].items():
+            if p["attributed"] == 0:
+                kw, page = pages.get(prompt, (None, None))
+                items["attribution"].append(_item(f"“{prompt}”: no answer attributes a source", page))
+        for platform in answers["platforms_all"]:
+            if platform not in answers["platforms_naming"]:
+                items["graph"].append(_item(f"{platform} does not name the brand in any answer: it may not know the brand as an entity yet"))
+    return items
 
 
 def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
@@ -250,10 +347,16 @@ def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
         ("attribution", "Source attribution", "Answers that attribute their sources."),
     ):
         signals.append({"key": key, "label": label, "weight": GEO_WEIGHTS[key], "score": answers[key] if answers else None, "measured": answers is not None, "detail": {}, "note": note})
+    items = _geo_items(db, client, rows, snaps, answers, blocked, entity_detail)
+    for sig in signals:
+        found = items.get(sig["key"], []) if sig["measured"] else []
+        sig["items"] = found[:URLS_KEPT]
+        sig["affected"] = len(found)
     measured = [s for s in signals if s["measured"]]
     weight = sum(s["weight"] for s in measured)
     score = round(sum(s["weight"] * s["score"] for s in measured) / weight) if weight else 0
-    return {"score": score, "grade": grade(score), "signals": signals, "answers": answers, "partial": len(measured) < len(signals)}
+    public = {k: v for k, v in (answers or {}).items() if k != "by_prompt"} or None
+    return {"score": score, "grade": grade(score), "signals": signals, "answers": public, "partial": len(measured) < len(signals)}
 
 
 # ── The month ─────────────────────────────────────────────────────────────────
@@ -301,7 +404,10 @@ def record(db: Session, client: Client, today: date | None = None) -> SiteHealth
 
 
 def _issue_sets(payload: dict[str, Any] | None) -> dict[str, set[str]]:
-    return {c["key"]: set(c["urls"]) for c in (payload or {}).get("seo", {}).get("checks", [])}
+    sets = {c["key"]: set(c["urls"]) for c in (payload or {}).get("seo", {}).get("checks", [])}
+    for sig in (payload or {}).get("geo", {}).get("signals", []):
+        sets[f"geo:{sig['key']}"] = {f"{i.get('url') or ''}|{i['text']}" for i in sig.get("items") or []}
+    return sets
 
 
 def months(db: Session, client: Client) -> list[str]:
@@ -335,6 +441,7 @@ def for_month(db: Session, client: Client, month: str, today: date | None = None
     if prev is not None:
         now_sets, was_sets = _issue_sets(payload), _issue_sets(prev.payload)
         labels = {c["key"]: c["label"] for c in payload["seo"]["checks"]}
+        labels.update({f"geo:{x['key']}": f"GEO: {x['label']}" for x in payload["geo"]["signals"]})
         for key, urls in now_sets.items():
             new, fixed = sorted(urls - was_sets.get(key, set())), sorted(was_sets.get(key, set()) - urls)
             if new or fixed:
