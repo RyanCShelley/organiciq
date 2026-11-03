@@ -96,8 +96,8 @@ function toCsv(data: Bi, noEvents: boolean) {
     ...data.pages.map((p) => [p.url, p.sessions, p.engagement_rate, p.avg_seconds, noEvents ? null : p.conversions, noEvents ? null : p.conversion_rate]),
     [],
     ["Keywords", data.keywords.from, data.keywords.to],
-    ["Keyword", "Start position", "End position", "Searches per month"],
-    ...data.keywords.keywords.map((k) => [k.keyword, k.start, k.end, k.volume]),
+    ["Keyword", "Searches per month", "Start position", "End position", "AI prompt", "Platforms citing", "Platforms naming"],
+    ...data.keywords.keywords.map((k) => [k.keyword, k.volume, k.start, k.end, k.prompt, k.ai?.cited ?? null, k.ai?.mentioned ?? null]),
   ];
   return rows.map((r) => r.map(q).join(",")).join("\n");
 }
@@ -105,17 +105,46 @@ function toCsv(data: Bi, noEvents: boolean) {
 const th = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]";
 const td = "px-3 py-2 tabular-nums";
 
+/** How the AI platforms answered the term's paired prompt: one chip per platform, and the count against the run before. */
+function AiVisibility({ k }: { k: BiKeyword }) {
+  if (!k.prompt) return <span className="text-xs text-[var(--text-tertiary)]">{k.in_watchlist ? "no prompt paired" : "not on the watchlist"}</span>;
+  if (!k.ai) return <span className="text-xs text-[var(--text-tertiary)]">not asked in the latest run</span>;
+  const { ai } = k;
+  const was = ai.previous_cited == null ? null : `${ai.previous_cited} cited, ${ai.previous_mentioned} named`;
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(ai.by_platform).map(([platform, v]) => (
+          <span
+            key={platform}
+            title={`${platform}: ${v.cited ? "cites the site" : v.named ? "names the brand" : "does not name the brand"}`}
+            className={`rounded px-1.5 py-0.5 text-[0.7rem] font-semibold ${v.cited ? "bg-green-100 text-green-800" : v.named ? "bg-teal-50 text-teal-800" : "bg-[var(--bg)] text-[var(--text-tertiary)]"}`}
+          >
+            {platform} {v.cited ? "cited" : v.named ? "named" : "–"}
+          </span>
+        ))}
+      </div>
+      <div className="text-xs text-[var(--text-secondary)]">
+        {ai.cited} cited, {ai.mentioned} named of {ai.platforms}
+        {was ? <span className="text-[var(--text-tertiary)]"> · before: {was}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function KeywordRow({ k }: { k: BiKeyword }) {
   const style = k.state === "up" || k.state === "new" ? "text-green-700" : k.state === "down" || k.state === "lost" ? "text-red-700" : "text-[var(--text-secondary)]";
   const text =
     k.state === "new" ? "now ranking" : k.state === "lost" ? "dropped out" : k.change == null ? "–" : k.state === "steady" ? "steady" : `${k.change > 0 ? "▲" : "▼"} ${Math.abs(k.change)}`;
   return (
-    <tr className="border-t border-[var(--border)]">
+    <tr className="border-t border-[var(--border)] align-top">
       <td className="px-3 py-2 font-medium">{k.keyword}</td>
+      <td className={td}>{num(k.volume)}</td>
       <td className={td}>{k.start ?? "–"}</td>
       <td className={td}>{k.end ?? "–"}</td>
       <td className={`${td} font-semibold ${style}`}>{text}</td>
-      <td className={td}>{num(k.volume)}</td>
+      <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]" title={k.prompt ?? undefined}>{k.prompt ?? "–"}</td>
+      <td className="px-3 py-2"><AiVisibility k={k} /></td>
     </tr>
   );
 }
@@ -345,11 +374,11 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
 
             {data.keywords.keywords.length > 0 ? (
               <div className={card}>
-                <h3 className="px-5 pt-4 text-sm font-semibold">Keyword movement</h3>
-                <p className="px-5 text-xs text-[var(--text-tertiary)]">Positions on {data.keywords.from ? day(data.keywords.from) : ""} and {data.keywords.to ? day(data.keywords.to) : ""}, the first and last days the rank tracker checked in this range. A dash means not ranking.</p>
+                <h3 className="px-5 pt-4 text-sm font-semibold">Keyword movement and AI visibility</h3>
+                <p className="px-5 text-xs text-[var(--text-tertiary)]">Positions on {data.keywords.from ? day(data.keywords.from) : ""} and {data.keywords.to ? day(data.keywords.to) : ""}, the first and last days the rank tracker checked in this range. A dash means not ranking. The AI columns show how the platforms answered the prompt paired with the term, in the latest run up to the end of the range.</p>
                 <div className="overflow-x-auto">
                   <table className="mt-2 w-full text-sm">
-                    <thead><tr><th className={th}>Keyword</th><th className={th}>Start</th><th className={th}>End</th><th className={th}>Move</th><th className={th}>Searches / month</th></tr></thead>
+                    <thead><tr><th className={th}>Keyword</th><th className={th}>Searches / month</th><th className={th}>Start</th><th className={th}>End</th><th className={th}>Movement</th><th className={th}>AI prompt</th><th className={th}>AI visibility</th></tr></thead>
                     <tbody>{data.keywords.keywords.map((k) => <KeywordRow key={k.keyword} k={k} />)}</tbody>
                   </table>
                 </div>

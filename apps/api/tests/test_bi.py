@@ -130,3 +130,33 @@ def test_totals_daily_coverage_and_ai_mentions_feed_the_overview(client, db, cli
     assert cov["start"] == {"top3": 1, "top10": 1, "top20": 0, "top100": 0, "outside": 1} and cov["end"] == {"top3": 1, "top10": 0, "top20": 0, "top100": 1, "outside": 1}
     ai = out["ai"]
     assert ai["date"] == "2026-10-20" and ai["mention_rate"] == 50.0 and ai["mention_rate_before"] == 0.0 and ai["platforms"][0]["checks"] == 2
+
+
+def test_keyword_movement_carries_the_volume_the_paired_prompt_and_how_the_ai_answered_it(client, db, client_a, admin_user):
+    from app.models.llm_visibility import LlmResponse, LlmRun
+    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+    for day, pos in ((date(2026, 10, 2), 20), (date(2026, 10, 30), 8)):
+        db.add(FactSerRanking(client_id=client_a.id, date=day, site_engine_id="1", keyword_id="k", keyword="natural sunscreen", position=Decimal(pos)))
+    b = WatchlistBucket(client_id=client_a.id, name="Sunscreen", name_key="sunscreen", sort_order=0)
+    db.add(b)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=b.id, keyword="Natural Sunscreen", keyword_key="natural sunscreen", volume=3200, paired_ai_prompt="What is the best natural sunscreen?"))
+    old = LlmRun(client_id=client_a.id, status="completed")
+    new = LlmRun(client_id=client_a.id, status="completed")
+    db.add_all([old, new])
+    db.flush()
+    sa_text = __import__("sqlalchemy").text
+    db.execute(sa_text("update llm_runs set started_at='2026-09-20' where id=:i"), {"i": old.id})
+    db.execute(sa_text("update llm_runs set started_at='2026-10-20' where id=:i"), {"i": new.id})
+    prompt = "What is the best natural sunscreen?"
+    for platform, mentioned, cited in (("openai", True, False), ("gemini", True, True), ("anthropic", False, False)):
+        db.add(LlmResponse(run_id=new.id, client_id=client_a.id, query_text=prompt, platform=platform, visibility_type="Mentioned", brand_mentioned=mentioned, url_cited=cited))
+    db.add(LlmResponse(run_id=old.id, client_id=client_a.id, query_text=prompt, platform="openai", visibility_type="Mentioned", brand_mentioned=False, url_cited=False))
+    db.commit()
+    out = client.get("/v2/bi", params={"from": START.isoformat(), "to": END.isoformat()}, headers=h(client_a, admin_user)).json()["keywords"]["keywords"]
+    k = next(x for x in out if x["keyword"] == "natural sunscreen")
+    assert k["volume"] == 3200 and k["prompt"] == prompt and k["in_watchlist"] is True and k["state"] == "up"
+    ai = k["ai"]
+    assert (ai["platforms"], ai["mentioned"], ai["cited"]) == (3, 2, 1) and (ai["previous_mentioned"], ai["previous_cited"]) == (0, 0)
+    assert ai["by_platform"]["gemini"] == {"cited": True, "named": True}

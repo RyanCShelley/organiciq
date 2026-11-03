@@ -124,10 +124,9 @@ def daily(db: Session, client: Client, start: date, end: date, events: list[str]
     return out
 
 
-def ai_mentions(db: Session, client: Client, end: date) -> dict[str, Any] | None:
-    """How often the AI platforms name or cite the brand: the latest finished run up to the end of the range, against the run before it."""
-    from app.llm_visibility.report import _valid
-    from app.models.llm_visibility import LlmResponse, LlmRun
+def _latest_runs(db: Session, client: Client, end: date):
+    """The latest finished LLM run up to the end of the range, and the one before it."""
+    from app.models.llm_visibility import LlmRun
 
     runs = (
         db.query(LlmRun)
@@ -136,6 +135,15 @@ def ai_mentions(db: Session, client: Client, end: date) -> dict[str, Any] | None
         .limit(2)
         .all()
     )
+    return runs
+
+
+def ai_mentions(db: Session, client: Client, end: date) -> dict[str, Any] | None:
+    """How often the AI platforms name or cite the brand: the latest finished run up to the end of the range, against the run before it."""
+    from app.llm_visibility.report import _valid
+    from app.models.llm_visibility import LlmResponse
+
+    runs = _latest_runs(db, client, end)
     if not runs:
         return None
 
@@ -253,7 +261,29 @@ def keyword_movement(db: Session, client: Client, start: date, end: date) -> dic
         item["change"] = round(s - e, 1) if s is not None and e is not None else None  # positive: moved up
         item["state"] = "new" if s is None and e is not None else "lost" if s is not None and e is None else "up" if (item["change"] or 0) > 0.5 else "down" if (item["change"] or 0) < -0.5 else "steady"
     out.sort(key=lambda r: (r["start"] is None and r["end"] is None, -(r["volume"] or 0)))  # ranking ones first, then by searches
-    return {"from": first.isoformat(), "to": last.isoformat(), "coverage": coverage, "keywords": out[:KEYWORDS_SHOWN]}
+    shown = out[:KEYWORDS_SHOWN]
+    _attach_prompts(db, client, end, shown)
+    return {"from": first.isoformat(), "to": last.isoformat(), "coverage": coverage, "keywords": shown}
+
+
+def _attach_prompts(db: Session, client: Client, end: date, items: list[dict[str, Any]]) -> None:
+    """Each keyword's watchlist volume and the AI prompt paired with it, and how the AI platforms answered that prompt in the
+    latest run (named or cited the brand), against the run before."""
+    from app.models.llm_visibility import LlmResponse
+    from app.models.watchlist import WatchlistKeyword
+    from app.services.review_visibility import _term_ai, key_of
+
+    watch = {key_of(k): (v, p) for k, v, p in db.query(WatchlistKeyword.keyword, WatchlistKeyword.volume, WatchlistKeyword.paired_ai_prompt).filter(WatchlistKeyword.client_id == client.id)}
+    runs = _latest_runs(db, client, end)
+    rows = db.query(LlmResponse).filter(LlmResponse.run_id == runs[0].id, LlmResponse.client_id == client.id).all() if runs else []
+    prev = db.query(LlmResponse).filter(LlmResponse.run_id == runs[1].id, LlmResponse.client_id == client.id).all() if len(runs) > 1 else None
+    for item in items:
+        volume, prompt = watch.get(key_of(item["keyword"]), (None, None))
+        if item["volume"] is None and volume is not None:
+            item["volume"] = float(volume)
+        item["prompt"] = prompt
+        item["ai"] = _term_ai(prompt, rows, prev)
+        item["in_watchlist"] = key_of(item["keyword"]) in watch
 
 
 def change_log(db: Session, client: Client, start: date, end: date) -> list[dict[str, Any]]:

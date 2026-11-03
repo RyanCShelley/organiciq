@@ -27,6 +27,16 @@ export type BiKeyword = {
   url: string | null;
   change: number | null;
   state: "up" | "down" | "steady" | "new" | "lost";
+  in_watchlist: boolean;
+  prompt: string | null;
+  ai: {
+    by_platform: Record<string, { cited: boolean; named: boolean }>;
+    platforms: number;
+    cited: number;
+    mentioned: number;
+    previous_cited: number | null;
+    previous_mentioned: number | null;
+  } | null;
 };
 
 export type BiChange = { id: string; date: string; type: string; description: string; page: string | null; from_task: boolean };
