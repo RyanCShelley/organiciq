@@ -102,11 +102,7 @@ def approve_concept(db: Session, client: Client, name: str, qid: str, label: str
 # ── spend ─────────────────────────────────────────────────────────────────────
 
 
-def month_spend(db: Session, client: Client) -> Decimal:
-    now = datetime.now(timezone.utc)
-    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    reports = db.query(func.coalesce(func.sum(SchemaPageReport.cost_usd), 0)).filter(SchemaPageReport.client_id == client.id, SchemaPageReport.created_at >= start).scalar() or Decimal(0)
-    return engine.month_spend(db, client.id) + reports
+from app.services.model_spend import month_spend  # noqa: E402,F401  (the same total for every feature that asks the model)
 
 
 # ── one page ──────────────────────────────────────────────────────────────────

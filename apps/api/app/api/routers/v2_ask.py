@@ -18,6 +18,7 @@ from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
 from app.models.ask_data import AskDataLog
 from app.models.client import Client
+from app.services import model_spend
 
 router = APIRouter(prefix="/v2/ask", tags=["v2 ask the data"])
 
@@ -45,7 +46,7 @@ def _out(row: AskDataLog) -> dict:
 
 def _spend(db: Session, client: Client) -> dict:
     cap = get_settings().ask_monthly_cap_usd
-    used = float(engine.month_spend(db, client.id))
+    used = float(model_spend.month_spend(db, client))
     return {"used_usd": round(used, 2), "cap_usd": cap, "left_usd": round(max(cap - used, 0), 2)}
 
 

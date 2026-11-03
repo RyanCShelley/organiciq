@@ -8,7 +8,6 @@ from decimal import Decimal
 from app.models.annotation import Annotation, AnnotationType
 from app.models.bing_stats import FactBingQueryStat
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
-from app.models.engine_task import EngineTask
 from app.models.gsc import FactGscQueryPage
 from app.services import ctr_optimizer as co
 from tests.conftest import client_header
@@ -77,19 +76,106 @@ def test_a_page_opens_to_its_snippet_its_searches_bing_and_what_was_changed(clie
     assert change["before"]["ctr"] == 1.0 and change["after"] is None or change["after"]["ctr"] > change["before"]["ctr"]
 
 
-def test_sending_a_page_to_the_plan_makes_a_task_with_the_evidence(client, db, client_a, admin_user):
-    seed(db, client_a)
-    h = client_header(client_a.id, admin_user.email)
-    made = client.post("/v2/ctr/plan", json={"url": LOW, "from": START.isoformat(), "to": END.isoformat()}, headers=h)
-    assert made.status_code == 200
-    task = db.query(EngineTask).filter(EngineTask.client_id == client_a.id).one()
-    assert task.page_url == LOW and task.kind == "suggestion" and task.search == "natural sunscreen"
-    assert "Rewrite the title and description of /low" in task.title and any("Sunscreen" in s for s in task.steps) and any("natural sunscreen" in s for s in task.steps)
-    again = client.post("/v2/ctr/plan", json={"url": LOW, "from": START.isoformat(), "to": END.isoformat()}, headers=h)
-    assert again.status_code == 200 and db.query(EngineTask).count() == 1, "sending it twice is one task"
-    fine = client.post("/v2/ctr/plan", json={"url": FINE, "from": START.isoformat(), "to": END.isoformat()}, headers=h)
-    assert fine.status_code == 400 and "not below" in fine.json()["detail"]
-
-
 def test_a_bad_range_is_refused(client, db, client_a, admin_user):
     assert client.get("/v2/ctr", params={"from": "2026-10-31", "to": "2026-10-01"}, headers=client_header(client_a.id, admin_user.email)).status_code == 400
+
+
+# ── title writer ─────────────────────────────────────────────────────────────
+
+
+def _titles_seed(db, client_a):
+    seed(db, client_a)
+    for i in range(6):  # a pattern: most titles end with the brand after a separator
+        db.add(FactCrawlPageSnapshot(client_id=client_a.id, source=CRAWL_SOURCE_FIRST_PARTY, snapshot_date=date(2026, 10, 1), raw_url=f"https://shop.example/p{i}", normalized_url=f"https://shop.example/p{i}",
+                                     indexable=True, status_code=200, title=f"Thing {i} | Shop Example", description="d"))
+    db.commit()
+
+
+def _enable(monkeypatch, replies, seen):
+    from app.core.settings import get_settings
+    from app.schema_tools import llm
+    from app.services import ctr_titles
+    from app.services.page_diagnostic import Fetched
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "k")
+    monkeypatch.setattr(ctr_titles, "read_page", lambda url, domain: Fetched(status=200, final_url=url, headers={}, body="<html><body><nav>menu</nav><h1>Natural sunscreen</h1><p>Zinc oxide sunscreen for sensitive skin.</p></body></html>"))
+
+    def call(depth, prompt, **kw):
+        seen["prompt"], seen["depth"] = prompt, depth
+        return replies, 1500, 300
+
+    monkeypatch.setattr(llm, "call", call)
+
+
+def test_the_model_writes_title_options_from_the_pages_search_data_and_nothing_is_sent_to_the_plan(client, db, client_a, admin_user, monkeypatch):
+    import json
+
+    from app.models.engine_task import EngineTask
+
+    _titles_seed(db, client_a)
+    seen: dict = {}
+    reply = json.dumps({"diagnosis": "The title never says natural.", "recommended": 1, "options": [
+        {"title": "Sunscreen", "serves": ["natural sunscreen"], "why": "same as now"},                      # the title now: dropped
+        {"title": "Natural Sunscreen for Sensitive Skin | Shop Example", "serves": ["natural sunscreen", "mineral spf"], "why": "Leads with the searched term."},
+        {"title": "Natural Sunscreen for Sensitive Skin | Shop Example", "serves": [], "why": "a repeat"},      # dropped
+        {"title": "Mineral SPF Sunscreen: Zinc Oxide, Gentle on Skin and Reef-Friendly | Shop Example", "serves": ["mineral spf"], "why": "Benefit lead."},
+        {"title": "Zinc Sunscreen", "serves": ["mineral spf"], "why": "Short."},
+    ]})
+    _enable(monkeypatch, reply, seen)
+    h = client_header(client_a.id, admin_user.email)
+    made = client.post("/v2/ctr/title", json={"url": LOW, "from": START.isoformat(), "to": END.isoformat(), "depth": "deep"}, headers=h)
+    assert made.status_code == 202
+    out = client.get("/v2/ctr/page", params={"url": LOW, "from": START.isoformat(), "to": END.isoformat()}, headers=h).json()
+    draft = out["title_draft"]
+    assert draft["status"] == "done" and draft["depth"] == "deep" and draft["cost_usd"] > 0 and out["model_ready"] is True
+    titles = [o["title"] for o in draft["options"]]
+    assert titles == ["Natural Sunscreen for Sensitive Skin | Shop Example", "Mineral SPF Sunscreen: Zinc Oxide, Gentle on Skin and Reef-Friendly | Shop Example", "Zinc Sunscreen"]
+    assert [o["too_long"] for o in draft["options"]] == [False, True, False] and draft["options"][0]["length"] == len(titles[0])
+    assert draft["recommended"] == 0, "the recommended option was dropped as a repeat of the title now, so the first one stands"
+    assert draft["diagnosis"] == "The title never says natural." and draft["pattern"] == "Shop Example" and draft["page_read"] is True
+    prompt = seen["prompt"]
+    assert "“natural sunscreen”: position 3.0, 2,000 impressions" in prompt and "expected" in prompt and "Title now (9 characters): Sunscreen" in prompt
+    assert "end with “Shop Example”" in prompt and "Zinc oxide sunscreen" in prompt and "menu" not in prompt
+    assert client_a.client_name.lower() not in prompt.lower().replace("brand: " + client_a.client_name.lower(), ""), "a brand search is not among the searches"
+    assert db.query(EngineTask).count() == 0, "a title draft is not a task and uses no page allowance"
+
+
+def test_a_page_with_no_searches_to_go_on_says_so_and_a_page_that_cannot_be_read_still_gets_titles(client, db, client_a, admin_user, monkeypatch):
+    import json
+
+    from app.services import ctr_titles
+
+    _titles_seed(db, client_a)
+    seen: dict = {}
+    _enable(monkeypatch, json.dumps({"diagnosis": "d", "options": [{"title": "Better Title Here", "serves": [], "why": "w"}], "recommended": 0}), seen)
+    h = client_header(client_a.id, admin_user.email)
+    client.post("/v2/ctr/title", json={"url": "https://shop.example/empty", "from": START.isoformat(), "to": END.isoformat()}, headers=h)
+    failed = client.get("/v2/ctr/page", params={"url": "https://shop.example/empty", "from": START.isoformat(), "to": END.isoformat()}, headers=h).json()["title_draft"]
+    assert failed["status"] == "failed" and "no searches with enough data" in failed["error"]
+
+    def unreadable(url, domain):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(ctr_titles, "read_page", unreadable)
+    client.post("/v2/ctr/title", json={"url": LOW, "from": START.isoformat(), "to": END.isoformat()}, headers=h)
+    done = client.get("/v2/ctr/page", params={"url": LOW, "from": START.isoformat(), "to": END.isoformat()}, headers=h).json()["title_draft"]
+    assert done["status"] == "done" and done["page_read"] is False and "could not be read" in seen["prompt"]
+
+
+def test_the_title_writer_respects_the_key_and_the_monthly_limit(client, db, client_a, admin_user, monkeypatch):
+    from decimal import Decimal
+
+    from app.core.settings import get_settings
+    from app.models.ask_data import AskDataLog
+
+    _titles_seed(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    body = {"url": LOW, "from": START.isoformat(), "to": END.isoformat()}
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "")
+    assert client.post("/v2/ctr/title", json=body, headers=h).status_code == 400
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "k")
+    monkeypatch.setattr(get_settings(), "ask_monthly_cap_usd", 1.0)
+    db.add(AskDataLog(client_id=client_a.id, asked_by="x", depth="quick", model="m", question="q", status="done", cost_usd=Decimal("1.5")))
+    db.commit()
+    res = client.post("/v2/ctr/title", json=body, headers=h)
+    assert res.status_code == 400 and "used its $1" in res.json()["detail"], "questions, schema work and title drafts share one limit"

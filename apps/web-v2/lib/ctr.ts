@@ -41,4 +41,27 @@ export type CtrDetail = {
   searches: (CtrSearch & { bing: { impressions: number; clicks: number; position: number | null } | null })[];
   searches_total: number;
   changes: { date: string; kind: string; text: string; before: CtrWindow; after: CtrWindow; measured_on: string | null }[];
+  title_draft: CtrTitleDraft | null;
+  model_ready: boolean;
+};
+
+export type CtrDepth = "quick" | "deep" | "deepest";
+export type CtrTitleDraft = {
+  id: string;
+  status: "running" | "done" | "failed";
+  error: string | null;
+  depth: CtrDepth;
+  cost_usd: number;
+  created_by: string;
+  created_at: string | null;
+  from: string;
+  to: string;
+  title_now?: string | null;
+  title_now_length?: number | null;
+  diagnosis?: string;
+  options?: { title: string; length: number; too_long: boolean; why: string; serves: string[] }[];
+  recommended?: number;
+  searches_used?: number;
+  page_read?: boolean;
+  pattern?: string | null;
 };

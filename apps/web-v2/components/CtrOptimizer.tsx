@@ -1,15 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { ctrPageAction, ctrToPlanAction } from "@/app/(app)/[clientSlug]/ctr/actions";
+import { ctrPageAction, ctrTitleAction } from "@/app/(app)/[clientSlug]/ctr/actions";
 import { WeeklyLine } from "@/components/bi/Charts";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import { presets } from "@/lib/bi";
-import type { Ctr, CtrDetail, CtrPage, CtrSearch, CtrWindow } from "@/lib/ctr";
+import type { Ctr, CtrDepth, CtrDetail, CtrPage, CtrSearch, CtrWindow } from "@/lib/ctr";
 import { monthLabel } from "@/lib/focus";
 
 const card = "rounded-xl border border-[var(--border)] bg-[var(--surface)]";
@@ -33,29 +32,42 @@ function Window({ w }: { w: CtrWindow }) {
   return w ? <span className="tabular-nums">{w.ctr}% ({num(w.clicks)} of {num(w.impressions)})</span> : <span className="text-[var(--text-tertiary)]">too little data</span>;
 }
 
-function PagePane({ client, url, from, to, onClose }: { client: Client; url: string; from: string; to: string; onClose: () => void }) {
+const DEPTH: Record<CtrDepth, string> = { quick: "Quick (Sonnet 5.5)", deep: "Deep dive (Opus 5.5)", deepest: "Deepest (Fable 5.1)" };
+
+function PagePane({ client, url, from, to }: { client: Client; url: string; from: string; to: string }) {
   const [d, setD] = useState<CtrDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<string | null>(null);
+  const [depth, setDepth] = useState<CtrDepth>("quick");
+  const [copied, setCopied] = useState<number | null>(null);
   const [pending, start] = useTransition();
+  const load = () => ctrPageAction(client.id, url, from, to).then((r) => (r.ok ? setD(r.value) : setError(r.error)));
   useEffect(() => {
     setD(null);
     setError(null);
-    setSent(null);
-    let live = true;
-    ctrPageAction(client.id, url, from, to).then((r) => live && (r.ok ? setD(r.value) : setError(r.error)));
-    return () => {
-      live = false;
-    };
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client.id, url, from, to]);
-  const send = () =>
+  const running = d?.title_draft?.status === "running";
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+  const write = () =>
     start(async () => {
       setError(null);
-      const r = await ctrToPlanAction(client.id, url, from, to);
-      if (r.ok) setSent(r.value.created ? "Sent to this month's plan." : "Already in this month's plan.");
-      else setError(r.error);
+      const r = await ctrTitleAction(client.id, url, from, to, depth);
+      if (!r.ok) setError(r.error);
+      else await load();
     });
-  const below = d?.searches.some((s) => s.below) ?? false;
+  const copy = (i: number, text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(i);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
+  const draft = d?.title_draft;
   return (
     <div className="space-y-4 text-sm">
       <p className="break-all font-semibold">{url}</p>
@@ -68,6 +80,48 @@ function PagePane({ client, url, from, to, onClose }: { client: Client; url: str
             <div className="mb-2">{d.title || <span className="text-[var(--text-tertiary)]">none found in the crawl</span>}</div>
             <div className="font-semibold">Description{d.description_length != null ? ` (${d.description_length} characters${d.description_length > 160 ? ", may be cut off" : d.description_length < 70 ? ", short" : ""})` : ""}</div>
             <div>{d.description || <span className="text-[var(--text-tertiary)]">none found in the crawl</span>}</div>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-[var(--border)] p-3">
+            <h3 className="font-bold">Title tag options</h3>
+            <p className="text-xs text-[var(--text-tertiary)]">
+              The model reads the searches below, the page&apos;s own words and how this site&apos;s titles are written, and offers three titles. It is a draft: nothing is sent anywhere and it uses no page allowance.
+            </p>
+            {d.model_ready ? (
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-xs font-semibold">
+                  How deep
+                  <select value={depth} onChange={(e) => setDepth(e.target.value as CtrDepth)} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-2 text-sm font-normal">
+                    {(Object.keys(DEPTH) as CtrDepth[]).map((k) => <option key={k} value={k}>{DEPTH[k]}</option>)}
+                  </select>
+                </label>
+                <button type="button" onClick={write} disabled={pending || running} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {pending || running ? <><Spinner />Writing…</> : draft?.status === "done" ? "Write again" : "Write title options"}
+                </button>
+              </div>
+            ) : <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">The model needs the Anthropic key on the API service.</p>}
+            {draft?.status === "failed" ? <p role="alert" className="text-xs font-semibold text-red-700">{draft.error}</p> : null}
+            {draft?.status === "done" && draft.options ? (
+              <div className="space-y-2 pt-1">
+                {draft.diagnosis ? <p className="text-xs"><strong>Why the title earns less:</strong> {draft.diagnosis}</p> : null}
+                {draft.page_read === false ? <p className="text-xs text-amber-800">The page itself could not be read, so these come from its title, description and searches only.</p> : null}
+                <ol className="space-y-2">
+                  {draft.options.map((o, i) => (
+                    <li key={i} className="rounded-lg border border-[var(--border)] p-2">
+                      <div className="flex flex-wrap items-start gap-2">
+                        <div className="min-w-0 flex-1 font-semibold">{o.title}</div>
+                        <span className={`text-xs tabular-nums ${o.too_long ? "font-semibold text-amber-700" : "text-[var(--text-tertiary)]"}`}>{o.length} characters{o.too_long ? ", may be cut off" : ""}</span>
+                        <button type="button" onClick={() => copy(i, o.title)} className="rounded-lg border border-[var(--border)] bg-white px-2 py-0.5 text-xs font-semibold">{copied === i ? "Copied" : "Copy"}</button>
+                      </div>
+                      {draft.recommended === i ? <span className="mt-1 inline-block rounded bg-green-100 px-1.5 py-0.5 text-[0.7rem] font-semibold text-green-800">Start with this one</span> : null}
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">{o.why}</p>
+                      {o.serves.length > 0 ? <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">Serves: {o.serves.join(", ")}</p> : null}
+                    </li>
+                  ))}
+                </ol>
+                <p className="text-xs text-[var(--text-tertiary)]">{DEPTH[draft.depth]} · ${draft.cost_usd.toFixed(2)} · read {draft.searches_used} searches. Check each against the page before using it. After you change the title, add a note to the change log so the 28-day check below measures it.</p>
+              </div>
+            ) : null}
           </div>
 
           <div>
@@ -96,7 +150,7 @@ function PagePane({ client, url, from, to, onClose }: { client: Client; url: str
           <div>
             <h3 className="font-bold">Changes to this page</h3>
             {d.changes.length === 0 ? (
-              <p className="text-xs text-[var(--text-secondary)]">No shipped task or change-log note is recorded for this page. When you change the title or description, add a note in Business Intelligence&apos;s change log, or ship the task, and the before and after click-through appears here.</p>
+              <p className="text-xs text-[var(--text-secondary)]">No shipped task or change-log note is recorded for this page. When you change the title or description, add a note in Business Intelligence&apos;s change log, and the before and after click-through appears here.</p>
             ) : (
               <ul className="mt-2 space-y-2 text-xs">
                 {d.changes.map((c, i) => (
@@ -108,19 +162,6 @@ function PagePane({ client, url, from, to, onClose }: { client: Client; url: str
                 ))}
               </ul>
             )}
-          </div>
-
-          <div className="border-t border-[var(--border)] pt-3">
-            {sent ? (
-              <p className="font-semibold text-green-700">
-                {sent} <Link href={`/${client.slug}/engine`} className="underline" onClick={onClose}>Open the plan</Link>
-              </p>
-            ) : (
-              <button type="button" onClick={send} disabled={pending || !below} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                {pending ? <><Spinner />Sending…</> : "Send to plan"}
-              </button>
-            )}
-            {!below ? <p className="mt-1 text-xs text-[var(--text-tertiary)]">This page is not below the benchmark in this range, so there is nothing to send.</p> : <p className="mt-1 text-xs text-[var(--text-tertiary)]">Adds a task to rewrite the title and description, with these searches as the evidence. It uses one of this month&apos;s page allowance.</p>}
           </div>
         </>
       ) : null}
@@ -217,7 +258,7 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
                 ))}
               </div>
             </div>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">{data.rule} Open a page to see its title, description and searches, and to send it to the plan.</p>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">{data.rule} Open a page to see its title, description and searches, and to have the model write title options.</p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full text-sm">
                 <thead><tr><th className={th}>Page</th><th className={th}>Pos.</th><th className={th}>Impr.</th><th className={th}>CTR</th><th className={th}>Clicks</th><th className={th}>To gain</th><th className={th} /></tr></thead>
@@ -261,7 +302,7 @@ export function CtrOptimizer({ client, from, to, data, error }: { client: Client
           <h2 className="font-bold">Page</h2>
           <button type="button" onClick={() => setOpen(null)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-sm font-semibold">Close</button>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">{open ? <PagePane client={client} url={open} from={from} to={to} onClose={() => setOpen(null)} /> : null}</div>
+        <div className="flex-1 overflow-y-auto p-5">{open ? <PagePane client={client} url={open} from={from} to={to} /> : null}</div>
       </aside>
     </section>
   );

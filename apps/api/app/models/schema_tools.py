@@ -68,3 +68,25 @@ class ClientSchemaIgnore(Base):
     label: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CtrTitleDraft(Base):
+    """Title tags a model wrote for one page, from the page's own search data. A draft for a person to check; nothing is sent anywhere."""
+
+    __tablename__ = "ctr_title_drafts"
+    __table_args__ = (Index("ix_ctr_title_drafts_client_url", "client_id", "url"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: running, done or failed.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The range of dates the searches were read from.
+    range_from: Mapped[str] = mapped_column(String(10), nullable=False)
+    range_to: Mapped[str] = mapped_column(String(10), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

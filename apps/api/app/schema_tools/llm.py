@@ -38,6 +38,8 @@ def call(depth: str, prompt: str, *, max_tokens: int = 3500) -> tuple[str, int, 
     body = response.json()
     usage = body.get("usage") or {}
     text = "".join(b.get("text", "") for b in body.get("content") or [] if b.get("type") == "text")
+    if not text.strip() and body.get("stop_reason") == "max_tokens":
+        raise ModelError("The model used all its room thinking and wrote no answer. Run it again.")
     return text, int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0)
 
 
