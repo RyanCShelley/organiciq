@@ -83,6 +83,16 @@ def competitors_to_pull(
         )
         .distinct()
     }
+    # A competitor DataForSEO answered with no rows has nothing stored to be "fresh" by, so it was asked for again
+    # every night (ACCTek: two of three, daily). The job records which domains it read; those count as read.
+    since = datetime.combine(cutoff, datetime.min.time(), tzinfo=timezone.utc)
+    for (params,) in db.query(SyncJob.params_json).filter(
+        SyncJob.client_id == client.id,
+        SyncJob.source == "dataforseo_competitor_keywords",
+        SyncJob.status.in_((SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL)),
+        SyncJob.created_at >= since,
+    ):
+        fresh.update((params or {}).get("checked") or [])
     return [domain for domain in named_competitors(client) if domain not in fresh]
 
 
@@ -102,6 +112,7 @@ def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob
 
         fetched = written = 0
         failures: dict[str, str] = {}
+        checked: list[str] = []
         for domain in domains:
             try:
                 rows = dataforseo.ranked_keywords(
@@ -116,6 +127,7 @@ def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob
                 logger.warning("Competitor keywords for %s failed: %s", domain, exc)
                 failures[domain] = str(exc)
                 continue
+            checked.append(domain)
             fetched += len(rows)
             payloads = []
             seen: set[str] = set()
@@ -155,6 +167,7 @@ def run_dataforseo_competitor_keywords_job(db: Session, job: SyncJob) -> SyncJob
             db.commit()
             written += len(payloads)
 
+        job.params_json = {**(job.params_json or {}), "checked": checked}
         job.records_fetched = fetched
         job.records_written = written
         job.validation_status = ValidationStatus.PASSED if domains else ValidationStatus.SKIPPED

@@ -33,6 +33,7 @@ LABELS = {
     "se_ranking_ai": "SE Ranking: AI search",
     "site_crawl": "Site crawl",
     "bing_query_stats": "Bing Webmaster",
+    "dataforseo_competitor_keywords": "Competitor rankings",
 }
 ACTIVE = (
     SyncJobStatus.QUEUED,
@@ -85,6 +86,13 @@ def pull_plan(db: Session, client: Any, today: date | None = None) -> list[dict]
         plan.append({"source": "site_crawl", "start": today, "end": today, "reach": "the site as it is today"})
     if db.query(ClientBingSite).filter(ClientBingSite.client_id == client.id).first() is not None:
         plan.append({"source": "bing_query_stats", "start": today, "end": today, "reach": "everything Bing returns for the site"})
+    # The competitors named in settings: their rankings are bought once a month per competitor, so pulling again within the
+    # month reads nothing new and costs nothing.
+    from app.ingestion.dataforseo.competitor_keywords import named_competitors
+    from app.integrations import dataforseo
+
+    if dataforseo.configured() and named_competitors(client):
+        plan.append({"source": "dataforseo_competitor_keywords", "start": today, "end": today, "reach": "what the competitors named in settings rank for (read monthly)"})
     for item in plan:
         item["label"] = LABELS.get(item["source"], item["source"])
     return plan
