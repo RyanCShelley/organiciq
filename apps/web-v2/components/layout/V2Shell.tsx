@@ -1,16 +1,9 @@
 import Link from "next/link";
 
 import { LogoWordmark } from "@/components/brand/Logo";
-import { ClientNav } from "@/components/layout/ClientNav";
+import { ClientNav, SidebarFooter } from "@/components/layout/ClientNav";
 import { ClientSelect } from "@/components/layout/ClientSelect";
 import type { Client } from "@/lib/api";
-
-/** What v2 will contain, in build order. Nothing links anywhere until its phase ships. */
-export const V2_SECTIONS = [
-  { label: "Site Health", phase: "Phase 3" },
-  { label: "CTR Optimizer", phase: "Phase 5" },
-  { label: "Content Hub", phase: "Phase 7" },
-] as const;
 
 export function V2Shell({
   clients,
@@ -40,11 +33,6 @@ export function V2Shell({
         <Link href="/new-client" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
           + Add client
         </Link>
-        {isAdmin ? (
-          <Link href="/admin" className="text-sm text-[var(--sidebar-fg-muted)] hover:text-white">
-            Admin
-          </Link>
-        ) : null}
         <div className="ml-auto flex items-center gap-4 text-sm text-[var(--sidebar-fg-muted)]">
           {userEmail ? <span>{userEmail}</span> : null}
           <form action={signOutAction}>
@@ -56,19 +44,9 @@ export function V2Shell({
       </header>
 
       <div className="flex flex-1">
-        <nav aria-label="Sections" className="w-56 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] p-3">
+        <nav aria-label="Sections" className="flex w-60 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] p-3">
           <ClientNav />
-          <ul className="space-y-1">
-            {V2_SECTIONS.map((section) => (
-              <li
-                key={section.label}
-                className="flex items-center justify-between rounded-md px-3 py-2 text-sm text-[var(--text-tertiary)]"
-              >
-                <span>{section.label}</span>
-                <span className="text-[0.65rem] uppercase tracking-wide">{section.phase}</span>
-              </li>
-            ))}
-          </ul>
+          <SidebarFooter isAdmin={isAdmin} />
         </nav>
         <main className="flex-1 p-8">{children}</main>
       </div>

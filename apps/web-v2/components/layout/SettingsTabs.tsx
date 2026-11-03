@@ -3,17 +3,18 @@
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 
-const TABS = [
+const TABS: readonly { label: string; path: string; href?: string }[] = [
   { label: "General", path: "" },
   { label: "Connections", path: "/connections" },
   { label: "Conversions & goals", path: "/conversions" },
   { label: "Baseline & goals", path: "/baseline" },
   { label: "Content sources", path: "/content" },
   { label: "Watchlist import", path: "/watchlist" },
+  { label: "Watchlist", path: "", href: "/watchlist" },
   { label: "Competitors", path: "/competitors" },
   { label: "Advanced", path: "/advanced" },
   { label: "Team access", path: "/team" },
-] as const;
+];
 
 export function SettingsTabs() {
   const { clientSlug } = useParams<{ clientSlug: string }>();
@@ -21,7 +22,7 @@ export function SettingsTabs() {
   return (
     <nav aria-label="Settings sections" className="flex flex-wrap gap-1 border-b border-[var(--border)]">
       {TABS.map((tab) => {
-        const href = `/${clientSlug}/settings${tab.path}`;
+        const href = tab.href ? `/${clientSlug}${tab.href}` : `/${clientSlug}/settings${tab.path}`;
         const active = pathname === href;
         return (
           <Link

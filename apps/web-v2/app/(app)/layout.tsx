@@ -11,8 +11,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await auth();
   if (!session) redirect("/login");
 
-  const clients = await getClients().catch(() => []);
-  const me = await apiFetch<{ role: string }>("/auth/me").catch(() => null);
+  // Independent calls: asked together, the page waits for the slower, not for both.
+  const [clients, me] = await Promise.all([
+    getClients().catch(() => []),
+    apiFetch<{ role: string }>("/auth/me").catch(() => null),
+  ]);
 
   return (
     <V2Shell clients={clients} userEmail={session.user?.email} isAdmin={me?.role === "sma_admin"} signOutAction={signOutAction}>

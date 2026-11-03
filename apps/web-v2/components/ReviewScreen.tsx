@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
-import { rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
+import { reachAction, rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
@@ -523,7 +523,6 @@ export function ReviewScreen({
   error,
   focus,
   buckets,
-  reach,
   shipped,
 }: {
   client: Client;
@@ -533,10 +532,19 @@ export function ReviewScreen({
   error: string | null;
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
-  reach: BucketOverview[];
   shipped: ShippedResult[];
 }) {
   const router = useRouter();
+  // How much each bucket has in reach is a hint beside the focus choice. It is the slowest part of the page, so it
+  // arrives after the review has shown instead of holding it up.
+  const [reach, setReach] = useState<BucketOverview[]>([]);
+  useEffect(() => {
+    let live = true;
+    reachAction(client.id, month).then((r) => live && setReach(r));
+    return () => {
+      live = false;
+    };
+  }, [client.id, month]);
   const [copied, setCopied] = useState(false);
   const prior = review ? monthLabel(review.previous_month).split(" ")[0] : "last month";
   const noun = review?.noun ?? "leads";

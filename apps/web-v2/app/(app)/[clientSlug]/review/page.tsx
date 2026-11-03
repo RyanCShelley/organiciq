@@ -1,11 +1,13 @@
 import { notFound } from "next/navigation";
 
 import { ReviewScreen } from "@/components/ReviewScreen";
-import { DataFreshness } from "@/components/DataFreshness";
+import { Suspense } from "react";
+
+import { DataFreshness, freshnessFor } from "@/components/DataFreshness";
 import { ApiError, apiFetch } from "@/lib/api";
 import { getClients } from "@/lib/clients";
 import type { ClientFocus } from "@/lib/focus";
-import { EMPTY_OVERVIEW, type EngineOverview, type ShippedResult } from "@/lib/engine";
+import type { ShippedResult } from "@/lib/engine";
 import { lastCompleteMonth, nextMonth, type Review } from "@/lib/review";
 import type { Watchlist } from "@/lib/watchlist";
 
@@ -26,27 +28,24 @@ export default async function ReviewPage({
   const month = requested && /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) ? requested : lastCompleteMonth();
   const planMonth = nextMonth(month);
 
-  let review: Review | null = null;
-  let error: string | null = null;
-  try {
-    review = await apiFetch<Review>(`/v2/review?month=${month}`, { clientId: client.id });
-  } catch (e) {
-    error = e instanceof ApiError ? e.message : "The review could not be built: the API did not answer.";
-  }
-
-  const [focus, watchlist, reach, shipped] = await Promise.all([
+  // Everything this page needs is asked at once; it waits for the slowest, not for each in turn.
+  const freshness = freshnessFor(client.id);
+  const reviewPromise = apiFetch<Review>(`/v2/review?month=${month}`, { clientId: client.id }).then(
+    (r) => ({ review: r, error: null as string | null }),
+    (e) => ({ review: null as Review | null, error: e instanceof ApiError ? e.message : "The review could not be built: the API did not answer." }),
+  );
+  const [{ review, error }, focus, watchlist, shipped] = await Promise.all([
+    reviewPromise,
     apiFetch<ClientFocus | null>(`/v2/focus/${planMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
-    // Reach is a hint beside the choice; the review still works without it.
-    apiFetch<EngineOverview>(`/v2/engine/visibility/buckets?month=${month}`, { clientId: client.id }).catch(
-      () => EMPTY_OVERVIEW,
-    ),
     apiFetch<ShippedResult[]>("/v2/engine/tasks/results", { clientId: client.id }).catch(() => [] as ShippedResult[]),
   ]);
 
   return (
     <>
-    <DataFreshness clientId={client.id} />
+    <Suspense fallback={null}>
+      <DataFreshness clientId={client.id} pending={freshness} />
+    </Suspense>
     <ReviewScreen
       client={client}
       month={month}
@@ -55,7 +54,6 @@ export default async function ReviewPage({
       error={error}
       focus={focus}
       buckets={watchlist.buckets.map((b) => ({ id: b.id, name: b.name }))}
-      reach={reach.buckets}
       shipped={shipped}
     />
     </>
