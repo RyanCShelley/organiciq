@@ -69,7 +69,7 @@ def test_geo_readiness_ports_the_graders_signals_and_says_what_it_could_not_meas
     geo = sh.geo_readiness(db, client_a)
     by = {s["key"]: s for s in geo["signals"]}
     assert by["schema"]["score"] == 70  # json-ld 40, plus 10 each for product, organization and faqpage
-    assert by["faq"]["score"] == 100 and by["crawler"]["score"] == 60 and by["crawler"]["detail"]["blocked"] == ["gptbot", "ccbot"]
+    assert by["faq"]["score"] == 0 and by["crawler"]["score"] == 60 and by["crawler"]["detail"]["blocked"] == ["gptbot", "ccbot"]
     assert by["entity"]["detail"]["about_page"] and by["entity"]["detail"]["contact_page"] and by["entity"]["detail"]["phone_in_markup"]
     assert by["citation"]["measured"] is False and geo["partial"] is True and sum(sh.GEO_WEIGHTS.values()) == 100
 
@@ -147,3 +147,17 @@ def test_each_geo_signal_lists_what_to_fix(db, client_a):
     assert "none of 2 answers" in cite["text"] and cite["url"] == BASE + "/a", "the page to strengthen is the one that shows most for the keyword"
     assert by["citation"]["affected"] == 1 and any("does not name the brand" in i["text"] for i in by["graph"]["items"])
     assert by["depth"]["items"][0]["url"] == BASE + "/a"
+
+
+def test_faq_is_scored_page_by_page_on_the_pages_google_shows_most(db, client_a):
+    from app.models.gsc import FactGscQueryPage
+
+    seed(db, client_a)
+    for url, imp in ((BASE + "/a", 900), (BASE + "/b", 300), (BASE + "/", 100), (BASE + "/not-crawled", 5000)):
+        db.add(FactGscQueryPage(client_id=client_a.id, date=date(2026, 10, 10), query="q", raw_url=url, normalized_url=url, country="usa", device="DESKTOP",
+                                impressions=Decimal(imp), clicks=Decimal(1), ctr=Decimal(0), average_position=Decimal(5)))
+    schema(db, client_a, "/a", "FAQPage")
+    db.commit()
+    faq = next(s for s in sh.geo_readiness(db, client_a)["signals"] if s["key"] == "faq")
+    assert faq["score"] == 33 and faq["detail"] == {"pages": 3, "with_markup": 1}  # /a has it; /b and / do not; an uncrawled page is not judged
+    assert [i["url"] for i in faq["items"]] == [BASE + "/b", BASE + "/"] and faq["affected"] == 2

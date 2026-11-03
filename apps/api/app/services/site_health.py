@@ -155,11 +155,34 @@ def _schema_signal(rows: list[Any]) -> tuple[int, dict[str, Any]]:
     return min(score, 100), {"json_ld_blocks": len(ld), "types": found, "microdata": any(r.syntax == "microdata" for r in rows)}
 
 
-def _faq_signal(rows: list[Any]) -> int:
-    """FAQPage markup is 50 of the grader's 100; its heading and accordion parts are not stored by the crawl, so this is
-    scored on the markup alone (0 or 100 of what can be measured)."""
-    text = " ".join(((r.schema_type or "") + " " + (r.raw_text or "")).lower() for r in rows if r.syntax == "json_ld")
-    return 100 if "faqpage" in text else 0
+FAQ_PAGES = 25
+
+
+def _faq_pages(db: Session, client: Client, rows: list[Any], snaps: list[Any]) -> tuple[list[tuple[str, float | None]], set[str]]:
+    """The pages FAQ markup is judged on, and which of them carry it.
+
+    A page-by-page measure: the 25 pages Search Console shows most in the last 90 days (the ones that matter), or, with no Search
+    Console data, the first 25 indexable pages crawled. Each either has FAQPage markup or does not.
+    """
+    from app.models.gsc import FactGscQueryPage
+
+    ok = {s.normalized_url for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable}
+    newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
+    pages: list[tuple[str, float | None]] = []
+    if newest:
+        top = db.query(FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions)).filter(
+            FactGscQueryPage.client_id == client.id, FactGscQueryPage.date > date.fromordinal(newest.toordinal() - 90)).group_by(FactGscQueryPage.normalized_url).order_by(func.sum(FactGscQueryPage.impressions).desc()).limit(FAQ_PAGES * 3).all()
+        pages = [(u, float(i)) for u, i in top if u in ok][:FAQ_PAGES]
+    if not pages:
+        pages = [(u, None) for u in sorted(ok)[:FAQ_PAGES]]
+    faq = {r.normalized_url for r in rows if r.syntax == "json_ld" and "faqpage" in ((r.schema_type or "") + (r.raw_text or "")).lower()}
+    return pages, faq
+
+
+def _faq_signal(pages: list[tuple[str, float | None]], faq: set[str]) -> int:
+    """The share of those pages that carry FAQPage markup. (The GEO Grader scores one page, and gives 50 for the markup and 50 for
+    headings and accordions, which the crawl does not store; here each page either has the markup or does not.)"""
+    return round(100 * sum(1 for u, _ in pages if u in faq) / len(pages)) if pages else 0
 
 
 def _entity_signal(db: Session, client: Client, rows: list[Any], snaps: list[Any]) -> tuple[int, dict[str, Any]]:
@@ -278,15 +301,11 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
     if "organization" not in text and "localbusiness" not in text:
         items["schema"].insert(0, _item("No Organization markup anywhere: add it to the homepage so the brand reads as one entity", home))
 
-    faq_urls = {r.normalized_url for r in rows if r.syntax == "json_ld" and "faqpage" in ((r.schema_type or "") + (r.raw_text or "")).lower()}
-    newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
-    faq: list[dict[str, str | None]] = []
-    if newest:
-        top = db.query(FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions)).filter(
-            FactGscQueryPage.client_id == client.id, FactGscQueryPage.date > date.fromordinal(newest.toordinal() - 90)).group_by(FactGscQueryPage.normalized_url).order_by(func.sum(FactGscQueryPage.impressions).desc()).limit(60).all()
-        okset = {s.normalized_url for s in ok}
-        faq = [_item(f"Shows {round(float(i)):,} times in Google in 90 days and has no FAQ markup", u) for u, i in top if u in okset and u not in faq_urls][:25]
-    items["faq"] = faq
+    pages, faq_urls = _faq_pages(db, client, rows, snaps)
+    items["faq"] = [
+        _item(f"Shows {round(imp):,} times in Google in 90 days and has no FAQ markup" if imp is not None else "No FAQ markup on this page", u)
+        for u, imp in pages if u not in faq_urls
+    ]
 
     ent = [_item("No title", s.normalized_url) for s in ok if not (s.title or "").strip()] + [_item("No meta description", s.normalized_url) for s in ok if not (s.description or "").strip()]
     if not entity_detail.get("about_page"):
@@ -334,9 +353,10 @@ def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
     entity, entity_detail = _entity_signal(db, client, rows, snaps)
     crawler, blocked = _crawler_signal(db, client)
     answers = _answer_signals(db, client)
+    faq_pages = _faq_pages(db, client, rows, snaps)
     signals = [
         {"key": "schema", "label": "Structured data", "weight": GEO_WEIGHTS["schema"], "score": schema, "measured": True, "detail": schema_detail, "note": "Read from every crawled page, not only the homepage."},
-        {"key": "faq", "label": "FAQ markup", "weight": GEO_WEIGHTS["faq"], "score": _faq_signal(rows), "measured": True, "detail": {}, "note": "FAQPage markup only; the crawl does not store headings or accordions."},
+        {"key": "faq", "label": "FAQ markup", "weight": GEO_WEIGHTS["faq"], "score": _faq_signal(*faq_pages), "measured": True, "detail": {"pages": len(faq_pages[0]), "with_markup": sum(1 for u, _ in faq_pages[0] if u in faq_pages[1])}, "note": "Page by page: the share of the 25 pages Google shows most that carry FAQPage markup."},
         {"key": "entity", "label": "Entity clarity", "weight": GEO_WEIGHTS["entity"], "score": entity, "measured": True, "detail": entity_detail, "note": "Titles and descriptions by share of pages; phone and address from the markup."},
         {"key": "crawler", "label": "AI-crawler access", "weight": GEO_WEIGHTS["crawler"], "score": crawler, "measured": True, "detail": {"blocked": blocked}, "note": "20 points off for each of GPTBot, CCBot, Google-Extended, ChatGPT-User and Anthropic blocked in robots.txt."},
     ]
