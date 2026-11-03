@@ -5,7 +5,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { presets, type AskInfo, type Bi } from "@/lib/bi";
 import { getClients } from "@/lib/clients";
 
-export const metadata = { title: "OrganicIQ Insights" };
+export const metadata = { title: "OrganicIQ insights" };
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,7 +33,7 @@ export default async function BusinessIntelligencePage({
     if (channel) q.set("channel", channel);
     data = await apiFetch<Bi>(`/v2/bi?${q}`, { clientId: client.id });
   } catch (e) {
-    error = e instanceof ApiError ? e.message : "OrganicIQ Insights could not be built: the API did not answer.";
+    error = e instanceof ApiError ? e.message : "OrganicIQ insights could not be built: the API did not answer.";
   }
 
   // Questions are optional: without them the screen still works.

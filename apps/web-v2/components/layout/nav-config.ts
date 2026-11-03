@@ -10,7 +10,7 @@ export const GROUPS: NavGroup[] = [
     icon: BarChart3,
     items: [
       { label: "Monthly review", path: "/review" },
-      { label: "OrganicIQ Insights", path: "/bi" },
+      { label: "OrganicIQ insights", path: "/bi" },
       { label: "Decision engine", path: "/engine" },
     ],
   },
@@ -27,7 +27,7 @@ export const GROUPS: NavGroup[] = [
     icon: Target,
     items: [
       { label: "Site health", path: "/site-health" },
-      { label: "Machine Readability", path: "/schema" },
+      { label: "Machine readability", path: "/schema" },
       { label: "CTR optimizer", path: "/ctr" },
       { label: "Inlink suggester", path: "/inlinks" },
     ],
@@ -57,4 +57,27 @@ export function locate(pathname: string, clientSlug: string | undefined): { grou
     if (item) return { group: g.title, page: item.label };
   }
   return { group: null, page: null };
+}
+
+/** Starter questions for the Ask panel, by page. Free: no model is asked until one is chosen. */
+export const SUGGESTIONS: Record<string, string[]> = {
+  "/review": ["Why did orders and revenue move this month?", "What should we do first in the next month?", "Write a short summary of this month for the client"],
+  "/bi": ["Which channel drove the change?", "Compare this period with the same period last year", "Explain what these charts show in plain words"],
+  "/engine": ["Which task would move the most traffic?", "What did we ship, and did it work?", "Why is the first action on the list?"],
+  "/search-visibility": ["Which terms moved the most?", "Where are we close to page one?", "Which terms are we losing?"],
+  "/llm": ["Where do AI platforms name the brand?", "Which competitors are named instead of us?", "What would get us cited more?"],
+  "/site-health": ["What should we fix first?", "Which issues affect the most pages?", "Explain these issues for the client"],
+  "/schema": ["Which pages are missing structured data?", "What should we add first?", "Explain this for the client"],
+  "/ctr": ["Which page has the most to gain from a better title?", "Why is this page's click-through low?"],
+  "/inlinks": ["Which page needs links most?", "Where should we link to the top page from?"],
+  "/content-gaps": ["Which gap should we write first?", "Why is this a gap?", "What topics are we missing?"],
+  "/content-refreshes": ["Why did the top page lose traffic?", "Which pages compete with each other?", "What should we refresh first?"],
+  "/content-calendar": ["What is overdue?", "What is planned for next month?"],
+};
+
+export function suggestionsFor(pathname: string, clientSlug: string | undefined): string[] | undefined {
+  if (!clientSlug) return undefined;
+  const rest = pathname.slice(`/${clientSlug}`.length);
+  const key = Object.keys(SUGGESTIONS).find((k) => rest.startsWith(k));
+  return key ? SUGGESTIONS[key] : undefined;
 }

@@ -130,3 +130,20 @@ def test_a_failure_is_reported_not_hidden(client, db, client_a, admin_user, monk
     out = client.get(f"/v2/ask/{qid}", headers=h).json()
     assert out["status"] == "failed" and "529" in out["error"]
     assert client.get(f"/v2/ask/{qid}", headers=client_header(__import__("uuid").uuid4(), admin_user.email)).status_code in (403, 404)
+
+
+def test_the_page_the_person_is_on_leads_the_question_and_stays_out_of_the_cached_system_prompt(client, db, client_a, admin_user, monkeypatch):
+    seen: list = []
+    fake_model(monkeypatch, seen)
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "k")
+    h = client_header(client_a.id, admin_user.email)
+    client.post("/v2/ask", json={"question": "Why did orders fall?", "page": "Monthly review", "page_text": "Orders   132\ndown 39%"}, headers=h)
+    asked = seen[0]["messages"][-1]["content"]
+    assert 'looking at the page "Monthly review"' in asked and "Orders 132 down 39%" in asked and asked.endswith("Question: Why did orders fall?")
+    assert "Monthly review" not in seen[0]["system"], "the system prompt is the same on every page, so it caches once"
+
+
+def test_cached_tokens_are_priced_as_cache_writes_and_reads():
+    # 1,000 fresh + 10,000 cache-write (1.25x) + 20,000 cache-read (0.1x) input, 500 out, at $2 / $10 per million.
+    assert engine.cost_usd("quick", 1000, 500, 10000, 20000) == Decimal("0.0360")
+    assert engine.cost_usd("quick", 3000, 300) == Decimal("0.0090")

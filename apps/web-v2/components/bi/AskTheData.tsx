@@ -65,7 +65,7 @@ function Answer({ item }: { item: AskItem }) {
  * A box to ask the data in plain words. The answer is worked out in the background (a question takes 15 to 60 seconds)
  * and polled for; every answer shows the lookups behind it.
  */
-export function AskTheData({ clientId, info, embedded = false }: { clientId: string; info: AskInfo | null; embedded?: boolean }) {
+export function AskTheData({ clientId, info, embedded = false, getPage, examples }: { clientId: string; info: AskInfo | null; embedded?: boolean; getPage?: () => { name: string; text: string } | null; examples?: string[] }) {
   const [items, setItems] = useState<AskItem[]>(() => (info ? [...info.recent].reverse() : []));
   const [question, setQuestion] = useState("");
   const [depth, setDepth] = useState<AskDepth>("quick");
@@ -96,7 +96,7 @@ export function AskTheData({ clientId, info, embedded = false }: { clientId: str
       .filter((i) => i.status === "done" && i.answer)
       .slice(-3)
       .flatMap((i) => [{ role: "user" as const, content: i.question }, { role: "assistant" as const, content: (i.answer ?? "").slice(0, 3000) }]);
-    const r = await askAction(clientId, q, depth, history);
+    const r = await askAction(clientId, q, depth, history, getPage?.() ?? null);
     if (!r.ok) {
       setError(r.error);
       return;
@@ -119,7 +119,7 @@ export function AskTheData({ clientId, info, embedded = false }: { clientId: str
         <>
           {items.length === 0 ? (
             <ul className="mt-3 flex flex-wrap gap-2">
-              {EXAMPLES.map((e) => (
+              {(examples ?? EXAMPLES).map((e) => (
                 <li key={e}>
                   <button type="button" onClick={() => send(e)} disabled={busy} className="rounded-full border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold hover:bg-[var(--bg)] disabled:opacity-50">{e}</button>
                 </li>

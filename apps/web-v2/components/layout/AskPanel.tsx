@@ -1,11 +1,32 @@
 "use client";
 
 import { Sparkles, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
-/** The chat on the right, which will answer from the page it sits on. This is the panel; the answers come next. */
-export function AskPanel({ context, onClose }: { context: string; onClose: () => void }) {
+import { askInfoAction } from "@/app/(app)/[clientSlug]/bi/actions";
+import { AskTheData } from "@/components/bi/AskTheData";
+import { Spinner } from "@/components/ui/Spinner";
+import type { AskInfo } from "@/lib/bi";
+
+/**
+ * The chat on the right, on every page. It sends what is on screen with each question, so an answer starts from the page the person
+ * is looking at and queries the client's data only for what the page does not show.
+ */
+export function AskPanel({ clientId, page, examples, onClose }: { clientId: string | null; page: string; examples?: string[]; onClose: () => void }) {
+  const [info, setInfo] = useState<AskInfo | null | undefined>(undefined);
+  useEffect(() => {
+    setInfo(undefined);
+    if (clientId) void askInfoAction(clientId).then(setInfo);
+  }, [clientId]);
+
+  // Read when a question is sent, so it is the page as it is then, not as it was when the panel opened.
+  const getPage = () => {
+    const text = (document.querySelector("main") as HTMLElement | null)?.innerText.replace(/\s+/g, " ").trim().slice(0, 12000) ?? "";
+    return text ? { name: page.slice(0, 80), text } : null;
+  };
+
   return (
-    <aside aria-label="Ask Organic IQ" className="sticky top-0 flex h-screen w-[340px] shrink-0 flex-col border-l border-[var(--border)] bg-white">
+    <aside aria-label="Ask Organic IQ" className="sticky top-0 flex h-screen w-[360px] shrink-0 flex-col border-l border-[var(--border)] bg-white">
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
         <Sparkles size={16} className="text-[var(--brand-teal)]" aria-hidden />
         <h2 className="text-base font-bold">Ask Organic IQ</h2>
@@ -13,10 +34,15 @@ export function AskPanel({ context, onClose }: { context: string; onClose: () =>
           <X size={16} aria-hidden />
         </button>
       </div>
-      <p className="mx-4 mt-3 w-fit max-w-full truncate rounded-full bg-[var(--brand-teal-soft)] px-2.5 py-0.5 text-[0.7rem] font-medium text-[#006b63]" title={context}>{context}</p>
-      <div className="flex-1 space-y-2 px-4 py-4 text-sm text-[var(--text-secondary)]">
-        <p className="font-semibold text-[var(--text-primary)]">Ask is coming next.</p>
-        <p>It will read the page you are on and the client&apos;s data behind it, and answer in plain words with where each number came from.</p>
+      <p className="mx-4 mt-3 w-fit max-w-full truncate rounded-full bg-[var(--brand-teal-soft)] px-2.5 py-0.5 text-[0.7rem] font-medium text-[#006b63]" title={page}>{page}</p>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {!clientId ? (
+          <p className="text-sm text-[var(--text-secondary)]">Choose a client to ask about its data.</p>
+        ) : info === undefined ? (
+          <p className="text-sm text-[var(--text-secondary)]"><Spinner />Loading…</p>
+        ) : (
+          <AskTheData key={clientId} clientId={clientId} info={info} embedded getPage={getPage} examples={examples} />
+        )}
       </div>
     </aside>
   );

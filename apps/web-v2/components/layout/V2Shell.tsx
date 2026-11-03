@@ -5,7 +5,7 @@ import { useParams, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AskPanel } from "@/components/layout/AskPanel";
-import { locate } from "@/components/layout/nav-config";
+import { locate, suggestionsFor } from "@/components/layout/nav-config";
 import { Sidebar } from "@/components/layout/Sidebar";
 import type { Client } from "@/lib/api";
 
@@ -67,7 +67,7 @@ export function V2Shell({
         </header>
         <main className="flex-1 p-8">{children}</main>
       </div>
-      {ask ? <AskPanel context={[client?.client_name, page].filter(Boolean).join(" · ") || "Organic IQ"} onClose={() => setAskOpen(false)} /> : null}
+      {ask ? <AskPanel clientId={client?.id ?? null} page={[client?.client_name, page].filter(Boolean).join(" · ") || "Organic IQ"} examples={suggestionsFor(pathname, clientSlug)} onClose={() => setAskOpen(false)} /> : null}
     </div>
   );
 }

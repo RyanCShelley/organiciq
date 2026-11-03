@@ -33,6 +33,9 @@ class AskIn(BaseModel):
     depth: Literal["quick", "deep", "deepest"] = "quick"
     #: The conversation so far, so a follow-up ("and last month?") makes sense.
     history: list[Turn] = Field(default_factory=list, max_length=12)
+    #: The page the person is on and its text as shown, so the answer starts from what is on screen.
+    page: str | None = Field(default=None, max_length=80)
+    page_text: str | None = Field(default=None, max_length=30000)
 
 
 def _out(row: AskDataLog) -> dict:
@@ -88,7 +91,7 @@ def ask(
     row = AskDataLog(client_id=client.id, asked_by=user.email, depth=payload.depth, model=engine.DEPTHS[payload.depth][0], question=payload.question.strip(), status="running", queries=[])
     db.add(row)
     db.commit()
-    background.add_task(engine.answer, row.id, [t.model_dump() for t in payload.history])
+    background.add_task(engine.answer, row.id, [t.model_dump() for t in payload.history], payload.page, payload.page_text)
     return {"id": str(row.id)}
 
 
