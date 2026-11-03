@@ -85,7 +85,15 @@ comes first.
 - **Layout:** two headline scores with their change; issue groups ordered by pages affected; click a group for the pages and
   the fix; Send to plan.
 - **Decided (C).** Ryan already has a scoring logic in his SEO crawler and GEO tool. We walk through those two tools and port
-  their logic (checks, weights, thresholds) rather than proposing new ones. Needs: access to both tools or their code.
+  their logic (checks, weights, thresholds) rather than proposing new ones. The GEO tool is the Railway project "GEO Grading Tool" (geo-grader-frontend and geo-grader-backend); its code is the
+  GitHub repo RyanCShelley/geo-grader, with a local copy on Ryan's Desktop. The SEO crawler score is built from this tool's own crawler.
+  GEO logic to port, from `backend/app/services/retrievability.py` (the "retrievability" score, 0 to 100): schema markup 15%
+  (JSON-LD present 40, plus 10 for each of organization, local business, service, FAQ page, product, professional service; microdata
+  20), FAQ structure 10% (FAQ page markup 50, FAQ headings 25, details elements up to 25), entity clarity 10% (title 25, description
+  25, about link 15, contact link 10, phone 15, street address 10), AI-crawler access 10% (100 minus 20 for each of GPTBot, CCBot,
+  Google-Extended, ChatGPT-User, Anthropic disallowed in robots.txt), citation 20%, content depth 15%, knowledge graph 10%, source
+  attribution 10% (these last four read the AI answers). The grader reads one page; ours has every crawled page, so the first four can
+  be scored site-wide and the last four come from LLM visibility runs.
 - **Size:** M to L. **Caution:** the crawl stops at its page limit (500 by default) and is slow on Shopify because the host
   rate-limits. A score on a partial crawl must say so.
 
