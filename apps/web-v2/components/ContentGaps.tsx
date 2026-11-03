@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { briefAction, dismissTopicAction, draftAction, setAsideAction, topicsAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
+import { briefAction, dismissTopicAction, draftAction, setAsideAction, topicDetailAction, topicsAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
 import { AddToCalendar, StatusChip } from "@/components/content/AddToCalendar";
 import { AskModel, DEPTH, Kpi, List, SidePane, card, num, shortPage, td, th } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { Brief, CalendarStatus, ContentDepthChoice, Gap, GapSource, Gaps, TopicsResponse } from "@/lib/content";
+import type { Brief, CalendarStatus, ContentDepthChoice, Gap, GapSource, Gaps, TopicDetail, TopicsResponse } from "@/lib/content";
 
 const SOURCE: Record<GapSource, string> = { searched: "Shown in Google", competitor: "Competitors rank", watchlist: "On the watchlist" };
 
@@ -16,7 +16,6 @@ function BriefPane({ client, gap, ready, canEdit, onCalendar, onRefresh, onChang
   const [brief, setBrief] = useState<Brief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
-  const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
   const load = () => briefAction(client.id, gap.term).then((r) => (r.ok ? setBrief(r.value) : setError(r.error)));
   useEffect(() => {
@@ -45,9 +44,6 @@ function BriefPane({ client, gap, ready, canEdit, onCalendar, onRefresh, onChang
       if (!r.ok) setError(r.error);
       else onChanged();
     });
-  const asText = (b: Brief) =>
-    [`Brief: ${gap.term}`, `Title: ${b.working_title}`, `Type: ${b.page_type}`, `Angle: ${b.angle}`, `Target length: ${b.target_words ?? "?"} words`, "", "Sections:", ...(b.sections ?? []).map((s) => `- ${s}`), "", "Questions to answer:", ...(b.questions ?? []).map((s) => `- ${s}`), "", "Cover:", ...(b.entities ?? []).map((s) => `- ${s}`), "", "Link from:", ...(b.link_from ?? []).map((l) => `- ${l.url} (${l.anchor_idea})`)].join("\n");
-  const copy = (b: Brief) => void navigator.clipboard.writeText(asText(b)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
 
   return (
     <div className="space-y-4 text-sm">
@@ -100,24 +96,109 @@ function BriefPane({ client, gap, ready, canEdit, onCalendar, onRefresh, onChang
         <AskModel ready={ready} depth={depth} onDepth={setDepth} busy={pending || running} again={brief?.status === "done"} label="Write a brief" onRun={write} />
         {brief?.status === "failed" ? <p role="alert" className="text-xs font-semibold text-red-700">{brief.error}</p> : null}
         {brief?.status === "done" ? (
-          <div className="space-y-3 pt-1">
-            <div>
-              <div className="text-base font-bold">{brief.working_title}</div>
-              <div className="text-xs text-[var(--text-secondary)]">{brief.page_type}{brief.target_words ? ` · about ${num(brief.target_words)} words` : ""}</div>
-            </div>
-            <p>{brief.angle}</p>
-            <List title="Sections" items={brief.sections} />
-            <List title="Questions to answer" items={brief.questions} />
-            <List title="Cover" items={brief.entities} />
-            {brief.link_from?.length ? <List title="Link to it from" items={brief.link_from.map((l) => `${shortPage(l.url)} — “${l.anchor_idea}”`)} /> : null}
-            <List title="Avoid" items={brief.avoid} />
-            <div className="flex items-center gap-3 text-xs text-[var(--text-tertiary)]">
-              <button type="button" onClick={() => copy(brief)} className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 font-semibold text-[var(--text)]">{copied ? "Copied" : "Copy brief"}</button>
-              <span>{DEPTH[brief.depth]} · ${brief.cost_usd.toFixed(2)}{brief.page_read === false ? " · the closest page could not be read" : ""}</span>
-            </div>
-          </div>
+          <BriefBody brief={brief} heading={gap.term} />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function BriefBody({ brief, heading }: { brief: Brief; heading: string }) {
+  const [copied, setCopied] = useState(false);
+  const asText = (b: Brief) =>
+    [`Brief: ${heading}`, `Title: ${b.working_title}`, `Type: ${b.page_type}`, `Angle: ${b.angle}`, `Target length: ${b.target_words ?? "?"} words`, "", "Sections:", ...(b.sections ?? []).map((s) => `- ${s}`), "", "Questions to answer:", ...(b.questions ?? []).map((s) => `- ${s}`), "", "Cover:", ...(b.entities ?? []).map((s) => `- ${s}`), "", "Link from:", ...(b.link_from ?? []).map((l) => `- ${l.url} (${l.anchor_idea})`)].join("\n");
+  return (
+    <div className="space-y-3 pt-1">
+      <div>
+        <div className="text-base font-bold">{brief.working_title}</div>
+        <div className="text-xs text-[var(--text-secondary)]">{brief.page_type}{brief.target_words ? ` · about ${num(brief.target_words)} words` : ""}</div>
+      </div>
+      <p>{brief.angle}</p>
+      <List title="Sections" items={brief.sections} />
+      <List title="Questions to answer" items={brief.questions} />
+      <List title="Cover" items={brief.entities} />
+      {brief.link_from?.length ? <List title="Link to it from" items={brief.link_from.map((l) => `${shortPage(l.url)} — “${l.anchor_idea}”`)} /> : null}
+      <List title="Avoid" items={brief.avoid} />
+      <div className="flex items-center gap-3 text-xs text-[var(--text-tertiary)]">
+        <button type="button" onClick={() => void navigator.clipboard.writeText(asText(brief)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })} className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 font-semibold text-[var(--text)]">{copied ? "Copied" : "Copy brief"}</button>
+        <span>{DEPTH[brief.depth]} · ${brief.cost_usd.toFixed(2)}{brief.page_read === false ? " · the closest page could not be read" : ""}</span>
+      </div>
+    </div>
+  );
+}
+
+function TopicPane({ client, label, dismissed, onDismiss, onCalendar }: { client: Client; label: string; dismissed: boolean; onDismiss: () => void; onCalendar: () => void }) {
+  const [d, setD] = useState<TopicDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [depth, setDepth] = useState<ContentDepthChoice>("quick");
+  const [pending, start] = useTransition();
+  const load = () => topicDetailAction(client.id, label).then((r) => (r.ok ? (setD(r.value), setError(null)) : setError(r.error)));
+  useEffect(() => {
+    setD(null);
+    setError(null);
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id, label]);
+  const running = d?.draft?.status === "running";
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+  const write = () =>
+    start(async () => {
+      setError(null);
+      const r = await draftAction(client.id, "tbrief", label, depth);
+      if (!r.ok) setError(r.error);
+      else await load();
+    });
+  const brief = d?.draft;
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-lg font-bold">{label}</p>
+          {d ? <p className="text-xs text-[var(--text-secondary)]">{d.topic.content_type}{d.topic.next_to ? ` · sits next to ${d.topic.next_to}` : ""}</p> : null}
+        </div>
+        <button type="button" onClick={onDismiss} disabled={pending} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">{dismissed ? "Restore" : "Not in scope"}</button>
+      </div>
+      {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
+      {!d && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Reading the topic…</p> : null}
+      {d ? (
+        <>
+          <div className="rounded-lg bg-[var(--bg)] p-3 text-xs"><p>{d.topic.why}</p></div>
+          <div>
+            <h3 className="font-bold">Searches in this subject</h3>
+            <p className="text-xs text-[var(--text-tertiary)]">The data on file for each. “Waiting” means no volume has been bought for it yet.</p>
+            <div className="overflow-x-auto">
+              <table className="mt-1 w-full text-xs">
+                <thead><tr><th className={th}>Search</th><th className={th}>Volume</th><th className={th}>Difficulty</th><th className={th}>Shown</th><th className={th}>Where it stands</th></tr></thead>
+                <tbody>
+                  {d.searches.map((x) => (
+                    <tr key={x.term} className="border-t border-[var(--border)] align-top">
+                      <td className="px-3 py-2 font-semibold">{x.term}</td>
+                      <td className={td}>{x.volume != null ? num(x.volume) : <span className="text-[var(--text-tertiary)]">waiting</span>}</td>
+                      <td className={td}>{x.difficulty ?? "–"}</td>
+                      <td className={td}>{x.impressions ? `${num(x.impressions)}${x.position != null ? ` · pos ${x.position}` : ""}` : "–"}</td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">{[x.gap ? "A gap on the list" : null, x.tracked ? "On the watchlist" : null].filter(Boolean).join(", ") || "–"}</td>
+                    </tr>
+                  ))}
+                  {d.searches.length === 0 ? <tr><td colSpan={5} className="px-3 py-2 text-[var(--text-secondary)]">The model listed no searches for this subject.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <AddToCalendar client={client} canEdit={d.can_edit} status={d.calendar ?? undefined} kind="new_page" title={brief?.status === "done" && brief.working_title ? brief.working_title : label} target={label} sourceArea="topic" sourceKey={label} onAdded={() => { void load(); onCalendar(); }} />
+          <div className="space-y-2 rounded-lg border border-[var(--border)] p-3">
+            <h3 className="font-bold">Content brief</h3>
+            <p className="text-xs text-[var(--text-tertiary)]">The model drafts one brief for the whole subject from the searches above. A draft: nothing is sent anywhere and it uses no page allowance.</p>
+            <AskModel ready={d.model_ready} depth={depth} onDepth={setDepth} busy={pending || running} again={brief?.status === "done"} label="Write a brief" onRun={write} />
+            {brief?.status === "failed" ? <p role="alert" className="text-xs font-semibold text-red-700">{brief.error}</p> : null}
+            {brief?.status === "done" ? <BriefBody brief={brief} heading={label} /> : null}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -128,6 +209,7 @@ function Topics({ client }: { client: Client }) {
   const [t, setT] = useState<TopicsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
+  const [open, setOpen] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const load = () => topicsAction(client.id).then((r) => (r.ok ? setT(r.value) : setError(r.error)));
   useEffect(() => {
@@ -171,16 +253,17 @@ function Topics({ client }: { client: Client }) {
         <div className="mt-3 space-y-2">
           {topics.length === 0 ? <p className="text-sm font-semibold text-green-700">Clean: nothing new to suggest.</p> : null}
           {topics.map((tp) => (
-            <div key={tp.label} className="rounded-lg border border-[var(--border)] p-3 text-sm">
+            <div key={tp.label} className="cursor-pointer rounded-lg border border-[var(--border)] p-3 text-sm hover:bg-[var(--bg)]" onClick={() => setOpen(tp.label)}>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-bold">{tp.label}</span>
                 <span className={`rounded px-1.5 py-0.5 text-[0.7rem] font-semibold ${PRIORITY[tp.priority]}`}>{tp.priority}</span>
                 {tp.content_type ? <span className="text-xs text-[var(--text-tertiary)]">{tp.content_type}</span> : null}
-                <button type="button" disabled={pending} onClick={() => dismiss(tp.label, false)} className="ml-auto rounded-lg border border-[var(--border)] bg-white px-2 py-0.5 text-xs font-semibold disabled:opacity-50">Not in scope</button>
+                <button type="button" disabled={pending} onClick={(e) => { e.stopPropagation(); dismiss(tp.label, false); }} className="ml-auto rounded-lg border border-[var(--border)] bg-white px-2 py-0.5 text-xs font-semibold disabled:opacity-50">Not in scope</button>
               </div>
               <p className="mt-1">{tp.why}</p>
               {tp.example_searches.length ? <p className="mt-1 text-xs text-[var(--text-secondary)]">Searches: {tp.example_searches.join(" · ")}</p> : null}
               {tp.next_to ? <p className="text-xs text-[var(--text-tertiary)]">Sits next to: {tp.next_to}</p> : null}
+              <p className="mt-1 text-xs font-semibold text-[var(--brand-dark)]">Open for its searches, a brief and the calendar</p>
             </div>
           ))}
           <p className="text-xs text-[var(--text-tertiary)]">{DEPTH[draft.depth]} · ${draft.cost_usd.toFixed(2)} · read {draft.pages_used} pages and {draft.searches_used} searches.</p>
@@ -192,6 +275,9 @@ function Topics({ client }: { client: Client }) {
           <ul className="mt-1 space-y-1">{t.dismissed.map((d) => <li key={d} className="flex items-center gap-2">{d}<button type="button" disabled={pending} onClick={() => dismiss(d, true)} className="rounded-lg border border-[var(--border)] bg-white px-2 py-0.5 font-semibold disabled:opacity-50">Restore</button></li>)}</ul>
         </details>
       ) : null}
+      <SidePane open={!!open} label="Missing topic" onClose={() => setOpen(null)}>
+        {open ? <TopicPane client={client} label={open} dismissed={hidden.has(open.toLowerCase())} onDismiss={() => { dismiss(open, hidden.has(open.toLowerCase())); setOpen(null); }} onCalendar={() => undefined} /> : null}
+      </SidePane>
     </section>
   );
 }

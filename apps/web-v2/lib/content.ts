@@ -57,6 +57,8 @@ export type Brief = Draft & {
 };
 export type Topic = { label: string; why: string; content_type: string; priority: "high" | "medium" | "low"; example_searches: string[]; next_to: string };
 export type TopicsDraft = Draft & { topics?: Topic[]; pages_used?: number; searches_used?: number };
+export type TopicSearch = { term: string; volume: number | null; difficulty: number | null; impressions: number; clicks: number; position: number | null; gap: boolean; tracked: boolean };
+export type TopicDetail = { topic: Topic; searches: TopicSearch[]; draft: Brief | null; calendar: CalendarStatus | null; can_edit: boolean; model_ready: boolean };
 export type TopicsResponse = { draft: TopicsDraft | null; dismissed: string[]; model_ready: boolean };
 
 export type RefreshLabel = "growing" | "steady" | "slipping" | "losing" | "quiet" | "new";
@@ -129,7 +131,7 @@ export type CalendarItem = {
   kind: "new_page" | "refresh";
   title: string;
   target: string;
-  source_area: "gap" | "refresh" | "manual";
+  source_area: "gap" | "refresh" | "topic" | "manual";
   source_key: string | null;
   status: CalendarStatus;
   due: string | null;

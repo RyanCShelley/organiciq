@@ -62,6 +62,21 @@ def topics(
     return {"draft": content_briefs.latest(db, client, "topics", "site"), "dismissed": sorted(content_gaps_view.ignored(db, client, "topic")), "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 
+@router.get("/topics/detail")
+def topic_detail(
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    label: Annotated[str, Query(min_length=1, max_length=80)],
+) -> dict:
+    """One suggested topic opened: its searches with the data on file for each, the brief if one was written, and where it stands on the calendar."""
+    found = content_briefs.topic_detail(db, client, label)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That topic is not in the latest list. Reload the list.")
+    return {**found, "draft": content_briefs.latest(db, client, "tbrief", found["topic"]["label"]), "calendar": content_calendar.index(db, client)["topic"].get(found["topic"]["label"]),
+            "can_edit": user.role in CONTENT_EDITOR_ROLES, "model_ready": bool(get_settings().anthropic_api_key.strip())}
+
+
 @router.get("/refreshes")
 def refreshes(
     client: Annotated[Client, Depends(require_client)],
@@ -134,7 +149,7 @@ def dismiss_topic(
 
 
 class DraftIn(BaseModel):
-    kind: Literal["brief", "refresh", "topics"]
+    kind: Literal["brief", "refresh", "topics", "tbrief"]
     key: str = Field(min_length=1, max_length=2048)
     depth: Literal["quick", "deep", "deepest"] = "quick"
     month: str | None = None
@@ -170,7 +185,7 @@ class CalendarIn(BaseModel):
     kind: Literal["new_page", "refresh"]
     title: str = Field(min_length=1, max_length=300)
     target: str = Field(min_length=1, max_length=2048)
-    source_area: Literal["gap", "refresh", "manual"] = "manual"
+    source_area: Literal["gap", "refresh", "topic", "manual"] = "manual"
     source_key: str | None = Field(default=None, max_length=2048)
     due: date | None = None
     assignee_email: str | None = Field(default=None, max_length=255)

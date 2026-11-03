@@ -19,7 +19,7 @@ from app.models.schema_tools import ContentItem
 from app.services import content_briefs
 
 KINDS = ("new_page", "refresh")
-SOURCES = ("gap", "refresh", "manual")
+SOURCES = ("gap", "refresh", "topic", "manual")
 STATUSES = ("idea", "planned", "writing", "review", "published", "dropped")
 LIMIT = 500
 
@@ -50,13 +50,13 @@ def _lines(label: str, values: Any) -> list[str]:
 
 def notes_from_draft(db: Session, client: Client, source_area: str, source_key: str | None) -> str | None:
     """The brief (for a gap) or refresh plan (for a page) the model already wrote, as plain words. None when there is none."""
-    if source_area not in ("gap", "refresh") or not source_key:
+    if source_area not in ("gap", "refresh", "topic") or not source_key:
         return None
-    draft = content_briefs.latest(db, client, "brief" if source_area == "gap" else "refresh", source_key)
+    draft = content_briefs.latest(db, client, {"gap": "brief", "topic": "tbrief", "refresh": "refresh"}[source_area], source_key)
     if not draft or draft.get("status") != "done":
         return None
     out_lines: list[str] = []
-    if source_area == "gap":
+    if source_area in ("gap", "topic"):
         if draft.get("working_title"):
             out_lines.append(f"Working title: {draft['working_title']}")
         if draft.get("page_type"):
@@ -80,8 +80,8 @@ def notes_from_draft(db: Session, client: Client, source_area: str, source_key: 
 
 def index(db: Session, client: Client) -> dict[str, dict[str, str]]:
     """Which gaps and pages are already on the calendar, and where they stand: {gap: {search: status}, refresh: {url: status}}."""
-    result: dict[str, dict[str, str]] = {"gap": {}, "refresh": {}}
-    for item in db.query(ContentItem).filter(ContentItem.client_id == client.id, ContentItem.source_area.in_(("gap", "refresh")), ContentItem.status != "dropped"):
+    result: dict[str, dict[str, str]] = {"gap": {}, "refresh": {}, "topic": {}}
+    for item in db.query(ContentItem).filter(ContentItem.client_id == client.id, ContentItem.source_area.in_(("gap", "refresh", "topic")), ContentItem.status != "dropped"):
         if item.source_key:
             result[item.source_area][item.source_key] = item.status
     return result
@@ -120,7 +120,7 @@ def description(item: ContentItem, client: Client) -> tuple[str, str]:
         record_url=f"{get_settings().web_v2_app_url.rstrip('/')}/{client.slug}/content-calendar",
     )
     if is_new:
-        text = f"Search to win: {item.target}\n\n{text}"
+        text = f"{'Subject to cover' if item.source_area == 'topic' else 'Search to win'}: {item.target}\n\n{text}"
     return name, text
 
 

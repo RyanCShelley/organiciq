@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Brief, ContentDepthChoice, RefreshDetail, TopicsResponse } from "@/lib/content";
+import type { Brief, ContentDepthChoice, RefreshDetail, TopicDetail, TopicsResponse } from "@/lib/content";
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: unknown, fallback: string): { ok: false; error: string } => ({ ok: false, error: error instanceof ApiError ? error.message : fallback });
@@ -24,7 +24,16 @@ export async function topicsAction(clientId: string): Promise<R<TopicsResponse>>
   }
 }
 
-export async function draftAction(clientId: string, kind: "brief" | "refresh" | "topics", key: string, depth: ContentDepthChoice, month?: string): Promise<R<true>> {
+export async function topicDetailAction(clientId: string, label: string): Promise<R<TopicDetail>> {
+  try {
+    const q = new URLSearchParams({ label });
+    return { ok: true, value: await apiFetch<TopicDetail>(`/v2/content/topics/detail?${q}`, { clientId }) };
+  } catch (e) {
+    return fail(e, "The topic could not be read: the API did not answer.");
+  }
+}
+
+export async function draftAction(clientId: string, kind: "brief" | "refresh" | "topics" | "tbrief", key: string, depth: ContentDepthChoice, month?: string): Promise<R<true>> {
   try {
     await apiFetch("/v2/content/draft", { method: "POST", clientId, body: { kind, key, depth, month } });
     return { ok: true, value: true };

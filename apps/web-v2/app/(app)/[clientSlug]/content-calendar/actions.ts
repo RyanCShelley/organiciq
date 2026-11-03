@@ -10,7 +10,7 @@ export type NewItem = {
   kind: "new_page" | "refresh";
   title: string;
   target: string;
-  source_area: "gap" | "refresh" | "manual";
+  source_area: "gap" | "refresh" | "topic" | "manual";
   source_key?: string | null;
   due?: string | null;
   assignee_email?: string | null;

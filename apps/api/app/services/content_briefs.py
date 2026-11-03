@@ -24,6 +24,7 @@ from app.decisions import visibility_candidates as vc
 from app.models.client import Client
 from app.models.gsc import FactGscQueryPage
 from app.models.schema_tools import ContentModelRun, ContentState
+from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 from app.schema_tools import llm
 from app.services import content_gaps_view, content_refresh
@@ -108,6 +109,40 @@ Respond with ONE JSON object, no prose and no markdown fences, exactly this shap
  "link_from": [{{"url": "an address from the closest pages above", "anchor_idea": "words to link with"}}],
  "avoid": ["a mistake to avoid", "..."]}}
 Rules: 5 to 9 sections; 4 to 8 questions; name only things you are certain exist; use no statistics or prices you cannot see above; link_from uses only addresses listed above and may be empty; do not target the brand name."""
+
+
+def topic_brief_prompt(*, brand: str, domain: str, topic: dict[str, Any], searches: list[dict[str, Any]], nearest: list[dict[str, Any]]) -> str:
+    lines = []
+    for x in searches:
+        facts = [f"{k} {x[k]}" for k in ("volume", "difficulty") if x.get(k) is not None]
+        if x.get("impressions"):
+            facts.append(f"shown {x['impressions']:,} times in 90 days at position {x['position']}")
+        lines.append(f"- “{x['term']}”" + (f" ({'; '.join(facts)})" if facts else ""))
+    near = "\n".join(f"- {n['url']} — {n['title'] or 'no title'}" for n in nearest) or "(no page on the site is close)"
+    return f"""You are producing a content brief for a writer at a digital marketing agency. The brief is for ONE new page (or one small cluster led by one page) that owns a whole subject the site does not cover yet.
+
+Brand: {brand}
+Site: {domain}
+Subject: {topic['label']}
+Suggested type: {topic.get('content_type') or 'not set'}
+Why it matters: {topic.get('why') or ''}
+It sits beside: {topic.get('next_to') or 'nothing named'}
+Searches in this subject:
+{chr(10).join(lines) or '(none listed)'}
+Pages on the site closest to it:
+{near}
+
+Respond with ONE JSON object, no prose and no markdown fences, exactly this shape:
+{{"working_title": "a title tag of 55 to 62 characters that includes the subject naturally",
+ "page_type": "guide, comparison, service page, collection, FAQ, or another plain type",
+ "angle": "two or three sentences: the specific point of view that makes this page worth ranking, concrete not generic",
+ "sections": ["H2 heading", "..."],
+ "questions": ["a question the page must answer", "..."],
+ "entities": ["a named thing, concept or standard the page should cover, by name only", "..."],
+ "target_words": 1500,
+ "link_from": [{{"url": "an address from the closest pages above", "anchor_idea": "words to link with"}}],
+ "avoid": ["a mistake to avoid", "..."]}}
+Rules: 5 to 9 sections; 4 to 8 questions; cover the searches above across the sections; name only things you are certain exist; use no statistics or prices you cannot see above; link_from uses only addresses listed above and may be empty; do not target the brand name."""
 
 
 # ---- a plan for a page to refresh ------------------------------------------------------------------------------------------------
@@ -196,6 +231,35 @@ def topic_inputs(db: Session, client: Client) -> tuple[list[tuple[str, list[str]
     return buckets, titles, searches
 
 
+def topic_detail(db: Session, client: Client, label: str) -> dict[str, Any] | None:
+    """One suggested topic from the latest topic draft, with each of its example searches priced and placed: the volume and difficulty on file,
+    what Search Console shows for it, and whether it is already a gap or on the watchlist."""
+    draft = latest(db, client, "topics", "site")
+    topic = next((t for t in (draft or {}).get("topics") or [] if t.get("label", "").lower() == label.lower()), None)
+    if topic is None:
+        return None
+    terms = [" ".join(t.lower().split()) for t in topic.get("example_searches") or []]
+    start = date.today() - timedelta(days=LOOKBACK_DAYS)
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    shown = {k: (i, c, p) for k, i, c, p in db.query(q, func.sum(FactGscQueryPage.impressions), func.sum(FactGscQueryPage.clicks), func.avg(FactGscQueryPage.average_position)).filter(
+        FactGscQueryPage.client_id == client.id, FactGscQueryPage.date >= start, q.in_(terms)).group_by(q)} if terms else {}
+    prices = {(m.keyword or "").strip().lower(): m for m in db.query(FactSerKeywordMetric).filter(FactSerKeywordMetric.client_id == client.id, func.lower(FactSerKeywordMetric.keyword).in_(terms))} if terms else {}
+    tracked = {(k or "").strip().lower() for (k,) in db.query(FactSerKeyword.keyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True))}
+    gaps = {g["term"] for g in content_gaps_view.build(db, client, show_ignored=False)["gaps"]}
+    rows = []
+    for term in terms:
+        imp, clk, pos = shown.get(term, (0, 0, None))
+        price = prices.get(term)
+        rows.append({
+            "term": term, "volume": int(price.volume) if price is not None and price.volume is not None else None,
+            "difficulty": round(float(price.difficulty)) if price is not None and price.difficulty is not None else None,
+            "impressions": round(float(imp or 0)), "clicks": round(float(clk or 0)), "position": round(float(pos), 1) if pos is not None else None,
+            "gap": term in gaps, "tracked": term in tracked,
+        })
+    rows.sort(key=lambda r: (-(r["volume"] or 0), -r["impressions"], r["term"]))
+    return {"topic": topic, "searches": rows}
+
+
 def clean_topics(parsed: dict[str, Any], dismissed: set[str]) -> list[dict[str, Any]]:
     out, seen = [], {d.lower() for d in dismissed}
     for t in parsed.get("topics") if isinstance(parsed.get("topics"), list) else []:
@@ -232,7 +296,14 @@ def run(run_id: UUID) -> None:
         client = db.get(Client, row.client_id)
         brand = _brand(db, client)
         read_ok = True
-        if row.kind == "brief":
+        if row.kind == "tbrief":
+            found = topic_detail(db, client, row.key)
+            if found is None:
+                raise RuntimeError("That topic is no longer in the latest list. Reload the list.")
+            near = [n for g in content_gaps_view.build(db, client, show_ignored=True)["gaps"] if g["term"] in {s["term"] for s in found["searches"]} for n in g["nearest"]][:5]
+            prompt = topic_brief_prompt(brand=brand, domain=client.domain or "", topic=found["topic"], searches=found["searches"], nearest=near)
+            shape = "brief"
+        elif row.kind == "brief":
             view = content_gaps_view.build(db, client)
             gap = next((g for g in view["gaps"] if g["term"] == row.key), None) or next((g for g in content_gaps_view.build(db, client, show_ignored=True)["gaps"] if g["term"] == row.key), None)
             if gap is None:

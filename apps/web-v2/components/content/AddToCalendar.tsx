@@ -18,7 +18,7 @@ export function AddToCalendar({ client, canEdit, status, kind, title, target, so
   kind: "new_page" | "refresh";
   title: string;
   target: string;
-  sourceArea: "gap" | "refresh";
+  sourceArea: "gap" | "refresh" | "topic";
   sourceKey: string;
   onAdded: () => void;
 }) {

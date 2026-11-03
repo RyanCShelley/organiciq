@@ -122,3 +122,32 @@ def test_a_tracked_term_that_fell_on_a_page_lists_it_for_a_refresh_and_brand_ter
     assert terms["garden hose repair"]["striking"] and not terms["garden hose repair"]["slipping"]
     assert "shop example reviews" not in terms, "a search for the business's own name is navigation"
     assert any("garden hose guide" in r and "5 to 11" in r for r in page["reasons"])
+
+
+def test_a_topic_opens_to_its_searches_gets_a_brief_and_goes_on_the_calendar(client, db, client_a, admin_user, monkeypatch):
+    import json
+
+    from tests.test_content import _enable
+
+    seed_gaps(db, client_a)
+    seen: dict = {}
+    hd = h(client_a, admin_user)
+    topics = {"topics": [{"label": "Schema audits", "why": "Searches show demand.", "content_type": "guide", "priority": "high", "example_searches": ["schema markup audit", "local seo checklist", "brand new term"], "next_to": "seo"}]}
+    _enable(monkeypatch, json.dumps(topics), seen)
+    client.post("/v2/content/draft", json={"kind": "topics", "key": "x"}, headers=hd)
+    detail = client.get("/v2/content/topics/detail", params={"label": "schema audits"}, headers=hd).json()
+    by = {s["term"]: s for s in detail["searches"]}
+    assert by["schema markup audit"]["volume"] == 900 and by["schema markup audit"]["impressions"] == 400 and by["schema markup audit"]["gap"] is True
+    assert by["local seo checklist"]["gap"] is True and by["brand new term"]["volume"] is None and by["brand new term"]["gap"] is False
+    assert detail["draft"] is None and detail["calendar"] is None and detail["can_edit"] is True
+    assert client.get("/v2/content/topics/detail", params={"label": "nope"}, headers=hd).status_code == 404
+
+    _enable(monkeypatch, json.dumps({"working_title": "Schema Audits Explained", "page_type": "guide", "angle": "How to audit.", "sections": ["What to check", "Fixing errors"], "questions": ["Why audit?"]}), seen)
+    assert client.post("/v2/content/draft", json={"kind": "tbrief", "key": "Schema audits", "depth": "quick"}, headers=hd).status_code == 202
+    assert "“schema markup audit” (volume 900" in seen["prompt"] and "Subject: Schema audits" in seen["prompt"]
+    draft = client.get("/v2/content/topics/detail", params={"label": "Schema audits"}, headers=hd).json()["draft"]
+    assert draft["status"] == "done" and draft["working_title"] == "Schema Audits Explained"
+
+    item = client.post("/v2/content/calendar", json={"kind": "new_page", "title": "Schema Audits Explained", "target": "Schema audits", "source_area": "topic", "source_key": "Schema audits"}, headers=hd).json()
+    assert "Working title: Schema Audits Explained" in item["notes"] and "- Fixing errors" in item["notes"]
+    assert client.get("/v2/content/topics/detail", params={"label": "Schema audits"}, headers=hd).json()["calendar"] == "idea"

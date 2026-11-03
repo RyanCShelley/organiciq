@@ -63,8 +63,8 @@ function ItemPane({ client, item, canEdit, teamwork, people, onChanged }: { clie
   return (
     <div className="space-y-4 text-sm">
       <div>
-        <p className="text-xs text-[var(--text-secondary)]">{KIND[item.kind]} · {item.source_area === "manual" ? "added by hand" : `from ${item.source_area === "gap" ? "a content gap" : "a content refresh"}`} · {item.created_by}</p>
-        <p className="mt-1 break-all text-xs"><span className="font-semibold">{item.kind === "new_page" ? "Search to win:" : "Page:"}</span> {item.target}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{KIND[item.kind]} · {item.source_area === "manual" ? "added by hand" : `from ${item.source_area === "gap" ? "a content gap" : item.source_area === "topic" ? "a missing topic" : "a content refresh"}`} · {item.created_by}</p>
+        <p className="mt-1 break-all text-xs"><span className="font-semibold">{item.source_area === "topic" ? "Subject to cover:" : item.kind === "new_page" ? "Search to win:" : "Page:"}</span> {item.target}</p>
       </div>
       {!canEdit ? <p className="rounded-lg bg-[var(--bg)] p-2 text-xs">You can read the calendar. Admins and content managers change it.</p> : null}
       <label className="block text-xs font-semibold">Title<input value={title} disabled={!canEdit} onChange={(e) => setTitle(e.target.value)} className={field} /></label>
