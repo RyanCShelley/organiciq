@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -11,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
 from app.core.db import get_db
-from app.core.security import AuthUser, require_sma_staff
+from app.core.security import CONTENT_EDITOR_ROLES, AuthUser, require_content_editor, require_sma_staff
 from app.core.settings import get_settings
 from app.models.client import Client
-from app.models.schema_tools import ContentState
-from app.services import content_briefs, content_gaps_view, content_refresh, model_spend
+from app.integrations import teamwork
+from app.models.schema_tools import ContentItem, ContentState
+from app.services import content_briefs, content_calendar, content_gaps_view, content_refresh, model_spend
 
 router = APIRouter(prefix="/v2/content", tags=["v2 content"])
 
@@ -32,12 +35,12 @@ def _month(month: str) -> str:
 @router.get("/gaps")
 def gaps(
     client: Annotated[Client, Depends(require_client)],
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     q: Annotated[str | None, Query(max_length=200)] = None,
     ignored: bool = False,
 ) -> dict:
-    return {**content_gaps_view.build(db, client, show_ignored=ignored, q=q), "model_ready": bool(get_settings().anthropic_api_key.strip())}
+    return {**content_gaps_view.build(db, client, show_ignored=ignored, q=q), "calendar": content_calendar.index(db, client)["gap"], "can_edit": user.role in CONTENT_EDITOR_ROLES, "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 
 @router.get("/gaps/brief")
@@ -62,13 +65,13 @@ def topics(
 @router.get("/refreshes")
 def refreshes(
     client: Annotated[Client, Depends(require_client)],
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     month: Annotated[str | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
     ignored: bool = False,
 ) -> dict:
-    return {**content_refresh.build(db, client, _month(month or content_briefs.last_complete_month()), show_ignored=ignored, q=q), "model_ready": bool(get_settings().anthropic_api_key.strip())}
+    return {**content_refresh.build(db, client, _month(month or content_briefs.last_complete_month()), show_ignored=ignored, q=q), "calendar": content_calendar.index(db, client)["refresh"], "can_edit": user.role in CONTENT_EDITOR_ROLES, "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 
 @router.get("/refreshes/page")
@@ -158,3 +161,130 @@ def write_draft(
         db.commit()
     background.add_task(content_briefs.run, row.id)
     return {"id": str(row.id)}
+
+
+# ---- the content calendar -----------------------------------------------------------------------------------------------------------
+
+
+class CalendarIn(BaseModel):
+    kind: Literal["new_page", "refresh"]
+    title: str = Field(min_length=1, max_length=300)
+    target: str = Field(min_length=1, max_length=2048)
+    source_area: Literal["gap", "refresh", "manual"] = "manual"
+    source_key: str | None = Field(default=None, max_length=2048)
+    due: date | None = None
+    assignee_email: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=8000)
+
+
+class CalendarPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    status: Literal["idea", "planned", "writing", "review", "published", "dropped"] | None = None
+    due: date | None = None
+    clear_due: bool = False
+    assignee_email: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=8000)
+
+
+def _item(db: Session, client: Client, item_id: UUID) -> ContentItem:
+    item = db.query(ContentItem).filter(ContentItem.id == item_id, ContentItem.client_id == client.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That item is not on this client's calendar.")
+    return item
+
+
+@router.get("/calendar")
+def calendar(
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    dropped: bool = False,
+) -> dict:
+    q = db.query(ContentItem).filter(ContentItem.client_id == client.id)
+    q = q.filter(ContentItem.status == "dropped") if dropped else q.filter(ContentItem.status != "dropped")
+    rows = q.order_by(ContentItem.due.is_(None), ContentItem.due, ContentItem.created_at).limit(content_calendar.LIMIT).all()
+    return {
+        "items": [content_calendar.out(r) for r in rows], "can_edit": user.role in CONTENT_EDITOR_ROLES,
+        "teamwork": {"configured": teamwork.configured(), "tasklist_id": client.teamwork_tasklist_id},
+        "counts": {s: sum(1 for r in rows if r.status == s) for s in content_calendar.STATUSES if s != "dropped"},
+    }
+
+
+@router.post("/calendar")
+def calendar_add(
+    payload: CalendarIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_content_editor)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Put a gap, a page to refresh, or something else on the calendar. A gap or page already there is returned, not added twice."""
+    if payload.source_area != "manual" and not payload.source_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Say which gap or page this comes from.")
+    item, created = content_calendar.add(
+        db, client, email=user.email, kind=payload.kind, title=payload.title, target=payload.target, source_area=payload.source_area,
+        source_key=payload.source_key, due=payload.due, assignee_email=payload.assignee_email, notes=payload.notes,
+    )
+    return {**content_calendar.out(item), "created": created}
+
+
+@router.patch("/calendar/{item_id}")
+def calendar_update(
+    item_id: UUID,
+    payload: CalendarPatch,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_content_editor)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    item = _item(db, client, item_id)
+    if payload.title is not None:
+        item.title = payload.title.strip()
+    if payload.notes is not None:
+        item.notes = payload.notes
+    if payload.assignee_email is not None:
+        item.assignee_email = payload.assignee_email.strip() or None
+    if payload.clear_due:
+        item.due = None
+    elif payload.due is not None:
+        item.due = payload.due
+        if item.status == "idea" and payload.status is None:
+            item.status = "planned"
+    if payload.status is not None:
+        content_calendar.set_status(item, payload.status)
+    db.commit()
+    db.refresh(item)
+    return content_calendar.out(item)
+
+
+@router.delete("/calendar/{item_id}")
+def calendar_remove(
+    item_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_content_editor)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Take an item off the calendar. Its Teamwork task, if sent, is left in Teamwork."""
+    db.delete(_item(db, client, item_id))
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/calendar/{item_id}/send")
+def calendar_send(
+    item_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_content_editor)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Push the item to the client's Teamwork tasklist. A second press returns the first task."""
+    item = _item(db, client, item_id)
+    if item.teamwork_task_id:
+        return content_calendar.out(item)
+    if not teamwork.configured():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Teamwork is not set up on this install, so the item cannot be sent.")
+    if not client.teamwork_tasklist_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This client has no Teamwork tasklist yet. Choose one in Settings → Connections.")
+    try:
+        content_calendar.send(db, client, item)
+    except teamwork.TeamworkError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return content_calendar.out(item)

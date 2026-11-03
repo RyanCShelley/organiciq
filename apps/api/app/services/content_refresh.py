@@ -29,7 +29,9 @@ from app.models.client import Client
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
 from app.models.engine_task import EngineTask
 from app.models.gsc import FactGscQueryPage
+from app.core.urls import normalize_url
 from app.models.schema_tools import ContentState
+from app.models.seranking import FactSerKeyword
 from app.services.content_depth import score_content_depth
 from app.services.page_diagnostic import read_page
 
@@ -43,6 +45,10 @@ COMPETING_SHARE = 0.25
 COMPETING_MAX_POSITION = 30
 COMPETING_SHOWN = 25
 LOOKBACK_DAYS = 90
+WATCH_DROP = 3
+WATCH_SLIPPING_MAX_POSITION = 30
+WATCH_STRIKING = (4, 20)
+WATCH_SHOWN = 5
 WINDOW_DAYS = 28
 
 LABELS = {"growing": "Growing", "steady": "Steady", "slipping": "Slipping", "losing": "Losing traffic", "quiet": "Gone quiet", "new": "New"}
@@ -93,6 +99,35 @@ def _snapshots(db: Session, client: Client) -> dict[str, FactCrawlPageSnapshot]:
     }
 
 
+def watch_by_page(db: Session, client: Client) -> dict[str, list[dict[str, Any]]]:
+    """The watchlist's tracked terms by the page that ranks for them: where each stands, and whether it slipped or is within reach of page one.
+
+    Brand terms are left out: no page change moves a search for the business's own name.
+    """
+    brand = vc.brand_keys(client)
+    best: dict[tuple[str, str], FactSerKeyword] = {}
+    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True), FactSerKeyword.ranking_url.isnot(None)):
+        term = " ".join((row.keyword or "").lower().split())
+        if not term or row.current_position is None or vc.is_brand(term, brand):
+            continue
+        key = (normalize_url(row.ranking_url or ""), term)
+        held = best.get(key)
+        if held is None or (row.checked_at or date.min) > (held.checked_at or date.min):
+            best[key] = row
+    pages: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (url, term), row in best.items():
+        pos = float(row.current_position)
+        drop = (pos - float(row.previous_position)) if row.previous_position is not None else 0.0
+        slipping = drop >= WATCH_DROP and pos <= WATCH_SLIPPING_MAX_POSITION
+        striking = WATCH_STRIKING[0] <= pos <= WATCH_STRIKING[1]
+        if slipping or striking:
+            pages[url].append({"term": term, "position": round(pos, 1), "change": round(-drop, 1) if row.previous_position is not None else None, "slipping": slipping, "striking": striking,
+                               "volume": int(row.volume) if row.volume is not None else None})
+    for rows in pages.values():
+        rows.sort(key=lambda r: (not r["slipping"], r["position"]))
+    return pages
+
+
 def build(db: Session, client: Client, month: str, *, show_ignored: bool = False, q: str | None = None) -> dict[str, Any]:
     year, mon = int(month[:4]), int(month[5:7])
     month_start = date(year, mon, 1)
@@ -113,6 +148,7 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
     site_ratio = (site["cur3"] / site["ly3"]) if has_last_year else None
 
     snaps = _snapshots(db, client)
+    watch = watch_by_page(db, client)
     set_aside = {k for (k,) in db.query(ContentState.key).filter(ContentState.client_id == client.id, ContentState.area == "refresh")}
     needle = " ".join((q or "").lower().split())
 
@@ -131,7 +167,9 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
         words = snap.word_count if snap else None
         stale = age is not None and age >= STALE_MONTHS and m["cur3"] >= tc.PAGE_MIN_SESSIONS
         thin = words is not None and 0 < words < THIN_WORDS and m["cur3"] >= tc.PAGE_MIN_SESSIONS
-        needs = label in ("losing", "slipping", "quiet") or stale or thin
+        held = watch.get(url, [])
+        watch_slip = any(w["slipping"] for w in held)
+        needs = label in ("losing", "slipping", "quiet") or stale or thin or watch_slip
         if not needs and not needle:
             continue
         at_stake = j["at_stake"]
@@ -143,7 +181,8 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
                 "sessions": {"current": round(m["current"]), "previous": round(m["previous"]), "change_pct": tc._pct(m["current"], m["previous"])},
                 "three_months": {"current": round(m["cur3"]), "last_year": round(m["ly3"]), "change_pct": tc._pct(m["cur3"], m["ly3"])},
                 "at_stake": round(at_stake), "last_updated": snap.content_updated_on.isoformat() if snap and snap.content_updated_on else None,
-                "months_since_update": age, "words": words, "stale": stale, "thin": thin, "reasons": _reasons(label, m, j, site_ratio, age, words),
+                "months_since_update": age, "words": words, "stale": stale, "thin": thin, "reasons": _reasons(label, m, j, site_ratio, age, words) + [f"Watchlist: “{w['term']}” moved from position {round(w['position'] + (w['change'] or 0))} to {round(w['position'])}." for w in held if w["slipping"]][:3],
+                "watch": held[:WATCH_SHOWN], "watch_slipping": watch_slip,
                 "ignored": url in set_aside,
             }
         )
@@ -157,7 +196,7 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
         "site": {"sessions": {"current": round(site["current"]), "previous": round(site["previous"])}, "three_months": {"current": round(site["cur3"]), "last_year": round(site["ly3"]), "change_pct": tc._pct(site["cur3"], site["ly3"])}},
         "counts": {
             "pages": len(live), "losing": sum(1 for r in live if r["label"] == "losing"), "quiet": sum(1 for r in live if r["label"] == "quiet"),
-            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]),
+            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]), "watch": sum(1 for r in live if r["watch_slipping"]),
             "at_stake": sum(r["at_stake"] for r in live),
         },
         "ignored_total": len(set_aside), "pages": rows[:LIST_SIZE], "pages_total": len(rows),
@@ -165,6 +204,7 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
         "notes": [
             "Organic search sessions by landing page, judged against the whole site's own change on the same three months last year.",
             ("Last year's months are missing from the data, so only sudden falls are caught." if not has_last_year else "At stake is the sessions a month the page has lost against what the site's own trend says it should have."),
+            "Watchlist: a tracked term that fell three or more places on this page also lists it. Tracked terms between positions 4 and 20 are shown beside the page as within reach.",
             f"Stale means not updated in {STALE_MONTHS} months or more while it still earns sessions. Thin means under {THIN_WORDS} words.",
         ],
     }
@@ -283,5 +323,5 @@ def page_detail(db: Session, client: Client, month: str, url: str) -> dict[str, 
         "sessions": [{"month": m, "sessions": round(series.get(m, 0))} for m in months],
         "lost": tc.queries_lost(db, client, month, url, limit=8),
         "competing": [c for c in competing(db, client) if any(p["url"] == url for p in c["pages"])][:6],
-        "changes": changes_for(db, client, url), "depth": depth, "read": read,
+        "changes": changes_for(db, client, url), "depth": depth, "read": read, "watch": watch_by_page(db, client).get(url, [])[:WATCH_SHOWN],
     }

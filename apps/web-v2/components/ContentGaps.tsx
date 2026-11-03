@@ -4,14 +4,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { briefAction, dismissTopicAction, draftAction, setAsideAction, topicsAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
+import { AddToCalendar, StatusChip } from "@/components/content/AddToCalendar";
 import { AskModel, DEPTH, Kpi, List, SidePane, card, num, shortPage, td, th } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { Brief, ContentDepthChoice, Gap, GapSource, Gaps, TopicsResponse } from "@/lib/content";
+import type { Brief, CalendarStatus, ContentDepthChoice, Gap, GapSource, Gaps, TopicsResponse } from "@/lib/content";
 
 const SOURCE: Record<GapSource, string> = { searched: "Shown in Google", competitor: "Competitors rank", watchlist: "On the watchlist" };
 
-function BriefPane({ client, gap, ready, onChanged }: { client: Client; gap: Gap; ready: boolean; onChanged: () => void }) {
+function BriefPane({ client, gap, ready, canEdit, onCalendar, onRefresh, onChanged }: { client: Client; gap: Gap; ready: boolean; canEdit: boolean; onCalendar?: CalendarStatus; onRefresh: () => void; onChanged: () => void }) {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
@@ -90,6 +91,8 @@ function BriefPane({ client, gap, ready, onChanged }: { client: Client; gap: Gap
           </ul>
         )}
       </div>
+
+      <AddToCalendar client={client} canEdit={canEdit} status={onCalendar} kind="new_page" title={brief?.status === "done" && brief.working_title ? brief.working_title : gap.term} target={gap.term} sourceArea="gap" sourceKey={gap.term} onAdded={onRefresh} />
 
       <div className="space-y-2 rounded-lg border border-[var(--border)] p-3">
         <h3 className="font-bold">Content brief</h3>
@@ -242,7 +245,7 @@ export function ContentGaps({ client, q, ignored, data, error }: { client: Clien
             <p className="px-5 text-xs text-[var(--text-tertiary)]">Open a gap to see the pages closest to it, who ranks for it, and to have the model draft a brief.</p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full text-sm">
-                <thead><tr><th className={th}>Search</th><th className={th}>Where it came from</th><th className={th}>Volume</th><th className={th}>Difficulty</th><th className={th}>To compete for</th><th className={th}>Shown</th></tr></thead>
+                <thead><tr><th className={th}>Search</th><th className={th}>Where it came from</th><th className={th}>Volume</th><th className={th}>Difficulty</th><th className={th}>To compete for</th><th className={th}>Shown</th><th className={th}>Calendar</th></tr></thead>
                 <tbody>
                   {data.gaps.map((g) => (
                     <tr key={g.term} className="cursor-pointer border-t border-[var(--border)] align-top hover:bg-[var(--bg)]" onClick={() => setOpen(g.term)}>
@@ -252,9 +255,10 @@ export function ContentGaps({ client, q, ignored, data, error }: { client: Clien
                       <td className={td}>{g.difficulty != null ? Math.round(g.difficulty) : "–"}</td>
                       <td className={`${td} font-semibold`}>{g.opportunity ? num(g.opportunity) : "–"}</td>
                       <td className={td}>{g.impressions ? `${num(g.impressions)}${g.position != null ? ` · pos ${g.position}` : ""}` : "–"}</td>
+                      <td className="px-3 py-2"><StatusChip status={data.calendar?.[g.term]} /></td>
                     </tr>
                   ))}
-                  {data.gaps.length === 0 ? <tr><td colSpan={6} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No gap matches “${q}”.` : "Clean: every search with demand has a page."}</td></tr> : null}
+                  {data.gaps.length === 0 ? <tr><td colSpan={7} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No gap matches “${q}”.` : "Clean: every search with demand has a page."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -265,7 +269,7 @@ export function ContentGaps({ client, q, ignored, data, error }: { client: Clien
       ) : null}
 
       <SidePane open={!!gap} label="Content gap" onClose={() => setOpen(null)}>
-        {gap ? <BriefPane client={client} gap={gap} ready={data?.model_ready ?? false} onChanged={() => { setOpen(null); router.refresh(); }} /> : null}
+        {gap ? <BriefPane client={client} gap={gap} ready={data?.model_ready ?? false} canEdit={data?.can_edit ?? false} onCalendar={data?.calendar?.[gap.term]} onRefresh={() => router.refresh()} onChanged={() => { setOpen(null); router.refresh(); }} /> : null}
       </SidePane>
     </section>
   );

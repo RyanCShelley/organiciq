@@ -102,11 +102,25 @@ def get_current_user(
     )
 
 
+STAFF_ROLES = {UserRole.SMA_ADMIN, UserRole.SMA_TEAM, UserRole.SEO_LEAD, UserRole.CONTENT_MANAGER}
+CONTENT_EDITOR_ROLES = {UserRole.SMA_ADMIN, UserRole.CONTENT_MANAGER}
+
+
 def require_sma_staff(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
-    if user.role not in {UserRole.SMA_ADMIN, UserRole.SMA_TEAM}:
+    if user.role not in STAFF_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="SMA staff access required",
+        )
+    return user
+
+
+def require_content_editor(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
+    """Admins and content managers add and edit content calendar items; an SEO lead and other staff only read it."""
+    if user.role not in CONTENT_EDITOR_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins and content managers can change the content calendar",
         )
     return user
 

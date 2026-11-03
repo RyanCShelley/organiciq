@@ -5,10 +5,11 @@ import { useEffect, useState, useTransition } from "react";
 
 import { draftAction, refreshPageAction, setAsideAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
 import { WeeklyLine } from "@/components/bi/Charts";
+import { AddToCalendar, StatusChip } from "@/components/content/AddToCalendar";
 import { AskModel, DEPTH, Kpi, List, SidePane, card, day, num, shortPage, td, th } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { ClickWindow, Competing, ContentDepthChoice, RefreshDetail, RefreshPage, Refreshes } from "@/lib/content";
+import type { CalendarStatus, ClickWindow, Competing, ContentDepthChoice, RefreshDetail, RefreshPage, Refreshes } from "@/lib/content";
 import { monthLabel } from "@/lib/focus";
 
 const TONE: Record<string, string> = { losing: "bg-red-100 text-red-800", quiet: "bg-red-100 text-red-800", slipping: "bg-amber-100 text-amber-900", growing: "bg-green-100 text-green-800", steady: "bg-gray-100 text-gray-700", new: "bg-blue-100 text-blue-800" };
@@ -32,7 +33,7 @@ function CompetingList({ rows, here }: { rows: Competing[]; here?: string }) {
   );
 }
 
-function PagePane({ client, page, month, ready, onChanged }: { client: Client; page: RefreshPage; month: string; ready: boolean; onChanged: () => void }) {
+function PagePane({ client, page, month, ready, canEdit, onCalendar, onRefresh, onChanged }: { client: Client; page: RefreshPage; month: string; ready: boolean; canEdit: boolean; onCalendar?: CalendarStatus; onRefresh: () => void; onChanged: () => void }) {
   const [d, setD] = useState<RefreshDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
@@ -78,6 +79,13 @@ function PagePane({ client, page, month, ready, onChanged }: { client: Client; p
       </div>
       {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
       {page.reasons.length ? <ul className="list-disc space-y-0.5 rounded-lg bg-[var(--bg)] p-3 pl-7 text-xs">{page.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : null}
+      <AddToCalendar client={client} canEdit={canEdit} status={onCalendar} kind="refresh" title={`Refresh ${page.title ?? shortPage(page.url)}`} target={page.url} sourceArea="refresh" sourceKey={page.url} onAdded={onRefresh} />
+      {page.watch.length ? (
+        <div className="rounded-lg border border-[var(--border)] p-3">
+          <h3 className="font-bold">Watchlist terms on this page</h3>
+          <ul className="mt-1 space-y-0.5 text-xs">{page.watch.map((w) => <li key={w.term}><span className="font-semibold">{w.term}</span> · position {w.position}{w.change ? ` (${w.change > 0 ? "+" : ""}${w.change})` : ""}{w.volume != null ? ` · ${num(w.volume)} searches a month` : ""} · <span className={w.slipping ? "font-semibold text-red-700" : "text-[var(--text-secondary)]"}>{w.slipping ? "slipping" : "within reach of page one"}</span></li>)}</ul>
+        </div>
+      ) : null}
       {!d && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Reading the page…</p> : null}
       {d ? (
         <>
@@ -209,11 +217,12 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
 
       {data && c ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Kpi label="Pages to refresh" value={num(c.pages)} note={c.pages === 0 ? "Clean" : `${num(c.losing)} losing traffic, ${num(c.quiet)} gone quiet, ${num(c.slipping)} slipping`} />
             <Kpi label="Sessions at stake" value={num(c.at_stake)} note="a month, against what the site's own trend says these pages should have" />
             <Kpi label="Stale" value={num(c.stale)} note="not updated in 18 months, and still earning" />
             <Kpi label="Thin" value={num(c.thin)} note="under 300 words, and still earning" />
+            <Kpi label="Watchlist slipping" value={num(c.watch)} note="pages where a tracked term fell three or more places" />
           </div>
           {data.has_last_year ? (
             <p className="-mt-3 text-xs text-[var(--text-secondary)]">The whole site: {num(data.site.three_months.current)} organic sessions in these three months{data.site.three_months.change_pct != null ? `, ${data.site.three_months.change_pct > 0 ? "+" : ""}${data.site.three_months.change_pct}% on last year` : ""}.</p>
@@ -231,7 +240,7 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
             <p className="px-5 text-xs text-[var(--text-tertiary)]">Open a page to see the searches it lost, the pages it competes with, how much it says, and to have the model plan the refresh.</p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full text-sm">
-                <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>At stake</th><th className={th}>Why</th></tr></thead>
+                <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>At stake</th><th className={th}>Why</th><th className={th}>Calendar</th></tr></thead>
                 <tbody>
                   {data.pages.map((p) => (
                     <tr key={p.url} className="cursor-pointer border-t border-[var(--border)] align-top hover:bg-[var(--bg)]" onClick={() => setOpen(p.url)}>
@@ -241,9 +250,10 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
                       <td className={td}>{num(p.three_months.last_year)}{p.three_months.change_pct != null ? <span className={`ml-1 text-xs ${p.three_months.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{p.three_months.change_pct > 0 ? "+" : ""}{p.three_months.change_pct}%</span> : null}</td>
                       <td className={`${td} font-semibold ${p.at_stake ? "text-red-700" : ""}`}>{p.at_stake ? `−${num(p.at_stake)}` : "–"}</td>
                       <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]">{p.reasons.slice(0, 2).join(" ")}</td>
+                      <td className="px-3 py-2"><StatusChip status={data.calendar[p.url]} /></td>
                     </tr>
                   ))}
-                  {data.pages.length === 0 ? <tr><td colSpan={6} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No page with traffic matches “${q}”.` : "Clean: no page needs a refresh this month."}</td></tr> : null}
+                  {data.pages.length === 0 ? <tr><td colSpan={7} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No page with traffic matches “${q}”.` : "Clean: no page needs a refresh this month."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -262,7 +272,7 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
       ) : null}
 
       <SidePane open={!!page} label="Page" onClose={() => setOpen(null)}>
-        {page ? <PagePane client={client} page={page} month={month} ready={data?.model_ready ?? false} onChanged={() => { setOpen(null); router.refresh(); }} /> : null}
+        {page ? <PagePane client={client} page={page} month={month} ready={data?.model_ready ?? false} canEdit={data?.can_edit ?? false} onCalendar={data?.calendar[page.url]} onRefresh={() => router.refresh()} onChanged={() => { setOpen(null); router.refresh(); }} /> : null}
       </SidePane>
     </section>
   );

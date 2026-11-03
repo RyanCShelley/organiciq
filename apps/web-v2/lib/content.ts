@@ -30,6 +30,8 @@ export type Gaps = {
   gaps_total?: number;
   notes: string[];
   model_ready?: boolean;
+  calendar?: Record<string, CalendarStatus>;
+  can_edit?: boolean;
 };
 
 export type Draft = {
@@ -73,7 +75,10 @@ export type RefreshPage = {
   thin: boolean;
   reasons: string[];
   ignored: boolean;
+  watch: WatchTerm[];
+  watch_slipping: boolean;
 };
+export type WatchTerm = { term: string; position: number; change: number | null; slipping: boolean; striking: boolean; volume: number | null };
 export type Competing = { query: string; impressions: number; pages: { url: string; impressions: number; clicks: number; position: number }[] };
 export type Refreshes = {
   month: string;
@@ -81,13 +86,15 @@ export type Refreshes = {
   showing_ignored: boolean;
   has_last_year: boolean;
   site: { sessions: { current: number; previous: number }; three_months: { current: number; last_year: number; change_pct: number | null } };
-  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; at_stake: number };
+  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; watch: number; at_stake: number };
   ignored_total: number;
   pages: RefreshPage[];
   pages_total: number;
   competing: Competing[];
   notes: string[];
   model_ready: boolean;
+  calendar: Record<string, CalendarStatus>;
+  can_edit: boolean;
 };
 export type ClickWindow = { impressions: number; clicks: number } | null;
 export type RefreshDetail = {
@@ -102,6 +109,7 @@ export type RefreshDetail = {
   changes: { date: string; kind: string; text: string; before: ClickWindow; after: ClickWindow; measured_on: string | null }[];
   depth: { score: number; signals: { stats_hits?: number; dates_present?: number; role_mentions?: number; list_items?: number; table_present?: boolean; word_count?: number; quotes?: number; citation_marker?: boolean } } | null;
   read: { ok: boolean; note: string | null };
+  watch: WatchTerm[];
   plan: RefreshPlan | null;
 };
 export type RefreshPlan = Draft & {
@@ -114,3 +122,29 @@ export type RefreshPlan = Draft & {
   merge_with?: string;
   target_words?: number | null;
 };
+
+export type CalendarStatus = "idea" | "planned" | "writing" | "review" | "published" | "dropped";
+export type CalendarItem = {
+  id: string;
+  kind: "new_page" | "refresh";
+  title: string;
+  target: string;
+  source_area: "gap" | "refresh" | "manual";
+  source_key: string | null;
+  status: CalendarStatus;
+  due: string | null;
+  assignee_email: string | null;
+  notes: string | null;
+  teamwork_task_id: string | null;
+  teamwork_task_url: string | null;
+  published_at: string | null;
+  created_by: string;
+  created_at: string | null;
+};
+export type CalendarData = {
+  items: CalendarItem[];
+  can_edit: boolean;
+  teamwork: { configured: boolean; tasklist_id: string | null };
+  counts: Record<string, number>;
+};
+export type Person = { email: string; name: string | null };

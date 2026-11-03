@@ -49,7 +49,7 @@ def user_can_access_client(db: Session, user: AuthUser, client_id: UUID) -> bool
     if user.role == UserRole.SMA_ADMIN:
         return True
 
-    if user.role == UserRole.SMA_TEAM:
+    if user.role in {UserRole.SMA_TEAM, UserRole.SEO_LEAD, UserRole.CONTENT_MANAGER}:
         assignment = (
             db.query(UserClient)
             .filter(UserClient.user_id == user.id, UserClient.client_id == client_id)

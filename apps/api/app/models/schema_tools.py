@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -146,3 +146,33 @@ class ContentModelRun(Base):
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentItem(Base):
+    """A page to write or refresh on the content calendar: added from a gap or a refresh, or by hand, planned by a person, optionally sent to Teamwork."""
+
+    __tablename__ = "content_items"
+    __table_args__ = (Index("ix_content_items_client_due", "client_id", "due"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: new_page | refresh
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The search to win (a new page) or the page address (a refresh).
+    target: Mapped[str] = mapped_column(Text, nullable=False)
+    #: gap | refresh | manual: where it came from. source_key is the gap's search or the page's address.
+    source_area: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    source_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: idea | planned | writing | review | published | dropped
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="idea")
+    due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    assignee_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: What the person doing the work needs: the brief or refresh plan, in words, copied at the time it was added.
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    teamwork_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
