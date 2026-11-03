@@ -134,7 +134,7 @@ export type WeekPoint = { week: string; value: number | null };
  * One value a week. With `invert` a lower number draws higher, which is how a position reads (1 at the top).
  * Bands are periods, such as Google updates, drawn behind the line.
  */
-export function WeeklyLine({ points, invert = false, bands = [], label, format = (n: number) => n.toLocaleString() }: { points: WeekPoint[]; invert?: boolean; bands?: { begin: string; end: string | null; title: string }[]; label: string; format?: (n: number) => string }) {
+export function WeeklyLine({ points, invert = false, bands = [], label, format = (n: number) => n.toLocaleString(), periodLabel = "Week of", spanDays = 6 }: { points: WeekPoint[]; invert?: boolean; bands?: { begin: string; end: string | null; title: string }[]; label: string; format?: (n: number) => string; periodLabel?: string; spanDays?: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 640, H = 200, L = 44, R = 12, T = 12, B = 26;
   const values = points.map((p) => p.value).filter((v): v is number => v != null);
@@ -146,7 +146,7 @@ export function WeeklyLine({ points, invert = false, bands = [], label, format =
   const path = points.reduce((acc, p, i) => (p.value == null ? acc : `${acc}${acc && points[i - 1]?.value != null ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)} `), "");
   const ticks = [0, 0.5, 1].map((f) => lo + f * (hi - lo));
   const t0 = new Date(`${points[0].week}T00:00:00`).getTime();
-  const tN = new Date(`${points[points.length - 1].week}T00:00:00`).getTime() + 6 * 86400000;
+  const tN = new Date(`${points[points.length - 1].week}T00:00:00`).getTime() + spanDays * 86400000;
   const px = (iso: string) => L + ((new Date(`${iso}T00:00:00`).getTime() - t0) / (tN - t0)) * (W - L - R);
   const short = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const h = hover != null ? points[hover] : null;
@@ -181,7 +181,7 @@ export function WeeklyLine({ points, invert = false, bands = [], label, format =
       </svg>
       {h ? (
         <div className="pointer-events-none absolute right-2 top-2 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-xs shadow-sm">
-          <div className="font-semibold">Week of {short(h.week)}</div>
+          <div className="font-semibold">{periodLabel} {short(h.week)}</div>
           <div>{h.value == null ? "no data" : format(h.value)}</div>
         </div>
       ) : null}

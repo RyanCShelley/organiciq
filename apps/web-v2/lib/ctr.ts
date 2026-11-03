@@ -1,0 +1,44 @@
+export type CtrPage = {
+  url: string;
+  title: string | null;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  expected_clicks: number;
+  extra_clicks: number;
+  position: number;
+  searches: number;
+  searches_below: number;
+  top_search: string;
+  below: boolean;
+};
+export type CtrSearch = { query: string; url: string; impressions: number; clicks: number; position: number; ctr: number; expected_ctr: number; expected_clicks: number; extra_clicks: number; below: boolean };
+export type Ctr = {
+  from: string;
+  to: string;
+  benchmark: string;
+  rule: string;
+  score: number | null;
+  clicks: number;
+  expected_clicks: number;
+  extra_clicks: number;
+  pages_below: number;
+  searches_below: number;
+  pages_counted: number;
+  searches_counted: number;
+  monthly: { month: string; score: number | null; extra_clicks: number; clicks: number; expected_clicks: number }[];
+  pages: CtrPage[];
+  searches: CtrSearch[];
+  bing: { score: number; clicks: number; expected_clicks: number; searches: number } | null;
+};
+export type CtrWindow = { impressions: number; clicks: number; ctr: number; position: number } | null;
+export type CtrDetail = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  title_length: number | null;
+  description_length: number | null;
+  searches: (CtrSearch & { bing: { impressions: number; clicks: number; position: number | null } | null })[];
+  searches_total: number;
+  changes: { date: string; kind: string; text: string; before: CtrWindow; after: CtrWindow; measured_on: string | null }[];
+};
