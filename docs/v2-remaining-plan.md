@@ -55,7 +55,7 @@ comes first.
   `dashboard_exploration.py` (dated, source-backed drill-downs) and `monthly_review.py`. (2) **Ask the data:** a chat box that
   answers questions about this client's data with the numbers and where they came from.
 - **Ask the data builds on the Copilot module** (`app/copilot`: chat, tools, playbook), which is already planned for every
-  screen. **OPEN B (to decide by comparison, 2026-11-03):** which model answers (the Copilot gateway speaks the OpenAI-compatible protocol and is not configured;
+  screen. **OPEN B (compared 2026-11-03; recommendation: the Claude 5 family, see the results note below; Ryan to choose):** which model answers (the Copilot gateway speaks the OpenAI-compatible protocol and is not configured;
   the four AI platform keys already on the install are another option), and the safety rules: read-only, this client only,
   every figure cited to its table, a monthly cost cap. You linked an article on the best LLM for data analysis; I have not
   read it, so tell me if it should decide the model.
@@ -137,6 +137,14 @@ comes first.
   changed since the page last moved; Send to plan; the change log (annotations) shows what was done and when.
 - **Size:** M. **Note:** this overlaps the engine's Traffic tab; the difference is intent. The engine answers "what dropped
   this month"; Refreshes answers "what should we update next, dropped or not".
+
+### Ask-the-data model comparison (2026-11-03)
+
+Twelve of Ryan's questions, one read-only SQL tool over Absolutely Natural's data, eight models. Fable 5.1, Opus 5.5, Sonnet 5.5 and
+Haiku 5.5 queried several times, checked the data's gaps and cited tables and periods. GPT-4o and Gemini answered after one query or none,
+and GPT-4o-mini invented numbers (an average engaged duration the data does not hold, and the wrong years). Data gaps the tool must
+show the user: no session duration or time on page in GA4, the SE Ranking competitor tables are empty for this client, and most
+purchases arrive as "other" or "direct_unattributed".
 
 ## 4. Build order
 
