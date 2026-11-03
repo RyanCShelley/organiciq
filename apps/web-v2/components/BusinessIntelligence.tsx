@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { addChangeAction, removeChangeAction } from "@/app/(app)/[clientSlug]/bi/actions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -145,10 +145,9 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
     });
   const input = "rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm";
   return (
-    <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <h3 className="text-sm font-semibold">Change log</h3>
-      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-        What changed on the site or in the work, so a movement in the numbers above can be tied to something. Shipping a task adds its entry here; add anything else by hand.
+    <section>
+      <p className="text-xs text-[var(--text-tertiary)]">
+        What changed on the site or in the work, so a movement in the numbers can be tied to something. Shipping a task adds its entry here; add anything else by hand. Entries are marked on the charts.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="text-xs font-semibold">
@@ -196,6 +195,13 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
 export function BusinessIntelligence({ client, from, to, channel, data, error, ask }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null; ask: AskInfo | null }) {
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
+  const [paneOpen, setPaneOpen] = useState(false);
+  useEffect(() => {
+    if (!paneOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPaneOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paneOpen]);
   const go = (f: string, t: string, c = channel) => {
     const q = new URLSearchParams({ from: f, to: t });
     if (c) q.set("channel", c);
@@ -229,7 +235,12 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
           <h1 className="text-2xl font-bold">Business Intelligence</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">How visible are we, who is arriving, and do those visits stay and act? Compared with the same number of days before.</p>
         </div>
-        <button type="button" onClick={download} disabled={!data} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Export data</button>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setPaneOpen((v) => !v)} aria-expanded={paneOpen} aria-controls="change-pane" className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold">
+            Change log{data ? ` (${data.changes.length})` : ""}
+          </button>
+          <button type="button" onClick={download} disabled={!data} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Export data</button>
+        </div>
       </header>
 
       <AskTheData clientId={client.id} info={ask} />
@@ -452,10 +463,23 @@ export function BusinessIntelligence({ client, from, to, channel, data, error, a
             </div>
           </Section>
 
-          <Section n="04" title="What changed?" sub="Work shipped and changes made to the site, so a movement above can be tied to something. Marked on the charts.">
-            <ChangeLog clientId={client.id} slug={client.slug} from={from} to={to} changes={data.changes} />
-          </Section>
         </>
+      ) : null}
+      {data ? (
+        <aside
+          id="change-pane"
+          aria-label="Change log"
+          aria-hidden={!paneOpen}
+          className={`fixed right-0 top-0 z-30 flex h-full w-full max-w-md flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-xl transition-transform duration-200 ${paneOpen ? "translate-x-0" : "pointer-events-none translate-x-full"}`}
+        >
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
+            <h2 className="font-bold">Change log</h2>
+            <button type="button" onClick={() => setPaneOpen(false)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-sm font-semibold">Close</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-5">
+            <ChangeLog clientId={client.id} slug={client.slug} from={from} to={to} changes={data.changes} />
+          </div>
+        </aside>
       ) : null}
     </section>
   );
