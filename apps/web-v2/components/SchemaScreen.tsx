@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useState, useTransition } from "react";
 
-import { approveConceptAction, pageAction, removeConceptAction, searchConceptsAction, startPageReportAction } from "@/app/(app)/[clientSlug]/schema/actions";
+import { addIgnoreAction, approveConceptAction, pageAction, removeConceptAction, removeIgnoreAction, searchConceptsAction, startPageReportAction } from "@/app/(app)/[clientSlug]/schema/actions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { ScCandidate, ScCheck, ScConcept, ScData, ScDepth, ScItem, ScPage, ScReport, ScResponse, ScType } from "@/lib/schema";
+import type { ScCandidate, ScCheck, ScConcept, ScData, ScDepth, ScIgnoreScope, ScItem, ScPage, ScReport, ScResponse, ScType } from "@/lib/schema";
+
+type Ignore = (scope: ScIgnoreScope, key: string, label: string) => void;
 
 const card = "rounded-xl border border-[var(--border)] bg-[var(--surface)]";
 const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
@@ -32,7 +34,17 @@ function Kpi({ label, value, note }: { label: string; value: string; note?: stri
   );
 }
 
-function TypeRow({ t, onOpen }: { t: ScType; onOpen: (url: string) => void }) {
+/** A markup type with a small "not needed" cross: this client does not need it for this kind of page. */
+function Chip({ label, onIgnore }: { label: string; onIgnore: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-[var(--bg)] px-1.5 py-0.5 font-medium text-[var(--text-primary)]">
+      {label}
+      <button type="button" onClick={onIgnore} aria-label={`${label} is not needed`} title="Not needed for this client" className="text-[var(--text-tertiary)] hover:text-red-700">×</button>
+    </span>
+  );
+}
+
+function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => void; onIgnore: Ignore }) {
   const [open, setOpen] = useState<"fix" | "rec" | null>(null);
   const items: ScItem[] = open === "rec" ? t.recommended_items : t.items;
   const total = open === "rec" ? t.recommended_affected : t.affected;
@@ -42,9 +54,12 @@ function TypeRow({ t, onOpen }: { t: ScType; onOpen: (url: string) => void }) {
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{t.label} <span className="font-normal text-[var(--text-tertiary)]">· {t.pages} page{t.pages === 1 ? "" : "s"}</span></div>
-          <div className="text-xs text-[var(--text-secondary)]">
-            {t.expects.length > 0 ? `Expected: ${t.expects.join(", ")}.` : "Nothing in particular is expected."}
-            {t.recommended.length > 0 ? ` Worth adding: ${t.recommended.join(", ")}.` : ""}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-[var(--text-secondary)]">
+            {t.expects.length > 0 ? <span>Expected:</span> : <span>Nothing in particular is expected.</span>}
+            {t.expects.map((x) => <Chip key={x} label={x} onIgnore={() => onIgnore("expect", `${t.page_type}:${x}`, `${t.label}: ${x} is not expected`)} />)}
+            {t.recommended.length > 0 ? <span className="ml-1">Worth adding:</span> : null}
+            {t.recommended.map((x) => <Chip key={x} label={x} onIgnore={() => onIgnore("expect", `${t.page_type}:${x}`, `${t.label}: ${x} is not wanted`)} />)}
+            <button type="button" onClick={() => onIgnore("page_type", t.page_type, `${t.label}: ignored`)} className="ml-2 underline">Ignore this kind</button>
           </div>
         </div>
         {t.score != null ? (
@@ -64,6 +79,7 @@ function TypeRow({ t, onOpen }: { t: ScType; onOpen: (url: string) => void }) {
             <li key={i.url} className="flex flex-wrap items-start gap-2">
               <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
               <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
+              <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
             </li>
           ))}
           {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
@@ -73,16 +89,18 @@ function TypeRow({ t, onOpen }: { t: ScType; onOpen: (url: string) => void }) {
   );
 }
 
-function CheckRow({ c }: { c: ScCheck }) {
+function CheckRow({ c, onIgnore }: { c: ScCheck; onIgnore: Ignore }) {
   const clean = c.status === "pass";
+  const ignored = c.status === "ignored";
   return (
     <li className="flex flex-wrap items-start gap-3 py-3">
-      <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : "To fix"}</span>
+      <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : "To fix"}</span>
       <div className="min-w-0 flex-1">
-        <div className="font-semibold">{c.label}</div>
+        <div className={`font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""}`}>{c.label}</div>
         <div className="text-xs text-[var(--text-secondary)]">{c.detail}</div>
         {c.fix ? <div className="mt-0.5 text-xs font-medium">{c.fix}</div> : null}
       </div>
+      {!clean && !ignored ? <button type="button" onClick={() => onIgnore("check", c.key, c.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button> : null}
     </li>
   );
 }
@@ -308,7 +326,24 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  const passing = data ? data.entity.checks.filter((c) => c.status === "pass").length : 0;
+  const [ignoreError, setIgnoreError] = useState<string | null>(null);
+  const [, startIgnore] = useTransition();
+  const ignore: Ignore = (scope, key, label) =>
+    startIgnore(async () => {
+      setIgnoreError(null);
+      const r = await addIgnoreAction(client.id, client.slug, scope, key, label);
+      if (r.ok) router.refresh();
+      else setIgnoreError(r.error);
+    });
+  const restore = (id: string) =>
+    startIgnore(async () => {
+      setIgnoreError(null);
+      const r = await removeIgnoreAction(client.id, client.slug, id);
+      if (r.ok) router.refresh();
+      else setIgnoreError(r.error);
+    });
+  const counted = data ? data.entity.checks.filter((c) => c.status !== "ignored") : [];
+  const passing = counted.filter((c) => c.status === "pass").length;
   return (
     <section className="max-w-6xl space-y-6">
       <header>
@@ -325,13 +360,13 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
             <Kpi label="Markup score" value={String(data.score)} note="how complete each page's markup is for its kind" />
             <Kpi label="Pages with markup" value={`${data.with_markup} of ${data.pages}`} note="indexable pages with a JSON-LD block" />
             <Kpi label="Cleanups found" value={String(data.cleanups)} note="invalid or misplaced properties in the markup now" />
-            <Kpi label="Brand entity checks" value={`${passing} of ${data.entity.checks.length}`} note="clean" />
+            <Kpi label="Brand entity checks" value={`${passing} of ${counted.length}`} note="clean" />
           </div>
 
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">By kind of page</h2>
             <p className="px-5 text-xs text-[var(--text-tertiary)]">The score is how complete the markup is for that kind of page. Open any page to audit it or write corrected markup. Worked out from the crawl of {day(data.crawl_date)}.</p>
-            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.types.map((t) => <TypeRow key={t.page_type} t={t} onOpen={setOpen} />)}</ul>
+            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.types.map((t) => <TypeRow key={t.page_type} t={t} onOpen={setOpen} onIgnore={ignore} />)}</ul>
           </section>
 
           {data.fixes.length > 0 ? (
@@ -344,6 +379,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
                     <span className="w-24 shrink-0 font-bold tabular-nums">{f.pages} pages</span>
                     <span className="min-w-0 flex-1">{f.text}</span>
                     <button type="button" onClick={() => setOpen(f.example)} className="text-xs font-semibold underline">See an example</button>
+                    <button type="button" onClick={() => ignore(f.ignore.scope, f.ignore.key, f.ignore.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button>
                   </li>
                 ))}
               </ul>
@@ -353,10 +389,26 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">The brand as one entity</h2>
             <p className="px-5 text-xs text-[var(--text-tertiary)]">Does the markup describe {data.entity.brand || "the brand"} as one organization, tied to the profiles and the Wikidata item that identify it?</p>
-            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.entity.checks.map((c) => <CheckRow key={c.key} c={c} />)}</ul>
+            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.entity.checks.map((c) => <CheckRow key={c.key} c={c} onIgnore={ignore} />)}</ul>
             <h3 className="px-5 pt-2 font-semibold">Wikidata items</h3>
             <Concepts client={client} data={data} />
           </section>
+
+          {ignoreError ? <p role="alert" className="text-sm font-semibold text-red-700">{ignoreError}</p> : null}
+          {data.ignored.length > 0 ? (
+            <section className={`${card} p-5`}>
+              <h2 className="text-lg font-bold">Ignored for this client</h2>
+              <p className="text-xs text-[var(--text-tertiary)]">These are not counted. Restore any of them and they count again.</p>
+              <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
+                {data.ignored.map((i) => (
+                  <li key={i.id} className="flex items-center gap-3 py-2">
+                    <span className="min-w-0 flex-1 break-all">{i.label}</span>
+                    <button type="button" onClick={() => restore(i.id)} className="text-xs font-semibold underline">Restore</button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {data.invalid.length > 0 ? (
             <section className={`${card} p-5`}>

@@ -16,7 +16,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
 from app.models.client import Client
-from app.models.schema_tools import ClientSchemaConcept
+from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore
 from app.services import schema_audit, schema_pages
 
 router = APIRouter(prefix="/v2/schema", tags=["v2 schema"])
@@ -120,3 +120,40 @@ def audit_page(payload: PageIn, background: BackgroundTasks, client: Annotated[C
 def generate_markup(payload: PageIn, background: BackgroundTasks, client: Annotated[Client, Depends(require_client)], user: Annotated[AuthUser, Depends(require_sma_staff)], db: Annotated[Session, Depends(get_db)]) -> dict:
     """Have the model write corrected JSON-LD for one page, linking only to the Wikidata items approved for this client."""
     return _start("markup", payload, background, client, user, db)
+
+
+class IgnoreIn(BaseModel):
+    scope: Literal["check", "expect", "page_type", "page", "cleanup"]
+    key: str = Field(min_length=1, max_length=2048)
+    label: str = Field(default="", max_length=500)
+
+
+@router.post("/ignores")
+def add_ignore(
+    payload: IgnoreIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Say that something does not apply to this client, so the Schema screen stops counting it. It can be restored."""
+    row = db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id, ClientSchemaIgnore.scope == payload.scope, ClientSchemaIgnore.key == payload.key).one_or_none()
+    if row is None:
+        row = ClientSchemaIgnore(client_id=client.id, scope=payload.scope, key=payload.key, label=payload.label, created_by=user.email)
+        db.add(row)
+        db.commit()
+    return {"id": str(row.id)}
+
+
+@router.delete("/ignores/{ignore_id}")
+def remove_ignore(
+    ignore_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    row = db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.id == ignore_id, ClientSchemaIgnore.client_id == client.id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That is not ignored for this client.")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}

@@ -11,7 +11,9 @@ export type ScType = {
   recommended_affected: number;
   recommended_items: ScItem[];
 };
-export type ScCheck = { key: string; label: string; status: "pass" | "warn" | "fail"; detail: string; fix: string | null };
+export type ScCheck = { key: string; label: string; status: "pass" | "warn" | "fail" | "ignored"; detail: string; fix: string | null };
+export type ScIgnoreScope = "check" | "expect" | "page_type" | "page" | "cleanup";
+export type ScIgnoreRule = { id: string; scope: ScIgnoreScope; key: string; label: string };
 export type ScConcept = { id: string; name: string; qid: string; label: string; description: string; url: string };
 export type ScData = {
   crawl_date: string;
@@ -20,7 +22,8 @@ export type ScData = {
   score: number;
   cleanups: number;
   types: ScType[];
-  fixes: { text: string; pages: number; example: string }[];
+  fixes: { text: string; pages: number; example: string; ignore: { scope: ScIgnoreScope; key: string; label: string } }[];
+  ignored: ScIgnoreRule[];
   present: { type: string; pages: number }[];
   invalid: { url: string; error: string }[];
   entity: { brand: string; names: { name: string; blocks: number }[]; same_as: string[]; checks: ScCheck[] };

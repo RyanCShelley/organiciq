@@ -119,6 +119,7 @@ def stored_page(db: Session, client: Client, url: str) -> dict[str, Any]:
     blocks = [r.raw for r in rows if r.syntax == "json_ld" and not r.parse_error and r.raw]
     micro = {r.schema_type for r in rows if r.syntax != "json_ld" and r.schema_type}
     audit = schema_audit.audit_page(url, snap.title if snap else None, blocks, micro)
+    audit = schema_audit.apply_ignores(audit, schema_audit.load_ignores(db, client)) or {**audit, "ignored_page": True}
     return {"snapshot_title": snap.title if snap else None, "blocks": blocks, "audit": audit}
 
 

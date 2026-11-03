@@ -158,3 +158,52 @@ def test_a_page_off_the_clients_site_is_not_read_and_a_failure_is_shown(client, 
     client.post("/v2/schema/page/audit", json={"url": "https://elsewhere.example/page", "depth": "quick"}, headers=h)
     report = client.get("/v2/schema/page", params={"url": "https://elsewhere.example/page"}, headers=h).json()["reports"]["audit"]
     assert report["status"] == "failed" and "not on this client's website" in report["error"]
+
+
+def ignore(client, client_a, admin_user, scope, key, label=""):
+    return client.post("/v2/schema/ignores", json={"scope": scope, "key": key, "label": label}, headers=client_header(client_a.id, admin_user.email))
+
+
+def test_what_does_not_apply_can_be_ignored_and_restored(client, db, client_a, admin_user):
+    seed(db, client_a)
+    base = get(client, client_a, admin_user).json()["data"]
+    by = {t["page_type"]: t for t in base["types"]}
+    assert "WebSite" in by["homepage"]["expects"] and by["homepage"]["affected"] == 1 and by["product"]["affected"] == 3
+
+    # A markup type not expected of a kind of page: the home page then needs only an Organization.
+    made = ignore(client, client_a, admin_user, "expect", "homepage:WebSite", "Home page: WebSite is not expected")
+    assert made.status_code == 200
+    after = {t["page_type"]: t for t in get(client, client_a, admin_user).json()["data"]["types"]}
+    assert "WebSite" not in after["homepage"]["expects"] and "Missing Organization" in after["homepage"]["items"][0]["text"] and "WebSite" not in after["homepage"]["items"][0]["text"]
+
+    # A whole kind of page, and one page.
+    ignore(client, client_a, admin_user, "page_type", "homepage")
+    ignore(client, client_a, admin_user, "page", BASE + "/products/c")
+    data = get(client, client_a, admin_user).json()["data"]
+    types = {t["page_type"]: t for t in data["types"]}
+    assert "homepage" not in types and types["product"]["pages"] == 2 and types["product"]["affected"] == 2
+    assert {i["scope"] for i in data["ignored"]} == {"expect", "page_type", "page"}
+
+    # An entity check that cannot apply (this brand has no Wikidata item) stops counting against the brand.
+    ignore(client, client_a, admin_user, "check", "wikidata", "Linked to its Wikidata item")
+    checks = {c["key"]: c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"]}
+    assert checks["wikidata"]["status"] == "ignored" and checks["wikidata"]["fix"] is None and checks["same_as"]["status"] == "fail"
+
+    # Restoring brings it back.
+    for i in get(client, client_a, admin_user).json()["data"]["ignored"]:
+        assert client.delete(f"/v2/schema/ignores/{i['id']}", headers=client_header(client_a.id, admin_user.email)).status_code == 200
+    restored = get(client, client_a, admin_user).json()["data"]
+    assert restored["ignored"] == [] and {t["page_type"]: t for t in restored["types"]}["homepage"]["affected"] == 1
+    assert ignore(client, client_a, admin_user, "bogus", "x").status_code == 422
+
+
+def test_a_recurring_cleanup_can_be_ignored_everywhere(client, db, client_a, admin_user):
+    seed(db, client_a)
+    first = get(client, client_a, admin_user).json()["data"]
+    cleanup = next(t for t in next(x for x in first["types"] if x["page_type"] == "product")["items"] if "cleanup" in t["text"])
+    assert cleanup["url"] == BASE + "/products/a"
+    detail = "Converted bare logo string to ImageObject: <address>"
+    ignore(client, client_a, admin_user, "cleanup", detail)
+    after = get(client, client_a, admin_user).json()["data"]
+    assert after["cleanups"] == first["cleanups"] - 1
+    assert BASE + "/products/a" not in [i["url"] for i in next(x for x in after["types"] if x["page_type"] == "product")["items"] if "cleanup" in i["text"]]

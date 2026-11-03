@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSchema, FactCrawlPageSnapshot
-from app.models.schema_tools import ClientSchemaConcept
+from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore
 from app.schema_tools.expected import expected_for, find_missing_recommended, find_missing_required
 from app.schema_tools.page_type import detect_page_type
 from app.schema_tools.transforms import run_pipeline
@@ -120,6 +120,25 @@ def _component_types(blocks: list[Any]) -> set[str]:
     return found
 
 
+def load_ignores(db: Session, client: Client) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = defaultdict(set)
+    for scope, key in db.query(ClientSchemaIgnore.scope, ClientSchemaIgnore.key).filter(ClientSchemaIgnore.client_id == client.id):
+        out[scope].add(key)
+    return out
+
+
+def apply_ignores(a: dict[str, Any], ign: dict[str, set[str]]) -> dict[str, Any] | None:
+    """The audit of one page without what a person has said does not apply. None when the whole page or its kind is ignored."""
+    if a["url"] in ign["page"] or a["page_type"] in ign["page_type"]:
+        return None
+    pt = a["page_type"]
+    a["missing_required"] = [t for t in a["missing_required"] if f"{pt}:{t}" not in ign["expect"]]
+    a["missing_recommended"] = [t for t in a["missing_recommended"] if f"{pt}:{t}" not in ign["expect"]]
+    a["corrections"] = [c for c in a["corrections"] if _normal(c["detail"]) not in ign["cleanup"]]
+    a["score"] = score(a["has_markup"], a["missing_required"], a["missing_recommended"], len(a["corrections"]))
+    return a
+
+
 def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str]) -> dict[str, Any]:
     present = sorted(set(collect_types(blocks)) | _component_types(blocks) | micro)
     page_type = detect_page_type(url, present, title)
@@ -127,15 +146,15 @@ def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str]) 
     missing_recommended = find_missing_recommended(page_type, present)
     corrections = run_pipeline(merged_graph(blocks))[1] if blocks else []
     return {
-        "url": url, "page_type": page_type, "present": present, "present_jsonld": collect_types(blocks), "has_jsonld": bool(blocks),
+        "url": url, "page_type": page_type, "present": present, "present_jsonld": collect_types(blocks), "has_jsonld": bool(blocks), "has_markup": bool(blocks) or bool(micro),
         "missing_required": missing_required, "missing_recommended": missing_recommended, "corrections": corrections,
-        "score": score(bool(blocks), missing_required, missing_recommended, len(corrections)),
+        "score": score(bool(blocks) or bool(micro), missing_required, missing_recommended, len(corrections)),
     }
 
 
 def _scored(a: dict[str, Any]) -> bool:
     """A page nothing is expected of (an unclassified page with no markup) is not marked down for having none."""
-    return not (a["page_type"] == "generic" and not a["has_jsonld"])
+    return not (a["page_type"] == "generic" and not a["has_markup"])
 
 
 def _average(group: list[dict[str, Any]]) -> int | None:
@@ -156,7 +175,10 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
         elif r.syntax != "json_ld" and r.schema_type:
             micro[r.normalized_url].add(r.schema_type)
 
-    audits = [audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set())) for s in pages]
+    ign = load_ignores(db, client)
+    audits = [
+        a for a in (apply_ignores(audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set())), ign) for s in pages) if a is not None
+    ]
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for a in audits:
         by_type[a["page_type"]].append(a)
@@ -178,9 +200,10 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             elif a["missing_recommended"]:
                 recommended.append({"url": a["url"], "text": "Worth adding: " + ", ".join(a["missing_recommended"])})
         spec = expected_for(key)
+        expects = [t for t in spec["required"] if f"{key}:{t}" not in ign["expect"]]
         types.append(
             {
-                "page_type": key, "label": label, "pages": len(group), "expects": spec["required"], "recommended": spec["recommended"],
+                "page_type": key, "label": label, "pages": len(group), "expects": expects, "recommended": [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]],
                 "score": _average([a for a in group if _scored(a)]),
                 "affected": len(fix), "items": fix[:LISTED],
                 "recommended_affected": len(recommended), "recommended_items": recommended[:LISTED],
@@ -190,16 +213,20 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
     # What recurs across pages: fixed once in the theme or template, it clears them all.
     recurring: Counter[str] = Counter()
     example: dict[str, str] = {}
+    meta: dict[str, dict[str, str]] = {}
     for a in audits:
-        for text in {f"{c['transform']}: {_normal(c['detail'])}" for c in a["corrections"]}:
+        for c in a["corrections"]:
+            text = _normal(c["detail"])
             recurring[text] += 1
             example.setdefault(text, a["url"])
+            meta.setdefault(text, {"scope": "cleanup", "key": text, "label": text})
     for a in audits:
         for t in a["missing_required"]:
-            text = f"missing: {t} on {TYPE_LABELS.get(a['page_type'], a['page_type']).lower()}"
+            text = f"Missing {t} on {TYPE_LABELS.get(a['page_type'], a['page_type']).lower()}"
             recurring[text] += 1
             example.setdefault(text, a["url"])
-    fixes = [{"text": t.split(": ", 1)[-1] if not t.startswith("missing:") else "Missing " + t[len("missing: "):], "pages": n, "example": example[t]} for t, n in recurring.most_common(10) if n > 1]
+            meta.setdefault(text, {"scope": "expect", "key": f"{a['page_type']}:{t}", "label": f"{TYPE_LABELS.get(a['page_type'], a['page_type'])}: {t} is not expected"})
+    fixes = [{"text": t, "pages": n, "example": example[t], "ignore": meta[t]} for t, n in recurring.most_common(10) if n > 1]
 
     present: Counter[str] = Counter()
     for a in audits:
@@ -207,7 +234,7 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             present[t] += 1
     invalid = [{"url": r.normalized_url, "error": (r.parse_error or "")[:200]} for r in rows if r.parse_error][:LISTED]
     with_markup = sum(1 for a in audits if a["has_jsonld"])
-    entity = _entity(db, client, blocks, micro)
+    entity = _entity(db, client, blocks, micro, ign["check"])
     return {
         "crawl_date": max(s.snapshot_date for s in snaps).isoformat(),
         "pages": len(pages), "with_markup": with_markup,
@@ -215,6 +242,7 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
         "cleanups": sum(len(a["corrections"]) for a in audits),
         "types": types, "fixes": fixes, "present": [{"type": t, "pages": n} for t, n in present.most_common()],
         "invalid": invalid, "entity": entity,
+        "ignored": [{"id": str(i.id), "scope": i.scope, "key": i.key, "label": i.label or i.key} for i in db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id).order_by(ClientSchemaIgnore.created_at)],
         "concepts": [_concept_out(c) for c in db.query(ClientSchemaConcept).filter(ClientSchemaConcept.client_id == client.id).order_by(ClientSchemaConcept.name)],
     }
 
@@ -260,7 +288,7 @@ def _has(node: dict[str, Any], prop: str) -> bool:
     return node.get(prop) not in (None, "", [], {})
 
 
-def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: dict[str, set[str]]) -> dict[str, Any]:
+def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: dict[str, set[str]], ignored_checks: set[str] | None = None) -> dict[str, Any]:
     """Does the markup describe the brand as one organization, tied to the profiles and the Wikidata item that identify it?"""
     from app.models.llm_visibility import ClientLlmSettings
     from app.schema_tools.transforms import extract_graph
@@ -315,6 +343,9 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
     if products:
         good = len(branded) >= 0.8 * len(products)
         checks.append(check("brand", "Products name their brand", "pass" if good else "warn", f"{len(branded)} of {len(products)} products carry a brand.", None if good else "Add the brand to each Product block so products tie back to the organization."))
+    for c in checks:
+        if c["key"] in (ignored_checks or set()):
+            c["status"], c["fix"] = "ignored", None
     return {"brand": brand, "names": [{"name": n, "blocks": c} for n, c in names.most_common()], "same_as": same_as, "checks": checks}
 
 

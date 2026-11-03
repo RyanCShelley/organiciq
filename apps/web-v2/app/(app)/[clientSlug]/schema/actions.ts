@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { ScCandidate, ScConcept, ScDepth, ScPage } from "@/lib/schema";
+import type { ScCandidate, ScConcept, ScDepth, ScIgnoreScope, ScPage } from "@/lib/schema";
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: unknown, fallback: string): { ok: false; error: string } => ({ ok: false, error: error instanceof ApiError ? error.message : fallback });
@@ -51,5 +51,25 @@ export async function startPageReportAction(clientId: string, kind: "audit" | "m
     return { ok: true, value: true };
   } catch (e) {
     return fail(e, "The request could not be sent: the API did not answer.");
+  }
+}
+
+export async function addIgnoreAction(clientId: string, slug: string, scope: ScIgnoreScope, key: string, label: string): Promise<R<true>> {
+  try {
+    await apiFetch("/v2/schema/ignores", { method: "POST", clientId, body: { scope, key, label } });
+    revalidatePath(`/${slug}/schema`);
+    return { ok: true, value: true };
+  } catch (e) {
+    return fail(e, "That could not be ignored: the API did not answer.");
+  }
+}
+
+export async function removeIgnoreAction(clientId: string, slug: string, id: string): Promise<R<true>> {
+  try {
+    await apiFetch(`/v2/schema/ignores/${id}`, { method: "DELETE", clientId });
+    revalidatePath(`/${slug}/schema`);
+    return { ok: true, value: true };
+  } catch (e) {
+    return fail(e, "That could not be restored: the API did not answer.");
   }
 }
