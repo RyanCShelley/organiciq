@@ -88,7 +88,9 @@ def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
         .all()
     )
     total = len(snaps)
-    ok_pages = [s for s in snaps if s.status_code is not None and 200 <= s.status_code < 300 and not s.blocked_by_robots]
+    # Numbered list pages (/page/2) repeat their list's template, so titles, descriptions, indexation and markup are not judged on them.
+    # A broken or redirecting list page is still counted below: those are faults whatever the page is.
+    ok_pages = [s for s in snaps if s.status_code is not None and 200 <= s.status_code < 300 and not s.blocked_by_robots and not is_pagination(s.normalized_url)]
     n_ok = len(ok_pages)
     checks: list[dict[str, Any]] = []
 

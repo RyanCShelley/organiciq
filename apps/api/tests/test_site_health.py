@@ -177,3 +177,16 @@ def test_numbered_list_pages_are_not_judged_in_geo_readiness(db, client_a):
     listed = [i["url"] for s in by.values() for i in s["items"]]
     assert not any("/page/" in (u or "") or "page=" in (u or "") for u in listed)
     assert by["entity"]["detail"]["description_share"] == 0.86  # 6 of the 7 real pages have a description; the four list pages are left out
+
+
+def test_numbered_list_pages_are_not_judged_in_seo_health_but_broken_ones_still_count(db, client_a):
+    seed(db, client_a)
+    before = {c["key"]: c for c in sh.seo_health(db, client_a, CRAWL)["checks"]}
+    for n in (2, 3):
+        page(db, client_a, f"/author/ryan/page/{n}", desc="", title="")
+    page(db, client_a, "/author/ryan/page/4", status=404, title="", desc="")
+    db.commit()
+    after = {c["key"]: c for c in sh.seo_health(db, client_a, CRAWL)["checks"]}
+    for key in ("titles", "descriptions", "indexation", "schema"):
+        assert after[key]["total"] == before[key]["total"] and after[key]["affected"] == before[key]["affected"], key
+    assert after["errors"]["affected"] == before["errors"]["affected"] + 1, "a broken list page is still a broken page"
