@@ -161,3 +161,19 @@ def test_faq_is_scored_page_by_page_on_the_pages_google_shows_most(db, client_a)
     faq = next(s for s in sh.geo_readiness(db, client_a)["signals"] if s["key"] == "faq")
     assert faq["score"] == 33 and faq["detail"] == {"pages": 3, "with_markup": 1}  # /a has it; /b and / do not; an uncrawled page is not judged
     assert [i["url"] for i in faq["items"]] == [BASE + "/b", BASE + "/"] and faq["affected"] == 2
+
+
+def test_numbered_list_pages_are_not_judged_in_geo_readiness(db, client_a):
+    seed(db, client_a)
+    for n in (2, 3, 11):
+        page(db, client_a, f"/author/ryan/page/{n}", desc="")
+    page(db, client_a, "/blog?page=4", desc="")
+    db.commit()
+    for url in ("/author/ryan/page/2", "/author/ryan/page/11", "/blog?page=4", "/a/p/7"):
+        assert sh.is_pagination(BASE + url)
+    for url in ("/author/ryan", "/pages/page-builder", "/collections/spf", "/products/pager"):
+        assert not sh.is_pagination(BASE + url)
+    by = {s["key"]: s for s in sh.geo_readiness(db, client_a)["signals"]}
+    listed = [i["url"] for s in by.values() for i in s["items"]]
+    assert not any("/page/" in (u or "") or "page=" in (u or "") for u in listed)
+    assert by["entity"]["detail"]["description_share"] == 0.86  # 6 of the 7 real pages have a description; the four list pages are left out

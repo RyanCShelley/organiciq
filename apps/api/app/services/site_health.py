@@ -56,6 +56,16 @@ def _last_day(month: str) -> date:
     return date.fromordinal(nxt.toordinal() - 1)
 
 
+_PAGINATION = re.compile(r"(^|/)(page/\d+|page-\d+|p/\d+)/?$", re.I)
+_PAGINATION_QUERY = re.compile(r"(^|&)(page|paged|pg|p)=\d+(&|$)", re.I)
+
+
+def is_pagination(url: str) -> bool:
+    """A numbered page of a list (/author/x/page/2, ?page=3): it repeats its list's template, so it is not judged on its own."""
+    parts = urlsplit(url or "")
+    return bool(_PAGINATION.search(parts.path) or _PAGINATION_QUERY.search(parts.query))
+
+
 def _path(url: str) -> str:
     return urlsplit(url or "").path or "/"
 
@@ -166,7 +176,7 @@ def _faq_pages(db: Session, client: Client, rows: list[Any], snaps: list[Any]) -
     """
     from app.models.gsc import FactGscQueryPage
 
-    ok = {s.normalized_url for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable}
+    ok = {s.normalized_url for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable and not is_pagination(s.normalized_url)}
     newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
     pages: list[tuple[str, float | None]] = []
     if newest:
@@ -188,7 +198,7 @@ def _faq_signal(pages: list[tuple[str, float | None]], faq: set[str]) -> int:
 def _entity_signal(db: Session, client: Client, rows: list[Any], snaps: list[Any]) -> tuple[int, dict[str, Any]]:
     """Title and description on the indexable pages (25 each, by share), an about page 15, a contact page 10, a phone 15 and an
     address 10 (both read from the structured data)."""
-    ok = [s for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable]
+    ok = [s for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable and not is_pagination(s.normalized_url)]
     t = (sum(1 for s in ok if (s.title or "").strip()) / len(ok)) if ok else 0
     d = (sum(1 for s in ok if (s.description or "").strip()) / len(ok)) if ok else 0
     paths = [_path(s.normalized_url).lower() for s in snaps if s.status_code and 200 <= s.status_code < 300]
@@ -292,7 +302,7 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
     from app.models.gsc import FactGscQueryPage
 
     home = f"https://{bare_domain(client.domain)}/"
-    ok = [s for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable]
+    ok = [s for s in snaps if s.status_code and 200 <= s.status_code < 300 and s.indexable and not is_pagination(s.normalized_url)]
     items: dict[str, list[dict[str, str | None]]] = {}
 
     with_ld = {r.normalized_url for r in rows if r.syntax == "json_ld" and not r.parse_error}
