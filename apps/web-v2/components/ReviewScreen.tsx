@@ -580,8 +580,8 @@ export function ReviewScreen({
 
       <div className="mb-6 space-y-4">
 
-          {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
           <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
+          {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
         
       </div>
 
