@@ -109,3 +109,33 @@ def test_the_review_route_returns_the_scorecards_even_for_a_month_kept_before_th
     monkeypatch.setattr(monthly_review, "review_for", lambda db_, client_, month, **kw: _review(month=month))
     out = client.get("/v2/review", params={"month": "2026-10"}, headers=client_header(client_a.id, admin_user.email)).json()
     assert out["scorecards"]["conversions"]["headline"] == 383 and out["scorecards"]["headline"].startswith("Conversions fell 47%")
+
+
+def test_each_card_gets_six_months_ending_with_the_month_and_a_month_with_no_data_is_none(db, client_a):
+    from app.models.gsc import FactGscQueryPage
+    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+    assert sc.trend_months("2026-02") == ["2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"]
+    _define(db, client_a, "form_submit", "Form submissions")
+    b = WatchlistBucket(client_id=client_a.id, name="SPF", name_key="spf", sort_order=0)
+    db.add(b)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=b.id, keyword="natural spf", keyword_key="natural spf"))
+    for day, sessions, leads, imp in ((date(2026, 8, 3), 100, 4, 50), (date(2026, 9, 3), 120, 6, 80), (date(2026, 10, 3), 90, 3, 65)):
+        _traffic(db, client_a, day, OrganicChannel.ORGANIC_SEARCH, sessions)
+        _event(db, client_a, day, "form_submit", leads)
+        db.add(FactGscQueryPage(client_id=client_a.id, date=day, query="Natural SPF", raw_url="https://x.example/", normalized_url="https://x.example/", country="usa", device="DESKTOP",
+                                impressions=Decimal(imp), clicks=Decimal(1), ctr=Decimal(0), average_position=Decimal(5)))
+    db.commit()
+    months = sc.trend_months("2026-10")
+    assert months == ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]
+    assert [p["value"] for p in sc.traffic_trend(db, client_a, months)] == [None, None, None, 100, 120, 90]
+    assert [p["value"] for p in sc.conversions_trend(db, client_a, months)] == [None, None, None, 4, 6, 3]
+    assert [p["value"] for p in sc.visibility_trend(db, client_a, months)] == [None, None, None, 50, 80, 65], "the watchlist term's impressions, matched without case"
+    out = sc.build(db, client_a, _review())
+    assert [p["month"] for p in out["traffic"]["trend"]] == months and len(out["conversions"]["trend"]) == 6 and len(out["visibility"]["trend"]) == 6
+
+
+def test_a_client_with_no_conversion_events_or_watchlist_has_empty_trends(db, client_a):
+    months = sc.trend_months("2026-10")
+    assert all(p["value"] is None for p in sc.conversions_trend(db, client_a, months)) and all(p["value"] is None for p in sc.visibility_trend(db, client_a, months))

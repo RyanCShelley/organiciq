@@ -1,5 +1,5 @@
 import { monthLabel } from "@/lib/focus";
-import type { Scorecards as Data } from "@/lib/review";
+import type { Scorecards as Data, TrendPoint } from "@/lib/review";
 
 const TONE = { up: "bg-[#e7fedc] text-[#2f6b0d]", down: "bg-[#fde8e4] text-[#b23a15]", flat: "bg-[#eceef2] text-[#4a5468]" } as const;
 const WORD = { up: "Up", down: "Down", flat: "Flat" } as const;
@@ -8,6 +8,37 @@ const MIX = ["#00a99d", "#7fd6c9", "#223540", "#8a929d", "#cfd2d6"];
 const num = (n: number | null | undefined) => (n == null ? "–" : Math.round(n).toLocaleString());
 const move = (pct: number | null | undefined) => (pct == null ? "" : Math.abs(Math.round(pct)) < 1 ? "flat" : `${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}%`);
 const tone = (pct: number | null | undefined) => (pct == null || Math.abs(pct) < 5 ? "flat" : pct > 0 ? "up" : "down");
+
+/** Six months as a faded line, oldest to newest. Months with nothing recorded are skipped, not drawn as zero. */
+function Trend({ points, color }: { points: TrendPoint[]; color: string }) {
+  const known = points.map((p, i) => ({ i, v: p.value })).filter((p): p is { i: number; v: number } => p.v != null);
+  if (known.length < 2) return <div className="mt-2 h-[46px]" aria-hidden />;
+  const w = 200;
+  const h = 46;
+  const values = known.map((p) => p.v);
+  const hi = Math.max(...values);
+  const lo = Math.min(...values);
+  const span = hi - lo || 1;
+  const x = (i: number) => (i / (points.length - 1)) * w;
+  const y = (v: number) => 6 + (h - 12) * (1 - (v - lo) / span);
+  const line = known.map((p, n) => `${n ? "L" : "M"}${x(p.i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(" ");
+  const last = known[known.length - 1];
+  const id = `trend-${color.slice(1)}-${known.length}-${Math.round(values[0])}`;
+  const first = points[known[0].i].month;
+  const end = points[last.i].month;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Trend from ${first} to ${end}`} className="mt-2 block h-[46px] w-full overflow-visible">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={color} stopOpacity="0.28" />
+          <stop offset="1" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L${x(last.i).toFixed(1)} ${h} L${x(known[0].i).toFixed(1)} ${h} Z`} fill={`url(#${id})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 function Chip({ verdict, children }: { verdict: keyof typeof TONE; children: React.ReactNode }) {
   return <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE[verdict]}`}>{children}</span>;
@@ -56,7 +87,8 @@ export function Scorecards({ data }: { data: Data }) {
             <>
               <Big>{num(v.headline)} of {num(v.of)}</Big>
               <div><Chip verdict={v.verdict}>{WORD[v.verdict]}</Chip> <span className="text-xs text-[var(--text-secondary)]">terms showing in Google</span></div>
-              <div className="mt-3 flex-1">
+              <Trend points={v.trend} color="#00a99d" />
+              <div className="mt-2 flex-1">
                 <Row label="Page one">{num(v.page_one)} {v.page_one === 1 ? "term" : "terms"}</Row>
                 <Row label="AI mentions">{v.ai_mentions == null ? "–" : num(v.ai_mentions)}</Row>
                 <Row label="AI links">{v.ai_links == null ? "–" : num(v.ai_links)}</Row>
@@ -75,6 +107,7 @@ export function Scorecards({ data }: { data: Data }) {
           <div>
             {t.change_pct != null ? <Chip verdict={tone(t.change_pct)}>{move(t.change_pct).replace(/^./, (x) => x.toUpperCase())}</Chip> : null} <span className="text-xs text-[var(--text-secondary)]">sessions vs {prior}</span>
           </div>
+          <Trend points={t.trend} color="#00a99d" />
           {total > 0 ? (
             <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-[#eceef2]" role="img" aria-label="Where visits came from">
               {t.channels.map((ch, i) => <i key={ch.key} style={{ width: `${(ch.sessions / total) * 100}%`, background: MIX[i % MIX.length] }} />)}
@@ -99,6 +132,7 @@ export function Scorecards({ data }: { data: Data }) {
             {c.change_pct != null ? <Chip verdict={tone(c.change_pct)}>{move(c.change_pct).replace(/^./, (x) => x.toUpperCase())}</Chip> : null}{" "}
             <span className="text-xs text-[var(--text-secondary)]">{c.previous != null ? `vs ${num(c.previous)} in ${prior}` : c.noun}</span>
           </div>
+          <Trend points={c.trend} color={c.verdict === "down" ? "#e2542b" : "#00a99d"} />
           {c.goal ? (
             <div className="mt-3">
               <div className="flex justify-between text-sm"><span className="text-[var(--text-secondary)]">Goal for the period</span><b className="font-semibold tabular-nums">{c.goal_progress_pct != null ? `${Math.round(c.goal_progress_pct)}% of ` : ""}{num(c.goal)}</b></div>
