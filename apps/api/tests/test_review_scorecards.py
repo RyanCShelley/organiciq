@@ -139,3 +139,39 @@ def test_each_card_gets_six_months_ending_with_the_month_and_a_month_with_no_dat
 def test_a_client_with_no_conversion_events_or_watchlist_has_empty_trends(db, client_a):
     months = sc.trend_months("2026-10")
     assert all(p["value"] is None for p in sc.conversions_trend(db, client_a, months)) and all(p["value"] is None for p in sc.visibility_trend(db, client_a, months))
+
+
+def _rank(db, client, day, kid, keyword, pos):
+    from app.models.seranking import FactSerRanking
+
+    db.add(FactSerRanking(id=uuid4(), client_id=client.id, date=day, site_engine_id="e1", keyword_id=kid, keyword=keyword, position=Decimal(pos)))
+
+
+def test_rank_check_counts_keywords_found_in_the_top_100_on_the_last_check_and_names_the_best_and_the_biggest_drop(db, client_a):
+    for day, a, b, c in ((date(2026, 10, 15), 2, 34, 0), (date(2026, 10, 31), 17, 66, 0)):
+        _rank(db, client_a, day, "1", "tanning oil", a)
+        _rank(db, client_a, day, "2", "tanning oil with spf", b)
+        _rank(db, client_a, day, "3", "lotion", c)
+    _rank(db, client_a, date(2026, 10, 31), "4", "natural sunscreen", 11)
+    db.commit()
+    rc = sc.rank_check(db, client_a, "2026-10")
+    assert rc["tracked"] == 4 and rc["ranked"] == 3 and rc["top10"] == 0
+    assert rc["best"] == {"keyword": "natural sunscreen", "position": 11}
+    assert rc["biggest_drop"] == {"keyword": "tanning oil with spf", "from": 34, "to": 66}
+    assert rc["checked_on"] == "2026-10-31"
+
+
+def test_rank_check_is_none_without_checks_in_the_month(db, client_a):
+    assert sc.rank_check(db, client_a, "2026-10") is None
+
+
+def test_each_section_gets_a_plain_read_from_its_numbers():
+    vis = {"available": True, "headline": 6, "of": 18, "page_one": 4, "verdict": "flat"}
+    traffic = {"headline": 100, "change_pct": -2, "channels": [{"key": "organic_search", "sessions": 10, "change_pct": -9.0}, {"key": "ai_referral", "sessions": 2, "change_pct": 27.0}, {"key": "direct_unattributed", "sessions": 80, "change_pct": -3.0}]}
+    conv = {"noun": "conversions", "headline": 383, "change_pct": -47, "goal": 525, "goal_progress_pct": 73.0}
+    reads = sc.section_reads("2026-10", "2026-09", vis, traffic, conv)
+    assert reads["visibility"].startswith("12 of 18 watchlist terms never show in Google.") and "reach is the gap, not rank" in reads["visibility"]
+    assert reads["traffic"] == "Organic is down 9%, but AI referrals are up 27%. Direct is more than half of all visits."
+    assert reads["conversions"] == "Conversions are at 73% of this period's goal, and down 47% on September."
+    empty = sc.section_reads("2026-10", "2026-09", {"available": False}, {"headline": None, "change_pct": None, "channels": []}, {"noun": "orders", "headline": None, "change_pct": None})
+    assert empty == {"visibility": None, "traffic": None, "conversions": None}

@@ -5,8 +5,7 @@ import { Fragment, useEffect, useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { reachAction, rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
-import { Scorecards } from "@/components/review/Scorecards";
-import { ReviewSummary } from "@/components/review/Summary";
+import { Band, LeadsCards, SectionHead, TrafficCards, VisibilityCards } from "@/components/review/Sections";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
@@ -63,14 +62,17 @@ function FocusPanel({
   focus,
   buckets,
   reach,
+  choice,
+  setChoice,
 }: {
   client: Client;
   planMonth: string;
   focus: ClientFocus | null;
   buckets: { id: string; name: string }[];
   reach: BucketOverview[];
+  choice: FocusValue | null;
+  setChoice: (value: FocusValue | null) => void;
 }) {
-  const [choice, setChoice] = useState<FocusValue | null>(focus?.focus ?? null);
   const [bucketId, setBucketId] = useState(focus?.bucket_id ?? "");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,14 +97,14 @@ function FocusPanel({
   const hint = FOCUSES.find((o) => o.value === choice)?.hint;
 
   return (
-    <section aria-label="Focus" className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4">
+    <section aria-label="Focus" className="rounded-2xl border border-[var(--border)] bg-white px-5 py-3">
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
         <div className="min-w-[11rem]">
           <h2 className="text-sm font-bold">Focus for {monthLabel(planMonth)}</h2>
           <p className="text-xs text-[var(--text-secondary)]">{hint ?? "What the plan goes after next month"}</p>
         </div>
 
-        <div role="radiogroup" aria-label="Focus" className="flex overflow-hidden rounded-lg border border-[var(--border)]">
+        <div role="radiogroup" aria-label="Focus" className="flex h-9 overflow-hidden rounded-lg border border-[var(--border)]">
           {FOCUSES.map((option) => (
             <button
               key={option.value}
@@ -114,22 +116,22 @@ function FocusPanel({
                 setChoice(option.value);
                 setSaved(false);
               }}
-              className={`border-l border-[var(--border)] px-4 py-2 text-sm font-semibold first:border-l-0 ${choice === option.value ? "bg-[var(--brand-navy)] text-white" : "bg-white text-[var(--text-primary)] hover:bg-[var(--background)]"}`}
+              className={`border-l border-[var(--border)] px-4 text-sm font-semibold first:border-l-0 ${choice === option.value ? "bg-[var(--brand-navy)] text-white" : "bg-white text-[var(--text-primary)] hover:bg-[var(--background)]"}`}
             >
               {option.label}
             </button>
           ))}
         </div>
 
-        <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--text-secondary)] sm:max-w-xs">
-          Watchlist bucket
+        <label className="min-w-[14rem] flex-1 text-xs font-semibold text-[var(--text-secondary)]">
+          Topic (watchlist bucket)
           <select
             value={bucketId}
             onChange={(e) => {
               setBucketId(e.target.value);
               setSaved(false);
             }}
-            className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal text-[var(--text-primary)]"
+            className="mt-1 block h-9 w-full rounded-lg border border-[var(--border)] bg-white px-3 text-sm font-normal text-[var(--text-primary)]"
           >
             <option value="">{buckets.length ? "No bucket chosen" : "No buckets: import the watchlist in Settings"}</option>
             {buckets.map((b) => {
@@ -168,7 +170,7 @@ function FocusPanel({
             type="button"
             disabled={pending || !choice}
             onClick={() => run(() => saveFocusAction(client.id, client.slug, planMonth, choice as string, bucketId || null))}
-            className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:hover:bg-[#00a99d]"
+            className="h-9 rounded-lg bg-[#00a99d] px-4 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:hover:bg-[#00a99d]"
           >
             Save focus
           </button>
@@ -278,49 +280,13 @@ function VisibilityPanel({ visibility, prior, href }: { visibility: Visibility; 
     ["page1", "Page one", all.filter(pageOne).length],
     ["ai", "AI cited", all.filter(aiCited).length],
   ];
-  const llm = visibility.llm;
-  const rate = llm?.summary.visibility_rate;
   const bing = visibility.bing.has_data;
-  const tile = "rounded-lg bg-[var(--bg)] px-3 py-2";
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">Visibility: the watchlist in Google, Bing and AI platforms</h2>
+        <h3 className="text-sm font-semibold">The watchlist, term by term</h3>
         <a href={href} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">Open LLM visibility →</a>
       </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2 @3xl:grid-cols-4">
-        <div className={tile}>
-          <div className="text-xs text-[var(--text-secondary)]">Terms showing in Google</div>
-          <div className="text-xl font-semibold tabular-nums">{visibility.summary.showing_in_google} of {visibility.summary.terms}</div>
-        </div>
-        <div className={tile}>
-          <div className="text-xs text-[var(--text-secondary)]">On page one</div>
-          <div className="text-xl font-semibold tabular-nums">{visibility.summary.on_page_one}</div>
-        </div>
-        <div className={tile}>
-          <div className="text-xs text-[var(--text-secondary)]">Clicks from these terms</div>
-          <div className="text-xl font-semibold tabular-nums">{num(visibility.summary.google_clicks)}</div>
-        </div>
-        <div className={tile} title={llm ? (llm.in_month ? `Run of ${llm.run_date}` : `Latest run, ${llm.run_date}, after this month`) : undefined}>
-          <div className="text-xs text-[var(--text-secondary)]">AI answers naming or citing us</div>
-          {rate ? (
-            <div className="text-xl font-semibold tabular-nums">
-              {Math.round(rate.current * 100)}%
-              {aiPts(rate.delta) ? <span className={`ml-2 text-xs ${(rate.delta ?? 0) > 0 ? "text-green-700" : "text-red-700"}`}>{aiPts(rate.delta)}</span> : null}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--text-tertiary)]">no run yet</div>
-          )}
-        </div>
-      </div>
-      {llm ? (
-        <p className="mt-2 text-xs text-[var(--text-secondary)]">
-          {llm.in_month ? `AI run of ${llm.run_date}` : `Latest AI run, ${llm.run_date}, after this month`}
-          {llm.previous_run_date ? `, against ${llm.previous_run_date}` : ", the first run"} · {llm.platforms.map((p) => `${p.platform} ${Math.round(p.visibility_rate.current * 100)}%`).join(" · ")}
-          {llm.brand_check.length > 0 ? ` · asked by name, the site was cited by ${llm.brand_check.map((p) => `${p.platform} ${p.site_cited}/${p.answers}`).join(", ")}` : ""}
-        </p>
-      ) : null}
 
       {!visibility.has_google_data ? (
         <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No Search Console data for these terms yet, so nothing is shown for Google.</p>
@@ -500,6 +466,10 @@ export function ReviewScreen({
       live = false;
     };
   }, [client.id, month]);
+  // The focus chosen in the bar or by a section's "Focus here" button. It is saved only by Save focus.
+  const [choice, setChoice] = useState<FocusValue | null>(focus?.focus ?? null);
+  useEffect(() => setChoice(focus?.focus ?? null), [focus, planMonth]);
+  const pickFocus = (value: FocusValue) => setChoice(value);
   const prior = review ? monthLabel(review.previous_month).split(" ")[0] : "last month";
   const noun = review?.noun ?? "leads";
 
@@ -526,119 +496,114 @@ export function ReviewScreen({
         </p>
       ) : null}
 
-      {review?.scorecards ? <Scorecards data={review.scorecards} /> : null}
+      <div className="space-y-6">
+        {review?.scorecards ? <Band data={review.scorecards} lines={review.summary} /> : null}
 
-      <div className="mb-6 space-y-4">
+        <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} choice={choice} setChoice={setChoice} />
 
-          <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
-          {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
-        
-      </div>
-
-      <div>
-        <div className="min-w-0 space-y-6">
-          {review ? (
-            <>
-              {!review.has_search_data ? (
-                <div className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-secondary)]">
-                  No Search Console data for {monthLabel(month)}. Pull it from Settings → Connections once GSC is connected.
-                </div>
-              ) : null}
-
-              {review.revenue?.status === "unavailable" ? (
-                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Revenue: {review.revenue.reason}</p>
-              ) : null}
-
-              {review.goal.period_goal ? (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <div className="flex items-baseline justify-between">
-                    <h2 className="text-sm font-semibold">Against the goal</h2>
-                    <span className="text-sm tabular-nums">
-                      {num(review.conversions.current)} of {num(review.goal.period_goal)} {noun}
-                      {review.goal.progress_pct != null ? ` (${review.goal.progress_pct.toFixed(0)}%)` : ""}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-2 rounded bg-[var(--border)]">
-                    <div
-                      className={`h-2 rounded ${(review.goal.progress_pct ?? 0) >= 100 ? "bg-green-600" : "bg-[var(--brand-teal)]"}`}
-                      style={{ width: `${Math.min(100, review.goal.progress_pct ?? 0)}%` }}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                    {review.goal.checkpoint
-                      ? `${review.goal.checkpoint.month}-month checkpoint (due ${review.goal.checkpoint.due}): ${num(review.goal.checkpoint.projected)} a month. `
-                      : ""}
-                    {review.goal.final_goal ? `12-month goal: ${num(review.goal.final_goal)} a month. ` : ""}
-                    {review.goal.baseline_version ? `From baseline version ${review.goal.baseline_version}.` : ""}
-                  </p>
-                </div>
-              ) : (
-                <p className="rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
-                  No goal yet: lock a baseline in Settings → Baseline &amp; goals.
-                </p>
-              )}
-
-              <div className="grid gap-6 @2xl:grid-cols-2">
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <h2 className="text-sm font-semibold">Where visits came from</h2>
-                  <table className="mt-3 w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-                      <tr>
-                        <th className="py-1 font-medium">Channel</th>
-                        <th className="py-1 text-right font-medium">Sessions</th>
-                        <th className="py-1 text-right font-medium">{noun}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...review.channels]
-                        .sort((a, b) => b.sessions - a.sessions)
-                        .slice(0, 6)
-                        .map((c) => (
-                          <tr key={c.label} className="border-t border-[var(--border)]">
-                            <td className="py-1.5">{c.label}</td>
-                            <td className="py-1.5 text-right tabular-nums">{num(c.sessions)}</td>
-                            <td className="py-1.5 text-right tabular-nums">{num(c.conversions)}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                  {review.services.rows[0] ? (
-                    <p className="mt-3 text-xs text-[var(--text-secondary)]">
-                      OrganicIQ channels (organic, AI, direct, referral): {num(review.services.rows[0].sessions.current)} sessions,{" "}
-                      {num(review.services.rows[0].lead_events.current)} conversion events.
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-                  <h2 className="text-sm font-semibold">Top pages</h2>
-                  <table className="mt-3 w-full text-left text-sm">
-                    <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-                      <tr>
-                        <th className="py-1 font-medium">Page</th>
-                        <th className="py-1 text-right font-medium">Sessions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {review.top_pages.map((p) => (
-                        <tr key={p.page} className="border-t border-[var(--border)]">
-                          <td className="max-w-[14rem] truncate py-1.5" title={p.page}>
-                            {p.page.replace(/^https?:\/\/[^/]+/, "") || "/"}
-                          </td>
-                          <td className="py-1.5 text-right tabular-nums">{num(p.sessions)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+        {review ? (
+          <>
+            {!review.has_search_data ? (
+              <div className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-secondary)]">
+                No Search Console data for {monthLabel(month)}. Pull it from Settings → Connections once GSC is connected.
               </div>
-              <ShippedWork rows={shipped} />
-              {review.visibility ? <VisibilityPanel visibility={review.visibility} prior={prior} href={`/${client.slug}/llm`} /> : null}
-            </>
-          ) : null}
-        </div>
+            ) : null}
 
+            {review.scorecards ? (
+              <>
+                <section aria-label="Visibility">
+                  <SectionHead kind="visibility" title="Visibility" read={review.scorecards.reads?.visibility} active={choice === "visibility"} onFocus={() => pickFocus("visibility")} />
+                  <VisibilityCards review={review} cards={review.scorecards} />
+                  {review.visibility ? <div className="mt-3"><VisibilityPanel visibility={review.visibility} prior={prior} href={`/${client.slug}/llm`} /></div> : null}
+                </section>
 
+                <section aria-label="Traffic">
+                  <SectionHead kind="traffic" title="Traffic" read={review.scorecards.reads?.traffic} active={choice === "traffic"} onFocus={() => pickFocus("traffic")} />
+                  <TrafficCards review={review} cards={review.scorecards} />
+                  <div className="mt-3 grid gap-3 @2xl:grid-cols-[3fr_2fr]">
+                    <div className="rounded-2xl border border-[var(--border)] bg-white p-4">
+                      <h3 className="text-sm font-semibold">Where visits came from</h3>
+                      <table className="mt-2 w-full text-left text-sm">
+                        <thead className="text-[0.65rem] uppercase tracking-wider text-[var(--text-tertiary)]">
+                          <tr>
+                            <th className="py-1 font-semibold">Channel</th>
+                            <th className="py-1 text-right font-semibold">Sessions</th>
+                            <th className="py-1 text-right font-semibold">{noun}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...review.channels]
+                            .sort((a, b) => b.sessions - a.sessions)
+                            .slice(0, 6)
+                            .map((c) => (
+                              <tr key={c.label} className="border-t border-[var(--border)]">
+                                <td className="py-1.5">{c.label}</td>
+                                <td className="py-1.5 text-right tabular-nums">{num(c.sessions)}</td>
+                                <td className="py-1.5 text-right tabular-nums">{num(c.conversions)}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                      {review.services.rows[0] ? (
+                        <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                          OrganicIQ channels (organic, AI, direct, referral): {num(review.services.rows[0].sessions.current)} sessions, {num(review.services.rows[0].lead_events.current)} conversion events.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="rounded-2xl border border-[var(--border)] bg-white p-4">
+                      <h3 className="text-sm font-semibold">Top pages</h3>
+                      <table className="mt-2 w-full text-left text-sm">
+                        <thead className="text-[0.65rem] uppercase tracking-wider text-[var(--text-tertiary)]">
+                          <tr>
+                            <th className="py-1 font-semibold">Page</th>
+                            <th className="py-1 text-right font-semibold">Sessions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {review.top_pages.map((p) => (
+                            <tr key={p.page} className="border-t border-[var(--border)]">
+                              <td className="max-w-[14rem] truncate py-1.5" title={p.page}>{p.page.replace(/^https?:\/\/[^/]+/, "") || "/"}</td>
+                              <td className="py-1.5 text-right tabular-nums">{num(p.sessions)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+
+                <section aria-label="Leads">
+                  <SectionHead kind="leads" title="Leads" read={review.scorecards.reads?.conversions} active={choice === "leads"} onFocus={() => pickFocus("leads")} />
+                  <LeadsCards review={review} cards={review.scorecards} />
+                  {review.revenue?.status === "unavailable" ? <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Revenue: {review.revenue.reason}</p> : null}
+                  {review.goal.period_goal ? (
+                    <div className="mt-3 rounded-2xl border border-[var(--border)] bg-white p-4">
+                      <div className="flex items-baseline justify-between">
+                        <h3 className="text-sm font-semibold">Against the goal</h3>
+                        <span className="text-sm tabular-nums">
+                          {num(review.conversions.current)} of {num(review.goal.period_goal)} {noun}
+                          {review.goal.progress_pct != null ? ` (${review.goal.progress_pct.toFixed(0)}%)` : ""}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-2 rounded bg-[var(--border)]">
+                        <div className={`h-2 rounded ${(review.goal.progress_pct ?? 0) >= 100 ? "bg-green-600" : "bg-[var(--brand-teal)]"}`} style={{ width: `${Math.min(100, review.goal.progress_pct ?? 0)}%` }} />
+                      </div>
+                      <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                        {review.goal.checkpoint ? `${review.goal.checkpoint.month}-month checkpoint (due ${review.goal.checkpoint.due}): ${num(review.goal.checkpoint.projected)} a month. ` : ""}
+                        {review.goal.final_goal ? `12-month goal: ${num(review.goal.final_goal)} a month. ` : ""}
+                        {review.goal.baseline_version ? `From baseline version ${review.goal.baseline_version}.` : ""}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">No goal yet: lock a baseline in Settings → Baseline &amp; goals.</p>
+                  )}
+                </section>
+              </>
+            ) : null}
+
+            <ShippedWork rows={shipped} />
+          </>
+        ) : null}
       </div>
     </section>
   );

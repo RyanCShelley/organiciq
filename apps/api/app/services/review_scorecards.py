@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.ga4 import FactGa4Event, FactGa4Traffic, OrganicChannel
+from app.models.seranking import FactSerRanking
 from app.models.watchlist import WatchlistKeyword
 from app.services.monthly_review import parse_month, pct_change, previous_month
 
@@ -149,6 +150,46 @@ def visibility_trend(db: Session, client: Client, months: list[str]) -> list[dic
     return _series(months, by_month)
 
 
+#: SE Ranking checks to this depth; a keyword it did not find reads 0 (or nothing).
+RANK_DEPTH = 100
+#: A keyword that fell at least this many places in the month is named as the biggest drop.
+DROP_PLACES = 5
+
+
+def rank_check(db: Session, client: Client, month: str) -> dict[str, Any] | None:
+    """SE Ranking's daily position checks for the month: how many tracked keywords it found in Google's top 100 on the last check,
+    how many in the top 10, the best one, and the biggest fall over the month. None when the client has no checks in the month."""
+    first, last = _period(month)
+    rows = (
+        db.query(FactSerRanking.site_engine_id, FactSerRanking.keyword_id, FactSerRanking.keyword, FactSerRanking.date, FactSerRanking.position)
+        .filter(FactSerRanking.client_id == client.id, FactSerRanking.date >= first, FactSerRanking.date <= last)
+        .order_by(FactSerRanking.date)
+        .all()
+    )
+    if not rows:
+        return None
+    series: dict[tuple[str, str], list[tuple[date, float | None, str]]] = {}
+    for engine, kid, keyword, day, pos in rows:
+        series.setdefault((engine, kid), []).append((day, float(pos) if pos is not None else None, keyword))
+    found = lambda p: p is not None and 0 < p <= RANK_DEPTH  # noqa: E731
+    checked_on = max(r[3] for r in rows)
+    latest = {k: v[-1] for k, v in series.items()}
+    ranked = [(pos, kw) for (_, pos, kw) in latest.values() if found(pos)]
+    best = min(ranked, default=None)
+    drops = []
+    for v in series.values():
+        known = [(d, p) for d, p, _ in v if found(p)]
+        last_pos = v[-1][1]
+        if known and found(last_pos) and last_pos - known[0][1] >= DROP_PLACES:
+            drops.append((last_pos - known[0][1], v[-1][2], known[0][1], last_pos))
+    worst = max(drops, default=None)
+    return {
+        "checked_on": checked_on.isoformat(), "tracked": len(series), "ranked": len(ranked), "top10": sum(1 for pos, _ in ranked if pos <= 10),
+        "best": {"keyword": best[1], "position": round(best[0])} if best else None,
+        "biggest_drop": {"keyword": worst[1], "from": round(worst[2]), "to": round(worst[3])} if worst else None,
+    }
+
+
 def _pair(p: dict | None) -> tuple[float | None, float | None, float | None]:
     p = p or {}
     return p.get("current"), p.get("previous"), p.get("change_pct")
@@ -190,6 +231,7 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
         "ai_links": (llm_sum.get("citations") or {}).get("current") if llm else None,
         "ai_runs": llm.get("runs") if llm else None,
         "trend": visibility_trend(db, client, months) if vis and terms else [],
+        "rank_check": rank_check(db, client, month),
     }
 
     # Traffic
@@ -210,7 +252,8 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
         "revenue": revenue, "conversion_rate": review.get("conversion_rate"),
     }
     return {"month": month, "previous_month": prior, "visibility": visibility, "traffic": traffic, "conversions": conversions,
-            "headline": one_line(month, prior, visibility, traffic, conversions)}
+            "headline": one_line(month, prior, visibility, traffic, conversions),
+            "reads": section_reads(month, prior, visibility, traffic, conversions)}
 
 
 _MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -265,3 +308,46 @@ def one_line(month: str, prior: str, visibility: dict, traffic: dict, conversion
             text += f" and AI platforms named the brand {round(mentions)} {'time' if round(mentions) == 1 else 'times'}."
         parts.append(text)
     return " ".join(parts)
+
+
+def section_reads(month: str, prior: str, visibility: dict, traffic: dict, conversions: dict) -> dict[str, str | None]:
+    """One or two plain sentences under each section's title: what its numbers say, so a focus can be chosen from the page."""
+    against = month_name(prior)
+
+    vis = None
+    if visibility["available"]:
+        shown, of = visibility["headline"] or 0, visibility["of"] or 0
+        missing = of - shown
+        if missing <= 0:
+            vis = f"Every one of the {of} watchlist terms shows in Google."
+        else:
+            vis = f"{missing} of {of} watchlist terms never show in Google."
+            page_one = visibility.get("page_one") or 0
+            if shown:
+                vis += " The terms that do show mostly sit on page one, so reach is the gap, not rank." if page_one * 2 >= shown else " The terms that do show mostly sit below page one, so rank is a gap as well as reach."
+
+    tr = None
+    mix = {c["key"]: c for c in traffic["channels"]}
+    organic, ai = mix.get("organic_search"), mix.get("ai_referral")
+    o_move, a_move = _move("up", "down", organic["change_pct"] if organic else None), _move("up", "down", ai["change_pct"] if ai else None)
+    if o_move and a_move and o_move.split()[0] != a_move.split()[0]:
+        tr = f"Organic is {o_move}, but AI referrals are {a_move}."
+    elif o_move:
+        tr = f"Organic search is {o_move} on {against}."
+    elif traffic["headline"] is not None:
+        tr = f"Organic search held steady on {against}."
+    total = sum(c["sessions"] for c in traffic["channels"])
+    direct = mix.get("direct_unattributed")
+    if tr and direct and total and direct["sessions"] * 2 > total:
+        tr += " Direct is more than half of all visits."
+
+    conv = None
+    noun = str(conversions["noun"])
+    if conversions["headline"] is not None:
+        move = _move("up", "down", conversions["change_pct"])
+        pct = conversions.get("goal_progress_pct")
+        if conversions.get("goal") and pct is not None:
+            conv = f"{noun.capitalize()} are at {round(pct)}% of this period's goal" + (f", and {move} on {against}." if move else ".")
+        elif move:
+            conv = f"{noun.capitalize()} are {move} on {against}."
+    return {"visibility": vis, "traffic": tr, "conversions": conv}
