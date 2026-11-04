@@ -80,6 +80,27 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  web-v2:
+    name: Web v2 checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web-v2
+    env:
+      # The build reads these to set up sign-in; the values only need to exist.
+      AUTH_SECRET: ci-build-secret
+      AUTH_URL: http://127.0.0.1:3001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web-v2/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
   advisories:
     name: Dependency advisories
     runs-on: ubuntu-latest
@@ -96,6 +117,10 @@ jobs:
           python-version: "3.13"
       - name: npm audit (production dependencies)
         working-directory: apps/web
+        run: npm audit --omit=dev
+      - name: npm audit, web v2 (production dependencies)
+        if: always()
+        working-directory: apps/web-v2
         run: npm audit --omit=dev
       - name: pip-audit
         # Runs even when the npm step reported something: they are separate
