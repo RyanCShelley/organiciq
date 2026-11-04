@@ -232,7 +232,6 @@ def assemble(current: dict, previous: dict, *, month: str, model: str | None, re
         "revenue": revenue,
     }
     out["summary"] = summarise(out)
-    out["summary_sections"] = sections(out)
     return out
 
 
@@ -363,73 +362,6 @@ def _change(pair: dict | None, prior: str, *, points: bool = False) -> dict | No
     return {"text": f"{'up' if pct > 0 else 'down'} {abs(pct):.0f}%", "tone": "good" if pct > 0 else "bad", "against": f"vs {_mon(prior)} ({_fmt(pair['previous'])})"}
 
 
-def sections(review: dict) -> list[dict]:
-    """The same facts as `summarise`, laid out to skim: sections of rows (what, how much, how it moved, the detail)."""
-    month, prior, noun = review["month"], review["previous_month"], review["noun"]
-    out: list[dict] = []
-
-    results: list[dict] = []
-    conv = review["conversions"]
-    if conv["current"] is not None:
-        goal = review["goal"]
-        detail = f"{goal['progress_pct']:.0f}% of this period's goal of {_fmt(goal['period_goal'])}" if goal["period_goal"] and goal["progress_pct"] is not None else None
-        results.append({"label": noun.capitalize(), "value": _fmt(conv["current"]), "change": _change(conv, prior), "detail": detail})
-    rev = review.get("revenue")
-    if rev and rev.get("status") == "measured":
-        total, organic = rev["revenue"], rev["organic_revenue"]
-        results.append({"label": "Revenue", "value": _fmt(total["current"]), "change": _change(total, prior),
-                        "detail": f"{_fmt(organic['current'])} of it through organic search" if organic["current"] is not None else None})
-    elif rev and rev.get("status") == "unavailable":
-        results.append({"label": "Revenue", "value": "–", "change": None, "detail": f"Could not be read: {rev.get('reason')}"})
-    if results:
-        out.append({"title": "Results", "rows": results})
-
-    traffic: list[dict] = []
-    sessions, organic = review["sessions"], review["organic_sessions"]
-    if sessions["current"] is not None:
-        traffic.append({"label": "Sessions", "value": _fmt(sessions["current"]), "change": _change(sessions, prior), "detail": None})
-    if organic["current"] is not None:
-        traffic.append({"label": "Organic sessions", "value": _fmt(organic["current"]), "change": _change(organic, prior), "detail": "Visits that came from search engines"})
-    if review["has_search_data"]:
-        clicks = review["search"]["clicks"]
-        traffic.append({"label": "Search Console clicks", "value": _fmt(clicks["current"]), "change": _change(clicks, prior), "detail": "Clicks from Google results to the site"})
-    else:
-        traffic.append({"label": "Search Console", "value": "–", "change": None, "detail": "No data for this month, so clicks and impressions are not shown"})
-    out.append({"title": "Traffic", "rows": traffic})
-
-    vis = review.get("visibility")
-    if vis:
-        s, visible = vis["summary"], []
-        visible.append({"label": "Google", "value": f"{s['showing_in_google']} of {s['terms']} terms", "change": None,
-                        "detail": f"{_fmt(s['google_impressions'])} impressions · {_fmt(s['google_clicks'])} clicks · {s['on_page_one']} averaging page one"})
-        if vis["bing"]["has_data"]:
-            visible.append({"label": "Bing", "value": f"{s['showing_in_bing']} of {s['terms']} terms", "change": None, "detail": "Bing stands in for Microsoft Copilot"})
-        llm = vis.get("llm")
-        if llm:
-            m, c, r = llm["summary"]["mentions"], llm["summary"]["citations"], llm["summary"]["visibility_rate"]
-            pooled = llm["in_month"] and llm.get("runs", 1) > 1
-            when = (f"{llm['runs']} runs in {_mon(month)}, pooled" if pooled else f"Run on {llm['run_date']}") + ("" if llm["in_month"] else f", after {_mon(month)}")
-            visible.append({"label": "AI platforms", "value": f"{round((r['current'] or 0) * 100)}%", "change": _change(r, prior, points=True),
-                            "detail": f"Discovery answers that named or cited the brand · {_n(m['current'], 'mention')} · {_n(c['current'], 'citation')} · {when}"})
-            from app.llm_visibility.platforms import DISPLAY
-
-            per = [f"{DISPLAY.get(p['platform'], p['platform'])} {round((p['visibility_rate']['current'] or 0) * 100)}%" for p in llm.get("platforms", [])]
-            if per:
-                visible.append({"label": "By platform", "value": " · ".join(per), "change": None, "detail": "Share of answers that named or cited the brand"})
-            checks = llm.get("brand_check") or []
-            answers = sum(b["answers"] for b in checks)
-            if answers:
-                cited = sum(b["site_cited"] for b in checks)
-                visible.append({"label": "Brand check", "value": f"{cited} of {answers} answers", "change": None,
-                                "detail": "Answers to questions that name the brand where the site was cited"})
-        out.append({"title": "Visibility", "rows": visible})
-
-    missing = [f["source"] for f in review.get("freshness", []) if not f.get("available")]
-    if missing:
-        out.append({"title": "Missing", "rows": [{"label": "No data yet from", "value": ", ".join(missing), "change": None, "detail": None}]})
-    return out
-
-
 def build_review(db: Session, client: Client, month: str) -> dict:
     first, last = parse_month(month)
     yesterday = date.today() - timedelta(days=1)
@@ -448,7 +380,6 @@ def build_review(db: Session, client: Client, month: str) -> dict:
 
     result["visibility"] = build_visibility(db, client, month)
     result["summary"] = summarise(result)
-    result["summary_sections"] = sections(result)
     return result
 
 

@@ -52,16 +52,6 @@ export type Visibility = {
   llm: VisibilityAi | null;
 };
 
-export type SummaryRow = {
-  label: string;
-  value: string;
-  change: { text: string; tone: "good" | "bad" | "flat"; against: string } | null;
-  detail: string | null;
-};
-export type SummarySection = { title: string; rows: SummaryRow[] };
-
-export type ScoreChange = { change_pct: number | null };
-export type TrendPoint = { month: string; value: number | null };
 export type RankCheck = {
   checked_on: string;
   tracked: number;
@@ -87,7 +77,6 @@ export type Scorecards = {
     ai_mentions: number | null;
     ai_links: number | null;
     ai_runs: number | null;
-    trend: TrendPoint[];
     rank_check: RankCheck | null;
   };
   traffic: {
@@ -96,7 +85,6 @@ export type Scorecards = {
     change_pct: number | null;
     verdict: "up" | "down" | "flat";
     organic_change_pct: number | null;
-    trend: TrendPoint[];
     channels: { key: string; label: string; sessions: number; previous: number; change_pct: number | null }[];
   };
   conversions: {
@@ -110,7 +98,6 @@ export type Scorecards = {
     top: { label: string; count: number; previous: number; change_pct: number | null }[];
     revenue: Pair | null;
     conversion_rate: Pair | null;
-    trend: TrendPoint[];
   };
 };
 
@@ -152,7 +139,6 @@ export type Review = {
   revenue: RevenueBlock | null;
   visibility: Visibility | null;
   summary: string[];
-  summary_sections: SummarySection[];
   scorecards?: Scorecards;
 };
 

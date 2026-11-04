@@ -9,7 +9,7 @@ Use with [README → Deploy](../README.md#deploy-railway--vercel) and [`.env.exa
 | Postgres | Railway plugin | — | — | private |
 | api | Railway | `apps/api` Dockerfile | `scripts/start-api.sh` | yes |
 | worker | Railway | same Dockerfile | `scripts/start-worker.sh` | no |
-| web | Vercel | Root Directory `apps/web` | Next build | yes |
+| web | Vercel | Root Directory `apps/web-v2` | Next build | yes |
 
 ## Env matrix
 

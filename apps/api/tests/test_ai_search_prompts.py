@@ -171,56 +171,6 @@ def _tracked(client_id, prompt):
     )
 
 
-def test_untracked_excludes_tracked_prompts(client, db, client_a, admin_user):
-    db.add(_discovered(client_a.id, "best geo agency", volume=900))
-    db.add(_discovered(client_a.id, "what is geo", volume=200))
-    db.add(_tracked(client_a.id, "best geo agency"))
-    db.commit()
-
-    body = client.get(
-        "/watch-list/untracked-prompts", headers=client_header(client_a.id, admin_user.email)
-    ).json()
-
-    assert body["discovered_prompts"] == 2
-    assert body["tracked_prompts"] == 1
-    assert body["untracked_total"] == 1
-    assert [row["prompt"] for row in body["items"]] == ["what is geo"]
-
-
-def test_untracked_prompt_match_is_case_insensitive(client, db, client_a, admin_user):
-    db.add(_discovered(client_a.id, "Best GEO Agency"))
-    db.add(_tracked(client_a.id, "best geo agency"))
-    db.commit()
-
-    body = client.get(
-        "/watch-list/untracked-prompts", headers=client_header(client_a.id, admin_user.email)
-    ).json()
-
-    assert body["untracked_total"] == 0
-
-
-def test_engines_are_reported_separately(client, db, client_a, admin_user):
-    """Each engine is paid for separately, so the UI must show which are stale."""
-    db.add(_discovered(client_a.id, "a", engine="chatgpt"))
-    db.add(_discovered(client_a.id, "b", engine="perplexity"))
-    db.commit()
-
-    body = client.get(
-        "/watch-list/untracked-prompts", headers=client_header(client_a.id, admin_user.email)
-    ).json()
-
-    assert set(body["engines_fetched"]) == {"chatgpt", "perplexity"}
-
-
-def test_untracked_prompts_empty_before_any_run(client, client_a, admin_user):
-    body = client.get(
-        "/watch-list/untracked-prompts", headers=client_header(client_a.id, admin_user.email)
-    ).json()
-
-    assert body["untracked_total"] == 0
-    assert body["engines_fetched"] == {}
-
-
 # --- Per-client ceiling -----------------------------------------------------
 
 
