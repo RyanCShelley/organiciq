@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState, useTransition } from "react";
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { reachAction, rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
 import { Scorecards } from "@/components/review/Scorecards";
+import { ReviewSummary } from "@/components/review/Summary";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
@@ -546,7 +547,6 @@ export function ReviewScreen({
       live = false;
     };
   }, [client.id, month]);
-  const [copied, setCopied] = useState(false);
   const prior = review ? monthLabel(review.previous_month).split(" ")[0] : "last month";
   const noun = review?.noun ?? "leads";
 
@@ -577,57 +577,7 @@ export function ReviewScreen({
 
       <div className="mb-6 grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_16rem]">
 
-          {review ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Summary</h2>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(review.summary.join("\n"));
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  }}
-                  className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <div className="mt-3 space-y-4">
-                {review.summary_sections.map((section) => (
-                  <div key={section.title}>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{section.title}</h3>
-                    <dl className="mt-1 divide-y divide-[var(--border)]">
-                      {section.rows.map((row) => (
-                        <div key={row.label} className="py-2">
-                          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                            <dt className="text-sm font-semibold">{row.label}</dt>
-                            <dd className="flex flex-wrap items-baseline gap-2 text-right">
-                              <span className="text-base font-semibold tabular-nums">{row.value}</span>
-                              {row.change ? (
-                                <span
-                                  className={`rounded px-1.5 py-0.5 text-xs font-semibold ${row.change.tone === "good" ? "bg-green-50 text-green-800" : row.change.tone === "bad" ? "bg-red-50 text-red-800" : "bg-[var(--bg)] text-[var(--text-secondary)]"}`}
-                                  title={row.change.against}
-                                >
-                                  {row.change.tone === "good" ? "▲ " : row.change.tone === "bad" ? "▼ " : "• "}
-                                  {row.change.text}
-                                </span>
-                              ) : null}
-                            </dd>
-                          </div>
-                          {row.change ? <p className="text-xs text-[var(--text-tertiary)]">{row.change.against}</p> : null}
-                          {row.detail ? <p className="text-xs text-[var(--text-secondary)]">{row.detail}</p> : null}
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                Worked out from the numbers below. It says what moved, not why.
-              </p>
-            </div>
-          ) : null}
+          {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
           <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
         
       </div>
