@@ -210,3 +210,20 @@ def test_the_review_summary_says_what_the_ai_platforms_did(db, client_a):
     review = mr.build_review(db, client_a, "2026-09")
     line = next(x for x in review["summary"] if x.startswith("AI platforms"))
     assert "50% of discovery answers named or cited the brand in the 2026-09-20 run" in line and "up 50 points" in line
+
+
+def test_a_month_with_several_runs_pools_them_and_compares_with_the_month_before(db, client_a):
+    _term(db, client_a)
+    _ai_run(db, client_a, datetime(2026, 8, 20, 12, tzinfo=timezone.utc), {"ChatGPT": (False, False), "Gemini": (False, False)})   # August: 0 of 2 visible
+    _ai_run(db, client_a, datetime(2026, 9, 2, 12, tzinfo=timezone.utc), {"ChatGPT": (True, True), "Gemini": (False, False)})      # September, week 1
+    _ai_run(db, client_a, datetime(2026, 9, 9, 12, tzinfo=timezone.utc), {"ChatGPT": (True, True), "Gemini": (False, True)})       # week 2
+    _ai_run(db, client_a, datetime(2026, 9, 16, 12, tzinfo=timezone.utc), {"ChatGPT": (False, False), "Gemini": (False, True)})    # week 3
+    out = rv.build_visibility(db, client_a, "2026-09")
+    llm = out["llm"]
+    assert llm["runs"] == 3 and llm["in_month"] is True and llm["run_date"] == "2026-09-16" and llm["run_dates"] == ["2026-09-02", "2026-09-09", "2026-09-16"]
+    assert llm["previous_runs"] == 1 and llm["previous_run_date"] == "2026-08-20"
+    assert llm["summary"]["visibility_rate"] == {"current": round(4 / 6, 4), "previous": 0.0, "delta": round(4 / 6, 4)}, "4 of the month's 6 answers were visible"
+    term = {t["keyword"]: t for b in out["buckets"] for t in b["terms"]}["sunscreen"]["ai"]
+    assert term["platforms"] == 6 and term["cited"] == 2 and term["mentioned"] == 4 and term["previous_cited"] == 0
+    # Per platform: did it cite or name the brand in at least half of its answers this month?
+    assert term["by_platform"] == {"ChatGPT": {"cited": True, "named": True}, "Gemini": {"cited": False, "named": True}}

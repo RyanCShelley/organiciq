@@ -315,10 +315,11 @@ def summarise(review: dict) -> list[str]:
         llm = vis.get("llm")
         if llm:
             m, c, r = llm["summary"]["mentions"], llm["summary"]["citations"], llm["summary"]["visibility_rate"]
-            when = f"in the {llm['run_date']} run" if llm["in_month"] else f"in the latest run ({llm['run_date']}, after {month})"
+            pooled = llm["in_month"] and llm.get("runs", 1) > 1
+            when = (f"across {llm['runs']} runs in {month}" if pooled else f"in the {llm['run_date']} run") if llm["in_month"] else f"in the latest run ({llm['run_date']}, after {month})"
             ai = f"AI platforms: {round((r['current'] or 0) * 100)}% of discovery answers named or cited the brand {when} ({_n(m['current'], 'mention')}, {_n(c['current'], 'citation')})"
             if r["delta"] is not None:
-                ai += f", {'up' if r['delta'] > 0 else 'down' if r['delta'] < 0 else 'unchanged'}" + (f" {abs(round(r['delta'] * 100))} points" if r["delta"] else "") + " on the run before"
+                ai += f", {'up' if r['delta'] > 0 else 'down' if r['delta'] < 0 else 'unchanged'}" + (f" {abs(round(r['delta'] * 100))} points" if r["delta"] else "") + (" on the month before" if pooled else " on the run before")
             lines.append(ai + ".")
             from app.llm_visibility.platforms import DISPLAY
 
@@ -397,7 +398,8 @@ def sections(review: dict) -> list[dict]:
         llm = vis.get("llm")
         if llm:
             m, c, r = llm["summary"]["mentions"], llm["summary"]["citations"], llm["summary"]["visibility_rate"]
-            when = f"Run on {llm['run_date']}" + ("" if llm["in_month"] else f", after {month}")
+            pooled = llm["in_month"] and llm.get("runs", 1) > 1
+            when = (f"{llm['runs']} runs in {month}, pooled" if pooled else f"Run on {llm['run_date']}") + ("" if llm["in_month"] else f", after {month}")
             visible.append({"label": "AI platforms", "value": f"{round((r['current'] or 0) * 100)}%", "change": _change(r, prior, points=True),
                             "detail": f"of discovery answers named or cited the brand · {_n(m['current'], 'mention')} · {_n(c['current'], 'citation')} · {when}"})
             from app.llm_visibility.platforms import DISPLAY

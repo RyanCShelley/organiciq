@@ -6,7 +6,7 @@ toward the term: the numbers say how the term itself performs, and understate it
 people search a longer phrase. SE Ranking is deliberately not used here.
 
 AI results come from the client's LLM visibility runs: for each term, whether the AI platforms
-named or cited the brand when asked its paired prompt, in the run of the month (or, if none was
+named or cited the brand when asked its paired prompt, across every run in the month, pooled (or, if none was
 done that month, the latest run, labelled as such).
 """
 
@@ -131,26 +131,39 @@ def status_for(google: dict, bing: dict) -> str:
 
 
 def _llm(db: Session, client: Client, month: str) -> dict[str, Any] | None:
-    """The AI platforms' results for the month: the run done in it against the run before."""
+    """The AI platforms' results for the month: every run done in it, pooled, against the month before.
+
+    A weekly run is one snapshot of answers that move from day to day, so the month's figures pool all of its runs. With no run in
+    the month, the latest run stands in (and is labelled as such), against the run before it.
+    """
     from app.llm_visibility import report
 
     first, last = parse_month(month)
     start = datetime.combine(first, time.min, tzinfo=timezone.utc)
-    end = datetime.combine(last + timedelta(days=1), time.min, tzinfo=timezone.utc)
     done = db.query(LlmRun).filter(LlmRun.client_id == client.id, LlmRun.status == "completed")
-    run = done.filter(LlmRun.started_at >= start, LlmRun.started_at < end).order_by(LlmRun.started_at.desc()).first()
-    in_month = run is not None
-    if run is None:
-        run = done.order_by(LlmRun.started_at.desc()).first()
-    if run is None:
-        return None
-    previous = done.filter(LlmRun.started_at < run.started_at).order_by(LlmRun.started_at.desc()).first()
-    rows = db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()
-    prev_rows = db.query(LlmResponse).filter(LlmResponse.run_id == previous.id).all() if previous else None
+    runs = report.month_runs(db, client, month)
+    in_month = bool(runs)
+    if runs:
+        prev_runs = report.month_runs(db, client, previous_month(month))
+        if not prev_runs:
+            older = done.filter(LlmRun.started_at < start).order_by(LlmRun.started_at.desc()).first()
+            prev_runs = [older] if older else []
+    else:
+        latest = done.order_by(LlmRun.started_at.desc()).first()
+        if latest is None:
+            return None
+        runs = [latest]
+        older = done.filter(LlmRun.started_at < latest.started_at).order_by(LlmRun.started_at.desc()).first()
+        prev_runs = [older] if older else []
+    rows = [r for run in runs for r in db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()]
+    prev_rows = [r for run in prev_runs for r in db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()] if prev_runs else None
     return {
-        "run_date": run.started_at.date().isoformat(),
+        "run_date": runs[-1].started_at.date().isoformat(),
+        "run_dates": [r.started_at.date().isoformat() for r in runs],
+        "runs": len(runs),
         "in_month": in_month,
-        "previous_run_date": previous.started_at.date().isoformat() if previous else None,
+        "previous_run_date": prev_runs[-1].started_at.date().isoformat() if prev_runs else None,
+        "previous_runs": len(prev_runs),
         "summary": report.summary(rows, prev_rows),
         "platforms": report.platform_deltas(rows, prev_rows),
         "brand_check": report.brand_check(rows)["platforms"],
@@ -176,10 +189,14 @@ def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dic
     now, then = tally(rows), tally(prev)
     if now is None:
         return None
+    # One run gives one answer per platform. Pooled runs give several: a platform counts as having cited or named the brand when it did so in at least half of them.
+    per_platform: dict[str, list[Any]] = defaultdict(list)
+    for r in rows:
+        if r.visibility_type != "Error" and key_of(r.query_text) == key:
+            per_platform[r.platform].append(r)
     by_platform = {
-        r.platform: {"cited": bool(r.url_cited), "named": bool(r.brand_mentioned)}
-        for r in rows
-        if r.visibility_type != "Error" and key_of(r.query_text) == key
+        platform: {"cited": sum(bool(r.url_cited) for r in got) * 2 >= len(got), "named": sum(bool(r.brand_mentioned) for r in got) * 2 >= len(got)}
+        for platform, got in per_platform.items()
     }
     return {
         "by_platform": by_platform,
