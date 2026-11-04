@@ -192,7 +192,7 @@ def test_the_summary_is_also_laid_out_in_sections_to_skim():
     assert orders["value"] == "218" and orders["change"]["text"] == "up 88%" and orders["change"]["tone"] == "good"
     assert orders["detail"] == "114% of this period's goal of 192"
     sessions = by_title["Traffic"]["Sessions"]
-    assert sessions["change"] == {"text": "down 34%", "tone": "bad", "against": "on 2026-08 (9,723)"}
+    assert sessions["change"] == {"text": "down 34%", "tone": "bad", "against": "vs Aug 2026 (9,723)"}
     assert "No data for this month" in by_title["Traffic"]["Search Console"]["detail"]
 
 
@@ -211,7 +211,7 @@ def test_the_visibility_section_names_each_ai_platform_and_the_brand_check():
     }
     rows = {r["label"]: r for s in mr.sections(review) if s["title"] == "Visibility" for r in s["rows"]}
     assert rows["Google"]["value"] == "6 of 18 terms" and "2 averaging page one" in rows["Google"]["detail"]
-    assert rows["AI platforms"]["change"]["text"] == "down 10 points" and "after 2026-10" in rows["AI platforms"]["detail"]
+    assert rows["AI platforms"]["change"]["text"] == "down 10 points" and "after Oct 2026" in rows["AI platforms"]["detail"]
     assert rows["By platform"]["value"] == "ChatGPT 0% · Claude 25%"
     assert rows["Brand check"]["value"] == "3 of 12 answers"
 
