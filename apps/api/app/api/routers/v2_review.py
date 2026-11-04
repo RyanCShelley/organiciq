@@ -11,9 +11,14 @@ from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
-from app.services import monthly_review
+from app.services import monthly_review, review_scorecards
 
 router = APIRouter(prefix="/v2/review", tags=["v2 review"])
+
+
+def _with_scorecards(db: Session, client: Client, review: dict) -> dict:
+    """The three scorecards and the one line, worked out now: a month that locked before they existed gets them too."""
+    return {**review, "scorecards": review_scorecards.build(db, client, review)}
 
 
 @router.get("")
@@ -25,7 +30,7 @@ def monthly_review_for(
 ) -> dict:
     chosen = month or monthly_review.last_complete_month()
     try:
-        return monthly_review.review_for(db, client, chosen)
+        return _with_scorecards(db, client, monthly_review.review_for(db, client, chosen))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -39,6 +44,6 @@ def rerun_monthly_review(
 ) -> dict:
     """Throw away the locked review of a month and work it out again from the data held now."""
     try:
-        return monthly_review.review_for(db, client, month, rerun=True, who=user.email)
+        return _with_scorecards(db, client, monthly_review.review_for(db, client, month, rerun=True, who=user.email))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
