@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState, useTransition } from "react";
 
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { reachAction, rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
+import { Scorecards } from "@/components/review/Scorecards";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
@@ -571,6 +572,8 @@ export function ReviewScreen({
           {error}
         </p>
       ) : null}
+
+      {review?.scorecards ? <Scorecards data={review.scorecards} /> : null}
 
       <div className="mb-6 grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_16rem]">
 
