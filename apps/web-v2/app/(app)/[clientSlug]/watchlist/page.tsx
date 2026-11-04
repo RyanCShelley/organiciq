@@ -19,9 +19,9 @@ export default async function WatchlistPage({
   const watchlist = await apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id });
 
   return (
-    <section className="max-w-5xl space-y-8">
+    <section className="space-y-6">
       <header>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">Watchlist</h1>
+        <h2 className="font-[family-name:var(--font-display)] text-lg font-bold">Watchlist</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           {client.client_name} · {watchlist.buckets.length} buckets · {watchlist.keyword_count}{" "}
           keywords
