@@ -18,7 +18,7 @@ from app.services import page_stage
 from app.services import portfolio as portfolio_service
 from app.services.triage_signals import NEXT_STEP_COVERAGE_FLOOR
 from app.models.client import Client
-from app.models.decision import EngineAction, ExcludedPage
+from app.models.decision import EngineAction, ExcludedPage, MonthlyRecord
 from app.schemas.plan_review import PlanReviewUpdate, PlanApproval
 from app.schemas.watchlist import WatchTargetUpdate
 from app.schemas import (
@@ -223,7 +223,7 @@ def get_plan_review(
     row = engine_action_service.load_record(db, client, month)
     if row is None:
         raise HTTPException(404, "No saved run for this month.")
-    return plan_review.view(row)
+    return plan_review.view(row, db)
 
 
 @router.put("/records/{month}/review")
@@ -548,6 +548,12 @@ def send_slot(
     Idempotent by the stored task id: a second press links to the task that
     exists rather than creating a twin.
     """
+    # Serialize delivery with plan edits and other sends, including the first
+    # send before an EngineAction row exists. Two concurrent clicks must not
+    # both create an external task.
+    db.query(MonthlyRecord).filter(
+        MonthlyRecord.client_id == client.id, MonthlyRecord.month == month,
+    ).with_for_update().one_or_none()
     record, slot = _slot_or_404(db, client, month, uid)
     _require_reviewed_growth(record, slot)
     existing = (

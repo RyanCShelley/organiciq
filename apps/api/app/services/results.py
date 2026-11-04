@@ -149,7 +149,12 @@ def _term_position(
         .order_by(FactSerRanking.date.desc())
         .first()
     )
+    if row is not None and row[1] < as_of - timedelta(days=7):
+        return Measurement(None, "the latest tracked ranking is more than seven days behind the measurement date")
     if row is None:
+        from app.services.measurement_coverage import metric_ready
+        if not metric_ready(db, client_id, "page_position", as_of):
+            return Measurement(None, "Search Console has not completed the comparison window")
         # Not tracked: a page written for a query Search Console showed the
         # site for is judged on where Search Console shows it.
         return _query_position(db, client_id, term, as_of)
@@ -339,6 +344,9 @@ def measure(
     as_of: date,
 ) -> Measurement:
     """One metric, as it read on `as_of`."""
+    from app.services.measurement_coverage import metric_ready
+    if not metric_ready(db, client.id, metric_key, as_of):
+        return Measurement(None, "the provider has not completed the comparison window")
     if metric_key in NOT_MEASURED:
         return Measurement(None, "this action settles a decision rather than moving a metric")
     if metric_key == "term_position":
@@ -399,7 +407,7 @@ def _slotted(data: dict[str, Any]):
     for kind, key in SLOTTED_POOLS:
         if kind == "action" and data.get("plan_review"):
             review = data["plan_review"]
-            snapshot = review if review.get("approved_at") else next(iter(reversed(review.get("versions", []))), {})
+            snapshot = review if review.get("approved_at") else next((v for v in reversed(review.get("versions", [])) if not v.get("retired_at")), {})
             actions = snapshot.get("items", [])
         elif kind == "action" and data.get("review_required"):
             actions = []
@@ -438,7 +446,7 @@ def capture_before(
             metric_key_for(action),
             url=action.get("target_url"),
             term=action.get("term"),
-            as_of=as_of,
+            as_of=existing.shipped_on - timedelta(days=1) if existing and existing.shipped_on else as_of,
         )
         # Measure first, then write. Creating the row up front left a junk
         # row behind for every action whose metric could not be read.
@@ -650,6 +658,11 @@ def maybe_check_results(db: Session) -> bool:
             # every metric is readable as-of a date.
             captured += capture_before(db, client, record)
         judged += len(check_due(db, client, today=today))
+        # Automatic Completed Work refresh is opt-in with service reporting.
+        # Unfinished clients keep their existing on-demand workflow.
+        if client.service_reporting is not None:
+            from app.services.annotations import remeasure_all
+            remeasure_all(db, client)
 
     checkpoint.last_run_date = today
     checkpoint.updated_at = now

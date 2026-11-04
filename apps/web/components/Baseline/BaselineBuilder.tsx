@@ -9,8 +9,6 @@ import {
   listBaselineVersionsAction,
   lockBaselineAction,
   setBaselineGoalAction,
-  setBaselineRateGoalAction,
-  setLeadConversionsAction,
   type BaselineBand,
   type BaselineEventCandidates,
   type BaselineSeriesInput,
@@ -71,8 +69,6 @@ export function BaselineBuilder({
   const [reasonCode, setReasonCode] = useState("relaunch");
   const [reasonNote, setReasonNote] = useState("");
   const [goal, setGoal] = useState("");
-  const [rateGoal, setRateGoal] = useState("");
-  const [syncLeads, setSyncLeads] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -96,9 +92,6 @@ export function BaselineBuilder({
   }, [clientId]);
 
   const defaults = candidates?.defaults ?? [];
-  const leadsToAdd = source === "ga4" ? selected.filter((name) => !defaults.includes(name)) : [];
-  const leadsToRemove = source === "ga4" ? defaults.filter((name) => !selected.includes(name)) : [];
-  const leadsDiffer = leadsToAdd.length + leadsToRemove.length > 0;
   const locked = candidates?.locked ?? null;
   const lockedDiffers =
     locked !== null &&
@@ -152,8 +145,8 @@ export function BaselineBuilder({
         reasonCode: first ? "initial" : reasonCode,
         reasonNote,
         monthlyLeadGoal: goal.trim() === "" ? null : Number(goal),
-        targetLeadRatePct: rateGoal.trim() === "" ? null : Number(rateGoal),
-        syncLeadConversions: leadsDiffer && syncLeads,
+        targetLeadRatePct: null,
+        syncLeadConversions: false,
       });
       if (!response.ok) {
         setError(response.error);
@@ -190,22 +183,7 @@ export function BaselineBuilder({
             screen, alerts and results count <strong>{defaults.join(", ") || "nothing"}</strong>, so their numbers
             will not match the baseline.
           </p>
-          <button
-            type="button"
-            className="btn btn-secondary mt-2"
-            disabled={pending}
-            onClick={() =>
-              startTransition(async () => {
-                const done = await setLeadConversionsAction(clientId, locked.events);
-                if (!done.ok) return setError(done.error);
-                setMessage(`Lead conversions now match v${locked.version}.`);
-                await reload(true);
-                router.refresh();
-              })
-            }
-          >
-            Make the lead conversions match v{locked.version}
-          </button>
+          <p className="mt-2 text-xs">This historical snapshot stays unchanged. New calculations use the saved lead definitions above.</p>
         </Alert>
       ) : null}
       {goalDiffers && goalInfo ? (
@@ -233,15 +211,6 @@ export function BaselineBuilder({
         </Alert>
       ) : null}
 
-      <details className="rounded-lg border border-[var(--border)] p-3 text-sm"><summary className="cursor-pointer font-medium">Lead conversion-rate target · {goalInfo?.target_lead_rate_pct != null ? `${goalInfo.target_lead_rate_pct}%` : "not set"}</summary>
-        <p className="mt-2 text-xs text-[var(--text-secondary)]">Set the rate the decision engine should compare with actual lead events per visit. This is separate from the measured baseline and the monthly lead-count goal. Existing baselines do not need to be relocked.</p>
-        <div className="mt-3 flex flex-wrap items-end gap-2"><FieldLabel label="Target rate (%)"><Input type="number" min={0.01} max={100} step={0.01} value={rateGoal} onChange={event => setRateGoal(event.target.value)} placeholder={goalInfo?.target_lead_rate_pct?.toString() ?? "e.g. 3"} /></FieldLabel>
-        <button type="button" className="btn btn-secondary" disabled={pending || !rateGoal.trim()} onClick={() => startTransition(async () => {
-          const response = await setBaselineRateGoalAction(clientId, Number(rateGoal));
-          if (!response.ok) return setError(response.error);
-          await reload(false); setMessage(`Target lead conversion rate set to ${response.saved.target_lead_rate_pct}%.`); router.refresh();
-        })}>Save rate target</button></div>
-      </details>
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldLabel label="Data from">
           <Select value={source} onChange={(event) => setSource(event.target.value as "ga4" | "csv")}>
@@ -255,54 +224,11 @@ export function BaselineBuilder({
       </div>
 
       {source === "ga4" ? (
-        <fieldset className="rounded-[var(--radius-md)] border border-[var(--border)] p-3">
-          <legend className="px-1 text-xs font-semibold text-[var(--text-secondary)]">Events that count as leads</legend>
-          {candidates === null ? (
-            <p className="text-xs text-[var(--text-tertiary)]">Loading events…</p>
-          ) : candidates.events.length === 0 ? (
-            <p className="text-xs text-[var(--text-tertiary)]">No GA4 events synced yet.</p>
-          ) : (
-            <ul className="grid max-h-56 gap-1 overflow-y-auto text-sm sm:grid-cols-2">
-              {candidates.events.map((event) => (
-                <li key={event.name}>
-                  <label className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={selected.includes(event.name)}
-                      onChange={() =>
-                        setSelected((current) =>
-                          current.includes(event.name)
-                            ? current.filter((name) => name !== event.name)
-                            : [...current, event.name],
-                        )
-                      }
-                    />
-                    <span>
-                      {event.name}
-                      <span className="block text-xs text-[var(--text-tertiary)]">
-                        {num(event.total)} events, {event.first_month} to {event.last_month}
-                      </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
-          {leadsDiffer ? (
-            <div className="mt-2 rounded-[var(--radius-md)] border border-[#E3B25C] bg-[#FFF8E6] px-3 py-2 text-xs">
-              <p>
-                This differs from the client&apos;s lead conversions, which the home screen, alerts and results count
-                {leadsToAdd.length ? <> — adds <strong>{leadsToAdd.join(", ")}</strong></> : null}
-                {leadsToRemove.length ? <> — switches off <strong>{leadsToRemove.join(", ")}</strong></> : null}.
-              </p>
-              <label className="mt-1 flex items-center gap-2">
-                <input type="checkbox" checked={syncLeads} onChange={() => setSyncLeads((v) => !v)} />
-                When I lock, update the lead conversions to match
-              </label>
-            </div>
-          ) : null}
-        </fieldset>
+        <div className="rounded-lg bg-[var(--surface-muted)] p-3 text-sm">
+          <p className="font-semibold">Saved lead events</p>
+          <p className="mt-1">{candidates === null ? "Loading saved definitions…" : defaults.length ? defaults.join(", ") : "No lead events selected. Save lead definitions above before calculating."}</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">This calculator counts lead events. A visit-based conversion-rate target is separate. Change lead events in Conversions, then calculate again. Locked baseline versions are preserved.</p>
+        </div>
       ) : (
         <FieldLabel label="Monthly CSV (month, sessions, leads; optional organic_sessions)">
           <textarea
@@ -497,14 +423,11 @@ export function BaselineBuilder({
                 }`}
               />
             </FieldLabel>
-            <FieldLabel label="Target lead conversion rate (%) for the decision engine">
-              <Input type="number" min={0.01} max={100} step={0.01} value={rateGoal} onChange={event => setRateGoal(event.target.value)} placeholder={goalInfo?.target_lead_rate_pct != null ? `Keep current target: ${goalInfo.target_lead_rate_pct}%` : "Choose a target, e.g. 3"} />
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">Measured baseline: {num(result.baseline.lead_rate_pct, 2)}%. Set the rate you want to achieve; a monthly lead-count goal does not set this rate. Blank preserves an existing target.</p>
-            </FieldLabel>
+
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || openBlockers.length > 0 || (leadsDiffer && !syncLeads)}
+              disabled={pending || openBlockers.length > 0}
               onClick={lock}
             >
               {pending ? "Locking…" : `Lock baseline v${nextVersion}`}

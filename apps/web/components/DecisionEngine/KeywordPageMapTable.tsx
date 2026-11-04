@@ -1,5 +1,6 @@
 "use client";
 
+import { pageIdentity } from "@/lib/client-setup";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
@@ -23,8 +24,10 @@ export type KeywordMapRow = {
   current_position: number | null;
   suggested_target_url: string | null;
   /** Which read it came from: where the site ranks, or what a page is about. */
-  suggested_from?: "search_console" | "subject" | null;
+  suggested_from?: "search_console" | "subject" | "ownership" | null;
   suggested_margin?: number | null;
+  suggested_reason?: string | null;
+  suggested_status?: "mapped" | "gap" | "conflict" | null;
   suggested_impressions: number | null;
   suggested_instead_of: string | null;
 };
@@ -137,6 +140,7 @@ function Row({
   clientId,
   clientSlug,
   pages,
+  origin,
 }: {
   row: KeywordMapRow;
   clientId: string;
@@ -145,7 +149,7 @@ function Row({
   origin: string | null;
 }) {
   // Held as it is shown — a path for this site — and expanded on save.
-  const [pageUrl, setPageUrl] = useState(forDisplay(row.target_url ?? "", origin));
+  const [pageUrl, setPageUrl] = useState(forDisplay(row.source === "suggested" ? "" : row.target_url ?? "", origin));
   const [role, setRole] = useState(row.term_role ?? "");
   const [priority, setPriority] = useState(row.priority);
   const [saved, setSaved] = useState<"idle" | "ok" | "error">("idle");
@@ -162,7 +166,8 @@ function Row({
     data.set("clientId", clientId);
     data.set("clientSlug", clientSlug);
     data.set("keyword", row.keyword);
-    data.set("target_url", next?.url ?? forSaving(pageUrl, origin));
+    data.set("target_url", forSaving(next?.url ?? pageUrl, origin));
+    data.set("note", row.note ?? "");
     data.set("term_role", next?.role ?? role);
     data.set("priority", String(next?.priority ?? priority));
     // The group is SE Ranking's, not a judgement, and it rides along so a
@@ -279,7 +284,9 @@ function Row({
             {/* The two reads mean different things and a person deciding
                 should know which they are looking at: one is where the site
                 ranks today, the other is what a page is about. */}
-            {row.suggested_from === "subject" ? (
+            {row.suggested_from === "ownership" ? (
+              <>Recommended owner: {forDisplay(row.suggested_target_url ?? "", origin)} — use this.</>
+            ) : row.suggested_from === "subject" ? (
               <>
                 Closest page by subject: {forDisplay(row.suggested_target_url ?? "", origin)}
                 {" "}— use this. Nothing ranks for this term yet.
@@ -297,6 +304,11 @@ function Row({
               </>
             )}
           </button>
+        ) : null}
+        {!row.mapped && row.suggested_reason ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            {row.suggested_reason}
+          </p>
         ) : null}
         {saved === "error" && message ? (
           <div className="mt-1 text-xs text-[var(--danger)]">{message}</div>
@@ -323,7 +335,9 @@ export function KeywordPageMapTable({
   pages,
   clientId,
   clientSlug,
+  initialSearch = "",
 }: {
+  initialSearch?: string;
   rows: KeywordMapRow[];
   pages: string[];
   clientId: string;
@@ -333,8 +347,8 @@ export function KeywordPageMapTable({
   const [matching, startMatching] = useTransition();
   const [matchNote, setMatchNote] = useState<string | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [onlyUnmapped, setOnlyUnmapped] = useState(true);
+  const [query, setQuery] = useState(initialSearch);
+  const [onlyUnmapped, setOnlyUnmapped] = useState(!initialSearch);
   const [onlyPriority, setOnlyPriority] = useState(false);
   const [group, setGroup] = useState("");
   // Volume first: the question this table is usually opened with is "what
@@ -373,10 +387,10 @@ export function KeywordPageMapTable({
       if (onlyPriority && !row.priority) return false;
       if (group && row.group_name !== group) return false;
       if (!needle) return true;
-      return (
-        row.keyword.toLowerCase().includes(needle) ||
-        (row.target_url ?? "").toLowerCase().includes(needle)
-      );
+      if (/^https?:\/\//i.test(query.trim())) {
+        return row.target_url != null && pageIdentity(row.target_url) === pageIdentity(query.trim());
+      }
+      return row.keyword.toLowerCase().includes(needle) || (row.target_url ?? "").toLowerCase().includes(needle);
     });
   }, [rows, query, onlyUnmapped, onlyPriority, group]);
 
@@ -542,7 +556,7 @@ export function KeywordPageMapTable({
       {visible.length === 0 ? (
         <p className="text-sm text-[var(--text-secondary)]">
           {rows.length === 0
-            ? "No tracked keywords yet. Add them to the watchlist and they appear here."
+            ? "No tracked keywords yet. Select the SE Ranking project in Connections and sync its current terms."
             : "Nothing matches that filter."}
         </p>
       ) : (

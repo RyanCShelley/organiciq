@@ -1,11 +1,9 @@
-import { ClientWorkspaceNav } from "@/components/ClientWorkspaceNav";
 import { EnqueueJobForm } from "@/components/EnqueueJobForm";
 import { DataTable } from "@/components/analytics/DataTable";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { apiFetch, type SyncJob } from "@/lib/api";
-import { clientHref } from "@/lib/client-path";
 import { requireWorkspaceClient } from "@/lib/context";
 import { jobBadgeVariant, jobStatusLabel } from "@/lib/jobs";
 
@@ -29,7 +27,6 @@ export default async function ClientJobsPage({
 
   return (
     <section>
-      <ClientWorkspaceNav clientSlug={client.slug} active={clientHref(client.slug, "jobs")} />
 
       <section className="workspace-section">
         <SectionHeader

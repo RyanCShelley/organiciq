@@ -1,0 +1,180 @@
+"""Concepts a person has approved as Wikidata entities for a client, and the audits and markup generated for its pages."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+class ClientSchemaConcept(Base):
+    """A concept (the brand, a product line, a topic) tied to its Wikidata item. Only these may be linked from generated markup."""
+
+    __tablename__ = "client_schema_concepts"
+    __table_args__ = (UniqueConstraint("client_id", "name_key", name="uq_client_schema_concept_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    name_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    qid: Mapped[str] = mapped_column(String(32), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    approved_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SchemaPageReport(Base):
+    """The latest model-written audit or corrected markup for one page, kept with what it cost."""
+
+    __tablename__ = "schema_page_reports"
+    __table_args__ = (Index("ix_schema_page_reports_client_url", "client_id", "url", "kind"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    #: audit or markup.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    depth: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: running, done or failed.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClientSchemaIgnore(Base):
+    """Something a person said does not apply to this client, so the Schema screen stops counting it.
+
+    scope `check`: an entity check ("wikidata"); `expect`: a markup type not expected of a kind of page ("homepage:WebSite");
+    `page_type`: a whole kind of page ("homepage"); `page`: one address; `cleanup`: one recurring cleanup (its text, addresses removed).
+    """
+
+    __tablename__ = "client_schema_ignores"
+    __table_args__ = (UniqueConstraint("client_id", "scope", "key", name="uq_client_schema_ignore"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CtrTitleDraft(Base):
+    """Title tags a model wrote for one page, from the page's own search data. A draft for a person to check; nothing is sent anywhere."""
+
+    __tablename__ = "ctr_title_drafts"
+    __table_args__ = (Index("ix_ctr_title_drafts_client_url", "client_id", "url"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: running, done or failed.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The range of dates the searches were read from.
+    range_from: Mapped[str] = mapped_column(String(10), nullable=False)
+    range_to: Mapped[str] = mapped_column(String(10), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InlinkState(Base):
+    """What a person did with a suggested link, so it is not suggested again: ignored (this pair, or this target page) or confirmed live."""
+
+    __tablename__ = "inlink_states"
+    __table_args__ = (UniqueConstraint("client_id", "source_url", "target_url", name="uq_inlink_state"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: Empty for a whole target page ("do not suggest links to this page").
+    source_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    target_url: Mapped[str] = mapped_column(Text, nullable=False)
+    #: ignored or live.
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    anchor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentState(Base):
+    """A content gap or refresh a person set aside (ignored), so it is not listed again until restored."""
+
+    __tablename__ = "content_states"
+    __table_args__ = (UniqueConstraint("client_id", "area", "key", name="uq_content_state"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: gap or refresh.
+    area: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: The search (a gap) or the page address (a refresh).
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentModelRun(Base):
+    """A model's work on one gap or page: a brief for a page to write, a plan for a page to refresh, or the topics a site is missing. A draft for a person."""
+
+    __tablename__ = "content_model_runs"
+    __table_args__ = (Index("ix_content_model_runs_client_key", "client_id", "kind", "key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: brief, refresh or topics.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: running, done or failed.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=0)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContentItem(Base):
+    """A page to write or refresh on the content calendar: added from a gap or a refresh, or by hand, planned by a person, optionally sent to Teamwork."""
+
+    __tablename__ = "content_items"
+    __table_args__ = (Index("ix_content_items_client_due", "client_id", "due"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: new_page | refresh
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The search to win (a new page) or the page address (a refresh).
+    target: Mapped[str] = mapped_column(Text, nullable=False)
+    #: gap | refresh | manual: where it came from. source_key is the gap's search or the page's address.
+    source_area: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    source_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: idea | planned | writing | review | published | dropped
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="idea")
+    due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    assignee_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: What the person doing the work needs: the brief or refresh plan, in words, copied at the time it was added.
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    teamwork_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The Teamwork list made for this item, kept so a send that failed halfway does not make a second list.
+    teamwork_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

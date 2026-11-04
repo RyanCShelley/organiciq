@@ -21,6 +21,8 @@ import zlib
 
 import httpx
 
+from app.services.jobs import check_stop
+
 from app.core.urls import normalize_path_prefix, normalize_url, url_in_scope
 from app.ingestion.crawler.parse import ParsedPage, is_page_url, parse_page
 from app.ingestion.crawler.safe_http import PublicOnlyTransport
@@ -54,6 +56,15 @@ class Throttle:
         self._clean_runs = 0
         self._lock = asyncio.Lock()
         self._next_at = 0.0
+        #: Until when the whole crawl is asked to stand still. A host that refuses one request
+        #: refuses the next three as well; only the refused worker used to wait, so the others
+        #: carried on, were refused in turn, and each paid its own minute.
+        self._paused_until = 0.0
+
+    def pause(self, seconds: float) -> None:
+        """Ask every worker to stand still for `seconds` (never shortening a pause already set)."""
+        until = asyncio.get_running_loop().time() + max(0.0, seconds)
+        self._paused_until = max(self._paused_until, until)
 
     def back_off(self) -> None:
         """Called after the server turns a request away."""
@@ -86,6 +97,9 @@ class Throttle:
         than each sleeping the same interval and then firing together — which
         is the burst the limiter is there to stop.
         """
+        remaining = self._paused_until - asyncio.get_running_loop().time()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
         if self.delay <= 0:
             return
         async with self._lock:
@@ -146,6 +160,12 @@ MAX_RETRY_AFTER = 60.0
 #: Once a site rate-limits us, every later request waits at least this long.
 #: ACC Tek answered 429 on sixty pages in one run: the crawl kept four
 #: requests in flight the whole way down and never slowed.
+#: The gap between requests when robots.txt states none. Flat out (four requests in flight, no
+#: gap) trips a rate limit on hosts like Shopify, which answer 429 with a Retry-After of up to a
+#: minute and make the crawl pay it: 30 pages took 138 seconds that way and 25 to 34 seconds at a
+#: steady 0.35 to 0.5 second gap, with no refusals. A steady, polite pace is also faster overall.
+DEFAULT_CRAWL_DELAY = 0.4
+
 THROTTLED_MIN_DELAY = 1.0
 #: And the delay grows each time it happens again.
 THROTTLE_GROWTH = 1.5
@@ -594,7 +614,7 @@ async def crawl_site(
             except (TypeError, ValueError):
                 declared_delay = None
         result.crawl_delay = declared_delay
-        throttle = Throttle(declared_delay or 0.0)
+        throttle = Throttle(declared_delay if declared_delay is not None else DEFAULT_CRAWL_DELAY)
         if robots is not None and not robots.can_fetch(USER_AGENT, root):
             result.robots_disallows_site = True
 
@@ -661,6 +681,7 @@ async def crawl_site(
                 )
 
         while queue and len(pages) < page_limit:
+            check_stop()
             batch = queue[: max(1, concurrency)]
             del queue[: len(batch)]
             batch = [u for u in batch if normalize_url(u) not in pages]
@@ -885,6 +906,9 @@ async def _fetch_page(
                         else RATE_LIMIT_BASE_DELAY * (2**attempts)
                     )
                     attempts += 1
+                    if throttle is not None:
+                        # The others wait out the same refusal instead of walking into it.
+                        throttle.pause(wait)
                     await asyncio.sleep(wait)
                     continue
                 # Out of retries. The status is deliberately not kept: stored

@@ -28,6 +28,7 @@ class StagingGa4Traffic(Base):
     active_users: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     views: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     engaged_sessions: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    engagement_seconds: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -80,6 +81,8 @@ class FactGa4Traffic(Base):
     active_users: Mapped[Decimal] = mapped_column(Numeric, nullable=False, default=0)
     views: Mapped[Decimal] = mapped_column(Numeric, nullable=False, default=0)
     # NULL until a GA4 sync that includes engagedSessions — used for bounce rate.
+    # Seconds of engaged time summed over the sessions (GA4 userEngagementDuration). NULL until a pull that includes it.
+    engagement_seconds: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     engaged_sessions: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -61,7 +61,9 @@ export function RunEngineButton({
         return;
       }
       // Land on what was just written rather than whatever ?run= pointed at.
-      router.replace(`/${slug}/decision-engine?run=${result.month}`);
+      const query = new URLSearchParams(window.location.search);
+      query.set("run", result.month);
+      router.replace(`/${slug}/decision-engine?${query}`);
       router.refresh();
     });
   }
@@ -69,7 +71,7 @@ export function RunEngineButton({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
-        <label className="sr-only" htmlFor="run-month">
+        <label className="text-sm" htmlFor="run-month">
           Month to run
         </label>
         <select
@@ -91,7 +93,7 @@ export function RunEngineButton({
           disabled={pending}
           className="inline-flex min-h-[36px] items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 text-[13px] font-semibold text-[var(--text-primary)] disabled:opacity-60"
         >
-          {pending ? "Running…" : "Run"}
+          {pending ? "Running…" : "Run assessment"}
         </button>
       </div>
       <p className="text-[11.5px] text-[var(--text-tertiary)]">

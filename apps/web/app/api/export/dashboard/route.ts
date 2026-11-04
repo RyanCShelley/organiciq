@@ -30,6 +30,15 @@ function buildSections(data: DashboardResponse): CsvSection[] {
       ],
     },
     {
+      title: "Tracked keyword coverage",
+      headers: ["Measure", "Current", "Previous", "Matched keywords"],
+      rows: [
+        ["Measured terms in top 10", data.exploration?.visibility.top_10 ?? "", "", ""],
+        ["Measured / tracked terms", data.exploration?.visibility.measured ?? "", data.exploration?.visibility.tracked ?? "", ""],
+        ["Same-cohort top 10", data.exploration?.visibility.matched_current_top_10 ?? "", data.exploration?.visibility.matched_previous_top_10 ?? "", data.exploration?.visibility.matched ?? ""],
+      ],
+    },
+    {
       title: "Conversions",
       headers: METRIC_HEADERS,
       rows: [

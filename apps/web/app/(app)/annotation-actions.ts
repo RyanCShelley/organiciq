@@ -9,7 +9,7 @@ export async function createAnnotationAction(formData: FormData) {
   if (!clientId) return { ok: false as const, error: "Missing client" };
 
   const body = {
-    date: String(formData.get("date") || ""),
+    date: String(formData.get("date") || formData.get("completed_at") || ""),
     annotation_type: String(formData.get("annotation_type") || "manual_note"),
     growth_action: String(formData.get("growth_action") || "").trim() || null,
     description: String(formData.get("description") || "").trim(),
@@ -35,7 +35,7 @@ export async function createAnnotationAction(formData: FormData) {
     };
   }
 
-  revalidatePath("/annotations");
+  revalidatePath("/[clientSlug]/annotations", "page");
   return { ok: true as const };
 }
 
@@ -54,7 +54,7 @@ export async function importAnnotationsAction(formData: FormData) {
         body: { csv_text: csvText },
       },
     );
-    revalidatePath("/annotations");
+    revalidatePath("/[clientSlug]/annotations", "page");
     return { ok: true as const, ...result };
   } catch (e) {
     return {
@@ -68,7 +68,7 @@ export async function remeasureAnnotationsAction(formData: FormData) {
   const clientId = String(formData.get("clientId") || "");
   if (!clientId) return;
   await apiFetch("/annotations/remeasure", { method: "POST", clientId, body: {} });
-  revalidatePath("/annotations");
+  revalidatePath("/[clientSlug]/annotations", "page");
 }
 
 

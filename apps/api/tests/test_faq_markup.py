@@ -46,7 +46,8 @@ def test_it_fires_on_questions_the_page_answers_without_markup():
     assert "frequently asked questions" in found.why
     # Markup, not writing: the answers already exist.
     assert found.effort_min == 15
-    assert found.metric_key == "ai_presence"
+    assert found.metric_key == "decision"
+    assert "guarantee" in found.why
 
 
 def test_it_stays_quiet_where_the_markup_is_already_there():

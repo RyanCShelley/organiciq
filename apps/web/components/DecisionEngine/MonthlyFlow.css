@@ -1,0 +1,280 @@
+.monthlyflow .visualmetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+  margin: 24px 0;
+}
+.monthlyflow .visualmetric {
+  min-width: 0;
+  border: 1px solid #dce5e7;
+  border-radius: 10px;
+  background: #fbfcfc;
+  padding: 18px;
+}
+.monthlyflow .metriclabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #536971;
+  margin-bottom: 14px;
+}
+.monthlyflow .metricbig {
+  font-size: 34px;
+  font-weight: 750;
+  line-height: 1.1;
+  margin: 10px 0 13px;
+  letter-spacing: -1px;
+}
+.monthlyflow .visibilityhero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 18px;
+}
+.monthlyflow .rankring {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.monthlyflow .rankring > div {
+  width: 82px;
+  height: 82px;
+  background: #fbfcfc;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.monthlyflow .rankring strong {
+  font-size: 23px;
+  letter-spacing: -0.8px;
+}
+.monthlyflow .rankring small {
+  font-size: 10px;
+  color: #687b82;
+  margin-top: 2px;
+}
+.monthlyflow .rankcount strong {
+  font-size: 26px;
+  white-space: nowrap;
+}
+.monthlyflow .rankcount strong span {
+  font-size: 19px;
+  color: #6d8188;
+  font-weight: 400;
+}
+.monthlyflow .rankcount p {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #566e76;
+}
+.monthlyflow .movement {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+.monthlyflow .movement.negative {
+  background: #fcece7;
+  color: #9c432f;
+}
+.monthlyflow .movement.positive {
+  background: #e2f2eb;
+  color: #22664e;
+}
+.monthlyflow .movement.steady {
+  background: #eaf0f2;
+  color: #506974;
+}
+.monthlyflow .metricdelta {
+  font-size: 12px;
+  color: #6c7d84;
+  margin-left: 8px;
+}
+.monthlyflow .metricfoot {
+  font-size: 11px;
+  color: #73858c;
+  line-height: 1.5;
+  margin: 10px 0 0;
+}
+.monthlyflow .comparisonbars {
+  margin-top: 20px;
+  display: grid;
+  gap: 10px;
+}
+.monthlyflow .comparisonbars > div {
+  display: grid;
+  grid-template-columns: 51px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #6a8088;
+}
+.monthlyflow .comparisonbars b {
+  font-size: 11px;
+  text-align: right;
+  color: #435e68;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.monthlyflow .bartrack {
+  height: 8px;
+  background: #edf1f2;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.monthlyflow .bar {
+  height: 100%;
+  border-radius: 3px;
+}
+.monthlyflow .bar.previous {
+  background: #afbec4;
+}
+.monthlyflow .bar.current {
+  background: #087c75;
+}
+.monthlyflow .direction {
+  border: 1px solid #bcdbd5;
+  border-left: 5px solid #087c75;
+  background: #f0f8f6;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+.monthlyflow .directioneyebrow {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: #087c75;
+  margin: 0 0 7px;
+}
+.monthlyflow .direction h3 {
+  font-size: 21px;
+}
+.monthlyflow .direction aside {
+  border-left-color: #cce1dc;
+}
+.monthlyflow .overview {
+  padding: 23px;
+}
+.monthlyflow .overview .cardheading {
+  align-items: flex-start;
+}
+@media (max-width: 1200px) {
+  .monthlyflow .visibilityhero {
+    gap: 10px;
+  }
+  .monthlyflow .rankring {
+    width: 84px;
+    height: 84px;
+  }
+  .monthlyflow .rankring > div {
+    width: 65px;
+    height: 65px;
+  }
+  .monthlyflow .rankring strong {
+    font-size: 19px;
+  }
+  .monthlyflow .rankcount strong {
+    font-size: 24px;
+  }
+  .monthlyflow .rankcount strong span {
+    font-size: 16px;
+  }
+  .monthlyflow .visualmetric {
+    padding: 14px;
+  }
+  .monthlyflow .comparisonbars > div {
+    grid-template-columns: 45px minmax(0, 1fr) 42px;
+    gap: 5px;
+  }
+}
+@media (max-width: 900px) {
+  .monthlyflow .visualmetrics {
+    grid-template-columns: 1fr;
+  }
+  .monthlyflow .visibilityhero {
+    justify-content: flex-start;
+  }
+  .monthlyflow .comparisonbars {
+    max-width: 450px;
+  }
+  .monthlyflow .metricbig {
+    font-size: 32px;
+  }
+}
+
+.monthlyflow .direction {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 24px;
+}
+.monthlyflow .direction aside {
+  border-left: 1px solid #cce1dc;
+  padding-left: 20px;
+}
+.monthlyflow .muted {
+  font-size: 13px;
+  color: #657780;
+}
+.monthlyflow .overview {
+  padding: 24px;
+}
+.monthlyflow.overview {
+  padding: 24px;
+}
+.monthlyflow .growthworkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 24px;
+}
+.monthlyflow .growthplan {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+}
+.monthlyflow .growthcard {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px;
+  margin: 16px 0;
+}
+.monthlyflow .growthcard.selected {
+  border: 2px solid #087c75;
+  padding: 21px;
+}
+.monthlyflow .growthcard h4 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 16px;
+  color: #087c75;
+}
+.monthlyflow .growthcard p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 6px;
+}
+.monthlyflow .growthcard .outcome {
+  background: var(--surface-muted);
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 16px;
+}
+@media (max-width: 1000px) {
+  .monthlyflow .growthworkspace,
+  .monthlyflow .direction {
+    grid-template-columns: 1fr;
+  }
+  .monthlyflow .growthplan {
+    position: static;
+  }
+  .monthlyflow .direction aside {
+    border: 0;
+    padding: 0;
+  }
+}

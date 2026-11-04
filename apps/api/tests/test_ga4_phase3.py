@@ -191,7 +191,7 @@ def test_ga4_pipeline_with_mocked_api(db, client_a):
     start_key = start.strftime("%Y%m%d")
     end_key = end.strftime("%Y%m%d")
     traffic_rows = [
-        _ga4_row([start_key, "/home", "google", "organic"], ["10", "8", "20", "7"]),
+        _ga4_row([start_key, "/home", "google", "organic"], ["10", "8", "20", "7", "95"]),
         _ga4_row([end_key, "/", "(direct)", "(none)"], ["3", "3", "3", "1"]),
         _ga4_row([start_key, "/ai", "chatgpt.com", "referral"], ["2", "2", "5", "2"]),
     ]
@@ -222,6 +222,7 @@ def test_ga4_pipeline_with_mocked_api(db, client_a):
     assert OrganicChannel.AI_REFERRAL in channels
     organic = next(row for row in traffic if row.channel == OrganicChannel.ORGANIC_SEARCH)
     assert organic.engaged_sessions == Decimal("7")
+    assert organic.engagement_seconds == Decimal("95")  # time on site, in seconds, kept beside the sessions
     events = db.query(FactGa4Event).filter(FactGa4Event.client_id == client_a.id).all()
     assert len(events) == 1
     assert events[0].event_name == "generate_lead"

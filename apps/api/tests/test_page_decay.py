@@ -364,3 +364,26 @@ def test_two_pages_answering_the_brand_name_is_not_a_split(db, client_a):
     _contest(db, client_a.id, sorted(brand_terms(client_a))[0], {a: 800, b: 700}, day)
     db.commit()
     assert _candidate(load_page_candidates(db, client_a, today=today), a).contested_terms == ()
+
+
+def test_protocol_variants_are_not_competing_pages(db, client_a):
+    today = date(2026, 10, 23)
+    _contest(db, client_a.id, 'pool leak detection', {
+        'http://example.com/': 800, 'https://example.com/': 700,
+    }, today)
+    db.commit()
+    assert not any(page.contested_terms for page in load_page_candidates(db, client_a, today=today))
+
+
+def test_protocol_variants_combine_before_real_rival_share_is_evaluated(db, client_a):
+    today = date(2026, 10, 23)
+    _contest(db, client_a.id, 'pool leak detection', {
+        'http://example.com/': 600, 'https://example.com/': 400,
+        'https://example.com/service': 500,
+    }, today)
+    db.commit()
+    pages = load_page_candidates(db, client_a, today=today)
+    term = next(t for p in pages for t in p.contested_terms)
+    assert term.total_impressions == 1500
+    assert term.own_impressions == 1000
+    assert [r.url for r in term.rivals] == ['https://example.com/service']

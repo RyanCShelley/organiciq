@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from app.decisions.planning import effective_record, initial_review, page_identity, proposals, validate_plan
 from app.models.decision import MonthlyRecord
+from app.decisions.review_opportunities import review_opportunities
+from app.decisions.action_reasoning import connect
 
 
 class ReviewConflict(ValueError):
@@ -16,11 +18,19 @@ def locked_record(db, client, month):
     ).with_for_update().one_or_none()
 
 
-def view(record):
+def view(record, db=None):
     data = record.record
     review = deepcopy(data.get("plan_review") or initial_review(data))
-    return {**review, "proposals": proposals(data), "capacity": data.get("growth_capacity", data["action_slots"]),
-            "suggested_focus": data.get("constraint"),
+    limits = []
+    if db is not None:
+        from app.services.recommendation_guard import blockers
+        rows = data.get("findings", data.get("candidates") or data.get("actions") or [])
+        blocked = blockers(db, record, rows)
+        limits = [{"title": rows[i].get("title"), "target_url": rows[i].get("target_url"), "reason": reason}
+                  for i, reason in blocked.items()]
+        data = {**data, "findings": [row for i, row in enumerate(rows) if i not in blocked]}
+    return {**review, "assessment_id": str(record.id), "crawl_evidence_limit": data.get("crawl_evidence_limit"), "page_evidence_note": data.get("page_evidence_note"), "recommendation_limits": limits, "proposals": connect(proposals(data), data), "capacity": data.get("growth_capacity", data["action_slots"]),
+            "suggested_focus": data.get("constraint"), "suggested_reason": data.get("reason_text"), "review_opportunities": review_opportunities(data),
             "setup_findings": [x for x in data.get("findings", data.get("candidates", [])) if x.get("id") == "V-6"]}
 
 
@@ -60,11 +70,11 @@ def save(db, record, payload, user):
                 raise ValueError("An assigned, sent or shipped brief cannot be rewritten. Unassign it or add a new brief for new scope.")
     review = {**old, **payload.model_dump(mode="json"), "revision": old["revision"] + 1,
               "approved_at": None, "approved_by": None,
-              "edited_by": str(user.email)}
+              "edited_by": str(user.email), "items": connect(items, data)}
     data["plan_review"] = review
     record.record = data
     db.commit()
-    return view(record)
+    return view(record, db)
 
 
 def approve(db, record, revision, user):
@@ -73,8 +83,12 @@ def approve(db, record, revision, user):
     if revision != review["revision"]:
         raise ReviewConflict("This plan changed. Reload before approving.")
     if review.get("approved_at"):
-        return view(record)
+        return view(record, db)
     validate_plan(review, data.get("growth_capacity", data["action_slots"]))
+    from app.services.recommendation_guard import blockers
+    blocked = blockers(db, record, review["items"])
+    if blocked:
+        raise ValueError(next(iter(blocked.values())))
     from app.models.decision import EngineAction
     states = {x.uid: x for x in db.query(EngineAction).filter(EngineAction.client_id == record.client_id, EngineAction.month == record.month)}
     reserved = set()
@@ -86,8 +100,15 @@ def approve(db, record, revision, user):
                 continue
             seen.add(uid)
             state = states.get(uid)
-            selected = state.in_plan if state and state.in_plan is not None else item.get("slot") is not None
-            if selected and item.get("target_url") and (not state or state.status != "skipped"):
+            # A ranked proposal is not a human commitment. Auto-created planned
+            # rows and suggested slots must not silently reserve a page.
+            committed = state and (
+                state.assignee_email or state.assignee_user_id or state.sent_at
+                or state.teamwork_task_id or state.shipped_on
+                or state.status in {"assigned", "done"}
+            )
+            selected = state and state.in_plan is True and state.status != "skipped"
+            if (committed or selected) and item.get("target_url"):
                 reserved.add(page_identity(item["target_url"]))
     if {page_identity(x["target_url"]) for x in review["items"]} & reserved:
         raise ValueError("A selected page already has retainer work this month. Combine or remove that work first.")
@@ -99,7 +120,7 @@ def approve(db, record, revision, user):
     data["plan_review"] = review
     record.record = data
     db.commit()
-    return view(record)
+    return view(record, db)
 
 
 def workflow_record(data):

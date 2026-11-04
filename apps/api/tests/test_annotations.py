@@ -61,3 +61,43 @@ def test_page_work_measurement_does_not_include_sibling_pages_or_other_clients(d
         assert _window_metrics(db,client_a.id,start=day,end=day,page_url=page,lead_events=[])['sessions']==count
     missing=_window_metrics(db,client_a.id,start=date(2026,1,1),end=date(2026,1,2),page_url=None,lead_events=[])
     assert missing['sessions'] is None and missing['clicks'] is None
+
+
+def test_future_window_does_not_cache_partial_results(db,client_a):
+    from app.models.annotation import Annotation,AnnotationType
+    row=Annotation(client_id=client_a.id,date=date(2026,10,1),annotation_type=AnnotationType.GROWTH_ACTION,
+        description='Verified page change',completed_at=date(2026,10,1),measurement_start_date=date(2026,10,2),
+        measurement_end_date=date(2026,10,29),baseline_metrics_json={'sessions':100})
+    db.add(row);db.flush()
+    summary=measure_annotation_impact(db,client_a,row,today=date(2026,10,18))
+    assert row.result==AnnotationResult.NOT_YET_MEASURED
+    assert summary['post']=={} and not row.post_action_metrics_json
+    assert summary['deltas']=={} and 'finish' in summary['measurement_note']
+
+
+def test_past_window_requires_complete_source_coverage(db,client_a):
+    from app.models.annotation import Annotation,AnnotationType
+    row=Annotation(client_id=client_a.id,date=date(2026,8,1),annotation_type=AnnotationType.GROWTH_ACTION,
+        description='Verified page change',completed_at=date(2026,8,1),measurement_start_date=date(2026,8,2),measurement_end_date=date(2026,8,29))
+    db.add(row);db.flush()
+    summary=measure_annotation_impact(db,client_a,row,today=date(2026,10,18))
+    assert row.result==AnnotationResult.NOT_ENOUGH_DATA
+    assert 'comparison-period' in summary['measurement_note']
+    assert not row.post_action_metrics_json
+
+
+def test_completed_window_is_measured_after_both_sources_finish(db,client_a):
+    from app.models.annotation import Annotation,AnnotationType
+    from app.models.job import SyncJob,SyncJobStatus
+    from app.models.gsc import FactGscPage
+    row=Annotation(client_id=client_a.id,date=date(2026,8,1),annotation_type=AnnotationType.GROWTH_ACTION,
+        description='Verified page change',completed_at=date(2026,8,1),measurement_start_date=date(2026,8,2),measurement_end_date=date(2026,8,29))
+    db.add(row)
+    for day,clicks in [(date(2026,7,31),10),(date(2026,8,29),20)]:
+        db.add(FactGscPage(client_id=client_a.id,date=day,raw_url='https://clienta.example/',normalized_url='https://clienta.example/',clicks=clicks,impressions=100))
+    for source in ('ga4','gsc_pages'):
+        db.add(SyncJob(client_id=client_a.id,source=source,start_date=date(2026,7,1),end_date=date(2026,8,29),fact_watermark=date(2026,8,29),status=SyncJobStatus.SUCCESSFUL))
+    db.commit()
+    summary=measure_annotation_impact(db,client_a,row,today=date(2026,10,18))
+    assert summary['deltas']['clicks_change_pct']==100
+    assert row.post_action_metrics_json['clicks']==20

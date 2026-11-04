@@ -49,6 +49,9 @@ def waits(monkeypatch):
         return await real_sleep(0)
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    # These tests are about each request's own retries. The sleep above never really passes
+    # time, so a shared pause would never expire; that behavior has its own tests below.
+    monkeypatch.setattr(Throttle, "pause", lambda self, seconds: None)
     return recorded
 
 
@@ -319,3 +322,47 @@ def test_a_site_that_never_refuses_is_never_slowed():
         t.succeeded()
     assert t.delay == 0.0
     assert t.throttled is False
+
+
+
+def test_one_refusal_makes_every_worker_wait_not_just_the_refused_one():
+    """Only the refused worker used to sleep. The others kept requesting, were refused in turn,
+    and each paid its own minute."""
+    import asyncio
+    import time
+
+    async def scenario():
+        t = Throttle(0.0)
+        t.pause(0.15)
+        started = time.monotonic()
+        await asyncio.gather(*[t.wait() for _ in range(3)])
+        return time.monotonic() - started
+
+    assert asyncio.run(scenario()) >= 0.14
+
+
+def test_a_pause_is_never_shortened_by_a_later_shorter_one():
+    import asyncio
+
+    async def scenario():
+        t = Throttle(0.0)
+        t.pause(0.2)
+        first = t._paused_until
+        t.pause(0.01)
+        return first, t._paused_until
+
+    first, after = asyncio.run(scenario())
+    assert after == first
+
+
+def test_without_a_pause_waiting_is_instant_at_zero_delay():
+    import asyncio
+    import time
+
+    async def scenario():
+        t = Throttle(0.0)
+        started = time.monotonic()
+        await t.wait()
+        return time.monotonic() - started
+
+    assert asyncio.run(scenario()) < 0.05

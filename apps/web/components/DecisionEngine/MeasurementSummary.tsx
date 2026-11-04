@@ -13,7 +13,7 @@ export type Measurements = {
     prompts: { text: string; provider: string | null; mentioned: boolean | null; cited: boolean | null; observed_on: string | null }[];
   };
   traffic: { current: { total: number | null; channels: Record<string, number> }; previous: { total: number | null; channels: Record<string, number> }; source: string; ctr_reference?: { scope: string; period: string; positions: { position: number; ctr_pct: number }[] } };
-  leads: { count: number | null; sessions: number | null; rate_pct: number | null; event_rate_pct?: number | null; lead_sessions?: number | null; session_measurement?: { sessions: number | null; status: string; reason?: string }; target_rate_pct: number | null; monthly_goal: number | null; source: string };
+  leads: { count: number | null; sessions: number | null; rate_pct: number | null; previous_rate_pct?: number | null; event_rate_pct?: number | null; lead_sessions?: number | null; session_measurement?: { sessions: number | null; status: string; reason?: string }; target_rate_pct: number | null; monthly_goal: number | null; source: string };
 };
 const number = (value: number | null | undefined) => value == null ? "Not measured" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
 const presence = (value: boolean | null) => value === true ? "Yes" : value === false ? "No" : "Not measured";

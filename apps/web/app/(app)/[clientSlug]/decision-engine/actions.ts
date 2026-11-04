@@ -9,6 +9,7 @@ export async function saveLeadRateGoalAction(clientId: string, slug: string, tar
   try {
     await apiFetch("/decisions/measurement-settings", { clientId, method: "PUT", body: { target_lead_rate_pct: target } });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     return { ok: true as const };
   } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Rate target did not save" }; }
 }
@@ -28,6 +29,7 @@ export async function savePlanReviewAction(clientId: string, slug: string, month
       } catch (error) { warning = `Draft saved. Approval needs attention: ${error instanceof Error ? error.message : "check the plan"}`; }
     }
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     revalidatePath(`/${slug}/content-opp`);
     return { ok: true as const, review: result, warning };
   } catch (error) {
@@ -39,6 +41,7 @@ export async function saveWatchTargetAction(clientId: string, slug: string, targ
   try {
     const rows = await apiFetch<import("@/components/DecisionEngine/WatchlistPanel").WatchItem[]>("/decisions/watchlist", { clientId, method: "PUT", body: target });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     return { ok: true as const, rows };
   } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Target did not save" }; }
 }
@@ -79,6 +82,7 @@ export async function runMonthlyRecordAction(
       body: { month: month ?? null },
     });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     return { ok: true as const, month: record.month };
   } catch (e) {
     return {
@@ -122,6 +126,7 @@ async function slotPost(
       body,
     });
     revalidatePath(`/${slug}/decision-engine`);
+    revalidatePath(`/${slug}/annotations`);
     // The retainer plan reads the same workflow rows.
     revalidatePath(`/${slug}/content-opp`);
     return { ok: true as const, state };

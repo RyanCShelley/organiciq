@@ -7,22 +7,39 @@ export const ACTION_FAMILIES: Record<string, string> = {
   investigation: "Investigate a material change",
 };
 
+export type ActionReasoning = {
+  status: "supported" | "unresolved";
+  findings: { uid: string | null; rule_id: string; page: string; term: string | null; observation: string; evidence: string[] }[];
+  why_this_action: string; outcome: string; limitation: string;
+};
+
 export type Brief = {
+  reasoning?: ActionReasoning;
   action_uid: string; id: string; family: string; title: string;
   branch: string; target_url: string; term: string | null;
   why: string; done_when: string; steps: string[]; evidence: string[];
   finding_ids: string[]; effort_min: number; metric: string;
   metric_key: string; check_after_days: number; check_on?: string | null;
-  score?: number; flags?: string[];
+  score?: number; flags?: string[]; interventions?: Brief[];
 };
 
 export type PlanReview = {
+  assessment_id?: string;
   revision: number; strategy: string; focus: string; reason: string; items: Brief[];
   approved_at: string | null; approved_by: string | null;
-  versions: { revision: number; approved_at: string; approved_by: string }[];
+  versions: { revision: number; approved_at: string; approved_by: string; retired_at?: string }[];
+  review_opportunities?: ReviewOpportunity[];
   proposals: Brief[]; capacity: number; suggested_focus: string;
+  suggested_reason?: string | null;
+  page_evidence_note?: string | null;
+  crawl_evidence_limit?: string | null;
+  recommendation_limits?: { title: string; target_url: string; reason: string }[];
   setup_findings: { title: string; why: string; target_url: string }[];
 };
+
+export function planDraftKey(clientId: string, month: string, review: Pick<PlanReview, "assessment_id" | "revision">): string {
+  return `organiciq:plan:v2:${clientId}:${month}:${review.assessment_id ?? "preview"}:${review.revision}`;
+}
 
 export function samePage(left: string, right: string): boolean {
   const key = (value: string) => { try { const url = new URL(value); return `${url.hostname.replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`.toLowerCase(); } catch { return value; } };
@@ -38,6 +55,8 @@ export const actionCount = (items: { steps?: string[] }[]) => items.reduce((n, i
 
 /** One selectable intervention, with its own assignment and Teamwork identity. */
 export function individualAction(group: Brief, step: string, index: number): Brief {
+  const intervention = group.interventions?.find(item => item.steps.length === 1 && item.steps[0] === step);
+  if (intervention) return { ...intervention };
   return { ...group, action_uid: `${group.action_uid.slice(0, 105)}-task-${index}`,
     title: step.length > 150 ? `${step.slice(0, 147)}…` : step,
     steps: [step], done_when: step,
@@ -84,4 +103,56 @@ export function suggestedPlan(proposals: Brief[], focus: string, capacity: numbe
     }
   }
   return selected;
+}
+
+/** Concise display copy; persisted task scope and delivery identity stay unchanged. */
+export function actionDisplayTitle(item: {id: string; title: string}): string {
+ const labels: Record<string,string> = {"T-1":"Review the search title and description","T-2":"Review the search result format","T-3":"Review the page opening","V-3":"Add relevant entity markup","V-4":"Add contextual internal links","V-7":"Mark up the existing FAQ"};
+ return labels[item.id] ?? item.title;
+}
+
+/** A source-backed observation; not a selectable execution task. */
+export type ReviewOpportunity = {
+  uid: string;
+  kind: string;
+  title: string;
+  summary: string;
+  evidence: string[];
+  review_checks: string[];
+  target_url: string;
+  term: string | null;
+  assessment_month: string;
+  screening_rule: string;
+  limitation: string;
+};
+
+export function opportunityDraft(
+  opportunity: ReviewOpportunity,
+  uid: string,
+): Brief {
+  const done =
+    "Record the verified cause, affected pages and next decision; explain when no site change is warranted.";
+  return {
+    action_uid: uid,
+    id: "MANUAL",
+    family: "investigation",
+    title: opportunity.title.replace(/^Review /, "Investigate "),
+    branch: opportunity.kind === "traffic_decline" ? "traffic" : "visibility",
+    target_url: opportunity.target_url,
+    term: opportunity.term,
+    why: `${opportunity.summary} ${opportunity.limitation}`,
+    done_when: done,
+    steps: [done],
+    evidence: [
+      ...opportunity.evidence,
+      opportunity.screening_rule,
+      ...opportunity.review_checks,
+    ],
+    finding_ids: [],
+    flags: [`review-opportunity:${opportunity.uid}`],
+    effort_min: 45,
+    metric: "Documented finding and next decision",
+    metric_key: "decision",
+    check_after_days: 7,
+  };
 }

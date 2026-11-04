@@ -3,6 +3,22 @@ import {
   accountToolFromPath,
   accountToolHref,
 } from "@/lib/account-routes";
+import type { Client } from "@/lib/api";
+
+/** Explicit URL context wins over the layout's potentially stale cookie. */
+export function navigationClient(
+  clients: Pick<Client, "id" | "slug">[],
+  pathname: string,
+  queryClientId: string | null,
+  defaultClientId: string,
+) {
+  const path = clientSlugFromPath(pathname);
+  return (
+    clients.find((client) => client.slug === path || client.id === path) ??
+    clients.find((client) => client.id === queryClientId) ??
+    clients.find((client) => client.id === defaultClientId)
+  );
+}
 
 export type NavItem = {
   href: string;
@@ -19,14 +35,17 @@ export type NavGroup = {
 
 export function accountNavGroups(clientSlug: string): NavGroup[] {
   const settingsHref = clientSlug ? `/clients/${clientSlug}` : "/clients";
-  const tool = (path: string) => (clientSlug ? accountToolHref(clientSlug, path) : `/${path}`);
+  const tool = (path: string) =>
+    clientSlug ? accountToolHref(clientSlug, path) : `/${path}`;
   return [
     {
       label: "Account",
       items: [
         { href: tool("dashboard"), label: "Dashboard", exact: true },
         { href: tool("decision-engine"), label: "Decision Engine" },
-        { href: tool("annotations"), label: "Completed work" },
+        { href: tool("site-crawl"), label: "Site crawl" },
+        { href: tool("copilot"), label: "Copilot" },
+        { href: tool("annotations"), label: "Work & Results" },
         { href: settingsHref, label: "Client settings" },
       ],
     },
@@ -51,7 +70,9 @@ export const ACCOUNT_TOOL_SEGMENTS = ACCOUNT_TOOLS;
  */
 export function clientSlugFromPath(pathname: string): string | null {
   const tools = ACCOUNT_TOOL_SEGMENTS.join("|");
-  const accountTool = pathname.match(new RegExp(`^/([^/]+)/(?:${tools})(?:/|$)`));
+  const accountTool = pathname.match(
+    new RegExp(`^/([^/]+)/(?:${tools})(?:/|$)`),
+  );
   if (accountTool) return accountTool[1];
   const workspace = pathname.match(/^\/clients\/([^/]+)(?:\/|$)/);
   if (workspace) return workspace[1];
@@ -66,7 +87,11 @@ export function isPlatformContext(pathname: string): boolean {
   return false;
 }
 
-export function isNavActive(pathname: string, href: string, exact = false): boolean {
+export function isNavActive(
+  pathname: string,
+  href: string,
+  exact = false,
+): boolean {
   if (exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -90,6 +115,7 @@ export function withNavContext(
   }
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  if (from && to) params.set("range", "custom");
   if (extra?.tab) params.set("tab", extra.tab);
   const qs = params.toString();
   return qs ? `${href}?${qs}` : href;

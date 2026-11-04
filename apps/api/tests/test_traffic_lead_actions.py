@@ -336,6 +336,17 @@ def test_loader_requires_declared_offer_intent_and_first_party_crawl(db, client_
     db.commit()
     page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
     assert page.crawl_readable and page.matched_offers==() and _l(page) is None
-    destination.stage='mofu';db.flush()
+    destination.stage='mofu'
+    db.add(FactCrawlPageSnapshot(client_id=client_a.id,source=CRAWL_SOURCE_FIRST_PARTY,snapshot_date=today,raw_url=offer,normalized_url=offer,status_code=200,sections=[]))
+    db.flush()
     page=next(p for p in load_page_candidates(db,client_a,today=today) if p.url==url)
     assert page.matched_offers==(offer,) and _l(page).action_id=='L-1'
+
+
+def test_low_engagement_on_a_small_sample_does_not_prescribe_a_rewrite():
+    from app.decisions.catalog import t3_realign_to_the_audience
+    page=traffic(sessions=73,engaged_sessions=19,site_median_engagement=0.45)
+    assert t3_realign_to_the_audience(page) is None
+    found=t3_realign_to_the_audience(traffic(sessions=300,engaged_sessions=90,site_median_engagement=0.6))
+    assert found.metric_key=='decision'
+    assert 'tracking' in found.done_when and 'only if' in found.done_when

@@ -72,3 +72,62 @@ def test_ga4_request_preserves_union_filter(monkeypatch):
         dimensions=[], metrics=['sessions'], dimension_filter=selected)
     assert rows.complete
     assert request.call_args.kwargs['json']['dimensionFilter'] == selected
+
+
+def empty_aggregate(**metadata):
+    # Sanitized shape observed on the live three-client read-only audit.
+    return {'kind': 'analyticsData#runReport', 'metadata': {'timeZone': 'America/New_York', **metadata}}
+
+
+def test_zero_matching_lead_visits_are_measured_not_unavailable(monkeypatch):
+    responses = [
+        {'rowCount': 1, 'metricHeaders': [{'name': 'sessions'}],
+         'rows': [{'metricValues': [{'value': '100'}]}]},
+        empty_aggregate(),
+    ]
+    request = Mock(side_effect=[Mock(json=lambda payload=payload: payload) for payload in responses])
+    monkeypatch.setattr('app.ingestion.ga4.client.request_with_retry', request)
+    result = measure()
+    assert result['status'] == 'measured'
+    assert result['sessions'] == 100 and result['lead_sessions'] == 0
+    assert result['conversion_rate_pct'] == 0
+    assert request.call_count == 2
+    assert result['source_metadata']['lead_sessions'][0]['row_count'] is None
+
+
+def test_verified_empty_traffic_has_no_conversion_rate(monkeypatch):
+    request = Mock(return_value=Mock(json=empty_aggregate))
+    monkeypatch.setattr('app.ingestion.ga4.client.request_with_retry', request)
+    result = measure()
+    assert result['status'] == 'no_sessions'
+    assert result['sessions'] == result['lead_sessions'] == 0
+    assert result['conversion_rate_pct'] is None
+
+
+@pytest.mark.parametrize('payload', [
+    {}, {'kind': 'analyticsData#runReport'}, {'metadata': {'timeZone': 'America/New_York'}},
+    {'kind': 'analyticsData#runReport', 'metadata': {}},
+    {'kind': 'analyticsData#runReport', 'metadata': {'timeZone': ''}},
+    {'kind': 'other', 'metadata': {'timeZone': 'America/New_York'}},
+    empty_aggregate(emptyReason='unavailable'),
+    empty_aggregate(subjectToThresholding=True),
+    empty_aggregate(dataLossFromOtherRow=True),
+    empty_aggregate(samplingMetadatas=[{'samplesReadCount': '1'}]),
+    empty_aggregate(dataTruncationReasons=[{'dataTruncationType': 'DATA_TRUNCATION_TYPE_GOOGLE_ADS'}]),
+    {**empty_aggregate(), 'metricHeaders': [{'name': 'eventCount'}]},
+    {**empty_aggregate(), 'rows': [{'metricValues': [{'value': '5'}]}]},
+])
+def test_unverified_or_restricted_envelopes_stay_unavailable(monkeypatch, payload):
+    request = Mock(return_value=Mock(json=lambda: payload))
+    monkeypatch.setattr('app.ingestion.ga4.client.post_json', request)
+    with pytest.raises(RuntimeError):
+        run_report(access_token='test', property_id='123', start_date=DAY, end_date=DAY,
+                   dimensions=[], metrics=['sessions'])
+
+
+@pytest.mark.parametrize('dimensions,metrics', [(['date'], ['sessions']), ([], ['eventCount'])])
+def test_empty_aggregate_exception_does_not_clear_dimensioned_facts(monkeypatch, dimensions, metrics):
+    monkeypatch.setattr('app.ingestion.ga4.client.post_json', Mock(return_value=Mock(json=empty_aggregate)))
+    with pytest.raises(RuntimeError, match='row count'):
+        run_report(access_token='test', property_id='123', start_date=DAY, end_date=DAY,
+                   dimensions=dimensions, metrics=metrics)

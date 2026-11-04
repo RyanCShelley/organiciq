@@ -70,6 +70,7 @@ class ClientCreate(BaseModel):
     slug: str | None = None
     start_date: Date | None = None
     primary_market: str | None = None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str = "America/New_York"
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
@@ -80,6 +81,7 @@ class ClientCreate(BaseModel):
     #: token are install-wide; this is the only per-client part, and without
     #: it the slot cards offer Copy instead of Send.
     teamwork_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -130,6 +132,7 @@ class ClientUpdate(BaseModel):
     tier_id: UUID | None = None
     start_date: Date | None = None
     primary_market: str | None = None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str | None = None
     monthly_lead_goal: int | None = None
     lead_goal_overrides: dict | None = None
@@ -140,6 +143,7 @@ class ClientUpdate(BaseModel):
     #: and token are install-wide; this is the only per-client part, and
     #: without it the slot cards offer Copy instead of Send.
     teamwork_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -191,12 +195,14 @@ class ClientOut(ORMModel):
     tier_id: UUID
     start_date: Date | None
     primary_market: str | None
+    business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     timezone: str
     monthly_lead_goal: int | None
     brand_aliases: list[str] = []
     competitor_domains: list[str] = []
     account_sheet_url: str | None
     teamwork_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -267,6 +273,7 @@ class AnnotationUpdate(BaseModel):
 
 
 class AnnotationOut(ORMModel):
+    engine_uid: str | None = None
     id: UUID
     client_id: UUID
     decision_id: UUID | None
@@ -597,6 +604,8 @@ class ConversionPageOut(ORMModel):
     label: str
     stage: str | None = None
     is_primary: bool = False
+    effective_stage: str | None = None
+    stage_source: str = "unknown"
 
 
 class KeywordTargetEntry(BaseModel):

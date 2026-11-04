@@ -76,12 +76,9 @@ def _first_number(*values):
 
 
 def keyword_page_map_view(db, client_id, *, period=None):
-    """Every tracked keyword with its mapping and the best guesses at one.
+    """Tracked terms with the same evidence-qualified ownership as the engine.
 
-    The map is only useful if it is easy to fill in, and a blank list of
-    keywords is not. Each row carries what the engine would have guessed —
-    the page Search Console shows and where it ranks — so the decision is
-    a confirmation rather than research.
+    Search appearances remain separate observations, not one-click owners.
     """
     from datetime import date, timedelta
 
@@ -114,13 +111,12 @@ def keyword_page_map_view(db, client_id, *, period=None):
     # for. This summarised every query the site has ever shown.
     tracked_keys = {(row.keyword or "").strip().lower() for row in tracked_rows} - {""}
     suggestions = pages_for_queries(db, client_id, period=period, only=tracked_keys)
-    # Where Search Console shows a page, that wins: it is an observation.
-    # The model fills the gap — a term that ranks nowhere has no observation
-    # to offer, and after a relaunch the only page that ranks is the
-    # homepage, so every observation points there.
-    from app.services.keyword_matcher import suggestions_for
-
-    by_subject = suggestions_for(db, client_id)
+    # Search appearances remain observations; the editor and engine must
+    # use the same intended-ownership evaluator, including intent conflicts.
+    from app.models.client import Client
+    from app.services.automatic_keyword_map import evaluate
+    client = db.query(Client).filter_by(id=client_id).one()
+    ownership = evaluate(db, client)
 
     # Where each page points its canonical. Search Console happily reports a
     # retired URL — smamarketing.com/services/local-seo still draws
@@ -153,15 +149,10 @@ def keyword_page_map_view(db, client_id, *, period=None):
         row = mapped.get(key)
         metric = metrics.get(key)
         suggested = suggestions.get(key)
-        proposed = by_subject.get(key)
-        suggested_url = suggested.page_url if suggested else None
-        suggested_from = "search_console" if suggested else None
-        if suggested_url is None and proposed is not None:
-            suggested_url = proposed.page_url
-            suggested_from = "subject"
+        decision = ownership.get(key)
+        suggested_url = decision.url if decision else None
+        suggested_from = "ownership" if suggested_url else None
         redirected_from = None
-        if suggested_url and suggested_url in canonical_of:
-            redirected_from, suggested_url = suggested_url, canonical_of[suggested_url]
         rows.append(
             {
                 "keyword": keyword,
@@ -193,13 +184,13 @@ def keyword_page_map_view(db, client_id, *, period=None):
                 #: is where the site ranks, the other is what the page is
                 #: about, and a person deciding should know which.
                 "suggested_from": suggested_from,
-                "suggested_margin": (
-                    float(proposed.margin)
-                    if proposed is not None and suggested_from == "subject"
-                    else None
-                ),
+                "suggested_margin": None,
+                "suggested_reason": decision.reason if decision else None,
+                "suggested_status": decision.status if decision else None,
+                "observed_page_url": suggested.page_url if suggested else None,
                 "suggested_impressions": (
-                    round(suggested.impressions) if suggested else None
+                    round(suggested.impressions)
+                    if suggested and suggested.page_url == suggested_url else None
                 ),
                 #: Set when the page Search Console reports canonicalises
                 #: elsewhere, so the UI can say why it is offering a

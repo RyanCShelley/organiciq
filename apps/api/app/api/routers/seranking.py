@@ -39,6 +39,13 @@ def seranking_projects(
     try:
         sites = list_sites(settings.se_ranking_api_key)
     except Exception as exc:  # noqa: BLE001
+        detail = str(exc)
+        refused = getattr(getattr(exc, "response", None), "status_code", None)
+        if refused in (401, 403):
+            detail = (
+                f"SE Ranking refused the API key ({refused}). "
+                "Check SE_RANKING_API_KEY: it may have been rotated."
+            )
         integration = (
             db.query(Integration)
             .filter(
@@ -49,9 +56,9 @@ def seranking_projects(
         )
         if integration:
             integration.connection_status = ConnectionStatus.ERROR
-            integration.error_message = str(exc)
+            integration.error_message = detail
             db.commit()
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail) from exc
 
     out: list[dict] = []
     for site in sites:

@@ -265,6 +265,8 @@ def _log_shipped(
         "page_url": slot.target_url or None,
         "success_metric": slot.metric,
         "teamwork_task_id": row.teamwork_task_id,
+        "measurement_start_date": on + timedelta(days=1),
+        "measurement_end_date": on + timedelta(days=slot.check_after_days or 28),
     }
     if existing is None:
         db.add(Annotation(client_id=client.id, engine_uid=slot.uid, **fields))
@@ -365,5 +367,8 @@ def serialise(row: EngineAction, *, slot: RecordSlot | None = None) -> dict:
         "teamwork_task_id": row.teamwork_task_id,
         "teamwork_task_url": row.teamwork_task_url,
         "assigned_action_id": row.action_id,
+        "before_value": float(row.before_value) if row.before_value is not None else None,
+        "after_value": float(row.after_value) if row.after_value is not None else None,
+        "result": row.result,
         "stale": stale,
     }

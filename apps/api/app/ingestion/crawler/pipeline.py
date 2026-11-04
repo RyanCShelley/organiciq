@@ -344,6 +344,12 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
 
         scope_note = f"{client.domain}{client.path_prefix or ''}"
         extra_hosts = _hosts_from_search_console(db, client)
+        domain = client.domain
+        sitemap_url = (client.sitemap_url or "").strip() or None
+        path_prefix = (client.path_prefix or "").strip() or None
+        # The crawl takes minutes. A transaction left open across it holds a lock on the
+        # tables it read (a migration waited on one for half an hour), so end it first.
+        db.commit()
         logger.info(
             "Crawling %s (limit=%d)%s",
             scope_note,
@@ -352,10 +358,10 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         )
         result = asyncio.run(
             crawl_site(
-                client.domain,
+                domain,
                 page_limit=limit,
-                sitemap_url=(client.sitemap_url or "").strip() or None,
-                path_prefix=(client.path_prefix or "").strip() or None,
+                sitemap_url=sitemap_url,
+                path_prefix=path_prefix,
                 extra_hosts=extra_hosts,
             )
         )
@@ -511,6 +517,14 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         db.commit()
 
         _upsert_watermark(db, job.client_id, snapshot_date, ValidationStatus.PASSED)
+        try:
+            # Keep this month's site health scores: the crawl is replaced on every run, so the score is written now.
+            from app.services import site_health
+
+            site_health.record(db, client)
+        except Exception:  # noqa: BLE001 - a scoring problem must never fail a finished crawl
+            db.rollback()
+            logger.exception("Site health scores were not recorded for %s", client.domain)
         logger.info(
             "Crawl %s: pages=%d schema_blocks=%d sitemap_urls=%d sitemap_at=%s hit_limit=%s",
             client.domain,

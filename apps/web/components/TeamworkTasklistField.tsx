@@ -88,6 +88,7 @@ export function TeamworkTasklistField({ value }: { value: string | null }) {
 
   return (
     <div className="flex flex-col gap-1">
+      {!data ? <input type="hidden" name="teamwork_tasklist_id" value={chosen} /> : null}
       <FieldLabel label="Teamwork tasklist">
         <Select
           name="teamwork_tasklist_id"

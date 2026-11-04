@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Organic IQ v2: the SMA brand tokens the shell needs. The current tool's
+   stylesheet is not carried over; v2 adds styles as its screens need them. */
+:root {
+  --brand-dark: #0a0c0f;
+  --brand-dark-2: #171a22;
+  --brand-teal: #00a99d;
+  --brand-teal-hover: #008077;
+  --brand-lime: #aae437;
+  --brand-teal-soft: #c8f2ec;
+  --brand-lime-soft: #e7fedc;
+  --brand-navy: #223540;
+  --brand-navy-hover: #2d4552;
+  --brand-navy-line: #34495a;
+  --brand-navy-deep: #1a2a33;
+  --background: #f8f8f8;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text-primary: #0a0c0f;
+  --text-secondary: #6a6d75;
+  --text-tertiary: #9ca3af;
+  --sidebar-fg: #ffffff;
+  --sidebar-fg-muted: #8f9ea7;
+  --font-display: var(--font-nunito-sans), system-ui, sans-serif;
+  --font-heading: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
+}
+
+/* The SMA style guide sets headings in Inter Tight, bold. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+body {
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+.brand-gradient-text {
+  background: linear-gradient(90deg, var(--brand-teal), var(--brand-lime));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* On the navy sidebar the logo fades from pale teal to pale green. */
+.brand-gradient-text-inverse {
+  background: linear-gradient(135deg, var(--brand-teal-soft), var(--brand-lime-soft));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.btn-primary {
+  background: var(--brand-teal);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-teal-hover);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

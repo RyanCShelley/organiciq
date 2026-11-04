@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Annotated, Literal
@@ -45,6 +47,7 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 #: restart or a second instance loses a flow in progress — which reads to
 #: the operator as "Google connect is flaky" rather than as a restart.
 _OAUTH_STATE_TTL = timedelta(minutes=15)
+logger = logging.getLogger("organiciq.oauth")
 _oauth_states: dict[str, dict] = {}
 
 
@@ -164,6 +167,7 @@ def start_google_data_oauth(
     user: Annotated[AuthUser, Depends(require_sma_admin)],
     db: Annotated[Session, Depends(get_db)],
     client_id: UUID = Query(...),
+    return_to: str = Query("legacy", pattern="^(legacy|v2)$"),
 ) -> dict:
     settings = get_settings()
     if not settings.google_data_oauth_client_id or not settings.google_data_oauth_client_secret:
@@ -182,6 +186,7 @@ def start_google_data_oauth(
         "client_id": str(client_id),
         "user_id": str(user.id),
         "started_at": now,
+        "return_to": return_to,
     }
 
     params = {
@@ -206,17 +211,31 @@ def google_data_oauth_callback(
 ) -> RedirectResponse:
     settings = get_settings()
     web = settings.web_app_url.rstrip("/")
+    peek = _oauth_states.get(state or "") or {}
+    v2 = peek.get("return_to") == "v2"
+
+    def back(*, message: str | None = None, slug: str | None = None) -> RedirectResponse:
+        """Send the browser to the tool that started the connect, never anywhere the caller names."""
+        if v2:
+            if slug is None and peek.get("client_id"):
+                row = db.query(Client).filter(Client.id == UUID(peek["client_id"])).one_or_none()
+                slug = row.slug if row is not None else None
+            base = settings.web_v2_app_url.rstrip("/")
+            where = f"{base}/{slug}/settings/connections" if slug else f"{base}/"
+            query = {"oauth": "error", "message": message} if message else {"oauth": "connected"}
+            return RedirectResponse(f"{where}?" + urlencode(query))
+        if message:
+            return RedirectResponse(f"{web}/clients?" + urlencode({"oauth": "error", "message": message}))
+        return back(slug=slug)
 
     if error:
         # Google's own error code, but it arrives on the query string and so
         # is caller-controlled: encoded, not interpolated, so it cannot add
         # parameters of its own to the URL we send the browser to.
-        return RedirectResponse(
-            f"{web}/clients?" + urlencode({"oauth": "error", "message": error})
-        )
+        return back(message=error)
     _drop_expired_states(datetime.now(timezone.utc))
     if not code or not state or state not in _oauth_states:
-        return RedirectResponse(f"{web}/clients?oauth=error&message=invalid_state")
+        return back(message="invalid_state")
 
     meta = _oauth_states.pop(state)
     client_id = UUID(meta["client_id"])
@@ -231,13 +250,26 @@ def google_data_oauth_callback(
     with httpx.Client(timeout=30.0) as client:
         token_res = client.post(GOOGLE_TOKEN_URL, data=token_payload)
         if token_res.status_code >= 400:
-            return RedirectResponse(f"{web}/clients?oauth=error&message=token_exchange_failed")
+            # Google's reason is an error code ("invalid_client", "redirect_uri_mismatch"),
+            # never a secret. Without it a wrong secret and a wrong redirect URI look alike.
+            try:
+                body = token_res.json()
+            except ValueError:
+                body = {}
+            reason = str(body.get("error") or token_res.status_code)
+            logger.warning(
+                "Google token exchange failed: %s (%s) redirect_uri=%s",
+                reason,
+                body.get("error_description"),
+                settings.google_data_oauth_redirect_uri,
+            )
+            return back(message=f"token_exchange_failed: {reason}" if v2 else "token_exchange_failed")
         tokens = token_res.json()
 
     refresh_token = tokens.get("refresh_token")
     access_token = tokens.get("access_token")
     if not refresh_token and not access_token:
-        return RedirectResponse(f"{web}/clients?oauth=error&message=no_tokens")
+        return back(message="no_tokens")
 
     cred_payload = {
         "refresh_token": refresh_token,
@@ -261,14 +293,14 @@ def google_data_oauth_callback(
                         break
         cred_payload["refresh_token"] = existing_rt
     if not cred_payload["refresh_token"]:
-        return RedirectResponse(f"{web}/clients?oauth=error&message=missing_refresh_token")
+        return back(message="missing_refresh_token")
 
     _upsert_google_credentials(db, client_id, cred_payload)
     # propagate_google_credentials already commits
 
     account = db.query(Client).filter(Client.id == client_id).one_or_none()
     slug = account.slug if account is not None else str(client_id)
-    return RedirectResponse(f"{web}/clients/{slug}/integrations?oauth=connected")
+    return back(slug=slug)
 
 
 @router.get("/integrations/gsc/sites")

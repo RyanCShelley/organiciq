@@ -16,6 +16,8 @@ from app.models.ga4 import FactGa4Event, FactGa4Traffic, StagingGa4Event, Stagin
 from app.models.job import SyncJob
 
 UPSERT_BATCH_SIZE = 1000
+STREAM_BATCH_SIZE = 20000
+INSERT_BATCH_SIZE = 5000
 
 
 def _chunked(items: Sequence[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
@@ -63,65 +65,91 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     # A client scoped to a folder shares its GA4 property with the parent
     # brand, so rows outside that folder are someone else's traffic.
     scope = normalize_path_prefix(client.path_prefix)
-    traffic = (
-        db.query(StagingGa4Traffic)
-        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id, StagingGa4Traffic.report_basis == "legacy")
-        .all()
-    )
-    events = (
-        db.query(StagingGa4Event)
-        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id, StagingGa4Event.report_basis == "legacy")
-        .all()
-    )
+    # Stream only the columns used (not the raw JSON copy of every row) and compute the URL and channel once per
+    # distinct value: 600,000 rows are a few thousand distinct landing pages and a handful of source/medium pairs.
+    normalized_by_url: dict[str, tuple[str, bool]] = {}
+    channel_by_pair: dict[tuple[str | None, str | None], str] = {}
+
+    def locate(landing_page: str | None) -> tuple[str, bool]:
+        raw_url = landing_page or ""
+        hit = normalized_by_url.get(raw_url)
+        if hit is None:
+            normalized = normalize_landing_page(raw_url, domain)
+            hit = normalized_by_url[raw_url] = (normalized, url_in_scope(normalized, scope))
+        return hit
+
+    def channel_of(source: str | None, medium: str | None) -> str:
+        pair = (source, medium)
+        if pair not in channel_by_pair:
+            channel_by_pair[pair] = classify_channel(source, medium, rules)
+        return channel_by_pair[pair]
 
     traffic_payloads: list[dict[str, Any]] = []
-    for row in traffic:
+    traffic_count = 0
+    for row in (
+        db.query(
+            StagingGa4Traffic.date, StagingGa4Traffic.landing_page, StagingGa4Traffic.session_source, StagingGa4Traffic.session_medium,
+            StagingGa4Traffic.sessions, StagingGa4Traffic.active_users, StagingGa4Traffic.views, StagingGa4Traffic.engaged_sessions,
+            StagingGa4Traffic.engagement_seconds,
+        )
+        .filter(StagingGa4Traffic.job_id == job.id, StagingGa4Traffic.client_id == job.client_id, StagingGa4Traffic.report_basis == "legacy")
+        .yield_per(STREAM_BATCH_SIZE)
+    ):
+        traffic_count += 1
         if row.date is None:
             continue
-        raw_url = row.landing_page or ""
-        normalized = normalize_landing_page(raw_url, domain)
-        if not url_in_scope(normalized, scope):
+        normalized, in_scope = locate(row.landing_page)
+        if not in_scope:
             continue
         traffic_payloads.append(
             {
                 "client_id": job.client_id,
                 "date": row.date,
-                "raw_url": raw_url,
+                "raw_url": row.landing_page or "",
                 "normalized_url": normalized,
                 "session_source": row.session_source or "",
                 "session_medium": row.session_medium or "",
-                "channel": classify_channel(row.session_source, row.session_medium, rules),
+                "channel": channel_of(row.session_source, row.session_medium),
                 "sessions": row.sessions or Decimal(0),
                 "active_users": row.active_users or Decimal(0),
                 "views": row.views or Decimal(0),
                 "engaged_sessions": row.engaged_sessions,
+                "engagement_seconds": row.engagement_seconds,
             }
         )
 
     event_payloads: list[dict[str, Any]] = []
-    for row in events:
+    event_count = 0
+    for row in (
+        db.query(
+            StagingGa4Event.date, StagingGa4Event.landing_page, StagingGa4Event.session_source, StagingGa4Event.session_medium,
+            StagingGa4Event.event_name, StagingGa4Event.event_count,
+        )
+        .filter(StagingGa4Event.job_id == job.id, StagingGa4Event.client_id == job.client_id, StagingGa4Event.report_basis == "legacy")
+        .yield_per(STREAM_BATCH_SIZE)
+    ):
+        event_count += 1
         if row.date is None or not row.event_name:
             continue
-        raw_url = row.landing_page or ""
-        normalized = normalize_landing_page(raw_url, domain)
-        if not url_in_scope(normalized, scope):
+        normalized, in_scope = locate(row.landing_page)
+        if not in_scope:
             continue
         event_payloads.append(
             {
                 "client_id": job.client_id,
                 "date": row.date,
-                "raw_url": raw_url,
+                "raw_url": row.landing_page or "",
                 "normalized_url": normalized,
                 "session_source": row.session_source or "",
                 "session_medium": row.session_medium or "",
-                "channel": classify_channel(row.session_source, row.session_medium, rules),
+                "channel": channel_of(row.session_source, row.session_medium),
                 "event_name": row.event_name,
                 "event_count": row.event_count or 0,
             }
         )
 
     traffic_payloads = _merge_on_grain(
-        traffic_payloads, TRAFFIC_GRAIN, ("sessions", "active_users", "views", "engaged_sessions")
+        traffic_payloads, TRAFFIC_GRAIN, ("sessions", "active_users", "views", "engaged_sessions", "engagement_seconds")
     )
     event_payloads = _merge_on_grain(event_payloads, EVENT_GRAIN, ("event_count",))
 
@@ -134,8 +162,8 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     replace_window = (manifest.get("complete") is True
         and manifest.get("start") == job.start_date.isoformat()
         and manifest.get("end") == job.end_date.isoformat()
-        and manifest.get("traffic_rows") == len(traffic)
-        and manifest.get("event_rows") == len(events))
+        and manifest.get("traffic_rows") == traffic_count
+        and manifest.get("event_rows") == event_count)
     for model, payloads, grain in ((FactGa4Traffic, traffic_payloads, TRAFFIC_GRAIN),
                                     (FactGa4Event, event_payloads, EVENT_GRAIN)):
         if replace_window:
@@ -150,34 +178,30 @@ def publish_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
                     tuple_(*(getattr(model, name) for name in natural)).in_(batch)
                 ).delete(synchronize_session=False)
 
-    for batch in _chunked(traffic_payloads, UPSERT_BATCH_SIZE):
-        if not batch:
-            continue
-        stmt = insert(FactGa4Traffic).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_facts_ga4_traffic_grain",
-            set_={
-                "raw_url": stmt.excluded.raw_url,
-                "sessions": stmt.excluded.sessions,
-                "active_users": stmt.excluded.active_users,
-                "views": stmt.excluded.views,
-                "engaged_sessions": stmt.excluded.engaged_sessions,
-            },
-        )
-        db.execute(stmt)
+    # One statement, many parameter sets: it is compiled once. Passing each batch to .values() recompiled a
+    # 1,000-row statement 600 times, a third of the whole publish.
+    traffic_stmt = insert(FactGa4Traffic)
+    traffic_stmt = traffic_stmt.on_conflict_do_update(
+        constraint="uq_facts_ga4_traffic_grain",
+        set_={
+            "raw_url": traffic_stmt.excluded.raw_url,
+            "sessions": traffic_stmt.excluded.sessions,
+            "active_users": traffic_stmt.excluded.active_users,
+            "views": traffic_stmt.excluded.views,
+            "engaged_sessions": traffic_stmt.excluded.engaged_sessions,
+            "engagement_seconds": traffic_stmt.excluded.engagement_seconds,
+        },
+    )
+    for batch in _chunked(traffic_payloads, INSERT_BATCH_SIZE):
+        db.execute(traffic_stmt, batch)
 
-    for batch in _chunked(event_payloads, UPSERT_BATCH_SIZE):
-        if not batch:
-            continue
-        stmt = insert(FactGa4Event).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_facts_ga4_events_grain",
-            set_={
-                "raw_url": stmt.excluded.raw_url,
-                "event_count": stmt.excluded.event_count,
-            },
-        )
-        db.execute(stmt)
+    event_stmt = insert(FactGa4Event)
+    event_stmt = event_stmt.on_conflict_do_update(
+        constraint="uq_facts_ga4_events_grain",
+        set_={"raw_url": event_stmt.excluded.raw_url, "event_count": event_stmt.excluded.event_count},
+    )
+    for batch in _chunked(event_payloads, INSERT_BATCH_SIZE):
+        db.execute(event_stmt, batch)
 
     from app.ingestion.ga4.publish_native import publish_native_channels
     native_traffic, native_events = publish_native_channels(db, job, client, rules)

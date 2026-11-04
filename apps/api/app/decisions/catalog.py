@@ -14,7 +14,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Callable
 
-from app.decisions.page_targets import PageCandidate
+from app.decisions.page_targets import PageCandidate, LinkDonor
 from app.decisions.slots import Prescription
 from app.decisions.targets import ScoredCandidate
 from app.decisions.triage import Branch
@@ -28,6 +28,7 @@ class SectionFacts:
     has_table: bool = False
     has_list: bool = False
     has_stat: bool = False
+    level: int = 2
 
     @property
     def extractable(self) -> bool:
@@ -73,6 +74,7 @@ class PageFacts:
     #: The site's median, so "under-linked" is relative to this site.
     site_median_links: float = 0.0
     page_type: str | None = None
+    link_donors: tuple[LinkDonor, ...] = ()
 
     @property
     def readable(self) -> bool:
@@ -103,7 +105,7 @@ def _mentions(term: str, text: str | None) -> bool:
     """Whether the text uses the term, phrase-aware.
 
     A bag of words matches "agency seo local" to "local seo agency", which is
-    how a page that never says the phrase was reported as already optimised
+    how a page that never says the phrase was reported as already optimized
     for it.
     """
     if not text:
@@ -302,7 +304,7 @@ def v3_entity_markup(target: ScoredCandidate, page: PageFacts) -> Prescription |
 
 def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription | None:
     """Fewer in-content links than the site's own median."""
-    if not page.readable:
+    if not page.readable or not page.link_donors:
         return None
     if page.site_median_links <= 0:
         return None
@@ -321,15 +323,15 @@ def v4_internal_links(target: ScoredCandidate, page: PageFacts) -> Prescription 
             f"against a site median of {page.site_median_links:.0f}. Navigation "
             "does not count: it is on every page and says nothing about this one."
         ),
-        done_when=(
-            "Two or three in-content links from related pages, with the term "
-            "or a variant as the anchor."
-        ),
+        done_when="The named donor links are live in relevant body passages and point to the target page.",
+        steps=tuple(f'On {donor.url}, add an in-content link to {page.url} where the passage discusses “{donor.anchor}”. Use a natural anchor and confirm the passage is relevant before publishing.'
+                    for donor in page.link_donors),
         metric="Term position",
         metric_key="term_position",
         evidence=(
             f"facts_crawl_internal_links: {page.inbound_editorial_links} editorial "
             f"inbound, site median {page.site_median_links:.0f}",
+            *(f"Shared query: {d.anchor}; donor: {d.url}; donor clicks: {d.clicks:g}. No existing editorial link was observed." for d in page.link_donors),
         ),
     )
 
@@ -349,7 +351,7 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
         effort_min=15,
         why=(
             f"“{candidate.keyword}” is mapped to {candidate.target_url} and "
-            f"ranks on {candidate.ranking_url}. Optimising either one before "
+            f"ranks on {candidate.ranking_url}. Optimizing either one before "
             "that is settled is work on a page nobody chose."
         ),
         done_when=(
@@ -378,7 +380,7 @@ def v7_mark_up_the_faq(
     headings are there, and an engine assembling a response has to infer
     from prose what FAQPage would have told it outright. No new content.
     """
-    if page.has_faq_schema or not page.has_faq_section:
+    if not page.readable or page.has_faq_schema or not page.has_faq_section:
         return None
     return Prescription(
         action_id="V-7",
@@ -390,16 +392,17 @@ def v7_mark_up_the_faq(
         effort_min=15,
         why=(
             "The page carries a section headed as frequently asked questions "
-            "and no FAQPage markup. The answers are already written; nothing "
-            "tells an engine assembling a response that they are answers."
+            "and no FAQPage markup. Verify the visible question-and-answer pairs "
+            "before adding matching structured data. This does not guarantee "
+            "a rich result, ranking improvement or AI citation."
         ),
         done_when=(
             "FAQPage markup lists every question in that section with the "
             "answer the page already gives, word for word, and nothing that "
             "is not on the page."
         ),
-        metric="Brand mention or citation",
-        metric_key="ai_presence",
+        metric="Validated FAQ markup matching the visible questions and answers",
+        metric_key="decision",
         evidence=(
             "facts_crawl_page_snapshots: a heading announcing an FAQ",
             "facts_crawl_page_schema: no FAQPage block",
@@ -432,13 +435,24 @@ def v5_add_an_extractable_structure(
     # No heading asks the query: that is V-2's finding, not this one.
     if not matching:
         return None
-    if any(s.extractable for s in matching):
-        return None
+    # A heading's answer includes its nested subheadings. Checking only the
+    # opening paragraph made an H1 look unstructured even when its H2s
+    # already supplied the relevant lists or tables.
+    for index, section in enumerate(page.sections):
+        if section not in matching:
+            continue
+        scope = [section]
+        for child in page.sections[index + 1:]:
+            if child.level <= section.level:
+                break
+            scope.append(child)
+        if any(part.extractable for part in scope):
+            return None
 
     feature = sorted(lifted)[0]
     return Prescription(
         action_id="V-5",
-        title=f"Add something liftable under the heading for “{term}”",
+        title=f"Review the answer format for “{term}”",
         branch=Branch.VISIBILITY,
         target_url=page.url,
         term=term,
@@ -451,12 +465,13 @@ def v5_add_an_extractable_structure(
             "A direct prose answer may already be sufficient; verify the gap first."
         ),
         done_when=(
-            "The reviewed brief names the missing answer, chooses a direct answer, "
-            "comparison table or steps that fit the question, and lists verified "
-            "facts and sources. The approved section is live."
+            "Review whether the existing prose already answers the question. "
+            "Record no change if it does. Otherwise name the verified answer "
+            "gap, select a suitable format and supporting facts, and publish "
+            "only the justified change."
         ),
-        metric="Term position; prompt citations require a separate observed check",
-        metric_key="term_position",
+        metric="Documented answer-format review and selected next step",
+        metric_key="decision",
         evidence=(
             f"facts_serp_features: {feature} present",
             f"facts_crawl_page_snapshots: no table, list or figure under "
@@ -480,7 +495,8 @@ VISIBILITY_ACTIONS: tuple[Callable[[ScoredCandidate, PageFacts], Prescription | 
     v6_rehoming,
     # V-1 and V-8 are legacy: exact-phrase absence alone is not a content gap.
     # A missing exact-match secondary heading alone does not prove a content gap.
-    v2_answer_block,
+    # Missing question headings do not establish missing answers.
+    # v2_answer_block remains available for historical records only.
     # Before the rest: the answers are already written, so this is fifteen
     # minutes of markup against a page rewrite. Cheapest first where the
     # cheap thing is also the right thing.
@@ -534,7 +550,7 @@ SNIPPET_MAX_POSITION = 3.0
 MIN_IMPRESSIONS = 100.0
 
 #: Enough sessions for an engagement rate to mean anything.
-MIN_SESSIONS_FOR_ENGAGEMENT = 50.0
+MIN_SESSIONS_FOR_ENGAGEMENT = 150.0
 
 
 def t1_rewrite_snippet(page: PageCandidate) -> Prescription | None:
@@ -595,7 +611,7 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
         return None
     return Prescription(
         action_id="T-3",
-        title="Rewrite the opening for the reader the page actually draws",
+        title="Review engagement and visitor intent",
         branch=Branch.TRAFFIC,
         target_url=page.url,
         term=page.top_query,
@@ -609,12 +625,13 @@ def t3_realign_to_the_audience(page: PageCandidate) -> Prescription | None:
             "and opening before deciding whether a rewrite is the right intervention."
         ),
         done_when=(
-            "The H1 and the first two paragraphs answer the query the page "
-            "draws, in the words of the customer it is for, with the old "
-            "opening logged."
+            "Compare channel and device mix, visitor intent and lead outcomes. "
+            "Record whether the engagement gap needs a page change, a tracking "
+            "fix or no intervention. Rewrite the opening only if a content "
+            "mismatch is verified."
         ),
-        metric="Engaged session rate",
-        metric_key="engagement_rate",
+        metric="Documented cause and selected next step",
+        metric_key="decision",
         evidence=(
             f"facts_ga4_traffic: {page.sessions:.0f} sessions, "
             f"{rate * 100:.0f}% engaged",

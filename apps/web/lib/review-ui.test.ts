@@ -1,8 +1,20 @@
 import { visibilitySummary } from "./visibility-summary";
 import assert from "node:assert/strict";
-import { mergeBrief, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
+import { actionDisplayTitle, opportunityDraft, mergeBrief, individualAction, includesProposal, suggestedPlan, actionCount, toggleAction, selectedAction, type Brief } from "./plan-review";
 import { metricExplanation } from "./metric-explanation";
 import type { BranchTest } from "./monthly-record";
+import { planDraftKey } from "./plan-review";
+
+{
+  const prior = { assessment_id: "before-reset", revision: 0 };
+  const fresh = { assessment_id: "after-reset", revision: 0 };
+  const storage = new Map([[planDraftKey("client", "2026-09", prior), ["old task"]]]);
+  assert.equal(storage.get(planDraftKey("client", "2026-09", fresh)), undefined);
+  assert.deepEqual(storage.get(planDraftKey("client", "2026-09", prior)), ["old task"]);
+  assert.notEqual(planDraftKey("other-client", "2026-09", prior), planDraftKey("client", "2026-09", prior));
+  assert.notEqual(planDraftKey("client", "2026-10", prior), planDraftKey("client", "2026-09", prior));
+  assert.notEqual(planDraftKey("client", "2026-09", { ...prior, revision: 1 }), planDraftKey("client", "2026-09", prior));
+}
 
 const row = (uid: string, ids: string[], steps: string[]): Brief => ({
   action_uid: uid, id: ids[0], family: "priority_page", title: "Improve page",
@@ -70,3 +82,46 @@ assert.match(dataGapGuidance("CTR reference is diagnostic only").next, /does not
 import {resolveQueryRange} from "./date-range";
 assert.deepEqual(resolveQueryRange(undefined, "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});
 assert.deepEqual(resolveQueryRange("custom", "2026-09-01", "2026-09-30"), {from:"2026-09-01",to:"2026-09-30"});
+
+{
+  const base = { action_uid: "group", id: "T-1", family: "priority_page", title: "Page work", branch: "traffic", target_url: "https://example.com/", term: null, why: "Evidence", done_when: "Done", steps: ["Title", "Opening"], evidence: [], finding_ids: [], effort_min: 60, metric: "Clicks", metric_key: "page_clicks", check_after_days: 28 } as Brief;
+  const opening = { ...base, action_uid: "opening", id: "T-3", steps: ["Opening"], metric_key: "engagement_rate", metric: "Engagement" };
+  const selected = individualAction({ ...base, interventions: [opening] }, "Opening", 1);
+  assert.equal(selected.action_uid, "opening");
+  assert.equal(selected.metric_key, "engagement_rate");
+}
+
+// An approved V-7 is FAQ markup, while V-3 concerns entity properties.
+// Brief titles can be completion specifications; labels must retain the rule's actual task.
+assert.equal(actionDisplayTitle({id:"V-7",title:"FAQPage markup lists every visible question"}), "Mark up the existing FAQ");
+assert.equal(actionDisplayTitle({id:"V-3",title:"Schema about / mentions properties"}), "Add relevant entity markup");
+assert.equal(actionDisplayTitle({id:"MANUAL",title:"Client-approved custom work"}), "Client-approved custom work");
+
+// An observation does not enter the task count until a person explicitly drafts it.
+const opportunity = {
+  uid: "review-test",
+  kind: "traffic_decline",
+  title: "Review the decline in site visits",
+  summary: "Visits fell from 1000 to 400.",
+  evidence: ["Exact-period comparison"],
+  review_checks: ["Verify tracking before choosing a fix."],
+  target_url: "",
+  term: null,
+  assessment_month: "2026-09",
+  screening_rule: "Substantial matched-period decline",
+  limitation: "Not a confirmed page defect.",
+};
+const candidate = opportunityDraft(opportunity, "manual-test");
+assert.equal(actionCount([]), 0);
+assert.equal(actionCount([candidate]), 1);
+assert.equal(candidate.metric_key, "decision");
+assert.equal(candidate.id, "MANUAL");
+assert.equal(candidate.branch, "traffic");
+assert.equal(candidate.target_url, ""); // Human must choose the actual page/scope.
+assert.deepEqual(candidate.finding_ids, []);
+assert.deepEqual(candidate.flags, ["review-opportunity:review-test"]);
+assert.equal(candidate.steps.length, 1);
+assert.match(candidate.why, /Not a confirmed page defect/);
+assert.equal(opportunity.target_url, "");
+
+assert.ok(candidate.evidence.includes(opportunity.screening_rule));

@@ -12,6 +12,8 @@ from app.core.db import Base
 class UserRole(str, enum.Enum):
     SMA_ADMIN = "sma_admin"
     SMA_TEAM = "sma_team"
+    SEO_LEAD = "seo_lead"
+    CONTENT_MANAGER = "content_manager"
     CLIENT_ADMIN = "client_admin"
     CLIENT_VIEWER = "client_viewer"
 

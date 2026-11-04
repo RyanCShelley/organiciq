@@ -33,6 +33,7 @@ export type BranchResult = {
 };
 
 export type RecordAction = {
+  metric_key?: string;
   family?: string;
   action_uid: string;
   slot: number;
@@ -276,6 +277,7 @@ export type Assignee = {
  * what the engine decided.
  */
 export type SlotState = {
+  before_value?: number | null; after_value?: number | null; result?: string | null;
   uid: string;
   status: "planned" | "assigned" | "done" | "skipped";
   assignee_email: string | null;

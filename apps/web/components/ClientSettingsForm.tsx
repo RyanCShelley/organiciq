@@ -1,11 +1,13 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { updateClientSettingsAction } from "@/app/(app)/actions";
 import { LeadGoalSchedule } from "@/components/LeadGoalSchedule";
-import { BaselineBuilder } from "@/components/Baseline/BaselineBuilder";
+import { CompetitorDomainsField } from "@/components/CompetitorDomainsField";
+import type { SettingsSection } from "@/lib/client-settings";
 import { TeamworkTasklistField } from "@/components/TeamworkTasklistField";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
@@ -19,14 +21,6 @@ const STATUS_OPTIONS = [
   { value: "paused", label: "Paused" },
   { value: "archived", label: "Archived" },
 ];
-
-/**
- * Mirrors the API's own constants (ingestion/seranking/client.py). The server
- * clamps independently — these only shape the form.
- */
-const AI_SEARCH_DEFAULT_PROMPTS = 5;
-const AI_SEARCH_MAX_PROMPTS = 50;
-const AI_SEARCH_CREDITS_PER_PROMPT = 200;
 
 /** Mirrors ingestion/crawler/fetch.py. The server clamps independently. */
 const CRAWL_DEFAULT_PAGES = 500;
@@ -71,12 +65,17 @@ export function ClientSettingsForm({
   client,
   tiers,
   canEditPlan = true,
+  section = "general",
+  continueHref,
 }: {
   client: Client;
   tiers: Tier[];
   /** Admins only. The API refuses plan and ceiling changes from anyone else. */
   canEditPlan?: boolean;
+  section?: SettingsSection;
+  continueHref?: string;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,18 +92,20 @@ export function ClientSettingsForm({
         setError(null);
         startTransition(async () => {
           const result = await updateClientSettingsAction(formData);
-          if (result.ok) setMessage("Client settings saved.");
+          if (result.ok) { setMessage("Changes saved."); router.refresh(); if (continueHref) router.push(continueHref); }
           else setError(result.error);
         });
       }}
     >
       <input type="hidden" name="clientId" value={client.id} />
+      <input type="hidden" name="settings_section" value={section} />
       <input type="hidden" name="is_enterprise" value={enterprise ? "1" : "0"} />
       {canEditPlan ? null : <input type="hidden" name="plan_locked" value="1" />}
 
       {error ? <Alert variant="danger">{error}</Alert> : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
 
+      {section === "general" ? <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <FieldLabel label="Agency services">
           <Select name="service_reporting" defaultValue={client.service_reporting == null ? "" : client.service_reporting.organiciq ? (client.service_reporting.ad_accelerator ? "both" : "organiciq") : (client.service_reporting.ad_accelerator ? "ad_accelerator" : "none")}>
@@ -121,23 +122,6 @@ export function ClientSettingsForm({
         <FieldLabel label="Website URL / domain">
           <Input name="domain" defaultValue={client.domain} required />
         </FieldLabel>
-        {/* Beside the domain, because together they say what this client's site
-            *is*. Filed under the crawl settings it read as a crawl option, and
-            was the last place anyone looked for it. */}
-        <FieldLabel label="Site folder (optional)">
-          <Input
-            name="path_prefix"
-            defaultValue={client.path_prefix ?? ""}
-            placeholder="Blank = whole domain"
-          />
-        </FieldLabel>
-        <p className="text-xs text-[var(--text-secondary)] sm:col-span-2">
-          Set <strong>Site folder</strong> only when this brand&rsquo;s site is a section
-          of a larger domain — <code>robinsonheli.com</code> with{" "}
-          <code>/unmanned</code>. Analytics, Search Console and the crawler are all held
-          to that folder, so a sibling brand&rsquo;s pages are never counted here. The
-          folder never belongs in the domain field.
-        </p>
         {canEditPlan ? (
         <FieldLabel label="OrganicIQ tier">
           <Select
@@ -170,105 +154,7 @@ export function ClientSettingsForm({
         <FieldLabel label="Contract start date">
           <Input name="start_date" type="date" defaultValue={client.start_date ?? ""} />
         </FieldLabel>
-        <FieldLabel label="Lead goal fallback">
-          <Input
-            name="monthly_lead_goal"
-            type="number"
-            min={0}
-            defaultValue={client.monthly_lead_goal ?? ""}
-            placeholder="From growth calculator"
-          />
-        </FieldLabel>
-        {/* It picks which SE Ranking regional index the domain pull reads,
-            and matches on a country. As free text it invited "Central NY",
-            which matches nothing and falls back to the United States while
-            looking filled in. */}
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Search market">
-            <Select
-              name="primary_market"
-              defaultValue={
-                SEARCH_MARKETS.some((m) => m.value === client.primary_market)
-                  ? (client.primary_market as string)
-                  : client.primary_market
-                    ? "__other"
-                    : ""
-              }
-            >
-              <option value="">Not set — United States</option>
-              {SEARCH_MARKETS.map((market) => (
-                <option key={market.value} value={market.value}>
-                  {market.value}
-                </option>
-              ))}
-              {/* Whatever is already stored stays selectable, so opening
-                  this page and saving cannot quietly rewrite it. */}
-              {client.primary_market &&
-              !SEARCH_MARKETS.some((m) => m.value === client.primary_market) ? (
-                <option value="__other">
-                  {client.primary_market} — not a search market, treated as
-                  United States
-                </option>
-              ) : null}
-            </Select>
-          </FieldLabel>
-          <p className="text-xs text-[var(--text-tertiary)]">
-            Which SE Ranking index the domain pull reads. It is a country, not
-            a city — the four above are the ones SE Ranking has.
-          </p>
-        </div>
-        <FieldLabel label="Timezone">
-          <Input name="timezone" defaultValue={client.timezone} />
-        </FieldLabel>
       </div>
-
-      <div
-        id="competitors"
-        className="scroll-mt-24 rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-3"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-            Competitors
-          </p>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${
-              (client.competitor_domains ?? []).length > 0
-                ? "bg-[#E5F4EC] text-[#15784F]"
-                : "bg-[#FDF1E3] text-[#8A4B08]"
-            }`}
-          >
-            {(client.competitor_domains ?? []).length > 0
-              ? `${(client.competitor_domains ?? []).length} of 3 set`
-              : "None set"}
-          </span>
-        </div>
-        <p className="text-sm text-[var(--text-secondary)]">
-          Name the sites that really compete for this client&apos;s customers — one is
-          fine, three is the most. Each month the content plan reads the terms they rank
-          for in the top ten and suggests pages for the ones this site has none about.
-          Leave it empty and the plan skips competitors. Each one is read once a month
-          (about 13¢ from DataForSEO).
-        </p>
-        <FieldLabel label="Competitor domains, one per line">
-          <textarea
-            name="competitor_domains"
-            rows={3}
-            defaultValue={(client.competitor_domains ?? []).join("\n")}
-            placeholder={"rival-one.com\nrival-two.com\nrival-three.com"}
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-          />
-        </FieldLabel>
-      </div>
-
-      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-3">
-        <div>
-          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-            Lead goal by checkpoint
-          </p>
-        </div>
-        <LeadGoalSchedule client={client} />
-      </div>
-
       <div className="flex flex-col gap-1">
         <FieldLabel label="Google Sheet account record">
           <Input
@@ -289,119 +175,6 @@ export function ClientSettingsForm({
             Open account record
           </a>
         ) : null}
-      </div>
-
-      {/* A list rather than a box to type an id into: an id read off a URL
-          is how a task ends up in the wrong client's list, and nothing
-          downstream would catch it. */}
-      <TeamworkTasklistField value={client.teamwork_tasklist_id ?? null} />
-
-      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
-        <BaselineBuilder clientId={client.id} currentGoal={client.monthly_lead_goal ?? null} />
-      </div>
-
-      {canEditPlan ? null : (
-        <p className="text-sm text-[var(--text-secondary)]">
-          The plan and its limits (allowances, AI prompt cap, crawl size) are changed by an
-          admin.
-        </p>
-      )}
-
-      {/* Cost ceiling, not a plan allowance — this one spends SE Ranking credits
-          per prompt returned, so it lives outside the tier blocks. */}
-      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
-        <div>
-          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-            AI prompt discovery
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Caps how many prompts one &ldquo;Find untracked prompts&rdquo; lookup on Watch List
-            can buy for this client. Billed at {AI_SEARCH_CREDITS_PER_PROMPT} credits per prompt
-            returned, so raise it only for accounts that justify the spend.
-          </p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <FieldLabel label="Max prompts per lookup">
-            <Input
-              name="ai_search_prompt_limit"
-              disabled={!canEditPlan}
-              type="number"
-              min={1}
-              max={AI_SEARCH_MAX_PROMPTS}
-              defaultValue={client.ai_search_prompt_limit ?? ""}
-              placeholder={`${AI_SEARCH_DEFAULT_PROMPTS} (default)`}
-            />
-          </FieldLabel>
-          <p className="self-center text-xs text-[var(--text-secondary)]">
-            Blank uses the default of {AI_SEARCH_DEFAULT_PROMPTS} prompts (
-            {(AI_SEARCH_DEFAULT_PROMPTS * AI_SEARCH_CREDITS_PER_PROMPT).toLocaleString()}{" "}
-            credits). The ceiling is {AI_SEARCH_MAX_PROMPTS}.
-          </p>
-        </div>
-      </div>
-
-      {/* Crawl budget, not a plan allowance: it bounds time spent on someone
-          else's server, so it sits with the other operational ceilings. */}
-      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
-        <div>
-          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
-            Site crawl
-          </p>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            OrganicIQ crawls this site once a month for technical signals and
-            structured data. Sites are staggered across the month, so this one has its
-            own day.
-          </p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <FieldLabel label="Max pages per crawl">
-            <Input
-              name="crawl_page_limit"
-              disabled={!canEditPlan}
-              type="number"
-              min={1}
-              max={CRAWL_MAX_PAGES}
-              defaultValue={client.crawl_page_limit ?? ""}
-              placeholder={`${CRAWL_DEFAULT_PAGES} (default)`}
-            />
-          </FieldLabel>
-          <p className="self-center text-xs text-[var(--text-secondary)]">
-            Blank uses {CRAWL_DEFAULT_PAGES.toLocaleString()}. Raise it for large blogs
-            or catalogues; the ceiling is {CRAWL_MAX_PAGES.toLocaleString()}. A crawl
-            that stops at the limit says so on the sync job.
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Other names the brand is searched by (optional)">
-            <textarea
-              name="brand_aliases"
-              rows={3}
-              defaultValue={(client.brand_aliases ?? []).join("\n")}
-              placeholder="One per line, e.g. acc technical services"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            />
-          </FieldLabel>
-          <p className="text-xs text-[var(--text-secondary)]">
-            The name and domain are already covered. Add the spellings people really
-            type — a query that names the business is navigation, and no page change
-            or link moves it, so the plan will not prescribe one.
-          </p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <FieldLabel label="Sitemap URL (optional)">
-            <Input
-              name="sitemap_url"
-              type="url"
-              defaultValue={client.sitemap_url ?? ""}
-              placeholder="Found automatically — set only if it isn't"
-            />
-          </FieldLabel>
-          <p className="text-xs text-[var(--text-secondary)]">
-            The crawler reads robots.txt and tries the usual locations. Set this only
-            when a site hides its sitemap somewhere unusual, or serves HTML for every
-            unknown path so nothing is discoverable.
-          </p>
-        </div>
       </div>
 
       {selectedTier && !enterprise ? (
@@ -520,8 +293,165 @@ export function ClientSettingsForm({
         </div>
       ) : null}
 
+      </> : null}
+      {section === "connections" ? <>
+      {/* A list rather than a box to type an id into: an id read off a URL
+          is how a task ends up in the wrong client's list, and nothing
+          downstream would catch it. */}
+      <TeamworkTasklistField value={client.teamwork_tasklist_id ?? null} />
+
+      </> : null}
+      {section === "competitors" ? <>
+      <CompetitorDomainsField initial={client.competitor_domains ?? []} />
+      </> : null}
+      {section === "goals" ? <>
+        <FieldLabel label="Monthly lead goal">
+          <Input
+            name="monthly_lead_goal"
+            type="number"
+            min={0}
+            defaultValue={client.monthly_lead_goal ?? ""}
+            placeholder="From growth calculator"
+          />
+        </FieldLabel>
+<p className="text-xs text-[var(--text-secondary)]">The monthly goal is used when no checkpoint applies. Blank checkpoints use the generated projection. Lead-event counts and visit-based conversion-rate targets remain separate.</p>
+      <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] p-4 space-y-3">
+        <div>
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
+            Lead goal by checkpoint
+          </p>
+        </div>
+        <LeadGoalSchedule client={client} />
+      </div>
+
+      </> : null}
+      {section === "advanced" ? <>
+<div className="grid gap-4 sm:grid-cols-2">        {/* Beside the domain, because together they say what this client's site
+            *is*. Filed under the crawl settings it read as a crawl option, and
+            was the last place anyone looked for it. */}
+        <FieldLabel label="Site folder (optional)">
+          <Input
+            name="path_prefix"
+            defaultValue={client.path_prefix ?? ""}
+            placeholder="Blank = whole domain"
+          />
+        </FieldLabel>
+        <p className="text-xs text-[var(--text-secondary)] sm:col-span-2">
+          Set <strong>Site folder</strong> only when this brand&rsquo;s site is a section
+          of a larger domain — <code>robinsonheli.com</code> with{" "}
+          <code>/unmanned</code>. Analytics, Search Console and the crawler are all held
+          to that folder, so a sibling brand&rsquo;s pages are never counted here. The
+          folder never belongs in the domain field.
+        </p>
+        {/* It picks which SE Ranking regional index the domain pull reads,
+            and matches on a country. As free text it invited "Central NY",
+            which matches nothing and falls back to the United States while
+            looking filled in. */}
+        <div className="flex flex-col gap-1">
+          <FieldLabel label="Search market">
+            <Select
+              name="primary_market"
+              defaultValue={
+                SEARCH_MARKETS.some((m) => m.value === client.primary_market)
+                  ? (client.primary_market as string)
+                  : client.primary_market
+                    ? "__other"
+                    : ""
+              }
+            >
+              <option value="">Not set — United States</option>
+              {SEARCH_MARKETS.map((market) => (
+                <option key={market.value} value={market.value}>
+                  {market.value}
+                </option>
+              ))}
+              {/* Whatever is already stored stays selectable, so opening
+                  this page and saving cannot quietly rewrite it. */}
+              {client.primary_market &&
+              !SEARCH_MARKETS.some((m) => m.value === client.primary_market) ? (
+                <option value="__other">
+                  {client.primary_market} — not a search market, treated as
+                  United States
+                </option>
+              ) : null}
+            </Select>
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-tertiary)]">
+            Which SE Ranking index the domain pull reads. It is a country, not
+            a city — the four above are the ones SE Ranking has.
+          </p>
+        </div>
+        <FieldLabel label="Timezone">
+          <Input name="timezone" defaultValue={client.timezone} />
+        </FieldLabel>
+</div>
+      {/* Crawl budget, not a plan allowance: it bounds time spent on someone
+          else's server, so it sits with the other operational ceilings. */}
+      <div className="rounded-[var(--radius-lg,14px)] border border-[var(--border)] bg-[var(--surface)] p-5 space-y-4">
+        <div>
+          <p className="font-[family-name:var(--font-display)] text-[15px] font-extrabold text-[var(--text-primary)]">
+            Site crawl
+          </p>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            OrganicIQ crawls this site once a month for technical signals and
+            structured data. Sites are staggered across the month, so this one has its
+            own day.
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <FieldLabel label="Max pages per crawl">
+            <Input
+              name="crawl_page_limit"
+              disabled={!canEditPlan}
+              type="number"
+              min={1}
+              max={CRAWL_MAX_PAGES}
+              defaultValue={client.crawl_page_limit ?? ""}
+              placeholder={`${CRAWL_DEFAULT_PAGES} (default)`}
+            />
+          </FieldLabel>
+          <p className="self-center text-xs text-[var(--text-secondary)]">
+            Blank uses {CRAWL_DEFAULT_PAGES.toLocaleString()}. Raise it for large blogs
+            or catalogues; the ceiling is {CRAWL_MAX_PAGES.toLocaleString()}. A crawl
+            that stops at the limit says so on the sync job.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel label="Other names the brand is searched by (optional)">
+            <textarea
+              name="brand_aliases"
+              rows={3}
+              defaultValue={(client.brand_aliases ?? []).join("\n")}
+              placeholder="One per line, e.g. acc technical services"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            The name and domain are already covered. Add the spellings people really
+            type — a query that names the business is navigation, and no page change
+            or link moves it, so the plan will not prescribe one.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel label="Sitemap URL (optional)">
+            <Input
+              name="sitemap_url"
+              type="url"
+              defaultValue={client.sitemap_url ?? ""}
+              placeholder="Found automatically — set only if it isn't"
+            />
+          </FieldLabel>
+          <p className="text-xs text-[var(--text-secondary)]">
+            The crawler reads robots.txt and tries the usual locations. Set this only
+            when a site hides its sitemap somewhere unusual, or serves HTML for every
+            unknown path so nothing is discoverable.
+          </p>
+        </div>
+      </div>
+
+      </> : null}
       <Button type="submit" variant="primary" disabled={pending}>
-        {pending ? "Saving…" : "Save client settings"}
+        {pending ? "Saving…" : continueHref ? "Save & continue" : "Save changes"}
       </Button>
     </form>
   );
