@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.ga4 import FactGa4Event, FactGa4Traffic, OrganicChannel
+from app.models.watchlist import WatchlistKeyword
 from app.services.monthly_review import parse_month, pct_change, previous_month
 
 #: A move under this many percent is "flat".
@@ -28,6 +29,8 @@ CHANNELS = (
     (OrganicChannel.REFERRAL, "Referral"),
 )
 TOP_CONVERSIONS = 3
+#: How many months each card's trend line covers, ending with the month reviewed.
+TREND_MONTHS = 6
 
 
 def verdict(change_pct: float | None) -> str:
@@ -96,6 +99,56 @@ def top_conversions(db: Session, client: Client, month: str) -> list[dict[str, A
     return rows[:TOP_CONVERSIONS]
 
 
+def trend_months(month: str, n: int = TREND_MONTHS) -> list[str]:
+    """The `n` months ending with `month`, oldest first."""
+    out = [month]
+    while len(out) < n:
+        out.append(previous_month(out[-1]))
+    return out[::-1]
+
+
+def _series(months: list[str], by_month: dict[str, float]) -> list[dict[str, Any]]:
+    """One point per month. A month with nothing recorded is None, not 0, so a client that began recently is not drawn as having collapsed."""
+    return [{"month": m, "value": (round(by_month[m]) if m in by_month else None)} for m in months]
+
+
+def _span(months: list[str]) -> tuple[date, date]:
+    return parse_month(months[0])[0], _period(months[-1])[1]
+
+
+def traffic_trend(db: Session, client: Client, months: list[str]) -> list[dict[str, Any]]:
+    first, last = _span(months)
+    key = func.to_char(FactGa4Traffic.date, "YYYY-MM")
+    rows = db.query(key, func.coalesce(func.sum(FactGa4Traffic.sessions), 0)).filter(FactGa4Traffic.client_id == client.id, FactGa4Traffic.date >= first, FactGa4Traffic.date <= last).group_by(key).all()
+    return _series(months, {m: float(v or 0) for m, v in rows})
+
+
+def conversions_trend(db: Session, client: Client, months: list[str]) -> list[dict[str, Any]]:
+    events = [d.event_name for d in db.query(ConversionDefinition).filter(ConversionDefinition.client_id == client.id, ConversionDefinition.active.is_(True), ConversionDefinition.conversion_type == "lead")]
+    if not events:
+        return _series(months, {})
+    first, last = _span(months)
+    key = func.to_char(FactGa4Event.date, "YYYY-MM")
+    rows = db.query(key, func.coalesce(func.sum(FactGa4Event.event_count), 0)).filter(FactGa4Event.client_id == client.id, FactGa4Event.date >= first, FactGa4Event.date <= last, FactGa4Event.event_name.in_(events)).group_by(key).all()
+    return _series(months, {m: float(v or 0) for m, v in rows})
+
+
+def visibility_trend(db: Session, client: Client, months: list[str]) -> list[dict[str, Any]]:
+    """The watchlist terms' Google impressions each month: the same measure as the card's impressions row."""
+    from app.services.review_visibility import _google, key_of
+
+    keys = sorted({key_of(k) for (k,) in db.query(WatchlistKeyword.keyword).filter(WatchlistKeyword.client_id == client.id)})
+    if not keys:
+        return _series(months, {})
+    by_month: dict[str, float] = {}
+    for m in months:
+        first, last = _period(m)
+        found = _google(db, client, keys, first, last)
+        if found:
+            by_month[m] = sum(v["impressions"] for v in found.values())
+    return _series(months, by_month)
+
+
 def _pair(p: dict | None) -> tuple[float | None, float | None, float | None]:
     p = p or {}
     return p.get("current"), p.get("previous"), p.get("change_pct")
@@ -113,6 +166,7 @@ def _terms_impressions_before(vis: dict) -> float | None:
 
 def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
     month, noun = review["month"], review.get("noun", "conversions")
+    months = trend_months(month)
     prior = previous_month(month)
     vis = review.get("visibility") or {}
     vs = vis.get("summary") or {}
@@ -135,13 +189,14 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
         "ai_mentions": (llm_sum.get("mentions") or {}).get("current") if llm else None,
         "ai_links": (llm_sum.get("citations") or {}).get("current") if llm else None,
         "ai_runs": llm.get("runs") if llm else None,
+        "trend": visibility_trend(db, client, months) if vis and terms else [],
     }
 
     # Traffic
     cur, prev, pct = _pair(review.get("sessions"))
     mix = traffic_mix(db, client, month)
     organic = next((c for c in mix if c["key"] == "organic_search"), None)
-    traffic = {"headline": cur, "previous": prev, "change_pct": pct, "verdict": verdict(pct), "channels": mix, "organic_change_pct": organic["change_pct"] if organic else (review.get("organic_sessions") or {}).get("change_pct")}
+    traffic = {"headline": cur, "previous": prev, "change_pct": pct, "verdict": verdict(pct), "trend": traffic_trend(db, client, months), "channels": mix, "organic_change_pct": organic["change_pct"] if organic else (review.get("organic_sessions") or {}).get("change_pct")}
 
     # Conversions
     c_cur, c_prev, c_pct = _pair(review.get("conversions"))
@@ -151,7 +206,7 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
     conversions = {
         "noun": noun, "headline": c_cur, "previous": c_prev, "change_pct": c_pct, "verdict": verdict(c_pct),
         "goal": goal.get("period_goal"), "goal_progress_pct": goal.get("progress_pct"),
-        "top": top_conversions(db, client, month),
+        "top": top_conversions(db, client, month), "trend": conversions_trend(db, client, months),
         "revenue": revenue, "conversion_rate": review.get("conversion_rate"),
     }
     return {"month": month, "previous_month": prior, "visibility": visibility, "traffic": traffic, "conversions": conversions,

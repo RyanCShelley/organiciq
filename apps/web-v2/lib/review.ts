@@ -61,6 +61,7 @@ export type SummaryRow = {
 export type SummarySection = { title: string; rows: SummaryRow[] };
 
 export type ScoreChange = { change_pct: number | null };
+export type TrendPoint = { month: string; value: number | null };
 export type Scorecards = {
   month: string;
   previous_month: string;
@@ -77,6 +78,7 @@ export type Scorecards = {
     ai_mentions: number | null;
     ai_links: number | null;
     ai_runs: number | null;
+    trend: TrendPoint[];
   };
   traffic: {
     headline: number | null;
@@ -84,6 +86,7 @@ export type Scorecards = {
     change_pct: number | null;
     verdict: "up" | "down" | "flat";
     organic_change_pct: number | null;
+    trend: TrendPoint[];
     channels: { key: string; label: string; sessions: number; previous: number; change_pct: number | null }[];
   };
   conversions: {
@@ -97,6 +100,7 @@ export type Scorecards = {
     top: { label: string; count: number; previous: number; change_pct: number | null }[];
     revenue: Pair | null;
     conversion_rate: Pair | null;
+    trend: TrendPoint[];
   };
 };
 
