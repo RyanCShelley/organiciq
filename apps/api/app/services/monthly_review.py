@@ -336,6 +336,15 @@ def summarise(review: dict) -> list[str]:
     return lines
 
 
+def _mon(month: str) -> str:
+    """'2026-09' as 'Sep 2026', for the text beside a figure."""
+    try:
+        y, m = month.split("-")
+        return f"{calendar.month_abbr[int(m)]} {y}"
+    except (ValueError, IndexError):
+        return month
+
+
 def _change(pair: dict | None, prior: str, *, points: bool = False) -> dict | None:
     """How a number moved, for a chip: the words, and good/bad/flat for its colour. Every measure here is better when higher."""
     if not pair or pair.get("previous") is None:
@@ -345,13 +354,13 @@ def _change(pair: dict | None, prior: str, *, points: bool = False) -> dict | No
         if delta is None:
             return None
         pts = round(delta * 100)
-        return {"text": "unchanged" if pts == 0 else f"{'up' if pts > 0 else 'down'} {abs(pts)} points", "tone": "flat" if pts == 0 else "good" if pts > 0 else "bad", "against": f"on the run before"}
+        return {"text": "unchanged" if pts == 0 else f"{'up' if pts > 0 else 'down'} {abs(pts)} points", "tone": "flat" if pts == 0 else "good" if pts > 0 else "bad", "against": "vs the run before"}
     pct = pair.get("change_pct")
     if pct is None:
         return None
     if abs(pct) < 1:
-        return {"text": "flat", "tone": "flat", "against": f"on {prior} ({_fmt(pair['previous'])})"}
-    return {"text": f"{'up' if pct > 0 else 'down'} {abs(pct):.0f}%", "tone": "good" if pct > 0 else "bad", "against": f"on {prior} ({_fmt(pair['previous'])})"}
+        return {"text": "flat", "tone": "flat", "against": f"vs {_mon(prior)} ({_fmt(pair['previous'])})"}
+    return {"text": f"{'up' if pct > 0 else 'down'} {abs(pct):.0f}%", "tone": "good" if pct > 0 else "bad", "against": f"vs {_mon(prior)} ({_fmt(pair['previous'])})"}
 
 
 def sections(review: dict) -> list[dict]:
@@ -399,9 +408,9 @@ def sections(review: dict) -> list[dict]:
         if llm:
             m, c, r = llm["summary"]["mentions"], llm["summary"]["citations"], llm["summary"]["visibility_rate"]
             pooled = llm["in_month"] and llm.get("runs", 1) > 1
-            when = (f"{llm['runs']} runs in {month}, pooled" if pooled else f"Run on {llm['run_date']}") + ("" if llm["in_month"] else f", after {month}")
+            when = (f"{llm['runs']} runs in {_mon(month)}, pooled" if pooled else f"Run on {llm['run_date']}") + ("" if llm["in_month"] else f", after {_mon(month)}")
             visible.append({"label": "AI platforms", "value": f"{round((r['current'] or 0) * 100)}%", "change": _change(r, prior, points=True),
-                            "detail": f"of discovery answers named or cited the brand · {_n(m['current'], 'mention')} · {_n(c['current'], 'citation')} · {when}"})
+                            "detail": f"Discovery answers that named or cited the brand · {_n(m['current'], 'mention')} · {_n(c['current'], 'citation')} · {when}"})
             from app.llm_visibility.platforms import DISPLAY
 
             per = [f"{DISPLAY.get(p['platform'], p['platform'])} {round((p['visibility_rate']['current'] or 0) * 100)}%" for p in llm.get("platforms", [])]
@@ -412,7 +421,7 @@ def sections(review: dict) -> list[dict]:
             if answers:
                 cited = sum(b["site_cited"] for b in checks)
                 visible.append({"label": "Brand check", "value": f"{cited} of {answers} answers", "change": None,
-                                "detail": "to questions that name the brand cited the site"})
+                                "detail": "Answers to questions that name the brand where the site was cited"})
         out.append({"title": "Visibility", "rows": visible})
 
     missing = [f["source"] for f in review.get("freshness", []) if not f.get("available")]
