@@ -15,56 +15,6 @@ import type { Pair, Review, Visibility, VisibilityAi, VisibilityTerm } from "@/l
 
 const num = (n: number | null | undefined, digits = 0) =>
   n == null ? "–" : n.toLocaleString(undefined, { maximumFractionDigits: digits });
-const money = (n: number | null | undefined) =>
-  n == null ? "–" : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-
-/** The change since last month, green when it is the direction we want. */
-function Change({ pair, lowerIsBetter = false, previousLabel }: { pair: Pair; lowerIsBetter?: boolean; previousLabel: string }) {
-  if (pair.change_pct == null) {
-    return <span className="text-xs text-[var(--text-tertiary)]">{pair.previous == null ? `no ${previousLabel} figure` : "no change to show"}</span>;
-  }
-  const up = pair.change_pct > 0;
-  const good = lowerIsBetter ? !up : up;
-  const flat = Math.abs(pair.change_pct) < 1;
-  return (
-    <span className={`text-xs font-semibold ${flat ? "text-[var(--text-secondary)]" : good ? "text-green-700" : "text-red-700"}`}>
-      {flat ? "flat" : `${up ? "▲" : "▼"} ${Math.abs(pair.change_pct).toFixed(0)}%`}{" "}
-      <span className="font-normal text-[var(--text-secondary)]">vs {previousLabel}</span>
-    </span>
-  );
-}
-
-function Card({
-  label,
-  value,
-  pair,
-  format = num,
-  lowerIsBetter,
-  previousLabel,
-  note,
-}: {
-  label: string;
-  value: string;
-  pair: Pair;
-  format?: (n: number | null) => string;
-  lowerIsBetter?: boolean;
-  previousLabel: string;
-  note?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">{label}</div>
-      <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
-      <div className="mt-1">
-        <Change pair={pair} lowerIsBetter={lowerIsBetter} previousLabel={previousLabel} />
-      </div>
-      {pair.previous != null ? (
-        <div className="text-xs text-[var(--text-tertiary)]">was {format(pair.previous)}</div>
-      ) : null}
-      {note ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{note}</div> : null}
-    </div>
-  );
-}
 
 const STATUS_STYLE: Record<string, string> = {
   "Top 3": "bg-green-50 text-green-800",
@@ -589,41 +539,11 @@ export function ReviewScreen({
         <div className="min-w-0 space-y-6">
           {review ? (
             <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Card label={noun} value={num(review.conversions.current)} pair={review.conversions} previousLabel={prior} />
-                {review.revenue?.status === "measured" ? (
-                  <Card
-                    label="Revenue"
-                    value={money(review.revenue.revenue.current)}
-                    pair={review.revenue.revenue}
-                    format={money}
-                    previousLabel={prior}
-                    note={`${money(review.revenue.organic_revenue.current)} through organic search`}
-                  />
-                ) : (
-                  <Card label="Conversion rate" value={`${num(review.conversion_rate.current, 2)}%`} pair={review.conversion_rate} previousLabel={prior} />
-                )}
-                <Card label="Sessions" value={num(review.sessions.current)} pair={review.sessions} previousLabel={prior} />
-                <Card label="Organic sessions" value={num(review.organic_sessions.current)} pair={review.organic_sessions} previousLabel={prior} />
-                {review.has_search_data ? (
-                  <>
-                    <Card label="Search clicks" value={num(review.search.clicks.current)} pair={review.search.clicks} previousLabel={prior} />
-                    <Card
-                      label="Avg. search position"
-                      value={num(review.search.average_position.current, 1)}
-                      pair={review.search.average_position}
-                      lowerIsBetter
-                      format={(n) => num(n, 1)}
-                      previousLabel={prior}
-                    />
-                  </>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-secondary)] sm:col-span-2">
-                    No Search Console data for {monthLabel(month)}. Pull it from Settings → Connections once GSC is
-                    connected.
-                  </div>
-                )}
-              </div>
+              {!review.has_search_data ? (
+                <div className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-secondary)]">
+                  No Search Console data for {monthLabel(month)}. Pull it from Settings → Connections once GSC is connected.
+                </div>
+              ) : null}
 
               {review.revenue?.status === "unavailable" ? (
                 <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Revenue: {review.revenue.reason}</p>
