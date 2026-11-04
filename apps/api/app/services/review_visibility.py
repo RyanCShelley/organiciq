@@ -181,7 +181,7 @@ def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dic
     def tally(source: list[Any] | None) -> tuple[int, int, int] | None:
         if source is None:
             return None
-        mine = [r for r in source if r.visibility_type != "Error" and key_of(r.query_text) == key]
+        mine = [r for r in source if r.visibility_type and r.visibility_type != "Error" and not getattr(r, "asked_by_name", False) and key_of(r.query_text) == key]
         if not mine:
             return None
         return len(mine), sum(bool(r.url_cited) for r in mine), sum(bool(r.brand_mentioned) for r in mine)
@@ -192,7 +192,7 @@ def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dic
     # One run gives one answer per platform. Pooled runs give several: a platform counts as having cited or named the brand when it did so in at least half of them.
     per_platform: dict[str, list[Any]] = defaultdict(list)
     for r in rows:
-        if r.visibility_type != "Error" and key_of(r.query_text) == key:
+        if r.visibility_type and r.visibility_type != "Error" and not getattr(r, "asked_by_name", False) and key_of(r.query_text) == key:
             per_platform[r.platform].append(r)
     by_platform = {
         platform: {"cited": sum(bool(r.url_cited) for r in got) * 2 >= len(got), "named": sum(bool(r.brand_mentioned) for r in got) * 2 >= len(got)}

@@ -2,8 +2,11 @@
 
 Questions are answered by a model that writes SQL, so the database has to make the dangerous things impossible, not
 the prompt. Each question runs as `ask_data_reader`, a role that can only SELECT from the tables listed here, and
-row-level security on every one of them shows it only the rows of the client in `app.client_id`. The role has no
-other table, no writes, and a short statement timeout; the transaction is read-only.
+row-level security on every one of them shows it only the rows of the client in the scope row written for this
+transaction. The scope is NOT a session setting: a setting (`app.client_id`) can be overwritten by any SELECT that reaches `set_config`
+by a spelling the query filter does not see (`U&"\\0073et_config"(...)`, `query_to_xml('se'||'lect ...')`). It is a row in
+`ask_scope_state`, keyed by this backend and transaction, read through a SECURITY DEFINER function; the role has no privilege on that
+table and the transaction is read-only. The role has no other table, no writes, and a short statement timeout.
 """
 
 from __future__ import annotations
@@ -41,6 +44,9 @@ TABLES = (
     "engine_tasks",
 )
 
+SCOPE_TABLE = "ask_scope_state"
+SCOPE_FUNCTION = "ask_scope_client"
+
 _ready = False
 
 
@@ -58,6 +64,16 @@ def ensure(db: Session) -> None:
     # The session user must be able to become the role (SET LOCAL ROLE).
     db.execute(text(f"grant {ROLE} to current_user"))
     db.execute(text(f"grant usage on schema public to {ROLE}"))
+    # Where the client for the running question is kept: one row per transaction, gone when it ends. Only the owner can touch it.
+    db.execute(text(f"create unlogged table if not exists {SCOPE_TABLE} (pid integer not null, xid bigint not null, client_id uuid not null, primary key (pid, xid))"))
+    db.execute(text(f"revoke all on {SCOPE_TABLE} from public"))
+    db.execute(text(f"revoke all on {SCOPE_TABLE} from {ROLE}"))
+    db.execute(text(
+        f"create or replace function {SCOPE_FUNCTION}() returns uuid language sql stable security definer set search_path = pg_catalog, public "
+        f"as $$ select client_id from public.{SCOPE_TABLE} where pid = pg_backend_pid() and xid = txid_current() $$"
+    ))
+    db.execute(text(f"revoke all on function {SCOPE_FUNCTION}() from public"))
+    db.execute(text(f"grant execute on function {SCOPE_FUNCTION}() to {ROLE}"))
     for table in TABLES:
         if table not in existing:
             continue
@@ -65,7 +81,7 @@ def ensure(db: Session) -> None:
         db.execute(text(f"drop policy if exists ask_scope on {table}"))
         db.execute(text(
             f"create policy ask_scope on {table} for select to {ROLE} "
-            "using (client_id = nullif(current_setting('app.client_id', true), '')::uuid)"
+            f"using (client_id = {SCOPE_FUNCTION}())"
         ))
         db.execute(text(f"grant select on {table} to {ROLE}"))
     db.commit()

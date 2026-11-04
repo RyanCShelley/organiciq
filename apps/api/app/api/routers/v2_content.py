@@ -216,8 +216,10 @@ class CalendarPatch(BaseModel):
     notes: str | None = Field(default=None, max_length=8000)
 
 
-def _item(db: Session, client: Client, item_id: UUID) -> ContentItem:
-    item = db.query(ContentItem).filter(ContentItem.id == item_id, ContentItem.client_id == client.id).first()
+def _item(db: Session, client: Client, item_id: UUID, lock: bool = False) -> ContentItem:
+    query = db.query(ContentItem).filter(ContentItem.id == item_id, ContentItem.client_id == client.id)
+    # Sending takes the row lock: two presses would otherwise each make a Teamwork list and a task.
+    item = (query.with_for_update() if lock else query).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That item is not on this client's calendar.")
     return item
@@ -306,7 +308,7 @@ def calendar_send(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Make the item's own list in the client's Teamwork content project, with its task. A second press returns the first task."""
-    item = _item(db, client, item_id)
+    item = _item(db, client, item_id, lock=True)
     if item.teamwork_task_id:
         return content_calendar.out(item)
     if not teamwork.configured():

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { briefAction, dismissTopicAction, draftAction, setAsideAction, topicDetailAction, topicsAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
 import { AddToCalendar, StatusChip } from "@/components/content/AddToCalendar";
@@ -17,7 +17,16 @@ function BriefPane({ client, gap, ready, canEdit, onCalendar, onRefresh, onChang
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
   const [pending, start] = useTransition();
-  const load = () => briefAction(client.id, gap.term).then((r) => (r.ok ? setBrief(r.value) : setError(r.error)));
+  const now = useRef(`${client.id}|${gap.term}`);
+  now.current = `${client.id}|${gap.term}`;
+  const load = () => {
+    const asked = now.current;
+    return briefAction(client.id, gap.term).then((r) => {
+      if (now.current !== asked) return; // a reply for a gap no longer open
+      if (r.ok) setBrief(r.value);
+      else setError(r.error);
+    });
+  };
   useEffect(() => {
     setBrief(null);
     setError(null);
@@ -132,7 +141,18 @@ function TopicPane({ client, label, dismissed, onDismiss, onCalendar }: { client
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
   const [pending, start] = useTransition();
-  const load = () => topicDetailAction(client.id, label).then((r) => (r.ok ? (setD(r.value), setError(null)) : setError(r.error)));
+  const now = useRef(`${client.id}|${label}`);
+  now.current = `${client.id}|${label}`;
+  const load = () => {
+    const asked = now.current;
+    return topicDetailAction(client.id, label).then((r) => {
+      if (now.current !== asked) return; // a reply for a subject no longer open
+      if (r.ok) {
+        setD(r.value);
+        setError(null);
+      } else setError(r.error);
+    });
+  };
   useEffect(() => {
     setD(null);
     setError(null);

@@ -48,6 +48,19 @@ def test_a_query_sees_only_its_own_clients_rows_and_only_the_listed_tables(db, c
     assert "permission denied" in sql.run(db, client_a.id, "select * from integrations")["error"]
 
 
+@pytest.mark.parametrize("hop", [
+    # `set_config` spelled so the word filter never sees it, aimed at the other client's id
+    "select U&\"\\0073et_config\"('app.client_id', '{other}', true), sum(sessions) from facts_ga4_traffic",
+    "select query_to_xml('se'||'lect set'||'_config(''app.client_id'',''{other}'',true)', true, false, ''), sum(sessions) from facts_ga4_traffic",
+    "select sum(sessions) from facts_ga4_traffic where (select U&\"\\0073et_config\"('app.client_id', '{other}', true)) is not null",
+])
+def test_a_query_cannot_move_itself_to_another_client(db, client_a, client_b, hop):
+    traffic(db, client_a, 100)
+    traffic(db, client_b, 999)
+    out = sql.run(db, client_a.id, hop.format(other=client_b.id))
+    assert "999" not in json.dumps(out)  # an error or only its own 100, never the other client's rows
+
+
 def test_the_session_is_back_to_normal_after_a_question(db, client_a):
     traffic(db, client_a, 5)
     sql.run(db, client_a.id, "select 1")

@@ -55,9 +55,10 @@ def run(db: Session, client_id: UUID, query: str) -> dict[str, Any]:
         return {"error": str(exc)}
     schema.ensure(db)
     try:
+        # The scope row is written as the owner, in this transaction, before the transaction goes read-only and the role is taken.
+        db.execute(text(f"insert into {schema.SCOPE_TABLE} (pid, xid, client_id) values (pg_backend_pid(), txid_current(), :c)"), {"c": str(client_id)})
         db.execute(text("set transaction read only"))
         db.execute(text(f"set local statement_timeout = {STATEMENT_TIMEOUT_MS}"))
-        db.execute(text("select set_config('app.client_id', :c, true)"), {"c": str(client_id)})
         db.execute(text(f"set local role {schema.ROLE}"))
         result = db.execute(text(q))
         columns = list(result.keys())
@@ -73,4 +74,4 @@ def run(db: Session, client_id: UUID, query: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - a bad query is an answer for the model, not a failure
         return {"error": str(exc).splitlines()[0][:300]}
     finally:
-        db.rollback()  # ends the read-only transaction and drops the role and the setting with it
+        db.rollback()  # ends the read-only transaction and drops the role and the scope row with it

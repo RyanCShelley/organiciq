@@ -105,8 +105,10 @@ def _allowance(client: Client, used: int) -> dict:
     return {"monthly": monthly, "used": used, "over": monthly is not None and used > monthly}
 
 
-def _get(db: Session, client: Client, task_id: UUID) -> EngineTask:
-    task = db.query(EngineTask).filter(EngineTask.id == task_id, EngineTask.client_id == client.id).one_or_none()
+def _get(db: Session, client: Client, task_id: UUID, lock: bool = False) -> EngineTask:
+    query = db.query(EngineTask).filter(EngineTask.id == task_id, EngineTask.client_id == client.id)
+    # Sending takes the row lock, so a second press waits for the first and then finds its Teamwork id instead of making another task.
+    task = (query.with_for_update() if lock else query).one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
@@ -275,7 +277,7 @@ def send_task(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Push the task to the client's Teamwork tasklist. Idempotent: a second press returns the first task."""
-    task = _get(db, client, task_id)
+    task = _get(db, client, task_id, lock=True)
     if task.teamwork_task_id:
         return _out(task)
     if task.status == "dropped":

@@ -16,7 +16,12 @@ export function AskPanel({ clientId, page, examples, onClose }: { clientId: stri
   const [info, setInfo] = useState<AskInfo | null | undefined>(undefined);
   useEffect(() => {
     setInfo(undefined);
-    if (clientId) void askInfoAction(clientId).then(setInfo);
+    // A slow answer for the client just left must not land on the one chosen now.
+    let live = true;
+    if (clientId) void askInfoAction(clientId).then((r) => live && setInfo(r));
+    return () => {
+      live = false;
+    };
   }, [clientId]);
 
   // Read when a question is sent, so it is the page as it is then, not as it was when the panel opened.

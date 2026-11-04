@@ -255,8 +255,16 @@ function VoicePane({ client, self, source, cluster, brand }: { client: Client; s
     setRows(null);
     setError(null);
     setOpen(null);
+    let live = true;
     const load = source.kind === "month" ? llmMonthResponsesAction(client.id, source.month) : llmResponsesAction(client.id, source.runId);
-    void load.then((r) => (r.ok ? setRows(r.value) : setError(r.error)));
+    void load.then((r) => {
+      if (!live) return;
+      if (r.ok) setRows(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client.id, sourceKey]);
 
@@ -341,8 +349,18 @@ function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
   const [open, setOpen] = useState<{ cluster: string; brand: string | null } | null>(null);
   useEffect(() => {
     if (mode !== "month") return;
+    // Another month's (or client's) figures must never sit under this selection while it loads, or land after a newer pick.
+    let live = true;
     setError(null);
-    void llmMonthSovAction(client.id, month).then((r) => (r.ok ? setMonthData(r.value) : setError(r.error)));
+    setMonthData(null);
+    void llmMonthSovAction(client.id, month).then((r) => {
+      if (!live) return;
+      if (r.ok) setMonthData(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
   }, [client.id, mode, month]);
   useEffect(() => {
     if (!open) return;
@@ -431,8 +449,17 @@ function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
   const [platform, setPlatform] = useState("all");
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
+    let live = true;
     setRows(null);
-    llmResponsesAction(client.id, run.id).then((r) => (r.ok ? setRows(r.value) : setError(r.error)));
+    setError(null);
+    llmResponsesAction(client.id, run.id).then((r) => {
+      if (!live) return;
+      if (r.ok) setRows(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
   }, [client.id, run.id]);
   if (error) return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>;
   if (!rows) return <p className="text-sm text-[var(--text-secondary)]">Loading the run…</p>;
