@@ -114,8 +114,14 @@ def stored_page(db: Session, client: Client, url: str) -> dict[str, Any]:
     rows = db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.normalized_url == url).all()
     blocks = [r.raw for r in rows if r.syntax == "json_ld" and not r.parse_error and r.raw]
     micro = {r.schema_type for r in rows if r.syntax != "json_ld" and r.schema_type}
-    audit = schema_audit.audit_page(url, snap.title if snap else None, blocks, micro)
+    # The site's other pages decide whether a reference to an entity this page does not define is dangling or defined elsewhere.
+    everywhere: dict[str, list[Any]] = {}
+    for r in db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.syntax == "json_ld").all():
+        if not r.parse_error and r.raw:
+            everywhere.setdefault(r.normalized_url, []).append(r.raw)
+    audit = schema_audit.audit_page(url, snap.title if snap else None, blocks, micro, schema_audit.site_registry(everywhere))
     audit = schema_audit.apply_ignores(audit, schema_audit.load_ignores(db, client)) or {**audit, "ignored_page": True}
+    audit["findings"] = [f.as_dict() for f in audit.get("findings", [])]
     return {"snapshot_title": snap.title if snap else None, "blocks": blocks, "audit": audit}
 
 

@@ -20,7 +20,10 @@ from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSchema, Fact
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore
 from app.schema_tools.expected import expected_for, find_missing_recommended, find_missing_required
 from app.schema_tools.page_type import detect_page_type
-from app.schema_tools.transforms import run_pipeline
+from app.schema_validation import findings as F
+from app.schema_validation.engine import defined_ids, validate_page
+from app.schema_validation.recommendation_rules import missing_types
+from app.schema_validation.vocabulary import load as load_vocabulary
 from app.services.competitors import bare_domain
 from app.services.site_health import is_pagination
 
@@ -134,22 +137,130 @@ def apply_ignores(a: dict[str, Any], ign: dict[str, set[str]]) -> dict[str, Any]
     pt = a["page_type"]
     a["missing_required"] = [t for t in a["missing_required"] if f"{pt}:{t}" not in ign["expect"]]
     a["missing_recommended"] = [t for t in a["missing_recommended"] if f"{pt}:{t}" not in ign["expect"]]
-    a["corrections"] = [c for c in a["corrections"] if _normal(c["detail"]) not in ign["cleanup"]]
+    a["findings"] = [
+        f for f in a["findings"]
+        if f.title not in ign["cleanup"] and _normal(f.message) not in ign["cleanup"]
+        and not (f.rule_id.startswith("recommendation.missing_type") and f"{pt}:{f.type}" in ign["expect"])
+    ]
+    a["corrections"] = _corrections(a["findings"])
     a["score"] = score(a["has_markup"], a["missing_required"], a["missing_recommended"], len(a["corrections"]))
     return a
 
 
-def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str]) -> dict[str, Any]:
+def _corrections(findings: list[F.Finding]) -> list[dict[str, str]]:
+    """What counts against a page's score and is listed as a fix: errors, and warnings. Enhancements and informational notices do not."""
+    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING)]
+
+
+def site_registry(blocks: dict[str, list[Any]]) -> dict[str, int]:
+    """Every identifier the site's pages define, and on how many pages."""
+    registry: Counter[str] = Counter()
+    for u, bl in blocks.items():
+        registry.update(defined_ids(u, bl))
+    return dict(registry)
+
+
+def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str], site_ids: dict[str, int] | None = None) -> dict[str, Any]:
     present = sorted(set(collect_types(blocks)) | _component_types(blocks) | micro)
     page_type = detect_page_type(url, present, title)
     missing_required = find_missing_required(page_type, present)
     missing_recommended = find_missing_recommended(page_type, present)
-    corrections = run_pipeline(merged_graph(blocks))[1] if blocks else []
+    spec = expected_for(page_type)
+    findings = validate_page(url, blocks, page_type=page_type, site_ids=site_ids) if blocks else []
+    vocab = load_vocabulary()
+    findings += missing_types(vocab, page_type, present, {"required": missing_required, "recommended": missing_recommended, "accepts": spec.get("accepts", [])}, url)
+    findings.sort(key=lambda f: (F.RANK[f.category], f.layer, f.rule_id, f.entity_id or ""))
+    corrections = _corrections(findings)
     return {
         "url": url, "page_type": page_type, "present": present, "present_jsonld": collect_types(blocks), "has_jsonld": bool(blocks), "has_markup": bool(blocks) or bool(micro),
-        "missing_required": missing_required, "missing_recommended": missing_recommended, "corrections": corrections,
+        "missing_required": missing_required, "missing_recommended": missing_recommended, "corrections": corrections, "findings": findings,
         "score": score(bool(blocks) or bool(micro), missing_required, missing_recommended, len(corrections)),
     }
+
+
+def google_reviewed() -> str:
+    from app.schema_validation.google_rules import REVIEWED
+
+    return REVIEWED
+
+
+_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
+SAMPLE_URLS = 5
+GROUPS_LISTED = 300
+
+
+def group_findings(audits: list[dict[str, Any]], extra: list[F.Finding] | None = None) -> list[dict[str, Any]]:
+    """Findings grouped by what causes them (rule, type, property), so one underlying problem on 2,000 pages is one row with an honest page count.
+
+    A page is counted once per group however many times the finding occurs on it; `occurrences` is the raw count. The example is the first page's own
+    evidence, so the row can be checked against a real page. The group's confidence is the lowest of its findings'.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    pairs = [(a["url"], f) for a in audits for f in a.get("findings", [])] + [(f.url, f) for f in (extra or [])]
+    for url, f in pairs:
+        g = groups.get(f.template_key)
+        if g is None:
+            g = groups[f.template_key] = {
+                "template_key": f.template_key, "rule_id": f.rule_id, "layer": f.layer, "category": f.category, "title": f.title, "explanation": f.explanation, "recommendation": f.recommendation,
+                "doc": f.doc, "type": f.type, "property": f.property, "auto_fixable": f.auto_fixable, "confidence": f.confidence, "pages": 0, "occurrences": 0, "sample_urls": [],
+                "example": {"url": url, "entity_id": f.entity_id, "message": f.message, "evidence": f.evidence}, "_urls": set(),
+            }
+        g["occurrences"] += 1
+        if url not in g["_urls"]:
+            g["_urls"].add(url)
+            g["pages"] += 1
+            if len(g["sample_urls"]) < SAMPLE_URLS:
+                g["sample_urls"].append(url)
+        if _CONFIDENCE[f.confidence] < _CONFIDENCE[g["confidence"]]:
+            g["confidence"] = f.confidence
+        g["auto_fixable"] = g["auto_fixable"] and f.auto_fixable
+    out = sorted(groups.values(), key=lambda g: (F.RANK[g["category"]], -g["pages"], g["rule_id"]))
+    for g in out:
+        del g["_urls"]
+    return out[:GROUPS_LISTED]
+
+
+def finding_counts(audits: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all."""
+    out = {c: {"groups": 0, "pages": 0, "occurrences": 0} for c in F.CATEGORIES}
+    seen_groups: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
+    pages: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
+    for a in audits:
+        for f in a.get("findings", []):
+            out[f.category]["occurrences"] += 1
+            seen_groups[f.category].add(f.template_key)
+            pages[f.category].add(a["url"])
+    for c in F.CATEGORIES:
+        out[c]["groups"], out[c]["pages"] = len(seen_groups[c]), len(pages[c])
+    return out
+
+
+def _site_findings(blocks: dict[str, list[Any]], audited: list[str]) -> list[F.Finding]:
+    """What only shows across pages: the same organization (by name) carrying different @id values on different pages."""
+    from app.schema_validation import graph as graph_mod
+
+    vocab = load_vocabulary()
+    ids_by_name: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for url in audited:
+        for node in graph_mod.build(url, blocks.get(url, [])).nodes:
+            name = node.data.get("name")
+            if node.id and isinstance(name, str) and name.strip() and any(vocab.is_a(vocab.type_name(t) or "", "Organization") for t in node.types) and not node.parent_property:
+                ids_by_name[_norm(name)][node.id].add(url)
+    out: list[F.Finding] = []
+    for name, by_id in ids_by_name.items():
+        if len(by_id) < 2:
+            continue
+        for ident, urls in by_id.items():
+            for url in sorted(urls):
+                out.append(F.Finding(
+                    url=url, layer="graph", rule_id="graph.inconsistent_entity_ids", category=F.WARNING, type="Organization", entity_id=ident,
+                    title="The same organization carries different @id values across the site",
+                    message=f"An organization named '{name}' is defined with {len(by_id)} different @id values across the site: " + ", ".join(sorted(by_id)[:3]),
+                    explanation="Search engines treat each @id as its own entity, so one business described under several identifiers is read as several businesses and its markup does not add up.",
+                    recommendation="Pick one identifier for the organization (for example https://example.com/#organization) and use it on every page.", doc=F.SCHEMA_DOCS,
+                    evidence=sorted(by_id)[:4], confidence="medium",
+                ))
+    return out
 
 
 def _scored(a: dict[str, Any]) -> bool:
@@ -176,8 +287,10 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             micro[r.normalized_url].add(r.schema_type)
 
     ign = load_ignores(db, client)
+    # Which identifiers the site defines, and on how many pages, so a reference to an entity another page defines is told from one nothing defines.
+    site_ids = site_registry(blocks)
     audits = [
-        a for a in (apply_ignores(audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set())), ign) for s in pages) if a is not None
+        a for a in (apply_ignores(audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set()), site_ids), ign) for s in pages) if a is not None
     ]
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for a in audits:
@@ -241,6 +354,8 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
         "score": _average([a for a in audits if _scored(a)]) or 0,
         "cleanups": sum(len(a["corrections"]) for a in audits),
         "types": types, "fixes": fixes, "present": [{"type": t, "pages": n} for t, n in present.most_common()],
+        "findings": group_findings(audits, _site_findings(blocks, [a["url"] for a in audits])), "finding_counts": finding_counts(audits),
+        "validator": {"schemaorg_version": load_vocabulary().version, "google_reviewed": google_reviewed()},
         "invalid": invalid, "entity": entity,
         "ignored": [{"id": str(i.id), "scope": i.scope, "key": i.key, "label": i.label or i.key} for i in db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id).order_by(ClientSchemaIgnore.created_at)],
         "concepts": [_concept_out(c) for c in db.query(ClientSchemaConcept).filter(ClientSchemaConcept.client_id == client.id).order_by(ClientSchemaConcept.name)],

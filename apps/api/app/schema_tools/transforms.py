@@ -218,10 +218,14 @@ def set_main_entity(
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """If a WebPage and a Service exist, point WebPage.mainEntity → Service."""
     corrections: list[dict[str, str]] = []
-    pages = find_nodes_by_type(graph, "WebPage", "ServicePage")
-    services = find_nodes_by_type(graph, "Service", "ProfessionalService", "FinancialService")
+    from app.schema_validation.vocabulary import load
 
-    if not pages or not services:
+    vocab = load()
+    pages = find_nodes_by_type(graph, "WebPage", "ServicePage")
+    # A business that provides a service (a ProfessionalService is an Organization) is not itself the page's service.
+    services = [n for n in graph if any(vocab.is_a(vocab.type_name(t) or "", "Service") for t in ([n.get("@type")] if isinstance(n.get("@type"), str) else n.get("@type") or []))]
+
+    if not pages or len(services) != 1:
         return graph, corrections
 
     service = services[0]
@@ -253,207 +257,36 @@ def set_main_entity(
 # Transform 5: validate properties against schema.org
 # ---------------------------------------------------------------------------
 
-# Valid properties per schema.org type — covers the types we generate or
-# commonly encounter. Includes inherited properties from parent types.
-# Breadcrumb / BreadcrumbList intentionally excluded from validation tables.
-_VALID_PROPERTIES: dict[str, set[str]] = {
-    "Organization": {
-        "name", "url", "logo", "description", "sameAs", "address", "telephone",
-        "email", "foundingDate", "founder", "numberOfEmployees", "areaServed",
-        "image", "identifier", "alternateName", "contactPoint", "member",
-        "department", "subOrganization", "parentOrganization", "brand",
-        "award", "knowsAbout", "slogan", "legalName", "taxID",
-    },
-    "LocalBusiness": {
-        "name", "url", "logo", "description", "sameAs", "address", "telephone",
-        "email", "foundingDate", "areaServed", "image", "identifier",
-        "alternateName", "contactPoint", "parentOrganization", "brand",
-        "openingHours", "openingHoursSpecification", "priceRange", "geo",
-        "review", "aggregateRating", "hasOfferCatalog", "paymentAccepted",
-        "currenciesAccepted", "menu", "servesCuisine",
-    },
-    "ProfessionalService": {
-        "name", "url", "logo", "description", "sameAs", "address", "telephone",
-        "email", "foundingDate", "areaServed", "image", "identifier",
-        "alternateName", "contactPoint", "parentOrganization", "brand",
-        "openingHours", "openingHoursSpecification", "priceRange", "geo",
-        "review", "aggregateRating", "hasOfferCatalog", "serviceType",
-        "knowsAbout", "slogan",
-    },
-    "Service": {
-        "name", "url", "description", "sameAs", "image", "identifier",
-        "provider", "serviceType", "areaServed", "offers", "hasOfferCatalog",
-        "category", "serviceOutput", "serviceArea", "availableChannel",
-        "termsOfService", "aggregateRating", "review", "brand",
-        "alternateName",
-    },
-    "WebSite": {
-        "name", "url", "description", "publisher", "potentialAction",
-        "sameAs", "alternateName", "inLanguage",
-    },
-    "WebPage": {
-        "name", "url", "description", "isPartOf", "mainEntity", "about",
-        "primaryImageOfPage", "datePublished", "dateModified",
-        "author", "inLanguage", "potentialAction", "sameAs", "significantLink",
-        "speakable", "relatedLink", "lastReviewed", "reviewedBy",
-        # NOTE: 'breadcrumb' deliberately omitted — we don't recommend
-        # BreadcrumbList per project policy.
-    },
-    "Article": {
-        "name", "url", "description", "headline", "author", "datePublished",
-        "dateModified", "image", "publisher", "mainEntityOfPage", "about",
-        "inLanguage", "articleBody", "articleSection", "keywords",
-        "wordCount", "alternativeHeadline",
-    },
-    "BlogPosting": {
-        "name", "url", "description", "headline", "author", "datePublished",
-        "dateModified", "image", "publisher", "mainEntityOfPage", "about",
-        "inLanguage", "articleBody", "articleSection", "keywords",
-        "wordCount", "alternativeHeadline",
-    },
-    "NewsArticle": {
-        "name", "url", "description", "headline", "author", "datePublished",
-        "dateModified", "image", "publisher", "mainEntityOfPage", "about",
-        "inLanguage", "articleBody", "articleSection", "keywords",
-        "wordCount", "alternativeHeadline", "dateline",
-    },
-    "Product": {
-        "name", "url", "description", "image", "sku", "mpn", "gtin", "gtin8",
-        "gtin13", "gtin14", "brand", "manufacturer", "model", "color",
-        "category", "offers", "aggregateRating", "review", "weight",
-        "height", "width", "depth", "material", "isAccessoryOrSparePartFor",
-        "isRelatedTo", "isSimilarTo",
-    },
-    "Offer": {
-        "price", "priceCurrency", "availability", "url", "validFrom",
-        "validThrough", "priceValidUntil", "itemCondition", "seller",
-        "shippingDetails", "hasMerchantReturnPolicy", "category",
-    },
-    "FAQPage": {
-        "name", "url", "description", "mainEntity", "inLanguage",
-        "isPartOf", "about", "author", "datePublished", "dateModified",
-    },
-    "Question": {
-        "name", "text", "acceptedAnswer", "answerCount", "upvoteCount",
-        "dateCreated", "author",
-    },
-    "Answer": {
-        "text", "upvoteCount", "dateCreated", "author",
-    },
-    "HowTo": {
-        "name", "url", "description", "image", "step", "totalTime",
-        "estimatedCost", "supply", "tool", "yield", "performTime",
-        "prepTime", "datePublished", "dateModified", "author",
-    },
-    "ImageObject": {
-        "url", "contentUrl", "width", "height", "caption", "description",
-        "name", "encodingFormat", "thumbnail",
-    },
-    "Person": {
-        "name", "url", "image", "description", "sameAs", "jobTitle",
-        "worksFor", "alumniOf", "knowsAbout", "hasCredential", "award",
-        "telephone", "email", "address", "givenName", "familyName",
-    },
-    "Thing": {
-        "name", "url", "description", "sameAs", "identifier", "image",
-        "alternateName",
-    },
-}
-
-# ORGANICIQ: the table above was written for markup the Topic Hub tool *generates*, so it lists only the properties that tool uses.
-# Audited here, it would call valid markup invalid (dateCreated on an Article, gtin12 on a Product). These are the other common
-# schema.org properties of each type, so only real mistakes (a misspelt `productId`, a property from the wrong type) are flagged.
-_ARTICLE_MORE = {
-    "dateCreated", "creator", "contributor", "thumbnailUrl", "copyrightHolder", "copyrightYear", "isAccessibleForFree", "license",
-    "text", "abstract", "genre", "audience", "isPartOf", "hasPart", "commentCount", "comment", "video", "aggregateRating", "review",
-    "citation", "mentions", "speakable", "educationalLevel", "timeRequired", "position", "publishingPrinciples", "locationCreated",
-    "sourceOrganization", "sameAs", "identifier", "potentialAction", "subjectOf", "alternateName", "editor", "translator", "isBasedOn",
-}
-_PRODUCT_MORE = {
-    "gtin12", "productID", "hasVariant", "isVariantOf", "audience", "award", "countryOfOrigin", "inProductGroupWithID", "itemCondition",
-    "logo", "pattern", "size", "slogan", "sameAs", "additionalProperty", "alternateName", "releaseDate", "potentialAction", "subjectOf",
-    "mainEntityOfPage", "identifier", "hasMerchantReturnPolicy", "positiveNotes", "negativeNotes", "asin", "nsn", "purchaseDate",
-    "keywords", "disambiguatingDescription", "funding", "hasEnergyConsumptionDetails", "isConsumableFor", "manufacturer", "width",
-}
-_OFFER_MORE = {
-    "offeredBy", "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "eligibleRegion", "inventoryLevel", "itemOffered", "priceSpecification",
-    "warranty", "sku", "mpn", "availabilityStarts", "availabilityEnds", "areaServed", "acceptedPaymentMethod", "deliveryLeadTime",
-    "name", "description", "image", "identifier", "businessFunction", "eligibleQuantity", "ineligibleRegion", "mainEntityOfPage",
-    "aggregateRating", "review", "leaseLength", "includesObject", "advanceBookingRequirement",
-}
-for _name in ("Article", "BlogPosting", "NewsArticle"):
-    _VALID_PROPERTIES[_name] |= _ARTICLE_MORE
-_VALID_PROPERTIES["Product"] |= _PRODUCT_MORE
-_VALID_PROPERTIES["Offer"] |= _OFFER_MORE
-
-# Property names we'll auto-replace or strip. None means "delete it."
-_PROPERTY_FIXES: dict[str, dict[str, str | None]] = {
-    "Organization": {"provider": None},
-    "LocalBusiness": {"provider": None},
-    "ProfessionalService": {"provider": None},
-    # about on Service is already removed by fix_about_placement, but we
-    # double-flag any that slip through the per-property validator.
-    "Service": {"about": None},
-}
-
 _META_KEYS = frozenset({"@context", "@type", "@id", "@graph", "@vocab", "@reverse", "@language"})
 
 
 def validate_properties(
     graph: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Strip properties that aren't valid on the node's schema.org @type."""
+    """Strip properties that do not exist in Schema.org, from markup this tool generated.
+
+    The test is the vocabulary itself (`app.schema_validation`), not a list kept by hand: a property is kept when Schema.org defines it, whatever type
+    it is on. A property used on a type it is not defined for is *not* removed here (that is a judgement about meaning; the audit reports it and a person
+    decides). Prefixed properties from another vocabulary, and nodes whose type is not a Schema.org type, are left alone.
+    """
+    from app.schema_validation.vocabulary import load
+
+    vocab = load()
     corrections: list[dict[str, str]] = []
     for node in graph:
         node_type = node.get("@type", "")
         types = [node_type] if isinstance(node_type, str) else list(node_type)
-
-        valid: set[str] = set(_META_KEYS)
-        matched_type = False
-        for t in types:
-            if t in _VALID_PROPERTIES:
-                valid |= _VALID_PROPERTIES[t]
-                matched_type = True
-
-        if not matched_type:
+        if not any(vocab.type_name(t) for t in types):
             continue
-
-        # Apply named fixes first (move/rename specific known-bad properties).
-        for t in types:
-            if t in _PROPERTY_FIXES:
-                for bad_prop, replacement in _PROPERTY_FIXES[t].items():
-                    if bad_prop in node:
-                        val = node.pop(bad_prop)
-                        if replacement and replacement not in node:
-                            node[replacement] = val
-                            detail = (
-                                f"Replaced invalid '{bad_prop}' with '{replacement}' on {t}"
-                            )
-                        else:
-                            detail = f"Removed invalid '{bad_prop}' from {t}"
-                        corrections.append(
-                            {
-                                "transform": "validate_properties",
-                                "node_id": node.get("@id", "?"),
-                                "detail": detail,
-                            }
-                        )
-
-        # Strip any remaining property not in the valid set.
-        invalid_keys = [k for k in node if k not in valid]
-        for k in invalid_keys:
+        for k in [k for k in node if k not in _META_KEYS and not k.startswith("@") and ":" not in k and vocab.property_name(k) is None]:
             node.pop(k)
             corrections.append(
                 {
                     "transform": "validate_properties",
                     "node_id": node.get("@id", "?"),
-                    "detail": (
-                        f"Removed invalid property '{k}' from {'/'.join(types)} "
-                        "(not in schema.org spec)"
-                    ),
+                    "detail": f"Removed '{k}' from {'/'.join(types)}: not a Schema.org property",
                 }
             )
-
     return graph, corrections
 
 
@@ -465,33 +298,40 @@ def validate_properties(
 def validate_id_refs(
     graph: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Flag @id references that don't resolve to any node in the graph.
+    """Flag @id references to a local entity that nothing in the markup defines.
 
-    Pure detection — the bad reference is left in place. Callers may surface
-    the warning so the analyst can fix the source.
+    Pure detection: the reference is left in place. Definitions are every node with an @id and properties of its own, nested ones included, so a node
+    defined inside another counts. An identifier on Schema.org (an enumeration value) or on a site the markup does not define anything on is a
+    legitimate reference, not a dangling one.
     """
     corrections: list[dict[str, str]] = []
-    defined_ids = {node.get("@id") for node in graph if node.get("@id")}
+    defined: set[str] = set()
+    refs: list[tuple[str, str]] = []
 
-    def check_refs(obj: object, parent_path: str = "") -> None:
+    def walk(obj: object, path: str) -> None:
         if isinstance(obj, dict):
-            if list(obj.keys()) == ["@id"] and obj["@id"] not in defined_ids:
-                corrections.append(
-                    {
-                        "transform": "validate_id_refs",
-                        "node_id": parent_path,
-                        "detail": f"Dangling @id reference: {obj['@id']} (at {parent_path})",
-                    }
-                )
+            ident = obj.get("@id")
+            if isinstance(ident, str):
+                if set(obj) == {"@id"}:
+                    refs.append((ident, path))
+                else:
+                    defined.add(ident)
             for k, v in obj.items():
-                check_refs(v, f"{parent_path}.{k}")
+                walk(v, f"{path}.{k}")
         elif isinstance(obj, list):
             for i, v in enumerate(obj):
-                check_refs(v, f"{parent_path}[{i}]")
+                walk(v, f"{path}[{i}]")
 
     for node in graph:
-        check_refs(node, node.get("@id", "root"))
+        walk(node, node.get("@id", "root"))
 
+    hosts = {urlparse(i).netloc.lower() for i in defined if i.startswith("http")}
+    for ident, path in refs:
+        if ident in defined or ident.startswith("_:"):
+            continue
+        local = ident.startswith("#") or (urlparse(ident).netloc.lower() in hosts)
+        if local:
+            corrections.append({"transform": "validate_id_refs", "node_id": path, "detail": f"Dangling @id reference: {ident} (at {path})"})
     return graph, corrections
 
 
