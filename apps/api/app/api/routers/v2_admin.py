@@ -104,6 +104,54 @@ def team_remove(
     return {"removed": removed, "admins_skipped": len(users) - len(removable)}
 
 
+class PeopleIn(BaseModel):
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+@router.post("/team-access/people/remove")
+def remove_people(
+    payload: PeopleIn,
+    admin: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Take people out of the tool: they can no longer sign in and lose every client assignment. Their account is kept (inactive), so work they
+    did stays attributed and Restore brings them back. Not yourself, and not the last active admin."""
+    ids = set(payload.user_ids)
+    users = db.query(User).filter(User.id.in_(ids)).all()
+    if len(users) != len(ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One of those people no longer exists. Reload the page.")
+    if admin.id in ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You can't remove yourself. Ask another admin.")
+    staying = db.query(User).filter(User.role == UserRole.SMA_ADMIN, User.is_active.is_(True), User.id.notin_(ids)).count()
+    if staying == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That would leave no active admin. Keep at least one.")
+    removed = 0
+    for user in users:
+        if user.is_active:
+            user.is_active = False
+            removed += 1
+    db.query(UserClient).filter(UserClient.user_id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"removed": removed}
+
+
+@router.post("/team-access/people/restore")
+def restore_people(
+    payload: PeopleIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Let people sign in again. Their client assignments are not brought back: give those again."""
+    users = db.query(User).filter(User.id.in_(set(payload.user_ids))).all()
+    restored = 0
+    for user in users:
+        if not user.is_active:
+            user.is_active = True
+            restored += 1
+    db.commit()
+    return {"restored": restored}
+
+
 class DeleteIn(BaseModel):
     confirm_name: str
 

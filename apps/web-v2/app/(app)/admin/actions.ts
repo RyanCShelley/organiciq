@@ -90,3 +90,23 @@ export async function teamRemoveAction(userIds: string[], clientIds: string[]): 
     return failure(error, "Access could not be removed: the API did not answer.");
   }
 }
+
+export async function removePeopleAction(userIds: string[]): Promise<Result<{ removed: number }>> {
+  try {
+    const value = await apiFetch<{ removed: number }>("/v2/admin/team-access/people/remove", { method: "POST", body: { user_ids: userIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "They could not be removed: the API did not answer.");
+  }
+}
+
+export async function restorePeopleAction(userIds: string[]): Promise<Result<{ restored: number }>> {
+  try {
+    const value = await apiFetch<{ restored: number }>("/v2/admin/team-access/people/restore", { method: "POST", body: { user_ids: userIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "They could not be restored: the API did not answer.");
+  }
+}

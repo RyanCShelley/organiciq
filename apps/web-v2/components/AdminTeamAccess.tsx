@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
-import { teamAssignAction, teamRemoveAction } from "@/app/(app)/admin/actions";
+import { removePeopleAction, restorePeopleAction, teamAssignAction, teamRemoveAction } from "@/app/(app)/admin/actions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { TeamAccessData } from "@/lib/admin";
 
@@ -31,6 +31,7 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
   const [pending, start] = useTransition();
 
   const users = data.users.filter((u) => u.is_active);
+  const removed = data.users.filter((u) => !u.is_active);
   const shownPeople = useMemo(() => users.filter((u) => `${u.name ?? ""} ${u.email}`.toLowerCase().includes(pq.trim().toLowerCase())), [users, pq]);
   const shownClients = useMemo(() => data.clients.filter((c) => `${c.name} ${c.domain}`.toLowerCase().includes(cq.trim().toLowerCase())), [data.clients, cq]);
   const chosen = users.filter((u) => people.has(u.id));
@@ -60,10 +61,30 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
     });
   };
 
+  const removePeople = () => {
+    if (!window.confirm(`Remove ${people.size} ${people.size === 1 ? "person" : "people"} from Organic IQ? They can no longer sign in and lose access to every client. You can restore them later.`)) return;
+    start(async () => {
+      setMessage(null);
+      const r = await removePeopleAction(Array.from(people));
+      if (!r.ok) return setMessage({ ok: false, text: r.error });
+      setPeople(new Set());
+      setMessage({ ok: true, text: `Removed ${r.value.removed} ${r.value.removed === 1 ? "person" : "people"}. They can no longer sign in.` });
+      router.refresh();
+    });
+  };
+  const restorePerson = (id: string) =>
+    start(async () => {
+      setMessage(null);
+      const r = await restorePeopleAction([id]);
+      if (!r.ok) return setMessage({ ok: false, text: r.error });
+      setMessage({ ok: true, text: "Restored. They can sign in again; give them their clients." });
+      router.refresh();
+    });
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--text-secondary)]">
-        Choose the people, choose the clients, then give or remove access. One person and one client is a single change. An admin sees every client, so there is nothing to give. People appear here after they have signed in once.
+        Choose the people, choose the clients, then give or remove access. One person and one client is a single change. An admin sees every client, so there is nothing to give. To take someone out of the tool entirely, choose them and use Remove from Organic IQ. People appear here after they have signed in once.
       </p>
       <div className="grid gap-4 lg:grid-cols-2">
         <section className={`${box} p-4`} aria-label="People">
@@ -88,6 +109,22 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
             ))}
             {shownPeople.length === 0 ? <li className="py-3 text-[var(--text-secondary)]">No one matches.</li> : null}
           </ul>
+          {removed.length ? (
+            <details className="mt-3 text-sm">
+              <summary className="cursor-pointer text-xs font-semibold">Removed ({removed.length})</summary>
+              <ul className="mt-1 divide-y divide-[var(--border)]">
+                {removed.map((u) => (
+                  <li key={u.id} className="flex items-center gap-3 py-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[var(--text-secondary)]">{u.name || u.email}</span>
+                      {u.name ? <span className="block truncate text-xs text-[var(--text-tertiary)]">{u.email}</span> : null}
+                    </span>
+                    <button type="button" disabled={pending} onClick={() => restorePerson(u.id)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">Restore</button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </section>
 
         <section className={`${box} p-4`} aria-label="Clients">
@@ -121,7 +158,8 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
 
       <div className={`${box} flex flex-wrap items-center gap-3 p-4`}>
         <p className="text-sm">{ready ? <><strong>{people.size}</strong> {people.size === 1 ? "person" : "people"} on <strong>{clients.size}</strong> {clients.size === 1 ? "client" : "clients"}</> : "Choose at least one person and one client."}</p>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button type="button" onClick={removePeople} disabled={pending || people.size === 0} title="Take the chosen people out of Organic IQ" className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:opacity-50">Remove from Organic IQ</button>
           <button type="button" onClick={() => run("remove")} disabled={pending || !ready} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:opacity-50">Remove access</button>
           <button type="button" onClick={() => run("give")} disabled={pending || !ready} className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:opacity-60">{pending ? <><Spinner />Saving…</> : "Give access"}</button>
         </div>

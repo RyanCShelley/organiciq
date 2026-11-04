@@ -137,3 +137,28 @@ def test_bulk_access_is_for_admins_only_and_refuses_people_or_clients_that_do_no
     missing = {"user_ids": [str(uuid.uuid4())], "client_ids": [str(client_a.id)]}
     assert client.post("/v2/admin/team-access/assign", json=missing, headers=auth_header(admin_user.email)).status_code == 404
     assert client.post("/v2/admin/team-access/assign", json={"user_ids": [], "client_ids": [str(client_a.id)]}, headers=auth_header(admin_user.email)).status_code == 422
+
+
+def test_people_are_removed_from_the_tool_and_restored_and_the_last_admin_and_yourself_stay(client, db, client_a, admin_user):
+    from app.models.user import UserClient, UserRole
+
+    one = _staff(db, "gone@smamarketing.com", UserRole.SMA_TEAM)
+    two = _staff(db, "gone2@smamarketing.com", UserRole.SEO_LEAD)
+    db.add(UserClient(user_id=one.id, client_id=client_a.id, role=UserRole.SMA_TEAM))
+    db.commit()
+    h = auth_header(admin_user.email)
+    body = {"user_ids": [str(one.id), str(two.id)]}
+    assert client.post("/v2/admin/team-access/people/remove", json=body, headers=h).json() == {"removed": 2}
+    db.expire_all()
+    assert one.is_active is False and two.is_active is False and db.query(UserClient).filter(UserClient.user_id == one.id).count() == 0
+    # An inactive person is refused on every call, as at sign-in.
+    assert client.get("/v2/admin/team-access", headers=auth_header(one.email)).status_code == 401
+    listed = {u["email"]: u for u in client.get("/v2/admin/team-access", headers=h).json()["users"]}
+    assert listed["gone@smamarketing.com"]["is_active"] is False
+    assert client.post("/v2/admin/team-access/people/restore", json=body, headers=h).json() == {"restored": 2}
+    db.expire_all()
+    assert one.is_active is True
+    assert client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(admin_user.id)]}, headers=h).status_code == 400, "not yourself"
+    other = _staff(db, "boss2@smamarketing.com", UserRole.SMA_ADMIN)
+    assert client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(other.id)]}, headers=h).json() == {"removed": 1}
+    assert client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(admin_user.id), str(one.id)]}, headers=auth_header(other.email)).status_code in (401, 403), "a removed admin cannot act"
