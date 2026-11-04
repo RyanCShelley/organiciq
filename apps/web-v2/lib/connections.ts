@@ -20,6 +20,7 @@ export type BingSite = {
 export type Connections = {
   teamwork_configured: boolean;
   teamwork_tasklist_id: string | null;
+  teamwork_content_tasklist_id: string | null;
   bing_key_configured: boolean;
   bing: BingSite | null;
   se_ranking_key_configured: boolean;

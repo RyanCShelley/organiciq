@@ -70,6 +70,8 @@ class Client(Base):
     #: The Teamwork tasklist a sent growth action lands in. The site and token
     #: are install-wide; this is the only per-client part of the mapping.
     teamwork_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Where content calendar items are sent in Teamwork: its own tasklist, apart from the growth actions'.
+    teamwork_content_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: The margin a keyword→page match must clear to be proposed, calibrated
     #: against this client's own Search Console pairs. One global number
     #: would be too loose for a site of near-identical pages and too tight

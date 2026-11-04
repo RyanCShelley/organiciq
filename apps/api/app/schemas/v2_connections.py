@@ -19,6 +19,7 @@ class BingSiteSet(BaseModel):
 class ConnectionsOut(BaseModel):
     teamwork_configured: bool
     teamwork_tasklist_id: str | None
+    teamwork_content_tasklist_id: str | None
     bing_key_configured: bool
     bing: BingSiteOut | None
     se_ranking_key_configured: bool

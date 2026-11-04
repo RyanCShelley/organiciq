@@ -99,7 +99,7 @@ function ItemPane({ client, item, canEdit, teamwork, people, onChanged }: { clie
         ) : !teamwork.configured ? (
           <p className="text-xs text-[var(--text-tertiary)]">Teamwork is not set up on this install.</p>
         ) : !teamwork.tasklist_id ? (
-          <p className="text-xs text-[var(--text-tertiary)]">This client has no Teamwork tasklist yet. Choose one in Settings → Connections.</p>
+          <p className="text-xs text-[var(--text-tertiary)]">This client has no content tasklist in Teamwork yet. Choose one in Client settings, under Connections.</p>
         ) : canEdit ? (
           <>
             <p className="text-xs text-[var(--text-tertiary)]">Creates one task on the client&apos;s tasklist with the title, due date, assignee and notes. Save changes first: the task is built from what is saved.</p>

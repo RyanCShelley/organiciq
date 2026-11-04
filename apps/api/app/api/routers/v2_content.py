@@ -235,7 +235,7 @@ def calendar(
     rows = q.order_by(ContentItem.due.is_(None), ContentItem.due, ContentItem.created_at).limit(content_calendar.LIMIT).all()
     return {
         "items": [content_calendar.out(r) for r in rows], "can_edit": user.role in CONTENT_EDITOR_ROLES,
-        "teamwork": {"configured": teamwork.configured(), "tasklist_id": client.teamwork_tasklist_id},
+        "teamwork": {"configured": teamwork.configured(), "tasklist_id": client.teamwork_content_tasklist_id},
         "counts": {s: sum(1 for r in rows if r.status == s) for s in content_calendar.STATUSES if s != "dropped"},
     }
 
@@ -311,8 +311,8 @@ def calendar_send(
         return content_calendar.out(item)
     if not teamwork.configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Teamwork is not set up on this install, so the item cannot be sent.")
-    if not client.teamwork_tasklist_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This client has no Teamwork tasklist yet. Choose one in Settings → Connections.")
+    if not client.teamwork_content_tasklist_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This client has no content tasklist in Teamwork yet. Choose one in Client settings, under Connections.")
     try:
         content_calendar.send(db, client, item)
     except teamwork.TeamworkError as exc:

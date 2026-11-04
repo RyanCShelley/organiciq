@@ -85,8 +85,11 @@ def test_an_item_is_sent_to_teamwork_once_and_says_plainly_why_it_cannot_be(clie
     monkeypatch.setattr(teamwork, "configured", lambda: False)
     assert "not set up" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
     monkeypatch.setattr(teamwork, "configured", lambda: True)
-    assert "no Teamwork tasklist" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
-    client_a.teamwork_tasklist_id = "42"
+    assert "no content tasklist" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
+    client_a.teamwork_tasklist_id = "99"          # the growth actions' tasklist is not where content goes
+    db.commit()
+    assert "no content tasklist" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
+    client_a.teamwork_content_tasklist_id = "42"
     db.commit()
     sent = []
     monkeypatch.setattr(teamwork, "list_people", lambda: [])

@@ -128,8 +128,8 @@ def send(db: Session, client: Client, item: ContentItem) -> ContentItem:
     """Create the Teamwork task. Raises teamwork.TeamworkError when it cannot; a second press leaves the first task."""
     if item.teamwork_task_id:
         return item
-    if not client.teamwork_tasklist_id:
-        raise teamwork.TeamworkError("This client has no Teamwork tasklist yet. Choose one in Settings → Connections.")
+    if not client.teamwork_content_tasklist_id:
+        raise teamwork.TeamworkError("This client has no content tasklist in Teamwork yet. Choose one in Client settings, under Connections.")
     assignee = None
     if item.assignee_email:
         try:
@@ -137,7 +137,7 @@ def send(db: Session, client: Client, item: ContentItem) -> ContentItem:
         except teamwork.TeamworkError:
             assignee = None  # sent unassigned rather than not sent
     name, text = description(item, client)
-    created = teamwork.create_task(tasklist_id=client.teamwork_tasklist_id, name=name, description=text, due=item.due.isoformat() if item.due else None, assignee_teamwork_id=assignee)
+    created = teamwork.create_task(tasklist_id=client.teamwork_content_tasklist_id, name=name, description=text, due=item.due.isoformat() if item.due else None, assignee_teamwork_id=assignee)
     item.teamwork_task_id, item.teamwork_task_url = str(created["id"]), created["url"]
     db.commit()
     db.refresh(item)

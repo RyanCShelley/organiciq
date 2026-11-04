@@ -60,9 +60,9 @@ export function V2Shell({
             type="button"
             aria-pressed={ask}
             onClick={() => setAskOpen(!ask)}
-            className={`ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${ask ? "border-[var(--brand-dark)] bg-[var(--brand-dark)] text-white" : "border-[#d6d9de] bg-white text-[var(--text-primary)] hover:bg-[var(--background)]"}`}
+            className={`ml-auto flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm ${ask ? "bg-[var(--brand-dark)] text-white" : "bg-[#00a99d] text-white hover:bg-[var(--brand-teal-hover)]"}`}
           >
-            <MessageSquare size={14} aria-hidden /> Ask
+            <MessageSquare size={16} aria-hidden /> Ask
           </button>
         </header>
         <main className="flex-1 p-8">{children}</main>

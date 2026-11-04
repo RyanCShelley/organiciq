@@ -52,6 +52,7 @@ def get_connections(
     return ConnectionsOut(
         teamwork_configured=teamwork.configured(),
         teamwork_tasklist_id=client.teamwork_tasklist_id,
+        teamwork_content_tasklist_id=client.teamwork_content_tasklist_id,
         bing_key_configured=bool(_key()),
         bing=_bing_out(row),
         se_ranking_key_configured=bool(settings.se_ranking_api_key.strip()),
