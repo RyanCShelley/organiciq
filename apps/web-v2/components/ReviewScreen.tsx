@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState, useTransition } from "react";
 import { clearFocusAction, saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { reachAction, rerunReviewAction } from "@/app/(app)/[clientSlug]/review/actions";
 import { Scorecards } from "@/components/review/Scorecards";
+import { ReviewSummary } from "@/components/review/Summary";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { BucketOverview, ShippedResult } from "@/lib/engine";
@@ -141,98 +142,101 @@ function FocusPanel({
     });
   }
 
+  const hint = FOCUSES.find((o) => o.value === choice)?.hint;
+
   return (
-    <div className="max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 @4xl:max-w-none">
-      <h2 className="text-sm font-semibold">Focus for {monthLabel(planMonth)}</h2>
-      <div className="mt-2 space-y-1.5">
-        {FOCUSES.map((option) => (
-          <label
-            key={option.value}
-            className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-2 text-sm ${
-              choice === option.value ? "border-[var(--brand-teal)] bg-[var(--brand-teal)]/10" : "border-[var(--border)] hover:border-[var(--brand-teal)]"
-            }`}
-          >
-            <input
-              type="radio"
-              name="focus"
-              checked={choice === option.value}
-              onChange={() => {
+    <section aria-label="Focus" className="rounded-2xl border border-[var(--border)] bg-white px-5 py-4">
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div className="min-w-[11rem]">
+          <h2 className="text-sm font-bold">Focus for {monthLabel(planMonth)}</h2>
+          <p className="text-xs text-[var(--text-secondary)]">{hint ?? "What the plan goes after next month"}</p>
+        </div>
+
+        <div role="radiogroup" aria-label="Focus" className="flex overflow-hidden rounded-lg border border-[var(--border)]">
+          {FOCUSES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={choice === option.value}
+              title={option.hint}
+              onClick={() => {
                 setChoice(option.value);
                 setSaved(false);
               }}
-              className="shrink-0"
-            />
-            <span className="min-w-0">
-              <span className="block font-semibold leading-tight">{option.label}</span>
-              <span className="block text-xs text-[var(--text-secondary)]">{option.hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-      <label className="mt-3 block text-sm">
-        <span className="font-semibold">Watchlist bucket</span>
-        <select
-          value={bucketId}
-          onChange={(e) => {
-            setBucketId(e.target.value);
-            setSaved(false);
-          }}
-          className="mt-1 w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm"
-        >
-          <option value="">{buckets.length ? "No bucket chosen" : "No buckets: import the watchlist in Settings"}</option>
-          {buckets.map((b) => {
-            const r = reach.find((x) => x.id === b.id);
-            return (
-              <option key={b.id} value={b.id}>
-                {b.name}
-                {choice === "visibility" && r ? ` (${r.reach === "thin" ? "little to move" : `${r.strong} strong, +${Math.round(r.expected_extra_clicks)} clicks`})` : ""}
-              </option>
-            );
-          })}
-        </select>
-        {choice === "visibility" && thinPick ? (
-          <span className="mt-2 block rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-            {thinPick.name} has almost nothing in reach for Visibility ({thinPick.found} searches, none strong), so
-            it would be a content job.
-            {better ? ` ${better.name} has ${better.strong} strong searches (+${Math.round(better.expected_extra_clicks)} clicks).` : ""}
-          </span>
-        ) : null}
-      </label>
-      <div className="mt-4 flex items-center gap-3">
-        <button
-          type="button"
-          disabled={pending || !choice}
-          onClick={() => run(() => saveFocusAction(client.id, client.slug, planMonth, choice as string, bucketId || null))}
-          className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:hover:bg-[#00a99d]"
-        >
-          Save focus
-        </button>
-        {focus ? (
+              className={`border-l border-[var(--border)] px-4 py-2 text-sm font-semibold first:border-l-0 ${choice === option.value ? "bg-[var(--brand-navy)] text-white" : "bg-white text-[var(--text-primary)] hover:bg-[var(--background)]"}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="min-w-[12rem] flex-1 text-xs font-semibold text-[var(--text-secondary)] sm:max-w-xs">
+          Watchlist bucket
+          <select
+            value={bucketId}
+            onChange={(e) => {
+              setBucketId(e.target.value);
+              setSaved(false);
+            }}
+            className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal text-[var(--text-primary)]"
+          >
+            <option value="">{buckets.length ? "No bucket chosen" : "No buckets: import the watchlist in Settings"}</option>
+            {buckets.map((b) => {
+              const r = reach.find((x) => x.id === b.id);
+              return (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {choice === "visibility" && r ? ` (${r.reach === "thin" ? "little to move" : `${r.strong} strong, +${Math.round(r.expected_extra_clicks)} clicks`})` : ""}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+
+        <div className="ml-auto flex items-center gap-3">
+          {saved ? <span className="text-sm text-[var(--text-secondary)]">Saved.</span> : null}
+          {focus ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                run(
+                  () => clearFocusAction(client.id, client.slug, planMonth),
+                  () => {
+                    setChoice(null);
+                    setBucketId("");
+                  },
+                )
+              }
+              className="text-sm font-semibold text-red-700 hover:underline disabled:opacity-50"
+            >
+              Clear
+            </button>
+          ) : null}
           <button
             type="button"
-            disabled={pending}
-            onClick={() =>
-              run(
-                () => clearFocusAction(client.id, client.slug, planMonth),
-                () => {
-                  setChoice(null);
-                  setBucketId("");
-                },
-              )
-            }
-            className="text-sm font-semibold text-red-700 hover:underline disabled:opacity-50"
+            disabled={pending || !choice}
+            onClick={() => run(() => saveFocusAction(client.id, client.slug, planMonth, choice as string, bucketId || null))}
+            className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-teal-hover)] disabled:cursor-not-allowed disabled:hover:bg-[#00a99d]"
           >
-            Clear
+            Save focus
           </button>
-        ) : null}
-        {saved ? <span className="text-sm text-[var(--text-secondary)]">Saved.</span> : null}
+        </div>
       </div>
+
+      {choice === "visibility" && thinPick ? (
+        <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+          {thinPick.name} has almost nothing in reach for Visibility ({thinPick.found} searches, none strong), so it would be a content job.
+          {better ? ` ${better.name} has ${better.strong} strong searches (+${Math.round(better.expected_extra_clicks)} clicks).` : ""}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">
           {error}
         </p>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -546,7 +550,6 @@ export function ReviewScreen({
       live = false;
     };
   }, [client.id, month]);
-  const [copied, setCopied] = useState(false);
   const prior = review ? monthLabel(review.previous_month).split(" ")[0] : "last month";
   const noun = review?.noun ?? "leads";
 
@@ -575,60 +578,10 @@ export function ReviewScreen({
 
       {review?.scorecards ? <Scorecards data={review.scorecards} /> : null}
 
-      <div className="mb-6 grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_16rem]">
+      <div className="mb-6 space-y-4">
 
-          {review ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Summary</h2>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(review.summary.join("\n"));
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  }}
-                  className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <div className="mt-3 space-y-4">
-                {review.summary_sections.map((section) => (
-                  <div key={section.title}>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{section.title}</h3>
-                    <dl className="mt-1 divide-y divide-[var(--border)]">
-                      {section.rows.map((row) => (
-                        <div key={row.label} className="py-2">
-                          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                            <dt className="text-sm font-semibold">{row.label}</dt>
-                            <dd className="flex flex-wrap items-baseline gap-2 text-right">
-                              <span className="text-base font-semibold tabular-nums">{row.value}</span>
-                              {row.change ? (
-                                <span
-                                  className={`rounded px-1.5 py-0.5 text-xs font-semibold ${row.change.tone === "good" ? "bg-green-50 text-green-800" : row.change.tone === "bad" ? "bg-red-50 text-red-800" : "bg-[var(--bg)] text-[var(--text-secondary)]"}`}
-                                  title={row.change.against}
-                                >
-                                  {row.change.tone === "good" ? "▲ " : row.change.tone === "bad" ? "▼ " : "• "}
-                                  {row.change.text}
-                                </span>
-                              ) : null}
-                            </dd>
-                          </div>
-                          {row.change ? <p className="text-xs text-[var(--text-tertiary)]">{row.change.against}</p> : null}
-                          {row.detail ? <p className="text-xs text-[var(--text-secondary)]">{row.detail}</p> : null}
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-                Worked out from the numbers below. It says what moved, not why.
-              </p>
-            </div>
-          ) : null}
           <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
+          {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
         
       </div>
 
