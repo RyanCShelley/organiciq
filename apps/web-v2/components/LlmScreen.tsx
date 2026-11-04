@@ -790,7 +790,7 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
               ? "The watchlist has no paired AI prompts, so there is nothing to ask. Import them with the watchlist."
               : settings && settings.calls_per_run === 0
                 ? "No AI platform has an API key on this install. Setup shows which are missing."
-                : `Run now asks ${settings?.prompts ?? 0} prompts on each platform (${settings?.calls_per_run ?? 0} answers). Runs then repeat monthly.`}
+                : `Run now asks ${settings?.prompts ?? 0} prompts on each platform (${settings?.calls_per_run ?? 0} answers). Runs then repeat weekly.`}
           </p>
         </div>
       ) : tab === "overview" ? (

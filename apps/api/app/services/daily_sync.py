@@ -311,13 +311,13 @@ def enqueue_due_bing_syncs(db: Session) -> dict[str, int]:
     return {"enqueued": enqueued, "skipped": skipped, "errors": errors, "due": due}
 
 
-#: A run asks every prompt on every platform and is billed per call, so once a month.
-LLM_RUN_INTERVAL_DAYS = 28
+#: A run asks every prompt on every platform and is billed per call (about 6 cents a client). Weekly, so share of voice rests on several runs a month.
+LLM_RUN_INTERVAL_DAYS = 7
 LLM_RETRY_DAYS = 3
 
 
 def enqueue_due_llm_runs(db: Session) -> dict[str, int]:
-    """Queue a monthly LLM visibility run for each worked client that has paired prompts, if a platform has a key."""
+    """Queue a weekly LLM visibility run for each worked client that has paired prompts, if a platform has a key."""
     from app.llm_visibility import platforms, runner
     from app.models.llm_visibility import LlmRun
 

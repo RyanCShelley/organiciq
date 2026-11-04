@@ -224,7 +224,7 @@ def test_the_overview_is_empty_before_a_run_and_a_run_is_not_readable_from_anoth
     assert client.get(f"/v2/llm/runs/{run.id}/responses", headers=other).status_code == 404
 
 
-def test_the_monthly_schedule_queues_clients_with_prompts_and_not_twice(db, client_a, keys, monkeypatch):
+def test_the_schedule_queues_clients_with_prompts_and_not_twice(db, client_a, keys, monkeypatch):
     from app.services import daily_sync
 
     assert daily_sync.enqueue_due_llm_runs(db)["due"] == 0  # no prompts yet
@@ -321,3 +321,18 @@ def test_a_run_marks_prompts_that_name_the_brand(db, client_a, keys, monkeypatch
     assert asked.asked_by_name is True and asked.visibility_type == "Named in prompt"
     plain = rows[("Best mineral sunscreen?", "ChatGPT")]
     assert plain.asked_by_name is False and plain.visibility_type == "Mentioned"
+
+
+def test_a_run_is_due_a_week_after_the_last_one_and_not_before(db, client_a, keys):
+    from datetime import datetime, timedelta, timezone
+
+    from app.services import daily_sync
+
+    _watch(db, client_a, [("a", "p1")])
+    last = LlmRun(client_id=client_a.id, status="completed", started_at=datetime.now(timezone.utc) - timedelta(days=5))
+    db.add(last)
+    db.commit()
+    assert daily_sync.enqueue_due_llm_runs(db)["due"] == 0, "five days is too soon"
+    last.started_at = datetime.now(timezone.utc) - timedelta(days=8)
+    db.commit()
+    assert daily_sync.enqueue_due_llm_runs(db)["enqueued"] == 1, "eight days is a week and more"
