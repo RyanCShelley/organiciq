@@ -46,7 +46,7 @@ STAGE_TEXT = {
     SyncJobStatus.QUEUED: "Waiting its turn",
     SyncJobStatus.FETCHING: "Pulling from the source",
     SyncJobStatus.STAGING: "Saving what came back",
-    SyncJobStatus.NORMALIZING: "Organising it",
+    SyncJobStatus.NORMALIZING: "Organizing it",
     SyncJobStatus.VALIDATING: "Checking it",
     SyncJobStatus.SUCCESSFUL: "Done",
     SyncJobStatus.PARTIAL: "Done, with some gaps",

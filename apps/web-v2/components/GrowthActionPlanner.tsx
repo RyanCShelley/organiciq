@@ -212,7 +212,7 @@ export function GrowthActionPlanner({
       {bundle && bundle.ok ? (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <h5 className="font-semibold">{bundle.draft.title}</h5>
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Tick what to keep, edit a part's steps if you want it said differently, then confirm. Each thing appears here once.</p>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Check what to keep, edit a part's steps if you want it said differently, then confirm. Each thing appears here once.</p>
           <ul className="mt-3 space-y-3">
             {bundle.parts.map((p) => renderPart(p, choices[p.id]?.on ? ++number : null))}
           </ul>

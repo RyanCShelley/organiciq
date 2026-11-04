@@ -43,7 +43,7 @@ function PickBar({
         {diagnosing ? <><Spinner />Reading the pages…</> : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
       </button>
       <span className="text-xs text-[var(--text-secondary)]">
-        Tick up to {max} pages. Each is read live from the client&apos;s site, with what is worth checking on it.
+        Select up to {max} pages. Each is read live from the client&apos;s site, with what is worth checking on it.
       </span>
       {picked.length > 0 ? (
         <button type="button" onClick={onClear} className="text-xs text-[var(--text-secondary)] hover:underline">

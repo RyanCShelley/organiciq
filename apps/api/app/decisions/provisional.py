@@ -6,7 +6,7 @@ read on demand most of that data is absent, so most pages return "no rule fires"
 and not very useful.
 
 This layer says what is still worth looking at, using only what a page read and Search Console
-do know. Every item is labelled *unconfirmed* and names the missing data that would turn it into
+do know. Every item is labeled *unconfirmed* and names the missing data that would turn it into
 a rule. Nothing here is a prescription, nothing is sent to the plan, and the catalog is untouched,
 so the live tool's rules do not change.
 
@@ -387,7 +387,7 @@ def suggest_leads(
                     "Open the page as a visitor from the search that brings them: does the first screen say they are in the right place?",
                     f"The page has {parsed.word_count:,} words in {len(parsed.sections)} headed sections and {parsed.conversion_elements} conversion elements.",
                 ],
-                "Why they leave (speed, mismatch with the search, layout). Page-level behaviour is not pulled.",
+                "Why they leave (speed, mismatch with the search, layout). Page-level behavior is not pulled.",
                 [f"engagement {row['engagement_rate']}% vs site median {med_eng}%"],
             )
         )
@@ -456,7 +456,7 @@ def suggest_leads(
                         "Fix the one that matches how a visitor would act: a shorter form, a call to action near the top, an in-content link to the page that converts.",
                         "Change one thing, so next month's numbers say which one mattered.",
                     ],
-                    "How visitors behave on the page (where they stop). Page-level behaviour is not pulled.",
+                    "How visitors behave on the page (where they stop). Page-level behavior is not pulled.",
                     [f"{row['conversions']} {noun['plural']} from {row['sessions']:,} sessions", f"{parsed.conversion_elements} conversion elements on the page"],
                 )
             )

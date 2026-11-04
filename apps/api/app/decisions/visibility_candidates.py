@@ -258,7 +258,7 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
         if band is None:
             continue
         branded = is_brand(text, brand)
-        # A brand search stays on the list, labelled, with no gain: it is not a ranking problem.
+        # A brand search stays on the list, labeled, with no gain: it is not a ranking problem.
         gain = 0.0 if branded else expected_extra_clicks(row["impressions"], row["position"], band)
         strong = row["impressions"] >= STRONG_MIN_IMPRESSIONS and not branded
         prior, last_year = before.get(text), year_ago.get(text)
@@ -345,7 +345,7 @@ def build(db: Session, client: Client, month: str, bucket_id: UUID | None = None
             "the period after it; position and clicks are steadier.",
             "When a bucket is chosen, a search belongs to it if it contains one of the bucket's watchlist terms.",
             "A search that contains the client's name (or one of its other names) is a brand search: it stays on the list "
-            "at the bottom, labelled, with no expected gain.",
+            "at the bottom, labeled, with no expected gain.",
         ],
     }
 

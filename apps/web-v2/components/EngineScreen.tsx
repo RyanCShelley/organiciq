@@ -525,7 +525,7 @@ export function EngineScreen({
                 {diagnosing ? <><Spinner />Reading the pages…</> : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
               </button>
               <span className="text-xs text-[var(--text-secondary)]">
-                Tick up to {MAX_PICKS}. Each page is read live from the client&apos;s site and checked against the rules.
+                Select up to {MAX_PICKS}. Each page is read live from the client&apos;s site and checked against the rules.
               </span>
               {picked.length > 0 ? (
                 <button type="button" onClick={() => setPicked([])} className="text-xs text-[var(--text-secondary)] hover:underline">

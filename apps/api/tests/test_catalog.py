@@ -133,7 +133,7 @@ def test_v6_fires_when_the_wrong_page_ranks():
 
 
 def test_re_homing_comes_before_optimising_the_page():
-    """Optimising either page before the owner is settled is work on a page
+    """Optimizing either page before the owner is settled is work on a page
     nobody chose."""
     target = _target(ranking_url="https://x/blog/other")
     found = prescribe(target, _page(title="Services | X", headings=()))

@@ -83,7 +83,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
     });
 
   const stop = () => {
-    if (!window.confirm("Stop this pull? What is waiting is cancelled. What is running stops at its next step, within seconds if it is fetching. Data already saved stays.")) return;
+    if (!window.confirm("Stop this pull? What is waiting is canceled. What is running stops at its next step, within seconds if it is fetching. Data already saved stays.")) return;
     start(async () => {
       setError(null);
       const r = await stopPullAction(clientId);
