@@ -81,7 +81,7 @@ class ClientCreate(BaseModel):
     #: token are install-wide; this is the only per-client part, and without
     #: it the slot cards offer Copy instead of Send.
     teamwork_tasklist_id: str | None = None
-    teamwork_content_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -143,7 +143,7 @@ class ClientUpdate(BaseModel):
     #: and token are install-wide; this is the only per-client part, and
     #: without it the slot cards offer Copy instead of Send.
     teamwork_tasklist_id: str | None = None
-    teamwork_content_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None
@@ -202,7 +202,7 @@ class ClientOut(ORMModel):
     competitor_domains: list[str] = []
     account_sheet_url: str | None
     teamwork_tasklist_id: str | None = None
-    teamwork_content_tasklist_id: str | None = None
+    teamwork_content_project_id: str | None = None
     custom_tracked_keyword_limit: int | None = None
     custom_tracked_prompt_limit: int | None = None
     custom_content_allowance: int | None = None

@@ -79,33 +79,41 @@ def test_an_item_is_planned_by_giving_it_a_date_published_by_status_and_removed(
     assert client.patch(f"/v2/content/calendar/{uuid4()}", json={"status": "idea"}, headers=a).status_code == 404
 
 
-def test_an_item_is_sent_to_teamwork_once_and_says_plainly_why_it_cannot_be(client, db, client_a, admin_user, monkeypatch):
+def test_an_item_gets_its_own_teamwork_list_with_a_task_and_says_plainly_why_it_cannot(client, db, client_a, admin_user, monkeypatch):
     a = h(client_a, admin_user)
-    item = client.post("/v2/content/calendar", json={**ITEM, "due": "2026-11-20", "notes": "Cover pricing."}, headers=a).json()
+    client_a.client_name = "Absolutely Natural"
+    db.commit()
+    undated = client.post("/v2/content/calendar", json=ITEM, headers=a).json()
+    item = client.post("/v2/content/calendar", json={**ITEM, "source_key": "dated", "target": "dated", "title": "Natural Relief for Eczema and Psoriasis", "due": "2026-12-23", "notes": "Cover pricing."}, headers=a).json()
     monkeypatch.setattr(teamwork, "configured", lambda: False)
     assert "not set up" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
     monkeypatch.setattr(teamwork, "configured", lambda: True)
-    assert "no content tasklist" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
+    assert "no Teamwork project for content" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
     client_a.teamwork_tasklist_id = "99"          # the growth actions' tasklist is not where content goes
+    client_a.teamwork_content_project_id = "555"
     db.commit()
-    assert "no content tasklist" in client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["detail"]
-    client_a.teamwork_content_tasklist_id = "42"
-    db.commit()
-    sent = []
+    assert "publish date" in client.post(f"/v2/content/calendar/{undated['id']}/send", headers=a).json()["detail"]
+    lists, tasks = [], []
     monkeypatch.setattr(teamwork, "list_people", lambda: [])
-    monkeypatch.setattr(teamwork, "create_task", lambda **kw: sent.append(kw) or {"id": 7, "url": "https://tw.example/app/tasks/7"})
+    monkeypatch.setattr(teamwork, "create_tasklist", lambda **kw: lists.append(kw) or "700")
+    monkeypatch.setattr(teamwork, "create_task", lambda **kw: tasks.append(kw) or {"id": 7, "url": "https://tw.example/app/tasks/7"})
     out = client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()
     assert out["teamwork_task_id"] == "7" and out["teamwork_task_url"].endswith("/7")
-    assert sent[0]["tasklist_id"] == "42" and sent[0]["due"] == "2026-11-20" and sent[0]["name"] == "Write: AEO agency guide"
-    assert "Search to win: aeo agency" in sent[0]["description"] and "Cover pricing." in sent[0]["description"]
-    assert client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["teamwork_task_id"] == "7" and len(sent) == 1
+    assert lists[0]["project_id"] == "555" and lists[0]["name"] == "Absolutely Natural · Publish Date 12/23/26 Natural Relief for Eczema and Psoriasis" and lists[0]["description"] == "Cover pricing."
+    assert tasks[0]["tasklist_id"] == "700" and tasks[0]["due"] == "2026-12-23" and tasks[0]["name"] == "Write: Natural Relief for Eczema and Psoriasis"
+    assert "Search to win: dated" in tasks[0]["description"] and "Cover pricing." in tasks[0]["description"]
+    assert client.post(f"/v2/content/calendar/{item['id']}/send", headers=a).json()["teamwork_task_id"] == "7" and len(lists) == 1 and len(tasks) == 1
 
+    # A list made and a task refused: the next press keeps the list and retries only the task.
     def refuse(**kw):
         raise teamwork.TeamworkError("Teamwork refused the task (403): no")
 
-    other = client.post("/v2/content/calendar", json={**ITEM, "source_key": "b", "target": "b"}, headers=a).json()
+    other = client.post("/v2/content/calendar", json={**ITEM, "source_key": "b", "target": "b", "title": "Second", "due": "2026-12-30"}, headers=a).json()
     monkeypatch.setattr(teamwork, "create_task", refuse)
     assert client.post(f"/v2/content/calendar/{other['id']}/send", headers=a).status_code == 502
+    monkeypatch.setattr(teamwork, "create_task", lambda **kw: tasks.append(kw) or {"id": 8, "url": "https://tw.example/app/tasks/8"})
+    assert client.post(f"/v2/content/calendar/{other['id']}/send", headers=a).json()["teamwork_task_id"] == "8"
+    assert len(lists) == 2 and tasks[-1]["tasklist_id"] == "700"
 
 
 def test_a_tracked_term_that_fell_on_a_page_lists_it_for_a_refresh_and_brand_terms_never_do(client, db, client_a, admin_user):

@@ -163,6 +163,7 @@ export type CalendarItem = {
   notes: string | null;
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
+  teamwork_tasklist_id?: string | null;
   published_at: string | null;
   created_by: string;
   created_at: string | null;
@@ -170,7 +171,7 @@ export type CalendarItem = {
 export type CalendarData = {
   items: CalendarItem[];
   can_edit: boolean;
-  teamwork: { configured: boolean; tasklist_id: string | null };
+  teamwork: { configured: boolean; project_id: string | null };
   counts: Record<string, number>;
 };
 export type Person = { email: string; name: string | null };

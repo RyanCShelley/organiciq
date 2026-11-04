@@ -173,6 +173,46 @@ def create_task(
     }
 
 
+def create_tasklist(
+    *,
+    project_id: str,
+    name: str,
+    description: str = "",
+    config: TeamworkConfig | None = None,
+    client: httpx.Client | None = None,
+) -> str:
+    """Create a tasklist in a project and return its id."""
+    config = config or load_config()
+    if config is None:
+        raise TeamworkError("Teamwork is not configured. Set TEAMWORK_SITE and TEAMWORK_API_TOKEN.")
+    if not project_id:
+        raise TeamworkError("This client has no Teamwork project for content yet, so there is nowhere to make the list.")
+    owns_client = client is None
+    client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
+    try:
+        response = client.post(
+            f"{config.base_url}/projects/api/v3/projects/{project_id}/tasklists.json",
+            json={"tasklist": {"name": name[:MAX_NAME], "description": description}},
+            headers={"Authorization": config.auth_header, "Content-Type": "application/json"},
+        )
+    except httpx.HTTPError as exc:
+        raise TeamworkError(f"Teamwork did not answer: {exc}") from exc
+    finally:
+        if owns_client:
+            client.close()
+    if response.status_code >= 400:
+        raise TeamworkError(f"Teamwork refused the list ({response.status_code}): {response.text[:300]}")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise TeamworkError("Teamwork returned something that was not JSON.") from exc
+    made = body.get("tasklist") or {}
+    list_id = made.get("id") or (body.get("tasklists") or [{}])[0].get("id")
+    if list_id is None:
+        raise TeamworkError("Teamwork accepted the list but returned no id.")
+    return str(list_id)
+
+
 @dataclass(frozen=True)
 class TaskList:
     """One tasklist, with the project it belongs to.

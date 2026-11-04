@@ -172,6 +172,8 @@ class ContentItem(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     teamwork_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The Teamwork list made for this item, kept so a send that failed halfway does not make a second list.
+    teamwork_tasklist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

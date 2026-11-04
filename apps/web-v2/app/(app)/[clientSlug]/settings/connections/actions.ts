@@ -129,6 +129,24 @@ export async function clearBingAction(clientId: string, slug: string): Promise<A
   return save(slug, "/v2/connections/bing", clientId, undefined, "DELETE");
 }
 
+/** The projects the token can see, found from its tasklists (a project is what content lists are made in). */
+export async function loadTeamworkProjectsAction(clientId: string): Promise<OptionsResult> {
+  try {
+    const res = await apiFetch<{
+      configured: boolean;
+      error: string | null;
+      tasklists: { id: string; name: string; project_id: string | null; project_name: string | null }[];
+    }>("/decisions/teamwork/tasklists", { clientId });
+    if (!res.configured) return { ok: false, error: "Teamwork is not set up on this install." };
+    if (res.error) return { ok: false, error: res.error };
+    const seen = new Map<string, string>();
+    for (const t of res.tasklists) if (t.project_id && !seen.has(t.project_id)) seen.set(t.project_id, t.project_name ?? `Project ${t.project_id}`);
+    return { ok: true, options: Array.from(seen, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label)) };
+  } catch (error) {
+    return { ok: false, error: error instanceof ApiError ? error.message : "The projects could not be read: the API did not answer." };
+  }
+}
+
 export async function loadTeamworkTasklistsAction(clientId: string): Promise<OptionsResult> {
   try {
     const res = await apiFetch<{

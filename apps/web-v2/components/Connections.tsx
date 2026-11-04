@@ -315,30 +315,30 @@ export function ConnectionsPanel({
         <Row
           logo="teamwork"
           name="Teamwork: content"
-          value={connections.teamwork_content_tasklist_id ? `Tasklist ${connections.teamwork_content_tasklist_id}` : null}
-          tone={!connections.teamwork_configured ? "bad" : connections.teamwork_content_tasklist_id ? "ok" : "off"}
-          status={!connections.teamwork_configured ? "Not configured" : connections.teamwork_content_tasklist_id ? "Connected" : "Not set up"}
-          error={connections.teamwork_configured ? null : "This install has no Teamwork site or token (TEAMWORK_SITE, TEAMWORK_API_TOKEN), so content items can be added to the calendar but not sent."}
-          action={connections.teamwork_content_tasklist_id ? "Change" : "Choose"}
+          value={connections.teamwork_content_project_id ? `Project ${connections.teamwork_content_project_id}` : null}
+          tone={!connections.teamwork_configured ? "bad" : connections.teamwork_content_project_id ? "ok" : "off"}
+          status={!connections.teamwork_configured ? "Not configured" : connections.teamwork_content_project_id ? "Connected" : "Not set up"}
+          error={connections.teamwork_configured ? null : "This install has no Teamwork site or token (TEAMWORK_SITE, TEAMWORK_API_TOKEN), so content items can be added to the calendar but not sent. Each item gets its own list in the project you choose here."}
+          action={connections.teamwork_content_project_id ? "Change" : "Choose"}
           open={open === "twc"}
           onToggle={() => toggle("twc")}
         >
           {connections.teamwork_configured ? (
             <div className="space-y-4">
               <Picker
-                label="Content tasklist"
-                load={() => act.loadTeamworkTasklistsAction(client.id)}
-                save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_tasklist_id: v })}
-                empty="This Teamwork token can't see any tasklists."
+                label="Content project"
+                load={() => act.loadTeamworkProjectsAction(client.id)}
+                save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_project_id: v })}
+                empty="This Teamwork token can't see any projects."
                 onSaved={close}
               />
               <div>
-                <p className="mb-1 text-xs text-[var(--text-secondary)]">Or enter a tasklist ID</p>
-                <TypedValue placeholder="Tasklist ID" initial={connections.teamwork_content_tasklist_id ?? ""} save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_tasklist_id: v })} onSaved={close} />
+                <p className="mb-1 text-xs text-[var(--text-secondary)]">Or enter a project ID</p>
+                <TypedValue placeholder="Project ID" initial={connections.teamwork_content_project_id ?? ""} save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_project_id: v })} onSaved={close} />
               </div>
             </div>
           ) : (
-            <TypedValue placeholder="Tasklist ID" initial={connections.teamwork_content_tasklist_id ?? ""} save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_tasklist_id: v })} onSaved={close} />
+            <TypedValue placeholder="Project ID" initial={connections.teamwork_content_project_id ?? ""} save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_project_id: v })} onSaved={close} />
           )}
         </Row>
       </ul>

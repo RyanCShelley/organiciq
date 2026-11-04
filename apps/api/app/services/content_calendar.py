@@ -124,20 +124,34 @@ def description(item: ContentItem, client: Client) -> tuple[str, str]:
     return name, text
 
 
+def list_name(item: ContentItem, client: Client) -> str:
+    """How the team names a content list in Teamwork: the client, the publish date, then the title."""
+    when = item.due.strftime("%m/%d/%y") if item.due else ""
+    return f"{client.client_name} · Publish Date {when} {item.title}".strip()
+
+
 def send(db: Session, client: Client, item: ContentItem) -> ContentItem:
-    """Create the Teamwork task. Raises teamwork.TeamworkError when it cannot; a second press leaves the first task."""
+    """Make this item's own list in the client's content project, with one task in it. Raises teamwork.TeamworkError when it cannot.
+
+    A second press leaves the first task. If the list was made and the task was not, the list is kept and only the task is retried.
+    """
     if item.teamwork_task_id:
         return item
-    if not client.teamwork_content_tasklist_id:
-        raise teamwork.TeamworkError("This client has no content tasklist in Teamwork yet. Choose one in Client settings, under Connections.")
+    if not client.teamwork_content_project_id:
+        raise teamwork.TeamworkError("This client has no Teamwork project for content yet. Choose one in Client settings, under Connections.")
+    if not item.due:
+        raise teamwork.TeamworkError("Set a publish date (the due date) first: it goes in the list's name.")
+    name, text = description(item, client)
+    if not item.teamwork_tasklist_id:
+        item.teamwork_tasklist_id = teamwork.create_tasklist(project_id=client.teamwork_content_project_id, name=list_name(item, client), description=(item.notes or text)[:8000])
+        db.commit()
     assignee = None
     if item.assignee_email:
         try:
             assignee = teamwork.person_id_for(item.assignee_email, teamwork.list_people())
         except teamwork.TeamworkError:
             assignee = None  # sent unassigned rather than not sent
-    name, text = description(item, client)
-    created = teamwork.create_task(tasklist_id=client.teamwork_content_tasklist_id, name=name, description=text, due=item.due.isoformat() if item.due else None, assignee_teamwork_id=assignee)
+    created = teamwork.create_task(tasklist_id=item.teamwork_tasklist_id, name=name, description=text, due=item.due.isoformat(), assignee_teamwork_id=assignee)
     item.teamwork_task_id, item.teamwork_task_url = str(created["id"]), created["url"]
     db.commit()
     db.refresh(item)

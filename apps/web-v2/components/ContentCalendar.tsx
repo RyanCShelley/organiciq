@@ -98,11 +98,13 @@ function ItemPane({ client, item, canEdit, teamwork, people, onChanged }: { clie
           <p className="text-xs">Sent as a task. <a href={item.teamwork_task_url ?? "#"} target="_blank" rel="noreferrer" className="font-semibold underline">Open in Teamwork</a></p>
         ) : !teamwork.configured ? (
           <p className="text-xs text-[var(--text-tertiary)]">Teamwork is not set up on this install.</p>
-        ) : !teamwork.tasklist_id ? (
-          <p className="text-xs text-[var(--text-tertiary)]">This client has no content tasklist in Teamwork yet. Choose one in Client settings, under Connections.</p>
+        ) : !teamwork.project_id ? (
+          <p className="text-xs text-[var(--text-tertiary)]">This client has no Teamwork project for content yet. Choose one in Client settings, under Connections.</p>
+        ) : !item.due ? (
+          <p className="text-xs text-[var(--text-tertiary)]">Set a publish date (the due date) and save: it goes in the Teamwork list&apos;s name.</p>
         ) : canEdit ? (
           <>
-            <p className="text-xs text-[var(--text-tertiary)]">Creates one task on the client&apos;s tasklist with the title, due date, assignee and notes. Save changes first: the task is built from what is saved.</p>
+            <p className="text-xs text-[var(--text-tertiary)]">Makes a new list in the client&apos;s Teamwork content project, named with the client, the publish date and the title, with the notes as its description and one task for the work. The due date is the publish date. Save changes first: it is built from what is saved.</p>
             <button type="button" onClick={send} disabled={pending} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-xs font-semibold disabled:opacity-50">Send to Teamwork</button>
           </>
         ) : (
