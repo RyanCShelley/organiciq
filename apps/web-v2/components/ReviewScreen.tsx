@@ -143,7 +143,7 @@ function FocusPanel({
   }
 
   return (
-    <div className="max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 @4xl:max-w-none">
+    <div className="max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <h2 className="text-sm font-semibold">Focus for {monthLabel(planMonth)}</h2>
       <div className="mt-2 space-y-1.5">
         {FOCUSES.map((option) => (
@@ -575,7 +575,7 @@ export function ReviewScreen({
 
       {review?.scorecards ? <Scorecards data={review.scorecards} /> : null}
 
-      <div className="mb-6 grid items-start gap-6 @4xl:grid-cols-[minmax(0,1fr)_16rem]">
+      <div className="mb-6 space-y-4">
 
           {review ? <ReviewSummary lines={review.summary} sections={review.summary_sections} /> : null}
           <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} />
