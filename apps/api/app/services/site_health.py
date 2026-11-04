@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.client import Client
@@ -475,7 +476,14 @@ def record(db: Session, client: Client, today: date | None = None) -> SiteHealth
     from fastapi.encoders import jsonable_encoder
 
     row.crawl_date, row.payload = crawl_date, jsonable_encoder(payload)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request wrote this month's row first: take theirs and write over it.
+        db.rollback()
+        row = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == month).one()
+        row.crawl_date, row.payload = crawl_date, jsonable_encoder(payload)
+        db.commit()
     return row
 
 
@@ -524,6 +532,8 @@ def for_month(db: Session, client: Client, month: str, today: date | None = None
         labels = {c["key"]: c["label"] for c in payload["seo"]["checks"]}
         labels.update({f"geo:{x['key']}": f"GEO: {x['label']}" for x in payload["geo"]["signals"]})
         for key, urls in now_sets.items():
+            if key not in was_sets:
+                continue  # a check that did not exist last month has nothing to compare with: every URL would read as new
             new, fixed = sorted(urls - was_sets.get(key, set())), sorted(was_sets.get(key, set()) - urls)
             if new or fixed:
                 changes.append({"key": key, "label": labels[key], "new": new[:50], "fixed": fixed[:50], "new_count": len(new), "fixed_count": len(fixed)})

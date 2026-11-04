@@ -44,9 +44,9 @@ export async function llmMonthSovAction(clientId: string, month?: string): Promi
   }
 }
 
-export async function llmMonthResponsesAction(clientId: string, month: string): Promise<LlmResult<LlmResponseRow[]>> {
+export async function llmMonthResponsesAction(clientId: string, month: string): Promise<LlmResult<{ answers: LlmResponseRow[]; total: number }>> {
   try {
-    return { ok: true, value: await apiFetch<LlmResponseRow[]>(`/v2/llm/share-of-voice/responses?month=${encodeURIComponent(month)}`, { clientId }) };
+    return { ok: true, value: await apiFetch<{ answers: LlmResponseRow[]; total: number }>(`/v2/llm/share-of-voice/responses?month=${encodeURIComponent(month)}`, { clientId }) };
   } catch (error) {
     return failure(error, "The answers could not be read: the API did not answer.");
   }

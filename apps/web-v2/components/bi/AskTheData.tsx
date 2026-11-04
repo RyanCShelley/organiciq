@@ -76,13 +76,20 @@ export function AskTheData({ clientId, info, embedded = false, getPage, examples
 
   useEffect(() => {
     if (!running) return;
+    let looking = false; // a slow API must not stack polls on top of each other
     const timer = setInterval(async () => {
-      for (const id of running.split(",")) {
-        const r = await askStatusAction(clientId, id);
-        if (r.ok) {
-          setItems((all) => all.map((x) => (x.id === id ? r.item : x)));
-          setLeft(r.left_usd);
+      if (looking) return;
+      looking = true;
+      try {
+        for (const id of running.split(",")) {
+          const r = await askStatusAction(clientId, id);
+          if (r.ok) {
+            setItems((all) => all.map((x) => (x.id === id ? r.item : x)));
+            setLeft(r.left_usd);
+          } else setError(r.error);
         }
+      } finally {
+        looking = false;
       }
     }, 2500);
     return () => clearInterval(timer);

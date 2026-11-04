@@ -159,5 +159,7 @@ def send(db: Session, client: Client, item: ContentItem) -> ContentItem:
 
 
 def set_status(item: ContentItem, status: str) -> None:
+    if status == item.status:
+        return  # saved again as it is: the publish date stays
     item.status = status
     item.published_at = datetime.now(timezone.utc) if status == "published" else None

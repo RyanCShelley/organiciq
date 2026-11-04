@@ -155,6 +155,7 @@ def _llm(db: Session, client: Client, month: str) -> dict[str, Any] | None:
         runs = [latest]
         older = done.filter(LlmRun.started_at < latest.started_at).order_by(LlmRun.started_at.desc()).first()
         prev_runs = [older] if older else []
+    scale = len(runs) / len(prev_runs) if prev_runs else 1.0
     rows = [r for run in runs for r in db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()]
     prev_rows = [r for run in prev_runs for r in db.query(LlmResponse).filter(LlmResponse.run_id == run.id).all()] if prev_runs else None
     return {
@@ -164,15 +165,16 @@ def _llm(db: Session, client: Client, month: str) -> dict[str, Any] | None:
         "in_month": in_month,
         "previous_run_date": prev_runs[-1].started_at.date().isoformat() if prev_runs else None,
         "previous_runs": len(prev_runs),
-        "summary": report.summary(rows, prev_rows),
-        "platforms": report.platform_deltas(rows, prev_rows),
+        "summary": report.summary(rows, prev_rows, scale),
+        "platforms": report.platform_deltas(rows, prev_rows, scale),
+        "_scale": scale,
         "brand_check": report.brand_check(rows)["platforms"],
         "_rows": rows,
         "_prev": prev_rows,
     }
 
 
-def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dict[str, Any] | None:
+def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None, prev_scale: float = 1.0) -> dict[str, Any] | None:
     """How the platforms answered one term's paired prompt: how many named or cited the brand, against the last run."""
     if not prompt:
         return None
@@ -203,8 +205,9 @@ def _term_ai(prompt: str | None, rows: list[Any], prev: list[Any] | None) -> dic
         "platforms": now[0],
         "cited": now[1],
         "mentioned": now[2],
-        "previous_cited": then[1] if then else None,
-        "previous_mentioned": then[2] if then else None,
+        # Counts over the runs of the month before, brought to this month's number of runs.
+        "previous_cited": round(then[1] * prev_scale, 1) if then else None,
+        "previous_mentioned": round(then[2] * prev_scale, 1) if then else None,
     }
 
 
@@ -248,7 +251,7 @@ def build_visibility(db: Session, client: Client, month: str) -> dict | None:
                 "google": google,
                 "bing": bing,
                 "status": status_for(google, bing),
-                "ai": _term_ai(keyword.paired_ai_prompt, llm_rows, llm_prev),
+                "ai": _term_ai(keyword.paired_ai_prompt, llm_rows, llm_prev, llm["_scale"] if llm else 1.0),
             }
         )
 

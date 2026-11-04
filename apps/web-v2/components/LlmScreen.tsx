@@ -248,19 +248,23 @@ type VoiceSource = { kind: "month"; month: string } | { kind: "run"; runId: stri
 
 function VoicePane({ client, self, source, cluster, brand }: { client: Client; self: string; source: VoiceSource; cluster: string; brand: string | null }) {
   const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
+  const [leftOut, setLeftOut] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const sourceKey = source.kind === "month" ? `m${source.month}` : `r${source.runId}`;
   useEffect(() => {
     setRows(null);
+    setLeftOut(0);
     setError(null);
     setOpen(null);
     let live = true;
     const load = source.kind === "month" ? llmMonthResponsesAction(client.id, source.month) : llmResponsesAction(client.id, source.runId);
     void load.then((r) => {
       if (!live) return;
-      if (r.ok) setRows(r.value);
-      else setError(r.error);
+      if (!r.ok) return setError(r.error);
+      if (Array.isArray(r.value)) return setRows(r.value);
+      setRows(r.value.answers);
+      setLeftOut(Math.max(r.value.total - r.value.answers.length, 0));
     });
     return () => {
       live = false;
@@ -287,6 +291,7 @@ function VoicePane({ client, self, source, cluster, brand }: { client: Client; s
       </div>
       {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
       {!rows && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Loading the answers…</p> : null}
+      {leftOut > 0 ? <p role="status" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Showing the newest {rows?.length} answers; {leftOut} older ones are left out, so the counts here are short of the month&apos;s.</p> : null}
       {rows ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -797,7 +802,16 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
   // A run takes minutes; look again until it lands.
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => router.refresh(), 8000);
+    // Look for twenty minutes at most: a first run that failed leaves nothing to land, and must not refresh the page for ever.
+    let looks = 0;
+    const t = setInterval(() => {
+      if (++looks > 150) {
+        clearInterval(t);
+        setQueued(false);
+        return;
+      }
+      router.refresh();
+    }, 8000);
     return () => clearInterval(t);
   }, [running, router]);
   useEffect(() => {

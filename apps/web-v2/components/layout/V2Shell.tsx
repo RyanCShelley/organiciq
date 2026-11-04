@@ -2,7 +2,7 @@
 
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useParams, usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 
 import { AskPanel } from "@/components/layout/AskPanel";
 import { locate, suggestionsFor } from "@/components/layout/nav-config";
@@ -27,7 +27,8 @@ export function V2Shell({
   const { clientSlug } = useParams<{ clientSlug?: string }>();
   const pathname = usePathname();
   const [ask, setAsk] = useState(false);
-  useEffect(() => {
+  // Before the first paint, so a panel left open does not flash shut and then open.
+  useLayoutEffect(() => {
     try {
       setAsk(localStorage.getItem(ASK_KEY) === "1");
     } catch {
@@ -65,7 +66,7 @@ export function V2Shell({
             <MessageSquare size={16} aria-hidden /> Ask
           </button>
         </header>
-        <main className="flex-1 p-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-auto p-8">{children}</main>
       </div>
       {ask ? <AskPanel clientId={client?.id ?? null} page={[client?.client_name, page].filter(Boolean).join(" · ") || "Organic IQ"} examples={suggestionsFor(pathname, clientSlug)} onClose={() => setAskOpen(false)} /> : null}
     </div>

@@ -31,7 +31,7 @@ export function AskPanel({ clientId, page, examples, onClose }: { clientId: stri
   };
 
   return (
-    <aside aria-label="Ask Organic IQ" className="sticky top-0 flex h-screen w-[360px] shrink-0 flex-col border-l border-[var(--border)] bg-white">
+    <aside aria-label="Ask Organic IQ" className="fixed right-0 top-0 z-30 flex h-screen w-[360px] max-w-full shrink-0 flex-col border-l border-[var(--border)] bg-white shadow-xl xl:sticky xl:z-auto xl:shadow-none">
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
         <Sparkles size={16} className="text-[var(--brand-teal)]" aria-hidden />
         <h2 className="text-base font-bold">Ask Organic IQ</h2>

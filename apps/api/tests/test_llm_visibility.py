@@ -366,11 +366,21 @@ def test_share_of_voice_over_a_month_pools_every_run_and_shows_how_each_run_diff
     assert rows[brand]["by_run"] == [0.5, 0.5] and rows["Badger"]["by_run"] == [1.0, 0.5] and round(rows["Badger"]["share"]["current"], 4) == 0.6667
     september = client.get("/v2/llm/share-of-voice", params={"month": "2026-09"}, headers=h).json()
     assert september["answers"] == 2 and september["previous_runs"] == 0 and next(r for r in september["share_of_voice"] if r["brand"] == brand)["share"]["previous"] is None
-    answers = client.get("/v2/llm/share-of-voice/responses", params={"month": "2026-10"}, headers=h).json()
-    assert len(answers) == 6 and answers[0]["run_started_at"].startswith("2026-10-09") and answers[-1]["run_started_at"].startswith("2026-10-02")
+    body = client.get("/v2/llm/share-of-voice/responses", params={"month": "2026-10"}, headers=h).json()
+    answers = body["answers"]
+    assert body["total"] == 6 and len(answers) == 6 and answers[0]["run_started_at"].startswith("2026-10-09") and answers[-1]["run_started_at"].startswith("2026-10-02")
     assert client.get("/v2/llm/share-of-voice", params={"month": "October"}, headers=h).status_code == 400
 
 
 def test_a_client_with_no_runs_has_an_empty_month_view(client, db, client_a, admin_user):
     out = client.get("/v2/llm/share-of-voice", headers=client_header(client_a.id, admin_user.email)).json()
     assert out["month"] is None and out["months"] == [] and out["share_of_voice"] == []
+
+
+def test_counts_against_a_month_with_more_runs_are_brought_to_the_same_number_of_runs():
+    """A month with 1 run so far against one with 4: 4 mentions then is 1 per run, the same as 1 mention now, not a fall of 3."""
+    from app.llm_visibility import report
+
+    pair = report._pair(1, 4, 1 / 4)
+    assert pair["previous"] == 1.0 and pair["delta"] == 0.0
+    assert report._pair(3, 2)["previous"] == 2 and report._pair(3, None, 0.5)["previous"] is None

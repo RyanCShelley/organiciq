@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.client import Client
 from app.models.llm_visibility import LlmResponse, LlmRun
 
-MONTH_ANSWER_CAP = 600
+MONTH_ANSWER_CAP = 2000
 VISIBLE = ("Cited + Mentioned", "Cited", "Mentioned")
 CODES = {"Cited + Mentioned": "C+M", "Cited": "C", "Mentioned": "M"}
 
@@ -45,7 +45,10 @@ def brand_check(rows: Iterable[Any]) -> dict[str, Any]:
     }
 
 
-def _pair(current: float, previous: float | None) -> dict[str, float | None]:
+def _pair(current: float, previous: float | None, scale: float = 1.0) -> dict[str, float | None]:
+    """`scale` brings a previous count to the current side's number of runs (a month with 1 run so far against one with 4), so counts compare like with like."""
+    if previous is not None and scale != 1.0:
+        previous = round(previous * scale, 1)
     return {"current": current, "previous": previous, "delta": None if previous is None else round(current - previous, 4)}
 
 
@@ -79,7 +82,7 @@ def _rank(b: dict[str, float]) -> float | None:
     return round(b["rank_sum"] / b["rank_n"], 2) if b["rank_n"] else None
 
 
-def platform_deltas(current: list[Any], previous: list[Any] | None) -> list[dict[str, Any]]:
+def platform_deltas(current: list[Any], previous: list[Any] | None, prev_scale: float = 1.0) -> list[dict[str, Any]]:
     cur = _platform_bucket(current)
     prev = _platform_bucket(previous) if previous is not None else None
     out = []
@@ -90,8 +93,8 @@ def platform_deltas(current: list[Any], previous: list[Any] | None) -> list[dict
                 "platform": platform,
                 "queries_checked": int(c["n"]),
                 "by_type": {"cited_mentioned": int(c["cm"]), "cited": int(c["c"]), "mentioned": int(c["m"]), "not_visible": int(c["nv"])},
-                "mentions": _pair(c["mentions"], p["mentions"] if p else (0 if prev is not None else None)),
-                "citations": _pair(c["citations"], p["citations"] if p else (0 if prev is not None else None)),
+                "mentions": _pair(c["mentions"], p["mentions"] if p else (0 if prev is not None else None), prev_scale),
+                "citations": _pair(c["citations"], p["citations"] if p else (0 if prev is not None else None), prev_scale),
                 "visibility_rate": _pair(_rate(c), _rate(p) if p else (0.0 if prev is not None else None)),
                 "avg_brand_rank": {"current": _rank(c), "previous": _rank(p) if p else None},
             }
@@ -112,7 +115,7 @@ def _sov_bucket(rows: list[Any], brand: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-def share_of_voice(current: list[Any], previous: list[Any] | None, brand: str) -> list[dict[str, Any]]:
+def share_of_voice(current: list[Any], previous: list[Any] | None, brand: str, prev_scale: float = 1.0) -> list[dict[str, Any]]:
     cur = _sov_bucket(current, brand)
     prev = _sov_bucket(previous, brand) if previous is not None else None
     out = []
@@ -127,7 +130,7 @@ def share_of_voice(current: list[Any], previous: list[Any] | None, brand: str) -
                     "topic_cluster": cluster,
                     "brand": name,
                     "is_self": name == brand,
-                    "mentions": _pair(info["count"], (pinfo["count"] if pinfo else 0) if pbucket else None),
+                    "mentions": _pair(info["count"], (pinfo["count"] if pinfo else 0) if pbucket else None, prev_scale),
                     "share": _pair(share, prev_share),
                     "responses": bucket["total"],
                 }
@@ -180,7 +183,7 @@ def movers(rows: list[dict[str, Any]], limit: int = 5) -> dict[str, list[dict[st
     return {"improved": improved[:limit], "declined": declined[:limit]}
 
 
-def summary(current: list[Any], previous: list[Any] | None) -> dict[str, Any]:
+def summary(current: list[Any], previous: list[Any] | None, prev_scale: float = 1.0) -> dict[str, Any]:
     def tally(rows: list[Any]) -> tuple[int, int, int, int]:
         valid = _valid(rows)
         return (
@@ -197,8 +200,8 @@ def summary(current: list[Any], previous: list[Any] | None) -> dict[str, Any]:
     rate = round(v / n, 4) if n else 0.0
     prev_rate = round(pv / pn, 4) if pn else (0.0 if previous is not None else None)
     return {
-        "mentions": _pair(m, pm),
-        "citations": _pair(c, pc),
+        "mentions": _pair(m, pm, prev_scale),
+        "citations": _pair(c, pc, prev_scale),
         "visibility_rate": _pair(rate, prev_rate),
         "responses": n,
     }
@@ -248,7 +251,7 @@ def month_share_of_voice(db: Session, client: Client, brand: str, month: str) ->
     pooled = [row for rows in per_run for row in rows]
     prev_runs = month_runs(db, client, _prev_month(month))
     prev_rows = [row for r in prev_runs for row in _rows(db, r.id)] if prev_runs else None
-    rows = share_of_voice(pooled, prev_rows, brand)
+    rows = share_of_voice(pooled, prev_rows, brand, len(runs) / len(prev_runs) if prev_runs and runs else 1.0)
     buckets = [_sov_bucket(rows_, brand) for rows_ in per_run]
     for r in rows:
         shares: list[float | None] = []
@@ -264,13 +267,13 @@ def month_share_of_voice(db: Session, client: Client, brand: str, month: str) ->
     }
 
 
-def month_responses(db: Session, client: Client, month: str) -> list[dict[str, Any]]:
-    """Every answer from a month's runs, newest run first, each marked with its run's date. Capped so the pane stays light."""
+def month_responses(db: Session, client: Client, month: str) -> dict[str, Any]:
+    """Every answer from a month's runs, newest run first, each marked with its run's date: {answers, total}. Capped so the pane stays light; `total` says what the cap left out."""
     out: list[dict[str, Any]] = []
     for run in reversed(month_runs(db, client, month)):
         for row in run_responses(db, run):
             out.append({**row, "run_started_at": run.started_at.isoformat(), "run_id": str(run.id)})
-    return out[:MONTH_ANSWER_CAP]
+    return {"answers": out[:MONTH_ANSWER_CAP], "total": len(out)}
 
 
 def _previous_run(db: Session, run: LlmRun) -> LlmRun | None:

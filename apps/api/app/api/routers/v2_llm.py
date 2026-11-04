@@ -263,7 +263,7 @@ def llm_month_responses(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     month: str,
-) -> list[dict]:
+) -> dict:
     return report.month_responses(db, client, _month(month, []) or month)
 
 
