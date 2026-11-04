@@ -336,3 +336,41 @@ def test_a_run_is_due_a_week_after_the_last_one_and_not_before(db, client_a, key
     last.started_at = datetime.now(timezone.utc) - timedelta(days=8)
     db.commit()
     assert daily_sync.enqueue_due_llm_runs(db)["enqueued"] == 1, "eight days is a week and more"
+
+
+def _month_run(db, client, when, answers):
+    """A completed run on a date, with answers as (cluster, brand named by us, competitors)."""
+    from datetime import datetime, timezone
+
+    run = LlmRun(client_id=client.id, status="completed", started_at=datetime(*when, 12, tzinfo=timezone.utc))
+    db.add(run)
+    db.flush()
+    for i, (cluster, named, rivals) in enumerate(answers):
+        db.add(LlmResponse(run_id=run.id, client_id=client.id, query_text=f"q{i}", topic_cluster=cluster, platform="openai", visibility_type="Mentioned" if named else "Not visible",
+                           brand_mentioned=named, url_cited=False, competitors_mentioned=rivals, full_response=f"answer {i}"))
+    return run
+
+
+def test_share_of_voice_over_a_month_pools_every_run_and_shows_how_each_run_differed(client, db, client_a, admin_user):
+    h = client_header(client_a.id, admin_user.email)
+    brand = client.get("/v2/llm/overview", headers=h).json()["brand"]
+    _month_run(db, client_a, (2026, 9, 20), [("SPF", False, ["Badger"]), ("SPF", False, ["Badger"])])                     # September: not named at all
+    _month_run(db, client_a, (2026, 10, 2), [("SPF", True, ["Badger"]), ("SPF", False, ["Badger"])])                      # 1 of 2
+    _month_run(db, client_a, (2026, 10, 9), [("SPF", True, []), ("SPF", True, ["Badger"]), ("SPF", False, ["Badger"]), ("SPF", False, [])])  # 2 of 4
+    db.commit()
+    out = client.get("/v2/llm/share-of-voice", headers=h).json()
+    assert out["month"] == "2026-10" and out["months"] == ["2026-10", "2026-09"] and len(out["runs"]) == 2 and out["previous_runs"] == 1 and out["answers"] == 6
+    rows = {r["brand"]: r for r in out["share_of_voice"]}
+    assert rows[brand]["share"]["current"] == 0.5 and rows[brand]["mentions"]["current"] == 3 and rows[brand]["responses"] == 6, "3 of the month's 6 answers"
+    assert rows[brand]["share"]["previous"] == 0.0 and rows[brand]["share"]["delta"] == 0.5
+    assert rows[brand]["by_run"] == [0.5, 0.5] and rows["Badger"]["by_run"] == [1.0, 0.5] and round(rows["Badger"]["share"]["current"], 4) == 0.6667
+    september = client.get("/v2/llm/share-of-voice", params={"month": "2026-09"}, headers=h).json()
+    assert september["answers"] == 2 and september["previous_runs"] == 0 and next(r for r in september["share_of_voice"] if r["brand"] == brand)["share"]["previous"] is None
+    answers = client.get("/v2/llm/share-of-voice/responses", params={"month": "2026-10"}, headers=h).json()
+    assert len(answers) == 6 and answers[0]["run_started_at"].startswith("2026-10-09") and answers[-1]["run_started_at"].startswith("2026-10-02")
+    assert client.get("/v2/llm/share-of-voice", params={"month": "October"}, headers=h).status_code == 400
+
+
+def test_a_client_with_no_runs_has_an_empty_month_view(client, db, client_a, admin_user):
+    out = client.get("/v2/llm/share-of-voice", headers=client_header(client_a.id, admin_user.email)).json()
+    assert out["month"] is None and out["months"] == [] and out["share_of_voice"] == []

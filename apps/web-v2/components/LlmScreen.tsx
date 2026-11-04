@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { addLlmPromptsAction, addSeenCompetitorAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
+import { addLlmPromptsAction, addSeenCompetitorAction, llmMonthResponsesAction, llmMonthSovAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
-import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, Pair, QueryRow } from "@/lib/llm";
+import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, MonthSov, Pair, QueryRow, SovRow } from "@/lib/llm";
 import { Markdown } from "@/components/bi/Markdown";
 import { SidePane } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
@@ -14,10 +14,11 @@ type Tab = "overview" | "queries" | "sov" | "run" | "setup";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(0)}%`);
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
+const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-function Delta({ pair, percent = false }: { pair: Pair; percent?: boolean }) {
-  if (pair.delta == null) return <span className="text-xs text-[var(--text-tertiary)]">first run</span>;
+function Delta({ pair, percent = false, first = "first run" }: { pair: Pair; percent?: boolean; first?: string }) {
+  if (pair.delta == null) return <span className="text-xs text-[var(--text-tertiary)]">{first}</span>;
   const shown = percent ? `${Math.abs(pair.delta * 100).toFixed(0)} pts` : Math.abs(pair.delta).toLocaleString();
   if (pair.delta === 0) return <span className="text-xs text-[var(--text-secondary)]">no change</span>;
   return (
@@ -243,19 +244,22 @@ const host = (url: string) => {
 const CHIP = (v: string | null) => CODE_STYLE[v === "Cited + Mentioned" ? "C+M" : v === "Cited" ? "C" : v === "Mentioned" ? "M" : "—"];
 
 /** The answers behind a share-of-voice box: who each platform named, who it cited, and the answer as given. */
-function VoicePane({ client, data, cluster, brand }: { client: Client; data: LlmOverview; cluster: string; brand: string | null }) {
+type VoiceSource = { kind: "month"; month: string } | { kind: "run"; runId: string; startedAt: string };
+
+function VoicePane({ client, self, source, cluster, brand }: { client: Client; self: string; source: VoiceSource; cluster: string; brand: string | null }) {
   const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const runId = data.run?.id;
+  const sourceKey = source.kind === "month" ? `m${source.month}` : `r${source.runId}`;
   useEffect(() => {
     setRows(null);
     setError(null);
     setOpen(null);
-    if (runId) void llmResponsesAction(client.id, runId).then((r) => (r.ok ? setRows(r.value) : setError(r.error)));
-  }, [client.id, runId]);
+    const load = source.kind === "month" ? llmMonthResponsesAction(client.id, source.month) : llmResponsesAction(client.id, source.runId);
+    void load.then((r) => (r.ok ? setRows(r.value) : setError(r.error)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id, sourceKey]);
 
-  const self = data.brand;
   const mine = (rows ?? []).filter((r) => r.visibility && r.visibility !== "Error" && !r.asked_by_name && (r.topic_cluster ?? "Uncategorized") === cluster);
   const shown = brand ? mine.filter((r) => (brand === self ? r.brand_mentioned : r.competitors.includes(brand))) : mine;
   const named = new Map<string, number>();
@@ -271,7 +275,7 @@ function VoicePane({ client, data, cluster, brand }: { client: Client; data: Llm
     <div className="space-y-4 text-sm">
       <div>
         <p className="text-lg font-bold">{brand ?? cluster}</p>
-        <p className="text-xs text-[var(--text-secondary)]">{brand ? `Answers in ${cluster} that name ${brand}.` : `Every answer counted in ${cluster}.`} {runId ? `From the run on ${day(data.run!.started_at)}.` : ""}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{brand ? `Answers in ${cluster} that name ${brand}.` : `Every answer counted in ${cluster}.`} {source.kind === "month" ? `From every run in ${monthName(source.month)}.` : `From the run on ${day(source.startedAt)}.`}</p>
       </div>
       {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
       {!rows && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Loading the answers…</p> : null}
@@ -291,14 +295,14 @@ function VoicePane({ client, data, cluster, brand }: { client: Client; data: Llm
             <h3 className="font-bold">{shown.length} {shown.length === 1 ? "answer" : "answers"}</h3>
             <ul className="mt-1 divide-y divide-[var(--border)]">
               {shown.map((r) => {
-                const key = `${r.query}|${r.platform}`;
+                const key = `${r.run_id ?? ""}|${r.query}|${r.platform}`;
                 const brands = [...(r.brand_mentioned ? [self] : []), ...r.competitors, ...r.other_brands];
                 return (
                   <li key={key} className="py-3">
                     <button type="button" onClick={() => setOpen(open === key ? null : key)} aria-expanded={open === key} className="flex w-full items-start justify-between gap-3 text-left">
                       <span>
                         <span className="block font-medium">{r.query}</span>
-                        <span className="text-xs text-[var(--text-tertiary)]">{r.platform}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">{r.platform}{r.run_started_at ? ` · run of ${day(r.run_started_at)}` : ""}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
                       </span>
                       <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${CHIP(r.visibility)}`}>{r.visibility}</span>
                     </button>
@@ -330,21 +334,58 @@ function VoicePane({ client, data, cluster, brand }: { client: Client; data: Llm
 }
 
 function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
-  const clusters = Array.from(new Set(data.share_of_voice!.map((r) => r.topic_cluster)));
+  const [mode, setMode] = useState<"month" | "run">("month");
+  const [month, setMonth] = useState<string | undefined>(undefined);
+  const [monthData, setMonthData] = useState<MonthSov | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<{ cluster: string; brand: string | null } | null>(null);
+  useEffect(() => {
+    if (mode !== "month") return;
+    setError(null);
+    void llmMonthSovAction(client.id, month).then((r) => (r.ok ? setMonthData(r.value) : setError(r.error)));
+  }, [client.id, mode, month]);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  const monthMode = mode === "month";
+  const sov: SovRow[] = monthMode ? monthData?.share_of_voice ?? [] : data.share_of_voice ?? [];
+  const clusters = Array.from(new Set(sov.map((r) => r.topic_cluster)));
+  const self = monthMode ? monthData?.brand ?? data.brand : data.brand;
+  const source: VoiceSource | null = monthMode ? (monthData?.month ? { kind: "month", month: monthData.month } : null) : data.run ? { kind: "run", runId: data.run.id, startedAt: data.run.started_at } : null;
+
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="tablist" aria-label="Share of voice over" className="flex overflow-hidden rounded-lg border border-[var(--border)]">
+          {(["month", "run"] as const).map((m) => (
+            <button key={m} role="tab" aria-selected={mode === m} type="button" onClick={() => setMode(m)} className={`px-4 py-1.5 text-sm font-semibold ${mode === m ? "bg-[var(--brand-dark)] text-white" : "bg-white"}`}>{m === "month" ? "Month" : "Latest run"}</button>
+          ))}
+        </div>
+        {monthMode && monthData && monthData.months.length > 1 ? (
+          <select aria-label="Month" value={monthData.month ?? ""} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm">
+            {monthData.months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
+          </select>
+        ) : null}
+        <p className="text-xs text-[var(--text-secondary)]">
+          {monthMode
+            ? monthData?.month
+              ? `${monthData.runs.length} ${monthData.runs.length === 1 ? "run" : "runs"} in ${monthName(monthData.month)}, ${num(monthData.answers)} answers pooled. ${monthData.previous_runs ? `Compared with ${monthData.previous_runs} ${monthData.previous_runs === 1 ? "run" : "runs"} the month before.` : "No runs the month before to compare with."}`
+              : ""
+            : data.run ? `The run on ${day(data.run.started_at)} only.` : ""}
+        </p>
+      </div>
       <p className="text-sm text-[var(--text-secondary)]">
-        Share of voice is the share of a topic&apos;s answers that name each brand. The topic is the watchlist bucket the prompt belongs to. Select a topic or a brand to read the answers behind it and see who is cited.
+        Share of voice is the share of a topic&apos;s answers that name each brand. The topic is the watchlist bucket the prompt belongs to.
+        {monthMode ? " A month pools every run, because one run is a snapshot and a model's answers move from day to day." : ""} Select a topic or a brand to read the answers behind it and see who is cited.
       </p>
+      {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+      {monthMode && !monthData && !error ? <p className="text-sm text-[var(--text-secondary)]"><Spinner />Pooling the month…</p> : null}
       {clusters.map((cluster) => {
-        const rows = data.share_of_voice!.filter((r) => r.topic_cluster === cluster);
+        const rows = sov.filter((r) => r.topic_cluster === cluster);
         return (
           <div key={cluster} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <h3 className="text-sm font-semibold">
@@ -352,25 +393,33 @@ function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
               <span className="font-normal text-[var(--text-tertiary)]">· {rows[0].responses} answers</span>
             </h3>
             <ul className="mt-3 space-y-1">
-              {rows.map((r) => (
-                <li key={r.brand}>
-                  <button type="button" onClick={() => setOpen({ cluster, brand: r.brand })} className="flex w-full items-center gap-3 rounded-md px-1 py-1 text-left text-sm hover:bg-[var(--bg)]" aria-label={`Answers in ${cluster} that name ${r.brand}`}>
-                    <span className={`w-40 shrink-0 truncate ${r.is_self ? "font-bold" : ""}`}>{r.brand}</span>
-                    <div className="h-3 flex-1 rounded bg-[var(--bg)]">
-                      <div className={`h-3 rounded ${r.is_self ? "bg-[var(--brand-teal)]" : "bg-[var(--text-tertiary)]"}`} style={{ width: `${Math.min(100, r.share.current * 100)}%` }} />
-                    </div>
-                    <span className="w-12 text-right tabular-nums">{pct(r.share.current)}</span>
-                    <span className="w-20 text-right"><Delta pair={r.share} percent /></span>
-                  </button>
-                </li>
-              ))}
+              {rows.map((r) => {
+                const seen = (r.by_run ?? []).filter((x): x is number => x != null);
+                return (
+                  <li key={r.brand}>
+                    <button type="button" onClick={() => setOpen({ cluster, brand: r.brand })} className="flex w-full items-center gap-3 rounded-md px-1 py-1 text-left text-sm hover:bg-[var(--bg)]" aria-label={`Answers in ${cluster} that name ${r.brand}`}>
+                      <span className={`w-40 shrink-0 truncate ${r.is_self ? "font-bold" : ""}`}>{r.brand}</span>
+                      <div className="h-3 flex-1 rounded bg-[var(--bg)]">
+                        <div className={`h-3 rounded ${r.is_self ? "bg-[var(--brand-teal)]" : "bg-[var(--text-tertiary)]"}`} style={{ width: `${Math.min(100, r.share.current * 100)}%` }} />
+                      </div>
+                      <span className="w-12 text-right tabular-nums">{pct(r.share.current)}</span>
+                      <span className="w-24 text-right"><Delta pair={r.share} percent first={monthMode ? "first month" : "first run"} /></span>
+                      {monthMode ? (
+                        <span className="w-32 text-right text-xs tabular-nums text-[var(--text-tertiary)]" title="Lowest to highest share in a single run this month">
+                          {seen.length > 1 ? `${pct(Math.min(...seen))}–${pct(Math.max(...seen))} by run` : ""}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         );
       })}
-      {clusters.length === 0 ? <p className="text-sm text-[var(--text-tertiary)]">No answers to count yet.</p> : null}
-      <SidePane open={!!open} label="Answers" onClose={() => setOpen(null)}>
-        {open ? <VoicePane client={client} data={data} cluster={open.cluster} brand={open.brand} /> : null}
+      {clusters.length === 0 && !(monthMode && !monthData && !error) ? <p className="text-sm text-[var(--text-tertiary)]">No answers to count yet.</p> : null}
+      <SidePane open={!!open && !!source} label="Answers" onClose={() => setOpen(null)}>
+        {open && source ? <VoicePane client={client} self={self} source={source} cluster={open.cluster} brand={open.brand} /> : null}
       </SidePane>
     </div>
   );

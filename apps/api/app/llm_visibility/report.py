@@ -7,6 +7,7 @@ they are tested without a database. Error rows are never counted.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from typing import Any, Iterable
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.client import Client
 from app.models.llm_visibility import LlmResponse, LlmRun
 
+MONTH_ANSWER_CAP = 600
 VISIBLE = ("Cited + Mentioned", "Cited", "Mentioned")
 CODES = {"Cited + Mentioned": "C+M", "Cited": "C", "Mentioned": "M"}
 
@@ -204,6 +206,71 @@ def summary(current: list[Any], previous: list[Any] | None) -> dict[str, Any]:
 
 def _rows(db: Session, run_id: UUID) -> list[LlmResponse]:
     return db.query(LlmResponse).filter(LlmResponse.run_id == run_id).all()
+
+
+def _month_bounds(month: str) -> tuple[datetime, datetime]:
+    year, mon = int(month[:4]), int(month[5:7])
+    start = datetime(year, mon, 1, tzinfo=timezone.utc)
+    end = datetime(year + (mon == 12), mon % 12 + 1, 1, tzinfo=timezone.utc)
+    return start, end
+
+
+def _prev_month(month: str) -> str:
+    year, mon = int(month[:4]), int(month[5:7])
+    return f"{year - (mon == 1):04d}-{(mon - 2) % 12 + 1:02d}"
+
+
+def month_runs(db: Session, client: Client, month: str) -> list[LlmRun]:
+    """The completed runs that started in a month (UTC), oldest first."""
+    start, end = _month_bounds(month)
+    return (
+        db.query(LlmRun)
+        .filter(LlmRun.client_id == client.id, LlmRun.status == "completed", LlmRun.started_at >= start, LlmRun.started_at < end)
+        .order_by(LlmRun.started_at)
+        .all()
+    )
+
+
+def run_months(db: Session, client: Client) -> list[str]:
+    """Months with at least one completed run, newest first."""
+    seen = {r.started_at.strftime("%Y-%m") for r in db.query(LlmRun).filter(LlmRun.client_id == client.id, LlmRun.status == "completed")}
+    return sorted(seen, reverse=True)
+
+
+def month_share_of_voice(db: Session, client: Client, brand: str, month: str) -> dict[str, Any]:
+    """Share of voice over every run in a month, pooled: each brand's answers named over all the month's answers in a topic.
+
+    One run is a snapshot; a model's answers move from day to day, so the month's pooled figure is steadier. Each row also carries
+    its share in each run, so how far it moved within the month is visible.
+    """
+    runs = month_runs(db, client, month)
+    per_run = [_rows(db, r.id) for r in runs]
+    pooled = [row for rows in per_run for row in rows]
+    prev_runs = month_runs(db, client, _prev_month(month))
+    prev_rows = [row for r in prev_runs for row in _rows(db, r.id)] if prev_runs else None
+    rows = share_of_voice(pooled, prev_rows, brand)
+    buckets = [_sov_bucket(rows_, brand) for rows_ in per_run]
+    for r in rows:
+        shares: list[float | None] = []
+        for b in buckets:
+            bucket = b.get(r["topic_cluster"])
+            info = bucket["brands"].get(r["brand"]) if bucket else None
+            shares.append(round(info["count"] / bucket["total"], 4) if bucket and info is not None and bucket["total"] else (0.0 if bucket else None))
+        r["by_run"] = shares
+    return {
+        "month": month, "months": run_months(db, client), "brand": brand,
+        "runs": [{"id": str(r.id), "started_at": r.started_at.isoformat()} for r in runs],
+        "previous_runs": len(prev_runs), "answers": len(_valid(pooled)), "share_of_voice": rows,
+    }
+
+
+def month_responses(db: Session, client: Client, month: str) -> list[dict[str, Any]]:
+    """Every answer from a month's runs, newest run first, each marked with its run's date. Capped so the pane stays light."""
+    out: list[dict[str, Any]] = []
+    for run in reversed(month_runs(db, client, month)):
+        for row in run_responses(db, run):
+            out.append({**row, "run_started_at": run.started_at.isoformat(), "run_id": str(run.id)})
+    return out[:MONTH_ANSWER_CAP]
 
 
 def _previous_run(db: Session, run: LlmRun) -> LlmRun | None:

@@ -30,6 +30,18 @@ export type SovRow = {
   mentions: Pair;
   share: Pair;
   responses: number;
+  /** The share in each run of the month, oldest first (month view only). */
+  by_run?: (number | null)[];
+};
+
+export type MonthSov = {
+  month: string | null;
+  months: string[];
+  brand: string;
+  runs: { id: string; started_at: string }[];
+  previous_runs: number;
+  answers: number;
+  share_of_voice: SovRow[];
 };
 
 export type QueryRow = {
@@ -96,6 +108,8 @@ export type LlmResponseRow = {
   other_brands: string[];
   answer: string | null;
   error: string | null;
+  run_started_at?: string;
+  run_id?: string;
 };
 
 export type LlmResult<T> = { ok: true; value: T } | { ok: false; error: string };

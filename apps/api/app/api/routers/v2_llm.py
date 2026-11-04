@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 from uuid import UUID
 
@@ -227,6 +228,43 @@ def llm_overview(
     if out.get("running"):
         out["running"]["answered"] = db.query(func.count()).select_from(LlmResponse).filter(LlmResponse.run_id == UUID(out["running"]["id"])).scalar() or 0
     return out
+
+
+_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def _month(value: str | None, months: list[str]) -> str | None:
+    if value is None:
+        return months[0] if months else None
+    if not _MONTH.match(value):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a month like 2026-10.")
+    return value
+
+
+@router.get("/share-of-voice")
+def llm_month_share_of_voice(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: str | None = None,
+) -> dict:
+    """Share of voice pooled over every run in a month (default: the newest month with a run)."""
+    months = report.run_months(db, client)
+    chosen = _month(month, months)
+    brand = runner.brand_config(db, client).brand_name
+    if chosen is None:
+        return {"month": None, "months": [], "brand": brand, "runs": [], "previous_runs": 0, "answers": 0, "share_of_voice": []}
+    return report.month_share_of_voice(db, client, brand, chosen)
+
+
+@router.get("/share-of-voice/responses")
+def llm_month_responses(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: str,
+) -> list[dict]:
+    return report.month_responses(db, client, _month(month, []) or month)
 
 
 @router.get("/runs/{run_id}/responses")

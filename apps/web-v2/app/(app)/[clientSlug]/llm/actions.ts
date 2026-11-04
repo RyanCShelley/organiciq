@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { LlmResponseRow, LlmResult, LlmSettings } from "@/lib/llm";
+import type { LlmResponseRow, LlmResult, LlmSettings, MonthSov } from "@/lib/llm";
 
 function failure(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof ApiError ? error.message : fallback };
@@ -32,6 +32,23 @@ export async function llmResponsesAction(clientId: string, runId: string): Promi
     return { ok: true, value: await apiFetch<LlmResponseRow[]>(`/v2/llm/runs/${runId}/responses`, { clientId }) };
   } catch (error) {
     return failure(error, "The run could not be read: the API did not answer.");
+  }
+}
+
+export async function llmMonthSovAction(clientId: string, month?: string): Promise<LlmResult<MonthSov>> {
+  try {
+    const q = month ? `?month=${encodeURIComponent(month)}` : "";
+    return { ok: true, value: await apiFetch<MonthSov>(`/v2/llm/share-of-voice${q}`, { clientId }) };
+  } catch (error) {
+    return failure(error, "The month could not be read: the API did not answer.");
+  }
+}
+
+export async function llmMonthResponsesAction(clientId: string, month: string): Promise<LlmResult<LlmResponseRow[]>> {
+  try {
+    return { ok: true, value: await apiFetch<LlmResponseRow[]>(`/v2/llm/share-of-voice/responses?month=${encodeURIComponent(month)}`, { clientId }) };
+  } catch (error) {
+    return failure(error, "The answers could not be read: the API did not answer.");
   }
 }
 
