@@ -62,7 +62,16 @@ export type SummarySection = { title: string; rows: SummaryRow[] };
 
 export type ScoreChange = { change_pct: number | null };
 export type TrendPoint = { month: string; value: number | null };
+export type RankCheck = {
+  checked_on: string;
+  tracked: number;
+  ranked: number;
+  top10: number;
+  best: { keyword: string; position: number } | null;
+  biggest_drop: { keyword: string; from: number; to: number } | null;
+};
 export type Scorecards = {
+  reads?: { visibility: string | null; traffic: string | null; conversions: string | null };
   month: string;
   previous_month: string;
   headline: string;
@@ -79,6 +88,7 @@ export type Scorecards = {
     ai_links: number | null;
     ai_runs: number | null;
     trend: TrendPoint[];
+    rank_check: RankCheck | null;
   };
   traffic: {
     headline: number | null;
