@@ -53,3 +53,7 @@ export type PullStatus = {
   jobs_total: number;
   jobs_ahead: number;
 };
+
+export type TeamUser = { id: string; email: string; name: string | null; role: string; is_active: boolean; sees_all: boolean; client_ids: string[] };
+export type TeamClient = { id: string; name: string; slug: string; domain: string; status: string | null };
+export type TeamAccessData = { users: TeamUser[]; clients: TeamClient[] };
