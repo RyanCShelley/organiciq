@@ -43,6 +43,8 @@ export function accountNavGroups(clientSlug: string): NavGroup[] {
       items: [
         { href: tool("dashboard"), label: "Dashboard", exact: true },
         { href: tool("decision-engine"), label: "Decision Engine" },
+        { href: tool("site-crawl"), label: "Site crawl" },
+        { href: tool("copilot"), label: "Copilot" },
         { href: tool("annotations"), label: "Work & Results" },
         { href: settingsHref, label: "Client settings" },
       ],

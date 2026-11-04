@@ -1,0 +1,897 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+
+import { addLlmPromptsAction, addSeenCompetitorAction, llmMonthResponsesAction, llmMonthSovAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
+import type { Client } from "@/lib/api";
+import type { LlmOverview, LlmResponseRow, LlmRunInfo, LlmSettings, MonthSov, Pair, QueryRow, SovRow } from "@/lib/llm";
+import { Markdown } from "@/components/bi/Markdown";
+import { SidePane } from "@/components/content/parts";
+import { Spinner } from "@/components/ui/Spinner";
+
+type Tab = "overview" | "queries" | "sov" | "run" | "setup";
+
+const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(0)}%`);
+const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
+const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+function Delta({ pair, percent = false, first = "first run" }: { pair: Pair; percent?: boolean; first?: string }) {
+  if (pair.delta == null) return <span className="text-xs text-[var(--text-tertiary)]">{first}</span>;
+  const shown = percent ? `${Math.abs(pair.delta * 100).toFixed(0)} pts` : Math.abs(pair.delta).toLocaleString();
+  if (pair.delta === 0) return <span className="text-xs text-[var(--text-secondary)]">no change</span>;
+  return (
+    <span className={`text-xs font-semibold ${pair.delta > 0 ? "text-green-700" : "text-red-700"}`}>
+      {pair.delta > 0 ? "▲" : "▼"} {shown}
+    </span>
+  );
+}
+
+function Stat({ label, value, pair, percent }: { label: string; value: string; pair?: Pair; percent?: boolean }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">{label}</div>
+      <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
+      {pair ? <Delta pair={pair} percent={percent} /> : null}
+    </div>
+  );
+}
+
+const CODE_STYLE: Record<string, string> = {
+  "C+M": "bg-green-100 text-green-800",
+  C: "bg-blue-100 text-blue-800",
+  M: "bg-amber-100 text-amber-800",
+  "—": "bg-[var(--bg)] text-[var(--text-tertiary)]",
+};
+
+function Mover({ row }: { row: QueryRow }) {
+  return (
+    <li className="flex items-start justify-between gap-3 border-t border-[var(--border)] py-2 first:border-t-0">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{row.query}</div>
+        <div className="text-xs text-[var(--text-tertiary)]">{row.topic_cluster ?? "Uncategorized"}</div>
+      </div>
+      <span className={`whitespace-nowrap text-xs font-semibold ${(row.change ?? 0) > 0 ? "text-green-700" : "text-red-700"}`}>
+        {(row.change ?? 0) > 0 ? "+" : ""}
+        {row.change} ({row.previous_score}→{row.score})
+      </span>
+    </li>
+  );
+}
+
+function Overview({ data }: { data: LlmOverview }) {
+  const s = data.summary!;
+  const trend = data.trend ?? [];
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Brand mentions" value={num(s.mentions.current)} pair={s.mentions} />
+        <Stat label="Citations" value={num(s.citations.current)} pair={s.citations} />
+        <Stat label="Average visibility rate" value={pct(s.visibility_rate.current)} pair={s.visibility_rate} percent />
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">Last run</div>
+          <div className="mt-1 text-lg font-bold">{day(data.run!.started_at)}</div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            {data.run!.total_calls} answers{data.run!.total_errors ? `, ${data.run!.total_errors} failed` : ""}
+            {data.run!.estimated_cost_usd != null ? `, about $${data.run!.estimated_cost_usd.toFixed(2)}` : ""}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {(["improved", "declined"] as const).map((kind) => (
+          <div key={kind} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <h3 className="text-sm font-semibold">{kind === "improved" ? "Top improvements" : "Top declines"}</h3>
+            {data.movers![kind].length === 0 ? (
+              <p className="mt-2 text-sm text-[var(--text-tertiary)]">
+                {data.previous_run ? "No prompt moved this way since the last run." : "This is the first run, so there is nothing to compare with yet."}
+              </p>
+            ) : (
+              <ul className="mt-2">{data.movers![kind].map((r) => <Mover key={r.query} row={r} />)}</ul>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <h3 className="text-sm font-semibold">Performance by platform</h3>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+              <tr>
+                <th className="py-1 pr-3 font-medium">Platform</th>
+                <th className="px-3 py-1 text-right font-medium">Visibility rate</th>
+                <th className="px-3 py-1 text-right font-medium">Mentions</th>
+                <th className="px-3 py-1 text-right font-medium">Citations</th>
+                <th className="px-3 py-1 text-right font-medium">Avg rank</th>
+                <th className="py-1 pl-3 font-medium">Answers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.platforms!.map((p) => (
+                <tr key={p.platform} className="border-t border-[var(--border)]">
+                  <td className="py-2 pr-3 font-medium">{p.platform}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{pct(p.visibility_rate.current)} <Delta pair={p.visibility_rate} percent /></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{p.mentions.current} <Delta pair={p.mentions} /></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{p.citations.current} <Delta pair={p.citations} /></td>
+                  <td className="px-3 py-2 text-right tabular-nums">{p.avg_brand_rank.current ?? "–"}</td>
+                  <td className="py-2 pl-3 text-xs text-[var(--text-secondary)]">
+                    {p.by_type.cited_mentioned} cited + mentioned, {p.by_type.cited} cited, {p.by_type.mentioned} mentioned, {p.by_type.not_visible} not visible
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {data.brand_check && data.brand_check.prompts.length > 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <h3 className="text-sm font-semibold">Brand check: questions that name the brand</h3>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            These are left out of the numbers above. An answer that repeats the name proves nothing, so the test is whether the platform cites the site.
+          </p>
+          <ul className="mt-3 flex flex-wrap gap-3">
+            {data.brand_check.platforms.map((p) => (
+              <li key={p.platform} className="rounded-lg bg-[var(--bg)] px-3 py-2 text-sm">
+                <span className="font-semibold">{p.platform}</span> cited the site in {p.site_cited} of {p.answers}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-left text-sm">
+              <tbody>
+                {data.brand_check.prompts.map((q) => (
+                  <tr key={q.query} className="border-t border-[var(--border)] align-top">
+                    <td className="py-2 pr-3">{q.query}</td>
+                    {Object.entries(q.by_platform).map(([platform, result]) => (
+                      <td key={platform} className="px-2 py-2 text-xs">
+                        <span className={result === "Cited" ? "font-semibold text-green-700" : "text-[var(--text-tertiary)]"}>
+                          {platform}: {result.toLowerCase()}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {trend.length > 1 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <h3 className="text-sm font-semibold">Visibility rate by run</h3>
+          <div className="mt-3 flex items-end gap-2" style={{ height: "6rem" }}>
+            {trend.map((t) => (
+              <div key={t.run_id} className="flex flex-1 flex-col items-center justify-end gap-1">
+                <span className="text-xs tabular-nums">{pct(t.visibility_rate)}</span>
+                <div className="w-full rounded-t bg-[var(--brand-teal)]" style={{ height: `${Math.max(4, t.visibility_rate * 70)}px` }} />
+                <span className="text-[0.65rem] text-[var(--text-tertiary)]">{new Date(t.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {data.other_brands && data.other_brands.length > 0 ? (
+        <p className="text-sm text-[var(--text-secondary)]">
+          <span className="font-semibold">Also named in answers, not tracked:</span> {data.other_brands.map((b) => `${b.name} (${b.count})`).join(", ")}. Add one under Setup to count it in share of voice.
+        </p>
+      ) : null}
+      {data.errors && data.errors.length > 0 ? (
+        <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          <span className="font-semibold">Some answers failed:</span> {data.errors.map((e) => `${e.platform}, ${e.count}×: ${e.message}`).join(" · ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Queries({ data }: { data: LlmOverview }) {
+  const platforms = Array.from(new Set(data.queries!.flatMap((q) => Object.keys(q.by_platform)))).sort();
+  return (
+    <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <p className="mb-3 text-xs text-[var(--text-tertiary)]">
+        C+M = cited and mentioned, C = cited, M = mentioned, — = not visible. Score is 2 for cited and mentioned, 1 for either, 0 for neither, summed over platforms.
+      </p>
+      <table className="w-full min-w-[44rem] text-left text-sm">
+        <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+          <tr>
+            <th className="py-1 pr-3 font-medium">Prompt</th>
+            {platforms.map((p) => (
+              <th key={p} className="px-2 py-1 text-center font-medium">{p}</th>
+            ))}
+            <th className="px-3 py-1 text-right font-medium">Score</th>
+            <th className="px-3 py-1 text-right font-medium">Avg rank</th>
+            <th className="py-1 pl-3 font-medium">Named most often</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.queries!.map((q) => (
+            <tr key={q.query} className="border-t border-[var(--border)] align-top">
+              <td className="min-w-[14rem] py-2 pr-3">
+                <div className="font-medium">{q.query}</div>
+                <div className="text-xs text-[var(--text-tertiary)]">{q.topic_cluster ?? "Uncategorized"}</div>
+              </td>
+              {platforms.map((p) => (
+                <td key={p} className="px-2 py-2 text-center">
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${CODE_STYLE[q.by_platform[p] ?? "—"]}`}>{q.by_platform[p] ?? "—"}</span>
+                </td>
+              ))}
+              <td className="px-3 py-2 text-right tabular-nums">
+                {q.score}/{q.max_score}
+                {q.change != null && q.change !== 0 ? <span className={`ml-1 text-xs font-semibold ${q.change > 0 ? "text-green-700" : "text-red-700"}`}>{q.change > 0 ? "+" : ""}{q.change}</span> : null}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">{q.avg_brand_rank ?? "–"}</td>
+              <td className="py-2 pl-3 text-xs text-[var(--text-secondary)]">{q.top_competitors.map((c) => `${c.name} (${c.count})`).join(", ") || "–"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const host = (url: string) => {
+  try {
+    return new URL(url.includes("://") ? url : `https://${url}`).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+const CHIP = (v: string | null) => CODE_STYLE[v === "Cited + Mentioned" ? "C+M" : v === "Cited" ? "C" : v === "Mentioned" ? "M" : "—"];
+
+/** The answers behind a share-of-voice box: who each platform named, who it cited, and the answer as given. */
+type VoiceSource = { kind: "month"; month: string } | { kind: "run"; runId: string; startedAt: string };
+
+function VoicePane({ client, self, source, cluster, brand }: { client: Client; self: string; source: VoiceSource; cluster: string; brand: string | null }) {
+  const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
+  const [leftOut, setLeftOut] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const sourceKey = source.kind === "month" ? `m${source.month}` : `r${source.runId}`;
+  useEffect(() => {
+    setRows(null);
+    setLeftOut(0);
+    setError(null);
+    setOpen(null);
+    let live = true;
+    const load = source.kind === "month" ? llmMonthResponsesAction(client.id, source.month) : llmResponsesAction(client.id, source.runId);
+    void load.then((r) => {
+      if (!live) return;
+      if (!r.ok) return setError(r.error);
+      if (Array.isArray(r.value)) return setRows(r.value);
+      setRows(r.value.answers);
+      setLeftOut(Math.max(r.value.total - r.value.answers.length, 0));
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id, sourceKey]);
+
+  const mine = (rows ?? []).filter((r) => r.visibility && r.visibility !== "Error" && !r.asked_by_name && (r.topic_cluster ?? "Uncategorized") === cluster);
+  const shown = brand ? mine.filter((r) => (brand === self ? r.brand_mentioned : r.competitors.includes(brand))) : mine;
+  const named = new Map<string, number>();
+  const cited = new Map<string, number>();
+  for (const r of shown) {
+    for (const b of [...(r.brand_mentioned ? [self] : []), ...r.competitors, ...r.other_brands]) named.set(b, (named.get(b) ?? 0) + 1);
+    for (const h of new Set(r.cited_urls.map(host))) cited.set(h, (cited.get(h) ?? 0) + 1);
+  }
+  const top = (m: Map<string, number>) => Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const mySite = host(client.domain);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="text-lg font-bold">{brand ?? cluster}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{brand ? `Answers in ${cluster} that name ${brand}.` : `Every answer counted in ${cluster}.`} {source.kind === "month" ? `From every run in ${monthName(source.month)}.` : `From the run on ${day(source.startedAt)}.`}</p>
+      </div>
+      {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
+      {!rows && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Loading the answers…</p> : null}
+      {leftOut > 0 ? <p role="status" className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Showing the newest {rows?.length} answers; {leftOut} older ones are left out, so the counts here are short of the month&apos;s.</p> : null}
+      {rows ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg bg-[var(--bg)] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Brands named</h3>
+              <ul className="mt-1 space-y-0.5 text-xs">{top(named).map(([b, n]) => <li key={b} className={b === self ? "font-bold" : ""}>{b} <span className="text-[var(--text-tertiary)]">· {n} of {shown.length}</span></li>)}{named.size === 0 ? <li className="text-[var(--text-tertiary)]">No brand named.</li> : null}</ul>
+            </div>
+            <div className="rounded-lg bg-[var(--bg)] p-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sites cited</h3>
+              <ul className="mt-1 space-y-0.5 text-xs">{top(cited).map(([h, n]) => <li key={h} className={h === mySite ? "font-bold text-[#006b63]" : ""}>{h}{h === mySite ? " (this site)" : ""} <span className="text-[var(--text-tertiary)]">· {n} {n === 1 ? "answer" : "answers"}</span></li>)}{cited.size === 0 ? <li className="text-[var(--text-tertiary)]">No source cited.</li> : null}</ul>
+            </div>
+          </div>
+          <div>
+            <h3 className="font-bold">{shown.length} {shown.length === 1 ? "answer" : "answers"}</h3>
+            <ul className="mt-1 divide-y divide-[var(--border)]">
+              {shown.map((r) => {
+                const key = `${r.run_id ?? ""}|${r.query}|${r.platform}`;
+                const brands = [...(r.brand_mentioned ? [self] : []), ...r.competitors, ...r.other_brands];
+                return (
+                  <li key={key} className="py-3">
+                    <button type="button" onClick={() => setOpen(open === key ? null : key)} aria-expanded={open === key} className="flex w-full items-start justify-between gap-3 text-left">
+                      <span>
+                        <span className="block font-medium">{r.query}</span>
+                        <span className="text-xs text-[var(--text-tertiary)]">{r.platform}{r.run_started_at ? ` · run of ${day(r.run_started_at)}` : ""}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
+                      </span>
+                      <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${CHIP(r.visibility)}`}>{r.visibility}</span>
+                    </button>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      <span className="font-semibold">Named:</span> {brands.length ? brands.join(", ") : "no brand"}
+                    </p>
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      <span className="font-semibold">Cited:</span>{" "}
+                      {r.cited_urls.length ? r.cited_urls.slice(0, 6).map((u, i) => (
+                        <span key={u}>{i ? ", " : ""}<a href={u.includes("://") ? u : `https://${u}`} target="_blank" rel="noreferrer" className="underline">{host(u)}</a></span>
+                      )) : "no source"}
+                    </p>
+                    {open === key ? (
+                      <div className="mt-2 rounded-lg border border-[var(--border)] bg-white p-3">
+                        {r.answer ? <Markdown text={r.answer} /> : <p className="text-[var(--text-tertiary)]">No answer was kept.</p>}
+                        {r.cited_urls.length > 6 ? <p className="mt-2 text-xs text-[var(--text-tertiary)]">All cited: {r.cited_urls.join(", ")}</p> : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+              {shown.length === 0 ? <li className="py-3 text-[var(--text-secondary)]">No answer matches.</li> : null}
+            </ul>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
+  const [mode, setMode] = useState<"month" | "run">("month");
+  const [month, setMonth] = useState<string | undefined>(undefined);
+  const [monthData, setMonthData] = useState<MonthSov | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<{ cluster: string; brand: string | null } | null>(null);
+  useEffect(() => {
+    if (mode !== "month") return;
+    // Another month's (or client's) figures must never sit under this selection while it loads, or land after a newer pick.
+    let live = true;
+    setError(null);
+    setMonthData(null);
+    void llmMonthSovAction(client.id, month).then((r) => {
+      if (!live) return;
+      if (r.ok) setMonthData(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [client.id, mode, month]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const monthMode = mode === "month";
+  const sov: SovRow[] = monthMode ? monthData?.share_of_voice ?? [] : data.share_of_voice ?? [];
+  const clusters = Array.from(new Set(sov.map((r) => r.topic_cluster)));
+  const self = monthMode ? monthData?.brand ?? data.brand : data.brand;
+  const source: VoiceSource | null = monthMode ? (monthData?.month ? { kind: "month", month: monthData.month } : null) : data.run ? { kind: "run", runId: data.run.id, startedAt: data.run.started_at } : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="tablist" aria-label="Share of voice over" className="flex overflow-hidden rounded-lg border border-[var(--border)]">
+          {(["month", "run"] as const).map((m) => (
+            <button key={m} role="tab" aria-selected={mode === m} type="button" onClick={() => setMode(m)} className={`px-4 py-1.5 text-sm font-semibold ${mode === m ? "bg-[var(--brand-dark)] text-white" : "bg-white"}`}>{m === "month" ? "Month" : "Latest run"}</button>
+          ))}
+        </div>
+        {monthMode && monthData && monthData.months.length > 1 ? (
+          <select aria-label="Month" value={monthData.month ?? ""} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm">
+            {monthData.months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
+          </select>
+        ) : null}
+        <p className="text-xs text-[var(--text-secondary)]">
+          {monthMode
+            ? monthData?.month
+              ? `${monthData.runs.length} ${monthData.runs.length === 1 ? "run" : "runs"} in ${monthName(monthData.month)}, ${num(monthData.answers)} answers pooled. ${monthData.previous_runs ? `Compared with ${monthData.previous_runs} ${monthData.previous_runs === 1 ? "run" : "runs"} the month before.` : "No runs the month before to compare with."}`
+              : ""
+            : data.run ? `The run on ${day(data.run.started_at)} only.` : ""}
+        </p>
+      </div>
+      <p className="text-sm text-[var(--text-secondary)]">
+        Share of voice is the share of a topic&apos;s answers that name each brand. The topic is the watchlist bucket the prompt belongs to.
+        {monthMode ? " A month pools every run, because one run is a snapshot and a model's answers move from day to day." : ""} Select a topic or a brand to read the answers behind it and see who is cited.
+      </p>
+      {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+      {monthMode && !monthData && !error ? <p className="text-sm text-[var(--text-secondary)]"><Spinner />Pooling the month…</p> : null}
+      {clusters.map((cluster) => {
+        const rows = sov.filter((r) => r.topic_cluster === cluster);
+        return (
+          <div key={cluster} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+            <h3 className="text-sm font-semibold">
+              <button type="button" onClick={() => setOpen({ cluster, brand: null })} className="text-left hover:underline">{cluster}</button>{" "}
+              <span className="font-normal text-[var(--text-tertiary)]">· {rows[0].responses} answers</span>
+            </h3>
+            <ul className="mt-3 space-y-1">
+              {rows.map((r) => {
+                const seen = (r.by_run ?? []).filter((x): x is number => x != null);
+                return (
+                  <li key={r.brand}>
+                    <button type="button" onClick={() => setOpen({ cluster, brand: r.brand })} className="flex w-full items-center gap-3 rounded-md px-1 py-1 text-left text-sm hover:bg-[var(--bg)]" aria-label={`Answers in ${cluster} that name ${r.brand}`}>
+                      <span className={`w-40 shrink-0 truncate ${r.is_self ? "font-bold" : ""}`}>{r.brand}</span>
+                      <div className="h-3 flex-1 rounded bg-[var(--bg)]">
+                        <div className={`h-3 rounded ${r.is_self ? "bg-[var(--brand-teal)]" : "bg-[var(--text-tertiary)]"}`} style={{ width: `${Math.min(100, r.share.current * 100)}%` }} />
+                      </div>
+                      <span className="w-12 text-right tabular-nums">{pct(r.share.current)}</span>
+                      <span className="w-24 text-right"><Delta pair={r.share} percent first={monthMode ? "first month" : "first run"} /></span>
+                      {monthMode ? (
+                        <span className="w-32 text-right text-xs tabular-nums text-[var(--text-tertiary)]" title="Lowest to highest share in a single run this month">
+                          {seen.length > 1 ? `${pct(Math.min(...seen))}–${pct(Math.max(...seen))} by run` : ""}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+      {clusters.length === 0 && !(monthMode && !monthData && !error) ? <p className="text-sm text-[var(--text-tertiary)]">No answers to count yet.</p> : null}
+      <SidePane open={!!open && !!source} label="Answers" onClose={() => setOpen(null)}>
+        {open && source ? <VoicePane client={client} self={self} source={source} cluster={open.cluster} brand={open.brand} /> : null}
+      </SidePane>
+    </div>
+  );
+}
+
+function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
+  const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState("all");
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    setError(null);
+    llmResponsesAction(client.id, run.id).then((r) => {
+      if (!live) return;
+      if (r.ok) setRows(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [client.id, run.id]);
+  if (error) return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>;
+  if (!rows) return <p className="text-sm text-[var(--text-secondary)]">Loading the run…</p>;
+  const platforms = Array.from(new Set(rows.map((r) => r.platform)));
+  const shown = rows.filter((r) => platform === "all" || r.platform === platform);
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <label className="text-sm">
+        <span className="font-semibold">Platform</span>
+        <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm">
+          <option value="all">All ({rows.length})</option>
+          {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </label>
+      <ul className="mt-3 divide-y divide-[var(--border)]">
+        {shown.map((r) => {
+          const key = `${r.query}|${r.platform}`;
+          return (
+            <li key={key} className="py-3">
+              <button type="button" onClick={() => setOpen(open === key ? null : key)} className="flex w-full items-start justify-between gap-3 text-left">
+                <span>
+                  <span className="block text-sm font-medium">{r.query}</span>
+                  <span className="text-xs text-[var(--text-tertiary)]">{r.platform} · {r.topic_cluster ?? "Uncategorized"}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
+                </span>
+                <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${r.visibility === "Error" ? "bg-red-50 text-red-800" : r.visibility === "Named in prompt" ? "bg-[var(--bg)] text-[var(--text-secondary)]" : CODE_STYLE[r.visibility === "Cited + Mentioned" ? "C+M" : r.visibility === "Cited" ? "C" : r.visibility === "Mentioned" ? "M" : "—"]}`}>{r.visibility}</span>
+              </button>
+              {open === key ? (
+                <div className="mt-2 space-y-2 text-sm">
+                  {r.error ? <p className="text-red-800">{r.error}</p> : <p className="whitespace-pre-wrap text-[var(--text-secondary)]">{r.answer}</p>}
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    {r.competitors.length ? `Competitors named: ${r.competitors.join(", ")}. ` : ""}
+                    {r.other_brands.length ? `Other brands: ${r.other_brands.join(", ")}. ` : ""}
+                    {r.cited_urls.length ? `Cited: ${r.cited_urls.join(", ")}` : ""}
+                  </p>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function RunProgress({ overview }: { overview: LlmOverview | null }) {
+  const run = overview?.running ?? null;
+  const total = run?.total_calls ?? 0;
+  const answered = run?.answered ?? 0;
+  const pct = total ? Math.min(100, Math.round((answered / total) * 100)) : 0;
+  return (
+    <div role="status" className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 text-sm">
+      <div className="flex items-center gap-2 font-semibold">
+        <Spinner className="!mr-0 h-4 w-4" />
+        {run ? `Run in progress: ${answered} of ${total} answers back` : "A run is queued and will start shortly"}
+      </div>
+      {run ? (
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--border)]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full bg-[var(--brand-teal)] transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
+      <p className="mt-2 text-xs text-[var(--text-secondary)]">
+        {run ? `Started ${new Date(run.started_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. ` : ""}
+        It takes a few minutes. This page checks every few seconds and shows the results when they land.
+      </p>
+    </div>
+  );
+}
+
+function ExtraPrompts({ client, settings }: { client: Client; settings: LlmSettings }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const [cluster, setCluster] = useState("Brand check");
+  const [message, setMessage] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const [suggesting, startSuggest] = useTransition();
+  const [suggested, setSuggested] = useState<SuggestedGroup[] | null>(null);
+  const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const groups = Array.from(new Set(settings.extra_prompts.map((p) => p.topic_cluster)));
+  const add = () =>
+    start(async () => {
+      const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+      const r = await addLlmPromptsAction(client.id, lines.map((prompt) => ({ prompt, topic_cluster: cluster })));
+      if (r.ok) {
+        setMessage(`${r.value.added} added${r.value.skipped ? `, ${r.value.skipped} already asked` : ""}.`);
+        setText("");
+        router.refresh();
+      } else setMessage(r.error);
+    });
+  const suggest = () =>
+    startSuggest(async () => {
+      setMessage(null);
+      setSuggestMessage(null);
+      const r = await suggestLlmPromptsAction(client.id);
+      if (!r.ok) {
+        setSuggestMessage(r.error);
+        return;
+      }
+      setSuggested(r.value.groups);
+      setTicked(new Set(r.value.groups.flatMap((g) => g.prompts.map((p) => `${g.topic_cluster}|${p}`))));
+      if (r.value.groups.every((g) => g.prompts.length === 0)) setSuggestMessage("The model gave nothing new that passed the checks. Try again.");
+    });
+  const addSuggested = () =>
+    start(async () => {
+      const chosen = (suggested ?? []).flatMap((g) => g.prompts.filter((p) => ticked.has(`${g.topic_cluster}|${p}`)).map((prompt) => ({ prompt, topic_cluster: g.topic_cluster })));
+      const r = await addLlmPromptsAction(client.id, chosen);
+      if (r.ok) {
+        setMessage(`${r.value.added} added${r.value.skipped ? `, ${r.value.skipped} already asked` : ""}.`);
+        setSuggested(null);
+        router.refresh();
+      } else setMessage(r.error);
+    });
+  const remove = (id: string) =>
+    start(async () => {
+      const r = await removeLlmPromptAction(client.id, id);
+      setMessage(r.ok ? "Removed." : r.error);
+      if (r.ok) router.refresh();
+    });
+  const input = "w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm";
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+      <h3 className="font-semibold">Extra prompts</h3>
+      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+        Asked on every run besides the watchlist&apos;s. Each group counts as its own topic in share of voice, so brand questions do not inflate a product topic.
+      </p>
+      {groups.map((g) => (
+        <div key={g} className="mt-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{g}</div>
+          <ul className="mt-1 divide-y divide-[var(--border)]">
+            {settings.extra_prompts.filter((p) => p.topic_cluster === g).map((p) => (
+              <li key={p.id} className="flex items-start justify-between gap-3 py-1.5">
+                <span>{p.prompt}</span>
+                <button type="button" onClick={() => remove(p.id)} disabled={pending} className="text-xs font-semibold text-red-700 underline disabled:opacity-50">Remove</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <div className="mt-4 rounded-lg bg-[var(--bg)] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[var(--text-secondary)]">Write brand-check and niche questions from this client&apos;s brand, competitors, watchlist and pages. You tick what to keep.</p>
+          <button type="button" onClick={suggest} disabled={suggesting || pending} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
+            {suggesting ? <><Spinner />Writing questions…</> : suggested ? "Suggest again" : "Suggest prompts"}
+          </button>
+        </div>
+        {suggestMessage ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{suggestMessage}</p> : null}
+        {suggested ? (
+          <div className="mt-3 space-y-3">
+            {suggested.filter((g) => g.prompts.length > 0).map((g) => (
+              <div key={g.topic_cluster}>
+                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{g.topic_cluster}</div>
+                <ul className="mt-1 space-y-1">
+                  {g.prompts.map((p) => {
+                    const key = `${g.topic_cluster}|${p}`;
+                    return (
+                      <li key={key}>
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={ticked.has(key)}
+                            onChange={() => setTicked((cur) => { const next = new Set(cur); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
+                            className="mt-1"
+                          />
+                          <span>{p}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            <div className="flex gap-3">
+              <button type="button" onClick={addSuggested} disabled={pending || ticked.size === 0} className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Add {ticked.size} selected
+              </button>
+              <button type="button" onClick={() => setSuggested(null)} className="text-sm text-[var(--text-secondary)] hover:underline">Discard</button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <label className="mt-4 block">
+        <span className="font-semibold">Add prompts, one per line</span>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className={`mt-1 ${input}`} />
+      </label>
+      <label className="mt-2 block">
+        <span className="font-semibold">Group</span>
+        <input value={cluster} onChange={(e) => setCluster(e.target.value)} list="llm-groups" className={`mt-1 ${input}`} />
+        <datalist id="llm-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
+      </label>
+      <div className="mt-3 flex items-center gap-3">
+        <button type="button" onClick={add} disabled={pending || !text.trim() || !cluster.trim()} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Add</button>
+        {message ? <span className="text-sm text-[var(--text-secondary)]">{message}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function SeenCompetitors({ client }: { client: Client }) {
+  const router = useRouter();
+  const [data, setData] = useState<{ run_date: string | null; brands: SeenBrand[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    seenCompetitorsAction(client.id).then((r) => {
+      if (!live) return;
+      if (r.ok) setData(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [client.id]);
+  const add = (b: SeenBrand) => {
+    if (!b.domain) return;
+    setAdding(b.brand);
+    setError(null);
+    addSeenCompetitorAction(client.id, b.domain, b.brand).then((r) => {
+      setAdding(null);
+      if (r.ok) {
+        setData((d) => (d ? { ...d, brands: d.brands.filter((x) => x.brand !== b.brand) } : d));
+        router.refresh();
+      } else setError(r.error);
+    });
+  };
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+      <h3 className="font-semibold">Brands the AI answers name</h3>
+      <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+        From the latest run{data?.run_date ? ` (${data.run_date})` : ""}: brands named in answers that are not this client or a listed competitor. Adding one lists its website as a competitor, so its search rankings are read too.
+      </p>
+      {!data && !error ? <p className="mt-3 text-[var(--text-secondary)]"><Spinner />Reading the latest run…</p> : null}
+      {error ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-red-800">{error}</p> : null}
+      {data && data.brands.length === 0 ? <p className="mt-3 text-[var(--text-secondary)]">None yet. Run LLM visibility first; the Anthropic key finds the brands answers name.</p> : null}
+      {data && data.brands.length > 0 ? (
+        <ul className="mt-3 divide-y divide-[var(--border)]">
+          {data.brands.map((b) => (
+            <li key={b.brand} className="flex flex-wrap items-center gap-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold">{b.brand}</span>{" "}
+                <span className="text-xs text-[var(--text-secondary)]">
+                  {b.mentions} answers · {b.prompts} prompt{b.prompts === 1 ? "" : "s"} · {b.platforms.length} platform{b.platforms.length === 1 ? "" : "s"}
+                  {b.domain ? ` · ${b.domain}` : " · website not found in the sources cited"}
+                </span>
+              </span>
+              {b.domain ? (
+                <button type="button" onClick={() => add(b)} disabled={adding !== null} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">
+                  {adding === b.brand ? <><Spinner />Adding…</> : "Add to competitors"}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function Setup({ client, settings }: { client: Client; settings: LlmSettings }) {
+  const router = useRouter();
+  const [brand, setBrand] = useState(settings.brand_name);
+  const [patterns, setPatterns] = useState(settings.brand_patterns.join(", "));
+  const [comps, setComps] = useState(settings.competitors.map((c) => ({ ...c, text: c.patterns.join(", ") })));
+  const [message, setMessage] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const split = (t: string) => t.split(",").map((p) => p.trim()).filter(Boolean);
+  const save = () =>
+    start(async () => {
+      const r = await saveLlmSettingsAction(client.id, {
+        brand_name: brand,
+        brand_patterns: split(patterns),
+        competitors: comps.map((c) => ({ domain: c.domain, name: c.name, patterns: split(c.text) })),
+      });
+      setMessage(r.ok ? "Saved." : r.error);
+      if (r.ok) router.refresh();
+    });
+  const input = "w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm";
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+        <h3 className="font-semibold">What a run asks</h3>
+        <p className="mt-1 text-[var(--text-secondary)]">
+          {settings.prompts} prompts ({settings.prompts - settings.extra_prompts.length} from the watchlist, {settings.extra_prompts.length} extra), across {settings.clusters.length} topics, on{" "}
+          {settings.platforms.filter((p) => p.enabled).map((p) => p.name).join(", ") || "no platform yet"}
+          {settings.calls_per_run ? `: ${settings.calls_per_run} answers a run.` : "."}
+        </p>
+        <ul className="mt-2 flex flex-wrap gap-2 text-xs">
+          {settings.platforms.map((p) => (
+            <li key={p.key} className={`rounded px-2 py-0.5 font-semibold ${p.enabled ? "bg-green-100 text-green-800" : "bg-[var(--bg)] text-[var(--text-tertiary)]"}`}>
+              {p.name} {p.enabled ? "ready" : "no API key"}
+            </li>
+          ))}
+        </ul>
+        {settings.platforms.some((p) => !p.enabled) ? (
+          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+            A platform is skipped until its key is in the API&apos;s environment: OPENAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY. The Anthropic key also finds other brands named in answers.
+          </p>
+        ) : null}
+      </div>
+      <ExtraPrompts client={client} settings={settings} />
+      <SeenCompetitors client={client} />
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
+        <h3 className="font-semibold">How to spot the brand</h3>
+        <label className="mt-3 block"><span className="font-semibold">Brand name</span><input value={brand} onChange={(e) => setBrand(e.target.value)} className={`mt-1 ${input}`} /></label>
+        <label className="mt-3 block">
+          <span className="font-semibold">Names to look for</span>
+          <input value={patterns} onChange={(e) => setPatterns(e.target.value)} className={`mt-1 ${input}`} />
+          <span className="mt-1 block text-xs text-[var(--text-tertiary)]">Comma separated. A name counts only as a whole word, and the site {settings.domain} counts as a citation.</span>
+        </label>
+        {comps.length ? <h3 className="mt-5 font-semibold">Competitors</h3> : <p className="mt-4 text-xs text-[var(--text-tertiary)]">Add competitor domains in the client&apos;s settings and they appear here.</p>}
+        {comps.map((c, i) => (
+          <div key={c.domain} className="mt-2 grid gap-2 sm:grid-cols-[10rem_1fr_1fr]">
+            <span className="self-center text-xs text-[var(--text-secondary)]">{c.domain}</span>
+            <input value={c.name} onChange={(e) => setComps(comps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} className={input} aria-label={`${c.domain} name`} />
+            <input value={c.text} onChange={(e) => setComps(comps.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} className={input} aria-label={`${c.domain} names to look for`} />
+          </div>
+        ))}
+        <div className="mt-4 flex items-center gap-3">
+          <button type="button" onClick={save} disabled={pending} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save</button>
+          {message ? <span className="text-sm text-[var(--text-secondary)]">{message}</span> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function LlmScreen({ client, overview, settings, error }: { client: Client; overview: LlmOverview | null; settings: LlmSettings | null; error: string | null }) {
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>("overview");
+  const [pending, start] = useTransition();
+  const [runError, setRunError] = useState<string | null>(null);
+  const [queued, setQueued] = useState(false);
+  const running = Boolean(overview?.running) || Boolean(overview?.queued) || queued;
+
+  // A run takes minutes; look again until it lands.
+  useEffect(() => {
+    if (!running) return;
+    // Look for twenty minutes at most: a first run that failed leaves nothing to land, and must not refresh the page for ever.
+    let looks = 0;
+    const t = setInterval(() => {
+      if (++looks > 150) {
+        clearInterval(t);
+        setQueued(false);
+        return;
+      }
+      router.refresh();
+    }, 8000);
+    return () => clearInterval(t);
+  }, [running, router]);
+  useEffect(() => {
+    if (overview?.running === null && queued && overview.runs.length) setQueued(false);
+  }, [overview, queued]);
+
+  const startRun = () =>
+    start(async () => {
+      setRunError(null);
+      const r = await startLlmRunAction(client.id);
+      if (r.ok) {
+        setQueued(true);
+        router.refresh();
+      } else setRunError(r.error);
+    });
+
+  const run = overview?.run ?? null;
+  const tabs: [Tab, string][] = [["overview", "Overview"], ["queries", "Query summary"], ["sov", "Share of voice"], ["run", "Full run"], ["setup", "Setup"]];
+
+  return (
+    <section className="max-w-6xl space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">LLM visibility</h1>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Whether ChatGPT, Perplexity, Gemini and Claude name {client.client_name} and cite its site when asked the watchlist&apos;s prompts.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {overview && overview.runs.length > 1 ? (
+            <select
+              value={run?.id ?? ""}
+              onChange={(e) => router.push(`/${client.slug}/llm?run=${e.target.value}`)}
+              className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
+              aria-label="Run"
+            >
+              {overview.runs.map((r) => <option key={r.id} value={r.id}>{day(r.started_at)}</option>)}
+            </select>
+          ) : null}
+          <button type="button" onClick={startRun} disabled={pending || running} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            {running ? <><Spinner />Running…</> : "Run now"}
+          </button>
+        </div>
+      </header>
+
+      {running ? <RunProgress overview={overview} /> : null}
+      {runError ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{runError}</p> : null}
+      {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+
+      <nav className="flex flex-wrap gap-2" aria-label="LLM visibility views">
+        {tabs.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setTab(id)} aria-current={tab === id ? "page" : undefined}
+            className={`rounded-full border px-4 py-1.5 text-sm font-semibold ${tab === id ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)]"}`}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "setup" ? (
+        settings ? <Setup client={client} settings={settings} /> : <p className="text-sm text-[var(--text-secondary)]">Setup could not be loaded.</p>
+      ) : !run ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm">
+          <h2 className="font-semibold">No run yet</h2>
+          <p className="mt-1 text-[var(--text-secondary)]">
+            {settings && settings.prompts === 0
+              ? "The watchlist has no paired AI prompts, so there is nothing to ask. Import them with the watchlist."
+              : settings && settings.calls_per_run === 0
+                ? "No AI platform has an API key on this install. Setup shows which are missing."
+                : `Run now asks ${settings?.prompts ?? 0} prompts on each platform (${settings?.calls_per_run ?? 0} answers). Runs then repeat weekly.`}
+          </p>
+        </div>
+      ) : tab === "overview" ? (
+        <Overview data={overview!} />
+      ) : tab === "queries" ? (
+        <Queries data={overview!} />
+      ) : tab === "sov" ? (
+        <ShareOfVoice client={client} data={overview!} />
+      ) : (
+        <FullRun client={client} run={run} />
+      )}
+    </section>
+  );
+}

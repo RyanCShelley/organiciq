@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from app.services.jobs import check_stop
+
 from app.ingestion.google_http import post_json, request_with_retry
 
 ACCOUNT_SUMMARIES_URL = "https://analyticsadmin.googleapis.com/v1beta/accountSummaries"
@@ -77,6 +79,7 @@ def run_report(
 
     with httpx.Client(timeout=timeout_seconds) as client:
         while True:
+            check_stop()
             body = {
                 "dateRanges": [
                     {"startDate": start_date.isoformat(), "endDate": end_date.isoformat()}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date
 from typing import Any
 from urllib.parse import quote
@@ -7,6 +8,7 @@ from urllib.parse import quote
 import httpx
 
 from app.ingestion.google_http import get as http_get, post_json
+from app.services.jobs import check_stop
 
 SEARCH_ANALYTICS_URL = "https://www.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"
 SITES_LIST_URL = "https://www.googleapis.com/webmasters/v3/sites"
@@ -32,15 +34,18 @@ def query_search_analytics(
     end_date: date,
     dimensions: list[str],
     row_limit: int = 25000,
-) -> list[dict[str, Any]]:
-    """Paginate Search Analytics until exhausted."""
+) -> Iterator[dict[str, Any]]:
+    """Paginate Search Analytics until exhausted, yielding rows as each page arrives.
+
+    A large property is millions of rows; holding them all as a list before saving any was the memory problem.
+    """
     encoded_site = quote(site_url, safe="")
     url = SEARCH_ANALYTICS_URL.format(site=encoded_site)
-    rows: list[dict[str, Any]] = []
     start_row = 0
 
     with httpx.Client(timeout=120.0) as client:
         while True:
+            check_stop()
             body = {
                 "startDate": start_date.isoformat(),
                 "endDate": end_date.isoformat(),
@@ -60,10 +65,8 @@ def query_search_analytics(
             )
             batch = list((res.json() or {}).get("rows") or [])
             if not batch:
-                break
-            rows.extend(batch)
+                return
+            yield from batch
             if len(batch) < row_limit:
-                break
+                return
             start_row += len(batch)
-
-    return rows

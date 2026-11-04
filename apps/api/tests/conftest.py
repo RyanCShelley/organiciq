@@ -38,7 +38,7 @@ os.environ["SE_RANKING_API_KEY"] = "test-se-ranking-key"
 os.environ["GOOGLE_DATA_OAUTH_CLIENT_SECRET"] = ""
 os.environ["INTERNAL_API_SECRET"] = ""
 os.environ["INTEGRATION_TOKEN_KEY_PREVIOUS"] = ""
-os.environ["SMA_ADMIN_EMAILS"] = "admin@smamarketing.net"
+os.environ["SMA_ADMIN_EMAILS"] = "admin@smamarketing.com"
 
 # Production is the default now, and it refuses development secrets. Tests
 # are not production.
@@ -178,7 +178,7 @@ def client_b(db: Session, tier: Tier) -> Client:
 def admin_user(db: Session) -> User:
     user = User(
         id=uuid.uuid4(),
-        email="admin@smamarketing.net",
+        email="admin@smamarketing.com",
         name="Admin",
         google_sub="admin-sub",
         role=UserRole.SMA_ADMIN,
@@ -193,7 +193,7 @@ def admin_user(db: Session) -> User:
 def team_user(db: Session, client_a: Client) -> User:
     user = User(
         id=uuid.uuid4(),
-        email="team@smamarketing.net",
+        email="team@smamarketing.com",
         name="Team",
         google_sub="team-sub",
         role=UserRole.SMA_TEAM,

@@ -99,7 +99,7 @@ def seed(db: Session) -> None:
     _ensure_client(
         client_id=SMA_CLIENT_ID,
         client_name="SMA Marketing",
-        domain="smamarketing.net",
+        domain="smamarketing.com",
         slug="sma-marketing",
         tier_id=ENTERPRISE_TIER_ID,
         monthly_lead_goal=25,
@@ -121,7 +121,7 @@ def seed(db: Session) -> None:
         db.add(
             User(
                 id=ADMIN_ID,
-                email="admin@smamarketing.net",
+                email="admin@smamarketing.com",
                 name="SMA Admin",
                 google_sub="seed-admin",
                 role=UserRole.SMA_ADMIN,
@@ -132,7 +132,7 @@ def seed(db: Session) -> None:
         db.add(
             User(
                 id=TEAM_ID,
-                email="team@smamarketing.net",
+                email="team@smamarketing.com",
                 name="SMA Team",
                 google_sub="seed-team",
                 role=UserRole.SMA_TEAM,

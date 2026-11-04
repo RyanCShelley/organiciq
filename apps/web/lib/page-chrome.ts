@@ -95,6 +95,11 @@ export function resolvePageChrome(pathname: string): { title: string; descriptio
         title: "Work & Results",
         description: "Follow approved work, record completion and review observed results.",
       };
+    case "copilot":
+      return {
+        title: "Copilot",
+        description: "Ask about this client's data, plan and tool health. Reads only; changes nothing.",
+      };
     default:
       return { title: "Organic IQ", description: "" };
   }

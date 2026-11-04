@@ -966,3 +966,40 @@ def test_a_first_crawl_that_was_challenged_fails_and_says_why(db, client_a, monk
         .count()
         == 0
     )
+
+
+def test_the_crawl_does_not_hold_a_transaction_open_while_it_fetches(db, client_a, monkeypatch):
+    """A crawl takes minutes. A read transaction left open across it holds locks on the tables it
+    touched, and a migration once waited on one for half an hour."""
+    from datetime import date as date_cls
+
+    from app.ingestion.crawler import pipeline
+    from app.models.job import SyncJob, SyncJobStatus
+
+    open_during_fetch = []
+
+    def fake_run(coro):
+        coro.close()
+        open_during_fetch.append(db.in_transaction())
+        return CrawlResult(pages=[], robots_txt_found=True)
+
+    monkeypatch.setattr(pipeline.asyncio, "run", fake_run)
+    job = SyncJob(
+        id=uuid4(), client_id=client_a.id, source="site_crawl",
+        start_date=date_cls.today(), end_date=date_cls.today(), status=SyncJobStatus.QUEUED,
+    )
+    db.add(job)
+    db.commit()
+
+    pipeline.run_site_crawl_job(db, job)
+
+    assert open_during_fetch == [False]
+
+
+def test_a_site_that_states_no_crawl_delay_gets_a_polite_default_pace():
+    from app.ingestion.crawler import fetch
+
+    assert 0.3 <= fetch.DEFAULT_CRAWL_DELAY <= 1.0
+    # A stated Crawl-delay still wins, and the pace never drops below it.
+    assert fetch.Throttle(2.5).delay == 2.5
+    assert fetch.Throttle(fetch.DEFAULT_CRAWL_DELAY).delay == fetch.DEFAULT_CRAWL_DELAY

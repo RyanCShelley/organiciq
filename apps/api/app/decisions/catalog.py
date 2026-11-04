@@ -105,7 +105,7 @@ def _mentions(term: str, text: str | None) -> bool:
     """Whether the text uses the term, phrase-aware.
 
     A bag of words matches "agency seo local" to "local seo agency", which is
-    how a page that never says the phrase was reported as already optimised
+    how a page that never says the phrase was reported as already optimized
     for it.
     """
     if not text:
@@ -351,7 +351,7 @@ def v6_rehoming(target: ScoredCandidate, page: PageFacts) -> Prescription | None
         effort_min=15,
         why=(
             f"“{candidate.keyword}” is mapped to {candidate.target_url} and "
-            f"ranks on {candidate.ranking_url}. Optimising either one before "
+            f"ranks on {candidate.ranking_url}. Optimizing either one before "
             "that is settled is work on a page nobody chose."
         ),
         done_when=(

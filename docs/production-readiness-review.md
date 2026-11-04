@@ -26,7 +26,7 @@ whose cost grows with the square of the client count.
 |---|----------|------|---------|
 | 1 | **P0** | Security | Default secrets are shipped as working fallbacks |
 | 2 | **P0** | Security | `/auth/upsert` is unauthenticated and creates privileged users |
-| 3 | **P0** | Security | Any unknown `@smamarketing.net` email is auto-provisioned `SMA_ADMIN` |
+| 3 | **P0** | Security | Any unknown `@smamarketing.com` email is auto-provisioned `SMA_ADMIN` |
 | 4 | **P0** | Scale | Queued jobs are failed after 45 min — daily sync mass-fails at scale |
 | 5 | **P0** | Scale | Worker `importlib.reload()` on every poll cycle |
 | 6 | **P1** | Efficiency | Token refresh writes every client's credentials — O(N²) per day |
@@ -60,7 +60,7 @@ healthy.
 
 - **`AUTH_SECRET` unset** — the API accepts any HS256 JWT signed with the
   published string. `get_current_user` trusts the `email` claim, so an attacker
-  forges `{"email":"anyone@smamarketing.net"}`, is auto-provisioned `SMA_ADMIN`
+  forges `{"email":"anyone@smamarketing.com"}`, is auto-provisioned `SMA_ADMIN`
   (finding 3), and reads every client's data. Full compromise.
 - **`INTEGRATION_TOKEN_KEY` unset** — `crypto.py` derives the Fernet key by
   SHA-256 of that string, so every stored Google refresh token is decryptable by

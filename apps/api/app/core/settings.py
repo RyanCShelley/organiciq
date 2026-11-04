@@ -35,9 +35,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://organiciq:organiciq@localhost:5432/organiciq"
     auth_secret: str = INSECURE_AUTH_SECRET
     sma_admin_emails: str = ""
-    # Comma-separated. Both are accepted through the .com migration; existing
-    # staff accounts and Google Workspace aliases are still on .net.
-    sma_google_hosted_domain: str = "smamarketing.com,smamarketing.net"
+    # Comma-separated: who may sign in. smamarketing.com only; a staff account still on .net must be moved.
+    sma_google_hosted_domain: str = "smamarketing.com"
     # Domains that are the same company, for matching a person across
     # systems. Deliberately not the login setting above: that one answers
     # "who may sign in" and gets narrowed, and narrowing it should not make
@@ -55,7 +54,17 @@ class Settings(BaseSettings):
     google_data_oauth_client_secret: str = ""
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
+    #: Where the Google connect flow returns to when v2 started it.
+    web_v2_app_url: str = "http://127.0.0.1:3001"
     se_ranking_api_key: str = ""
+    bing_webmaster_api_key: str = ""
+    #: LLM visibility asks these platforms the watchlist's paired prompts. A platform with no key is skipped.
+    openai_api_key: str = ""
+    perplexity_api_key: str = ""
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    #: What questions asked of one client's data may cost in a calendar month (Ask the data). Past it, questions are refused until next month.
+    ask_monthly_cap_usd: float = 20.0
     # Daily refresh for mapped client integrations (UTC hour, overlapping lookback window).
     daily_sync_enabled: bool = True
     daily_sync_hour_utc: int = 11  # ~07:00 America/New_York (EST)
@@ -96,6 +105,16 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
+    #: The copilot's model, behind any OpenAI-compatible /chat/completions
+    #: endpoint (vLLM, Together, Fireworks, Modal, Ollama). Empty base URL
+    #: means the copilot is off and /copilot/chat answers 503. Swapping stock
+    #: Qwen for a fine-tuned LoRA is a change to LLM_MODEL, nothing else.
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "Qwen/Qwen3.5-9B"
+    llm_timeout_seconds: float = 120.0
+    #: Model -> tool -> model round trips allowed for one question.
+    copilot_max_tool_rounds: int = 6
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))

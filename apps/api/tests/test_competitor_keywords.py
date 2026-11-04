@@ -130,6 +130,27 @@ def test_a_second_run_buys_nothing(db, client_a, monkeypatch):
     assert second.records_fetched == 0
 
 
+def test_a_competitor_that_returned_nothing_is_not_asked_for_again_the_next_day(db, client_a, monkeypatch):
+    _name(db, client_a, "empty.com")
+    calls: list[str] = []
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    monkeypatch.setattr(pipeline.dataforseo, "ranked_keywords", lambda domain, **kw: calls.append(domain) or [])
+    first = pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    assert first.params_json["checked"] == ["empty.com"]
+    assert pipeline.competitors_to_pull(db, client_a, today=TODAY) == []
+    pipeline.run_dataforseo_competitor_keywords_job(db, _job(db, client_a))
+    assert calls == ["empty.com"], "nothing stored, but it was read: no second charge"
+
+
+def test_the_pull_plan_lists_competitor_rankings_when_competitors_are_named(db, client_a, monkeypatch):
+    from app.services import data_pull
+
+    monkeypatch.setattr(pipeline.dataforseo, "configured", lambda: True)
+    assert "dataforseo_competitor_keywords" not in {i["source"] for i in data_pull.pull_plan(db, client_a)}
+    _name(db, client_a, "a.com")
+    assert "dataforseo_competitor_keywords" in {i["source"] for i in data_pull.pull_plan(db, client_a)}
+
+
 def test_it_is_a_runnable_source_and_not_in_the_daily_provider_list():
     from app.services.daily_sync import _PROVIDER_SOURCES
     from app.services.jobs import _job_handlers

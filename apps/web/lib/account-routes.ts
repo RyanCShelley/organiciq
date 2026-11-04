@@ -5,6 +5,7 @@ export const ACCOUNT_TOOLS = [
   "decision-engine",
   "site-crawl",
   "annotations",
+  "copilot",
 ] as const;
 
 export type AccountTool = (typeof ACCOUNT_TOOLS)[number];

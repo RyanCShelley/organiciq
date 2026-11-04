@@ -204,7 +204,7 @@ def test_auth_upsert_promotes_admin_email(client):
     res = client.post(
         "/auth/upsert",
         json={
-            "email": "admin@smamarketing.net",
+            "email": "admin@smamarketing.com",
             "name": "Admin",
             "google_sub": "g-admin",
         },

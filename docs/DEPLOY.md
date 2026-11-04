@@ -20,7 +20,7 @@ Use with [README → Deploy](../README.md#deploy-railway--vercel) and [`.env.exa
 | `AUTH_URL` / `NEXTAUTH_URL` | `https://<vercel-host>` | — | — |
 | `AUTH_TRUST_HOST` | `true` | — | — |
 | `API_URL` / `NEXT_PUBLIC_API_URL` | `https://<api-host>` | — | — |
-| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.net` | `smamarketing.net` | `smamarketing.net` |
+| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.com` | `smamarketing.com` | `smamarketing.com` |
 | `DATABASE_URL` | — | from Postgres | from Postgres |
 | `INTEGRATION_TOKEN_KEY` | — | required (shared) | required (shared) |
 | `SMA_ADMIN_EMAILS` | — | required | required |
@@ -54,9 +54,149 @@ Confirm: `curl -s https://<api-host>/health` → `{"status":"ok"}`.
 
 ## Smoke test
 
-- [ ] Vercel login with `@smamarketing.net`
+- [ ] Vercel login with `@smamarketing.com`
 - [ ] Client switcher shows SMA Marketing (after seed)
 - [ ] Dashboard / Decision Engine load without hard errors
 - [ ] GSC or GA4 OAuth connect completes and returns to web
 - [ ] Short sync job moves to completed/partial; Data Health updates
 - [ ] Annotations page and baseline preview reachable
+
+
+---
+
+# Organic IQ v2: deploy additions
+
+v2 is a second web app (`apps/web-v2`) on the **same API and Postgres** as the live tool. The API only gets
+additive migrations, so the live tool keeps working while both run. Nothing below replaces the section above;
+it adds to it.
+
+## Services
+
+| Name | Platform | Root / image | Start command | Public? |
+|------|----------|--------------|---------------|---------|
+| web-v2 | Vercel (a **new** project) | Root Directory `apps/web-v2` | Next build | yes |
+| api, worker, Postgres | Railway | unchanged | unchanged | unchanged |
+
+Create the Vercel project from the same GitHub repo, set the Root Directory to `apps/web-v2`, and leave the
+framework preset on Next.js.
+
+## Vercel env (web-v2)
+
+| Variable | Value |
+|----------|-------|
+| `AUTH_SECRET` | same value as the API's |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | the login OAuth client |
+| `AUTH_URL` / `NEXTAUTH_URL` | `https://<v2-vercel-host>` |
+| `AUTH_TRUST_HOST` | `true` |
+| `API_URL` | `https://<api-host>`: must start with `https://` (v2 only reads this; `NEXT_PUBLIC_API_URL` is for local development) |
+| `INTERNAL_API_SECRET` | same value as the API's (v2 refuses to sign anyone in without it) |
+| `SMA_GOOGLE_HOSTED_DOMAIN` | `smamarketing.com` |
+
+## Railway env: new for v2
+
+Set on **api** and **worker** unless noted. The worker is what runs the scheduled jobs, so it needs the keys too.
+
+| Variable | api | worker | What it does |
+|----------|:---:|:------:|--------------|
+| `ALLOWED_ORIGINS` | add `https://<v2-vercel-host>` (comma separated, keep the old one) | — | lets v2's browser calls through |
+| `WEB_V2_APP_URL` | `https://<v2-vercel-host>` | — | where Google connect returns to |
+| `BING_WEBMASTER_API_KEY` | yes | yes | Bing status on Connections, weekly Bing pull |
+| `OPENAI_API_KEY` | yes | yes | LLM visibility: ChatGPT |
+| `PERPLEXITY_API_KEY` | yes | yes | LLM visibility: Perplexity |
+| `GEMINI_API_KEY` | yes | yes | LLM visibility: Gemini (needs prepaid credit in AI Studio) |
+| `ANTHROPIC_API_KEY` | yes | yes | LLM visibility: Claude, and finding other brands in answers |
+| `TEAMWORK_SITE` / `TEAMWORK_API_TOKEN` | yes | — | Send to Teamwork, and listing projects and tasklists |
+
+A platform with no key is skipped, not failed. A key typed with a missing `=` is silently ignored, so check the
+**Variables** list shows each name with a value.
+
+## Migrations
+
+`scripts/start-api.sh` runs Alembic on each API start. v2 adds **0070 to 0082** on top of the live chain
+(baseline `0069_ga4_native_channels`). They only add tables and columns; a test
+(`tests/test_migrations_additive_only.py`) refuses anything else. Run them against a **copy of the production
+database first** if Railway lets you, and confirm `/health` answers `{"status":"ok","migrations":"..."}` after.
+
+## Sign-in domain
+
+Production uses `SMA_GOOGLE_HOSTED_DOMAIN=smamarketing.com` on the API, the worker and web-v2. The code's own default is also
+`smamarketing.com` only, so **a staff account still on `.net` is refused**. Check every person who signs in has a `.com`
+account, and that `SMA_ADMIN_EMAILS` lists `.com` addresses.
+
+One deliberate exception: `IDENTITY_DOMAINS` still lists both domains. It is not about signing in. It matches a person
+between systems (Teamwork still holds 7 of 8 people on `.net`), so removing `.net` there would leave their tasks
+unassigned. Drop it once Teamwork is moved.
+
+## Google Console
+
+| Client | Add |
+|--------|-----|
+| Login (Auth.js) | origin `https://<v2-vercel-host>`, redirect `https://<v2-vercel-host>/api/auth/callback/google` |
+| Data (GSC/GA4) | nothing: its redirect goes to the API, which does not move |
+
+## What starts running once the worker has the keys
+
+- Daily: Search Console, GA4 and SE Ranking syncs (as before).
+- Weekly: the site crawl, and the Bing pull for any client with a Bing site saved.
+- Every 28 days: an LLM visibility run for each worked client with paired prompts.
+
+**An LLM run asks every prompt of every platform that has a key** (about $0.08 for 30 prompts on four
+platforms). Check the keys before the first scheduled day.
+
+## v2 smoke test
+
+- [ ] Sign in at the v2 address with `@smamarketing.com`; the client switcher lists the clients
+- [ ] Monthly review loads, with the "Data through" line under the header
+- [ ] Settings → Connections: Google, Search Console, Bing and Teamwork show their state
+- [ ] Decision engine: a candidate list loads; diagnose one page; the growth action builds
+- [ ] Confirm a growth action and send it to Teamwork; the task appears in the client's tasklist
+- [ ] LLM visibility: Setup shows each platform as ready; Run now queues a job and the worker picks it up
+- [ ] The live tool still loads for a client (nothing in v2 should have changed it)
+
+
+---
+
+# Resetting a client (fresh start in v2)
+
+`python -m app.reset_client_data` clears one client's synced data and set-up data and keeps who they are and how they
+connect. It is **not reversible**: take a Postgres backup first. It changes what the live tool shows for that client too,
+because the database is shared.
+
+| Cleared | Kept |
+|---------|------|
+| Search Console, GA4, SE Ranking, crawl, Bing and SERP facts, staging tables, sync jobs and watermarks | the client record (name, domain, tier, business model, competitors) |
+| baselines and goals, conversions, completion patterns, feeds | people with access, Google and other integrations |
+| watchlist, monthly focus, AI visibility prompts, settings and runs | the Bing site and Teamwork tasklist |
+| Decision Engine tasks, actions, records, thresholds, overrides, excluded pages, page stages, keyword targets, topics, decisions, old watch targets | annotations (links to deleted decisions and topics are cleared), Copilot conversations |
+
+```bash
+# 1. See what would go, for every client. Deletes nothing.
+python -m app.reset_client_data --all
+
+# 2. One client: dry run, then delete (type the exact client name)
+python -m app.reset_client_data --client-slug <slug>
+python -m app.reset_client_data --client-slug <slug> --apply --confirm "<exact client name>"
+
+# 3. Pull the data again: one job per connected source with long windows
+python -m app.reset_client_data --client-slug <slug> --backfill
+```
+
+`--apply` takes one client at a time. A table that holds client data and is not in the tool's lists stops the run, so
+a table added later gets decided, not guessed. The backfill asks Search Console for 13 months and GA4 for 26, then
+the site crawl and the Bing pull; the worker runs them, and the crawl takes the longest.
+
+
+---
+
+# Admin (v2): add and remove clients
+
+An **Admin** link appears in the v2 header for SMA admins. It lists every client with what is set up (Google and Bing
+connected, watchlist, baseline, team) and how current its data is, with **Add a client**, **Settings**, **Open** and **Delete**.
+
+- **Add** uses the Add client screen (`POST /clients`, admin only).
+- **Delete** shows what will be removed (synced rows, set-up rows, connections, team access, annotations), then needs the
+  client's exact name typed in. It removes the client from the live tool too, because the database is shared, and it cannot be
+  undone: back up first. The delete uses the same table lists as the reset command, so it stops on any client table it has not
+  been told about instead of leaving rows behind. (The old hand-kept list had fallen behind, so deleting a client that had a
+  watchlist or a task would have failed.)
+- Both routes are admin only: `GET /v2/admin/clients`, `GET /v2/admin/clients/{id}/delete-preview`, `DELETE /v2/admin/clients/{id}`.

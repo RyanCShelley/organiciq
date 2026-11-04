@@ -1,5 +1,10 @@
+from app.models.ask_data import AskDataLog
+from app.models.google_update import GoogleSearchUpdate
+from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, ContentItem, ContentModelRun, ContentState, CtrTitleDraft, InlinkState, SchemaPageReport
+from app.models.site_health import SiteHealthSnapshot
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
 from app.models.client import Client, ClientStatus, Tier
+from app.models.copilot import CopilotConversation, CopilotMessage
 from app.models.config import ChannelRule, ConversionDefinition, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot, StagingSerAuditIssue, StagingSerAuditPage
 from app.models.decision import Decision, DecisionThreshold
@@ -31,10 +36,25 @@ from app.models.seranking import (
     StagingSerSiteSummary,
 )
 from app.models.user import User, UserClient, UserRole
+from app.models.bing_stats import FactBingQueryStat
+from app.models.client_bing_site import ClientBingSite
+from app.models.engine_task import EngineTask
+from app.models.monthly_review import MonthlyReviewSnapshot
+from app.models.llm_visibility import ClientLlmPrompt, ClientLlmSettings, LlmResponse, LlmRun
+from app.models.client_completion_pattern import ClientCompletionPattern
+from app.models.client_feed import ClientFeed
+from app.models.client_focus import ClientFocus
 from app.models.watch_target import WatchTarget
+from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 __all__ = [
     "BaselineVersion",
+    "ClientLlmPrompt",
+    "ClientLlmSettings",
+    "LlmRun",
+    "LlmResponse",
+    "WatchlistBucket",
+    "WatchlistKeyword",
     "Tier",
     "Client",
     "ClientStatus",
@@ -92,4 +112,17 @@ __all__ = [
     "FactSerAiCheck",
     "FactSerAiPresence",
     "FactSerAiTrackerStats",
+    "AskDataLog",
+    "GoogleSearchUpdate",
+    "ClientSchemaConcept",
+    "ClientSchemaIgnore",
+    "ContentItem",
+    "ContentModelRun",
+    "ContentState",
+    "CtrTitleDraft",
+    "InlinkState",
+    "SchemaPageReport",
+    "SiteHealthSnapshot",
+    "CopilotConversation",
+    "CopilotMessage",
 ]

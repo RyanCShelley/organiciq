@@ -1,0 +1,34 @@
+export const BRAND = {
+  productName: "Organic IQ",
+  logoWordmark: "OrganicIQ",
+  companyName: "SMA Marketing",
+  tagline: "Operating system for predictable organic growth",
+  hostedDomain: "smamarketing.com",
+  styleGuideUrl: "https://smamarketing.com/style-guide/",
+  logoPath: "/brand/sma-marketing-logo.svg",
+  colors: {
+    brandDark: "#0a0c0f",
+    brandDark2: "#171a22",
+    brandDark3: "#223540",
+    brandTeal: "#00a99d",
+    brandTealHover: "#008077",
+    brandLime: "#aae437",
+    brandTealSoft: "#c8f2ec",
+    brandLimeSoft: "#e7fedc",
+    textSecondary: "#6a6d75",
+    textTertiary: "#9ca3af",
+    border: "#e5e7eb",
+    background: "#f8f9fb",
+    surface: "#ffffff",
+  },
+  typography: {
+    body: "Inter",
+    headline: "Nunito Sans",
+  },
+  layout: {
+    sidebarWidth: "15.75rem",
+    maxContentWidth: "88.75rem",
+  },
+} as const;
+
+/** CSS variable names for programmatic use (charts, etc.) */

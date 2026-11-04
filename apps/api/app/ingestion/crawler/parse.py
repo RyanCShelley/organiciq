@@ -159,6 +159,11 @@ class ParsedPage:
     #: Anything a visitor could convert through: a form, a phone number, an
     #: email link, or a button that asks for the next step.
     conversion_elements: int = 0
+    #: Fields in the longest form in the page's own content (not the header, footer or navigation, and
+    #: not a search box). Friction removal asks whether the form a visitor must fill is long.
+    form_fields: int = 0
+    #: The page offers a phone number or email link, and every one of them sits in the footer.
+    contact_only_in_footer: bool = False
     #: The page says it is a 404 while returning 200.
     says_not_found: bool = False
     #: Every heading with the first paragraph under it, in document order.
@@ -605,6 +610,17 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         if href:
             resources.append(urljoin(url, href))
 
+    form_fields = 0
+    for form in doc.xpath("//form[not(ancestor::header or ancestor::footer or ancestor::nav)]"):
+        if form.xpath('.//input[@type="search"]') or (form.get("role") or "").lower() == "search":
+            continue
+        fields = form.xpath(
+            './/input[not(@type="hidden" or @type="submit" or @type="button" or @type="image")] | .//textarea | .//select'
+        )
+        form_fields = max(form_fields, len(fields))
+    contact_links = doc.xpath('//a[starts-with(@href,"tel:") or starts-with(@href,"mailto:")]')
+    contact_only_in_footer = bool(contact_links) and all(a.xpath("ancestor::footer") for a in contact_links)
+
     conversion_elements = len(doc.xpath("//form"))
     conversion_elements += len(
         doc.xpath('//a[starts-with(@href,"tel:") or starts-with(@href,"mailto:")]')
@@ -641,6 +657,8 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         faq_questions=faq_questions,
         resource_urls=sorted(set(resources)),
         conversion_elements=conversion_elements,
+        form_fields=form_fields,
+        contact_only_in_footer=contact_only_in_footer,
         says_not_found=bool(_NOT_FOUND.search(title) or _NOT_FOUND.search(h1)),
         content_updated_on=content_updated_on,
         content_updated_source=content_updated_source,
