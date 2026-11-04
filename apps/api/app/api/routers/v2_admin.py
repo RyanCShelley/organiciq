@@ -11,7 +11,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -24,12 +24,84 @@ from app.models.client_bing_site import ClientBingSite
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscDaily
 from app.models.integration import Integration
-from app.models.user import UserClient
+from app.models.user import User, UserClient, UserRole
 from app.services import data_pull
 from app.models.watchlist import WatchlistKeyword
 
 logger = logging.getLogger("organiciq.admin")
 router = APIRouter(prefix="/v2/admin", tags=["v2 admin"])
+
+
+class TeamBulkIn(BaseModel):
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+    client_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+@router.get("/team-access")
+def team_access(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Everyone who can sign in and the clients each can see, for assigning people to clients in bulk.
+
+    An admin sees every client without an assignment, so an admin's list is marked rather than filled in.
+    """
+    links: dict[UUID, list[str]] = {}
+    for user_id, client_id in db.query(UserClient.user_id, UserClient.client_id):
+        links.setdefault(user_id, []).append(str(client_id))
+    users = [
+        {"id": str(u.id), "email": u.email, "name": u.name, "role": u.role.value, "is_active": u.is_active, "sees_all": u.role == UserRole.SMA_ADMIN, "client_ids": links.get(u.id, [])}
+        for u in db.query(User).filter(User.role.in_((UserRole.SMA_ADMIN, UserRole.SMA_TEAM, UserRole.SEO_LEAD, UserRole.CONTENT_MANAGER))).order_by(User.email)
+    ]
+    clients = [{"id": str(c.id), "name": c.client_name, "slug": c.slug, "domain": c.domain, "status": c.status.value if hasattr(c.status, "value") else c.status} for c in db.query(Client).order_by(Client.client_name)]
+    return {"users": users, "clients": clients}
+
+
+def _bulk_targets(db: Session, payload: TeamBulkIn) -> tuple[list[User], list[Client]]:
+    user_ids, client_ids = set(payload.user_ids), set(payload.client_ids)
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+    if len(users) != len(user_ids) or len(clients) != len(client_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One of those people or clients no longer exists. Reload the page.")
+    return users, clients
+
+
+@router.post("/team-access/assign")
+def team_assign(
+    payload: TeamBulkIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Give each person access to each client. People who already have it are left as they are, and admins need nothing (they see every client)."""
+    users, clients = _bulk_targets(db, payload)
+    held = {(u, c) for u, c in db.query(UserClient.user_id, UserClient.client_id).filter(UserClient.user_id.in_([u.id for u in users]), UserClient.client_id.in_([c.id for c in clients]))}
+    added = already = 0
+    admins = [u for u in users if u.role == UserRole.SMA_ADMIN]
+    for user in users:
+        if user.role == UserRole.SMA_ADMIN:
+            continue
+        for client in clients:
+            if (user.id, client.id) in held:
+                already += 1
+            else:
+                db.add(UserClient(user_id=user.id, client_id=client.id, role=UserRole.SMA_TEAM))
+                added += 1
+    db.commit()
+    return {"added": added, "already": already, "admins_skipped": len(admins)}
+
+
+@router.post("/team-access/remove")
+def team_remove(
+    payload: TeamBulkIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Take each person's access to each client away. An admin's access is by role, so it is not removed here."""
+    users, clients = _bulk_targets(db, payload)
+    removable = [u.id for u in users if u.role != UserRole.SMA_ADMIN]
+    removed = db.query(UserClient).filter(UserClient.user_id.in_(removable), UserClient.client_id.in_([c.id for c in clients])).delete(synchronize_session=False) if removable else 0
+    db.commit()
+    return {"removed": removed, "admins_skipped": len(users) - len(removable)}
 
 
 class DeleteIn(BaseModel):

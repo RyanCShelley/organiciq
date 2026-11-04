@@ -86,3 +86,54 @@ def test_the_original_delete_route_now_works_for_a_client_with_v2_data(client, d
     assert client.delete(f"/clients/{a_id}", headers=auth_header(admin_user.email)).status_code == 204
     db.expire_all()
     assert db.get(Client, a_id) is None
+
+
+def _staff(db, email, role):
+    import uuid
+
+    from app.models.user import User
+
+    user = User(id=uuid.uuid4(), email=email, name=email.split("@")[0], google_sub=f"sub-{email}", role=role)
+    db.add(user)
+    db.commit()
+    return user
+
+
+def test_team_access_lists_people_with_their_clients_and_marks_admins(client, db, client_a, client_b, admin_user):
+    from app.models.user import UserClient, UserRole
+
+    helper = _staff(db, "helper@smamarketing.com", UserRole.CONTENT_MANAGER)
+    db.add(UserClient(user_id=helper.id, client_id=client_a.id, role=UserRole.SMA_TEAM))
+    db.commit()
+    out = client.get("/v2/admin/team-access", headers=auth_header(admin_user.email)).json()
+    by = {u["email"]: u for u in out["users"]}
+    assert by[admin_user.email]["sees_all"] is True and by[helper.email]["sees_all"] is False and by[helper.email]["client_ids"] == [str(client_a.id)] and by[helper.email]["role"] == "content_manager"
+    assert {c["id"] for c in out["clients"]} >= {str(client_a.id), str(client_b.id)}
+
+
+def test_people_are_given_access_to_many_clients_at_once_and_it_is_safe_to_repeat(client, db, client_a, client_b, admin_user):
+    from app.models.user import UserClient, UserRole
+
+    one = _staff(db, "one@smamarketing.com", UserRole.SMA_TEAM)
+    two = _staff(db, "two@smamarketing.com", UserRole.SEO_LEAD)
+    h = auth_header(admin_user.email)
+    body = {"user_ids": [str(one.id), str(two.id), str(admin_user.id)], "client_ids": [str(client_a.id), str(client_b.id)]}
+    first = client.post("/v2/admin/team-access/assign", json=body, headers=h).json()
+    assert first == {"added": 4, "already": 0, "admins_skipped": 1}, "two people on two clients; the admin needs nothing"
+    assert db.query(UserClient).filter(UserClient.user_id == admin_user.id).count() == 0
+    assert client.post("/v2/admin/team-access/assign", json=body, headers=h).json() == {"added": 0, "already": 4, "admins_skipped": 1}
+    one_only = {"user_ids": [str(one.id)], "client_ids": [str(client_a.id)]}
+    assert client.post("/v2/admin/team-access/remove", json=one_only, headers=h).json() == {"removed": 1, "admins_skipped": 0}
+    left = {(str(l.user_id), str(l.client_id)) for l in db.query(UserClient)}
+    assert (str(one.id), str(client_a.id)) not in left and (str(one.id), str(client_b.id)) in left and (str(two.id), str(client_a.id)) in left
+
+
+def test_bulk_access_is_for_admins_only_and_refuses_people_or_clients_that_do_not_exist(client, db, client_a, team_user, admin_user):
+    import uuid
+
+    body = {"user_ids": [str(team_user.id)], "client_ids": [str(client_a.id)]}
+    assert client.post("/v2/admin/team-access/assign", json=body, headers=auth_header(team_user.email)).status_code == 403
+    assert client.get("/v2/admin/team-access", headers=auth_header(team_user.email)).status_code == 403
+    missing = {"user_ids": [str(uuid.uuid4())], "client_ids": [str(client_a.id)]}
+    assert client.post("/v2/admin/team-access/assign", json=missing, headers=auth_header(admin_user.email)).status_code == 404
+    assert client.post("/v2/admin/team-access/assign", json={"user_ids": [], "client_ids": [str(client_a.id)]}, headers=auth_header(admin_user.email)).status_code == 422
