@@ -58,6 +58,7 @@ class FactCrawlPageSnapshot(Base):
         ),
         Index("ix_facts_crawl_page_snapshots_client", "client_id"),
         Index("ix_facts_crawl_page_snapshots_client_source", "client_id", "source"),
+        Index("ix_facts_crawl_page_snapshots_client_date", "client_id", "snapshot_date"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
