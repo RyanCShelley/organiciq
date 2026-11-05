@@ -247,6 +247,7 @@ def _site_findings(blocks: dict[str, list[Any]], audited: list[str]) -> list[F.F
             if node.id and isinstance(name, str) and name.strip() and any(vocab.is_a(vocab.type_name(t) or "", "Organization") for t in node.types) and not node.parent_property:
                 ids_by_name[_norm(name)][node.id].add(url)
     out: list[F.Finding] = []
+    out += _glossary_finding(blocks, audited, vocab)
     for name, by_id in ids_by_name.items():
         if len(by_id) < 2:
             continue
@@ -261,6 +262,25 @@ def _site_findings(blocks: dict[str, list[Any]], audited: list[str]) -> list[F.F
                     evidence=sorted(by_id)[:4], confidence="medium",
                 ))
     return out
+
+
+def _glossary_finding(blocks: dict[str, list[Any]], audited: list[str], vocab: Any) -> list[F.Finding]:
+    """The baseline asks for one DefinedTermSet per site, on the glossary hub. A site that has none is told once, on its home page."""
+    from app.schema_validation import graph as graph_mod
+    from app.schema_validation.baseline_rules import VERSION
+
+    if not audited or not any(blocks.get(u) for u in audited):
+        return []
+    for url in audited:
+        if any(vocab.is_a(vocab.type_name(t) or "", "DefinedTermSet") for n in graph_mod.build(url, blocks.get(url, [])).nodes for t in n.types):
+            return []
+    home = min(audited, key=lambda u: (len(u), u))
+    return [F.Finding(
+        url=home, layer="baseline", rule_id="baseline.glossary_missing", category=F.ENHANCEMENT, type="DefinedTermSet",
+        title="The site has no glossary markup (DefinedTermSet)", message="No page of the site carries a DefinedTermSet",
+        explanation="The baseline declares the company's official vocabulary as one DefinedTermSet on a glossary hub, with a DefinedTerm for each core term linked to Wikipedia and Wikidata. "
+        f"A term with no glossary page is also a content gap. This is part of the {VERSION}, not a requirement of Schema.org or Google.",
+        recommendation="Build a glossary hub page with a DefinedTermSet and a DefinedTerm for each core term (name, definition, inDefinedTermSet, sameAs).", doc=F.schema_doc("DefinedTermSet"), confidence="medium")]
 
 
 def _scored(a: dict[str, Any]) -> bool:
