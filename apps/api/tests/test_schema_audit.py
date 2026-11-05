@@ -67,7 +67,7 @@ def test_the_brand_is_checked_as_an_entity_and_a_wikidata_item_can_be_approved(c
     seed(db, client_a)
     checks = {c["key"]: c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"]}
     assert checks["org"]["status"] == "warn", "the organization only appears as an article's publisher"
-    assert checks["wikidata"]["status"] == "fail" and checks["same_as"]["status"] == "fail"
+    assert checks["wikidata"]["status"] == "optional" and checks["same_as"]["status"] == "fail", "most brands have no Wikidata item, so the brand's own is optional"
 
     async def fake(names, **kw):
         return {n: [wikidata.QIDCandidate(qid="Q42", label=n, description="a brand", url="https://www.wikidata.org/wiki/Q42")] for n in names}
@@ -82,6 +82,28 @@ def test_the_brand_is_checked_as_an_entity_and_a_wikidata_item_can_be_approved(c
     after = get(client, client_a, admin_user).json()["data"]
     assert next(c for c in after["entity"]["checks"] if c["key"] == "wikidata")["status"] == "pass" and len(after["concepts"]) == 1
     assert client.delete(f"/v2/schema/concepts/{approved.json()['id']}", headers=h).status_code == 200
+
+
+def test_core_topics_are_checked_for_wikidata_ids_and_for_being_linked_from_the_markup(client, db, client_a, admin_user):
+    from app.models.watchlist import WatchlistBucket
+
+    seed(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+
+    def topics():
+        return next(c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"] if c["key"] == "topics")
+
+    assert topics()["status"] == "warn" and "No core topics" in topics()["detail"]
+    db.add(WatchlistBucket(client_id=client_a.id, name="Sunscreen", name_key="sunscreen", sort_order=0))
+    db.commit()
+    assert topics()["status"] == "fail" and topics()["items"][0]["kind"] == "missing"
+    client.post("/v2/schema/concepts", json={"name": "Sunscreen", "qid": "Q10", "label": "sunscreen", "description": "lotion"}, headers=h)
+    t = topics()
+    assert t["status"] == "warn" and t["items"][0]["kind"] == "other" and "approved but not in the site's markup yet" in t["items"][0]["label"]
+    ld(db, client_a, "/collections/x", {"@context": "https://schema.org", "@type": "CollectionPage", "name": "X", "about": {"@type": "Thing", "name": "Sunscreen", "sameAs": "https://www.wikidata.org/wiki/Q10"}})
+    db.commit()
+    t = topics()
+    assert t["status"] == "pass" and t["detail"].startswith("1 of 1 topics are linked") and t["items"][0]["kind"] == "found"
 
 
 def fetched(body="<html><body><nav>menu</nav><main><h1>Spf</h1><p>Natural sunscreen for daily use.</p></main></body></html>"):

@@ -581,14 +581,15 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
         checks.append(check("names", "One name everywhere", "pass" if ok else "warn", (f"Every block that describes the brand says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.") + others_note, None if ok else "Make the markup and the brand name match.", name_items))
     else:
         checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare." + others_note, items=name_items))
+    checks.insert(0, _topics_check(db, client, blocks, approved, brand_concept, check))
     wd_links = [x for x in same_as if "wikidata.org" in x]
     wikidata_linked = bool(wd_links)
     wd_items = [r for r in links.out() if "wikidata.org" in r["label"]]
     if brand_concept:
         wd_items = [{"label": f"Approved: {brand_concept.qid} {brand_concept.label or brand_concept.name}", "count": 1, "pages": [], "kind": "found"}] + wd_items
-    checks.append(check("wikidata", "Linked to its Wikidata item", "pass" if (wikidata_linked or brand_concept) else "fail",
-                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand is not tied to a Wikidata item. That item is how search engines and AI recognize the brand as one known entity."),
-                        None if (wikidata_linked or brand_concept) else "Find the brand's Wikidata item below and approve it. If it has none, creating one is the first step.", wd_items))
+    checks.append(check("wikidata", "Brand linked to its own Wikidata item (optional)", "pass" if (wikidata_linked or brand_concept) else "optional",
+                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand has no Wikidata item. Most brands do not, and one is hard to get approved, so this is optional. The core topics above matter more."),
+                        None, wd_items))
     checks.append(check("same_as", "Links to the brand's other profiles (sameAs)", "pass" if same_as else "fail",
                         f"{len(same_as)} linked: " + ", ".join(sorted({_host(x) for x in same_as})[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
                         None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block.", links.out()))
@@ -615,6 +616,49 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
         if c["key"] in (ignored_checks or set()):
             c["status"], c["fix"] = "ignored", None
     return {"brand": brand, "names": [{"name": r["label"], "blocks": r["count"]} for r in names.out()], "same_as": same_as, "checks": checks}
+
+
+_WIKIDATA_ID = re.compile(r"wikidata\.org/(?:wiki|entity)/(Q\d+)")
+
+
+def _topics_check(db: Session, client: Client, blocks: dict[str, list[Any]], approved: list[Any], brand_concept: Any, check: Any) -> dict[str, Any]:
+    """The brand's core topics, each tied to a Wikidata item and linked from the markup.
+
+    Most small brands have no Wikidata item of their own, so what search engines and AI can recognize is the topics the brand is about.
+    The topics are the watchlist's buckets and any other approved concept (a product line, a topic); the brand's own item is not one.
+    """
+    import json
+
+    from app.models.watchlist import WatchlistBucket
+
+    by_name = {_norm(c.name): c for c in approved if c is not brand_concept}
+    names: list[str] = []
+    for n in [b.name for b in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order, WatchlistBucket.name)] + [c.name for c in by_name.values()]:
+        if _norm(n) and _norm(n) not in {_norm(x) for x in names}:
+            names.append(n)
+    on_site: Counter[str] = Counter()
+    for ents in blocks.values():
+        on_site.update(set(_WIKIDATA_ID.findall(json.dumps(ents, default=str))))
+    items, with_id, linked = [], 0, 0
+    for name in names:
+        c = by_name.get(_norm(name))
+        if c is None:
+            items.append({"label": f"{name}: no Wikidata item approved yet", "count": 0, "pages": [], "kind": "missing"})
+        elif on_site.get(c.qid):
+            with_id += 1
+            linked += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + f", on {on_site[c.qid]} page{'' if on_site[c.qid] == 1 else 's'}", "count": on_site[c.qid], "pages": [], "kind": "found"})
+        else:
+            with_id += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + ", approved but not in the site's markup yet", "count": 0, "pages": [], "kind": "other"})
+    label = "Core topics linked to Wikidata IDs"
+    if not names:
+        return check("topics", label, "warn", "No core topics are set yet. They come from the watchlist's topic groups.", "Add topics on the watchlist, then link each one to its Wikidata item below.", [])
+    detail = f"{linked} of {len(names)} topics are linked from the site's markup" + (f"; {with_id - linked} more are approved but not on the site yet." if with_id > linked else ".")
+    if linked == len(names):
+        return check("topics", label, "pass", detail, None, items)
+    fix = "Find each topic's Wikidata item below and approve it. Then add it to the pages that cover that topic (as what the page is about, with a sameAs link to the item). A topic with no Wikidata item can stay as plain text."
+    return check("topics", label, "warn" if with_id else "fail", detail, fix, items)
 
 
 def brand_facts(db: Session, client: Client) -> Any:
