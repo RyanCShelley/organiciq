@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
-import { removePeopleAction, restorePeopleAction, teamAssignAction, teamRemoveAction } from "@/app/(app)/admin/actions";
+import { addPersonAction, removePeopleAction, restorePeopleAction, teamAssignAction, teamRemoveAction } from "@/app/(app)/admin/actions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { TeamAccessData } from "@/lib/admin";
 
@@ -29,6 +29,10 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
   const [cq, setCq] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const [adding, setAdding] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState<"sma_team" | "sma_admin">("sma_team");
 
   const users = data.users.filter((u) => u.is_active);
   const removed = data.users.filter((u) => !u.is_active);
@@ -61,6 +65,22 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
     });
   };
 
+  const addPerson = () =>
+    start(async () => {
+      setMessage(null);
+      const r = await addPersonAction(newEmail, newName, newRole);
+      if (!r.ok) return setMessage({ ok: false, text: r.error });
+      // Chosen straight away, so the next step is to choose their clients and give access.
+      setPeople((p) => new Set(p).add(r.value.id));
+      setPq("");
+      setNewEmail("");
+      setNewName("");
+      setNewRole("sma_team");
+      setAdding(false);
+      setMessage({ ok: true, text: `${r.value.outcome === "restored" ? "Let back in" : "Added"} ${r.value.email}. Choose their clients, then Give access. They sign in with their own Google account.` });
+      router.refresh();
+    });
+
   const removePeople = () => {
     if (!window.confirm(`Remove ${people.size} ${people.size === 1 ? "person" : "people"} from Organic IQ? They can no longer sign in and lose access to every client. You can restore them later.`)) return;
     start(async () => {
@@ -84,14 +104,37 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-[var(--text-secondary)]">
-        Choose the people, choose the clients, then give or remove access. One person and one client is a single change. An admin sees every client, so there is nothing to give. To take someone out of the tool entirely, choose them and use Remove from Organic IQ. People appear here after they have signed in once.
+        Choose the people, choose the clients, then give or remove access. One person and one client is a single change. An admin sees every client, so there is nothing to give. To take someone out of the tool entirely, choose them and use Remove from Organic IQ. Someone who has not signed in yet can be added with Add a team member, so you can give them clients first.
       </p>
       <div className="grid gap-4 lg:grid-cols-2">
         <section className={`${box} p-4`} aria-label="People">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-bold">People <span className="font-normal text-[var(--text-tertiary)]">· {people.size} chosen</span></h2>
-            <button type="button" onClick={() => setPeople(allPeople ? new Set() : new Set(shownPeople.map((u) => u.id)))} className="text-xs font-semibold underline">{allPeople ? "Clear" : "Choose all shown"}</button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => setAdding((a) => !a)} aria-expanded={adding} className="text-xs font-semibold text-[var(--brand-teal)] hover:underline">{adding ? "Cancel" : "Add a team member"}</button>
+              <button type="button" onClick={() => setPeople(allPeople ? new Set() : new Set(shownPeople.map((u) => u.id)))} className="text-xs font-semibold underline">{allPeople ? "Clear" : "Choose all shown"}</button>
+            </div>
           </div>
+          {adding ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                addPerson();
+              }}
+              className="mt-3 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3"
+            >
+              <input type="email" required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Work email, e.g. name@smamarketing.com" aria-label="Work email" className="w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm" />
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name (optional)" aria-label="Name" className="w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm" />
+              <div className="flex flex-wrap items-center gap-3">
+                <select value={newRole} onChange={(e) => setNewRole(e.target.value as "sma_team" | "sma_admin")} aria-label="Role" className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
+                  <option value="sma_team">Team member</option>
+                  <option value="sma_admin">Admin (sees every client)</option>
+                </select>
+                <button type="submit" disabled={pending || !newEmail.trim()} className="rounded-lg bg-[#00a99d] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{pending ? <><Spinner />Adding…</> : "Add"}</button>
+              </div>
+              <p className="text-xs text-[var(--text-secondary)]">They sign in with their own Google account on this address. Nothing is sent to them.</p>
+            </form>
+          ) : null}
           <input value={pq} onChange={(e) => setPq(e.target.value)} placeholder="Find a person" aria-label="Find a person" className="mt-2 w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm" />
           <ul className="mt-2 max-h-96 divide-y divide-[var(--border)] overflow-y-auto text-sm">
             {shownPeople.map((u) => (

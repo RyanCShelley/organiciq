@@ -162,3 +162,30 @@ def test_people_are_removed_from_the_tool_and_restored_and_the_last_admin_and_yo
     other = _staff(db, "boss2@smamarketing.com", UserRole.SMA_ADMIN)
     assert client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(other.id)]}, headers=h).json() == {"removed": 1}
     assert client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(admin_user.id), str(one.id)]}, headers=auth_header(other.email)).status_code in (401, 403), "a removed admin cannot act"
+
+
+def test_someone_who_has_not_signed_in_can_be_added_and_given_clients(client, db, client_a, admin_user):
+    from app.models.user import User, UserRole
+
+    h = auth_header(admin_user.email)
+    made = client.post("/v2/admin/team-access/people", json={"email": "  New.Person@SMAMarketing.com ", "name": "New Person"}, headers=h)
+    assert made.status_code == 200 and made.json()["outcome"] == "added" and made.json()["email"] == "new.person@smamarketing.com"
+    row = db.query(User).filter(User.email == "new.person@smamarketing.com").one()
+    assert row.role == UserRole.SMA_TEAM and row.is_active and row.google_sub is None
+    listed = {u["email"] for u in client.get("/v2/admin/team-access", headers=h).json()["users"]}
+    assert "new.person@smamarketing.com" in listed
+    body = {"user_ids": [str(row.id)], "client_ids": [str(client_a.id)]}
+    assert client.post("/v2/admin/team-access/assign", json=body, headers=h).json()["added"] == 1
+
+
+def test_adding_refuses_a_stranger_a_repeat_and_a_non_admin_and_restores_the_removed(client, db, admin_user, team_user):
+    h = auth_header(admin_user.email)
+    assert client.post("/v2/admin/team-access/people", json={"email": "someone@gmail.com"}, headers=h).status_code == 400
+    assert client.post("/v2/admin/team-access/people", json={"email": "not-an-address"}, headers=h).status_code == 400
+    assert client.post("/v2/admin/team-access/people", json={"email": team_user.email}, headers=h).status_code == 409
+    assert client.post("/v2/admin/team-access/people", json={"email": "x@smamarketing.com"}, headers=auth_header(team_user.email)).status_code == 403
+    client.post("/v2/admin/team-access/people/remove", json={"user_ids": [str(team_user.id)]}, headers=h)
+    back = client.post("/v2/admin/team-access/people", json={"email": team_user.email}, headers=h)
+    assert back.status_code == 200 and back.json()["outcome"] == "restored"
+    assert client.post("/v2/admin/team-access/people", json={"email": "boss@smamarketing.com", "role": "sma_admin"}, headers=h).json()["role"] == "sma_admin"
+    assert client.post("/v2/admin/team-access/people", json={"email": "bad@smamarketing.com", "role": "client_viewer"}, headers=h).status_code == 422

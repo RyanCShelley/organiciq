@@ -91,6 +91,20 @@ export async function teamRemoveAction(userIds: string[], clientIds: string[]): 
   }
 }
 
+export async function addPersonAction(
+  email: string,
+  name: string,
+  role: "sma_team" | "sma_admin",
+): Promise<Result<{ outcome: "added" | "restored"; id: string; email: string }>> {
+  try {
+    const value = await apiFetch<{ outcome: "added" | "restored"; id: string; email: string }>("/v2/admin/team-access/people", { method: "POST", body: { email, name: name.trim() || null, role } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "That person could not be added.");
+  }
+}
+
 export async function removePeopleAction(userIds: string[]): Promise<Result<{ removed: number }>> {
   try {
     const value = await apiFetch<{ removed: number }>("/v2/admin/team-access/people/remove", { method: "POST", body: { user_ids: userIds } });

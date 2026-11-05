@@ -7,7 +7,7 @@ the client's exact name, with a preview of what goes first. Only an SMA admin ca
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app import reset_client_data
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin
+from app.core.settings import get_settings
 from app.models.baseline import BaselineVersion
 from app.models.client import Client
 from app.models.client_bing_site import ClientBingSite
@@ -102,6 +103,41 @@ def team_remove(
     removed = db.query(UserClient).filter(UserClient.user_id.in_(removable), UserClient.client_id.in_([c.id for c in clients])).delete(synchronize_session=False) if removable else 0
     db.commit()
     return {"removed": removed, "admins_skipped": len(users) - len(removable)}
+
+
+class PersonIn(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    role: Literal["sma_team", "sma_admin"] = "sma_team"
+
+
+@router.post("/team-access/people")
+def add_person(
+    payload: PersonIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Add someone before they have signed in, so they can be given clients now. They sign in with their own Google account and are matched on the address.
+
+    Only a workspace address is accepted (the same rule sign-in applies). Someone already here is not changed; someone who was removed is let back in.
+    """
+    email = payload.email.strip().lower()
+    if "@" not in email or not get_settings().is_workspace_email(email):
+        domains = ", ".join(sorted(get_settings().hosted_domains))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Use a work address ({domains}): that is what they sign in with.")
+    user = db.query(User).filter(User.email == email).one_or_none()
+    outcome = "added"
+    if user is None:
+        user = User(email=email, name=(payload.name or "").strip() or None, role=UserRole(payload.role), is_active=True)
+        db.add(user)
+    elif user.is_active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{email} is already on the team.")
+    else:
+        user.is_active = True
+        outcome = "restored"
+    db.commit()
+    db.refresh(user)
+    return {"outcome": outcome, "id": str(user.id), "email": user.email, "name": user.name, "role": user.role.value}
 
 
 class PeopleIn(BaseModel):
