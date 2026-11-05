@@ -49,6 +49,8 @@ class EngineTask(Base):
     due: Mapped[date | None] = mapped_column(Date, nullable=True)
     teamwork_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     teamwork_task_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Subtask key -> Teamwork id, for the subtasks made under the task.
+    teamwork_subtasks: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: What the page and topic looked like in the 28 days before it shipped.
     baseline: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
