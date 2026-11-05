@@ -143,11 +143,28 @@ function Chip({ label, onIgnore }: { label: string; onIgnore: () => void }) {
   );
 }
 
+function PageList({ title, items, total, onOpen, onIgnore }: { title: string; items: ScItem[]; total: number; onOpen: (url: string) => void; onIgnore: Ignore }) {
+  if (total === 0) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold">{title} ({total})</div>
+      <ul className="mt-1 max-h-60 space-y-1.5 overflow-y-auto text-xs">
+        {items.map((i) => (
+          <li key={i.url} className="flex flex-wrap items-start gap-2">
+            <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
+            <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
+            <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
+          </li>
+        ))}
+        {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
+      </ul>
+    </div>
+  );
+}
+
 function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => void; onIgnore: Ignore }) {
-  const [open, setOpen] = useState<"fix" | "rec" | null>(null);
-  const items: ScItem[] = open === "rec" ? t.recommended_items : t.items;
-  const total = open === "rec" ? t.recommended_affected : t.affected;
-  const clean = t.affected === 0;
+  const [open, setOpen] = useState(false);
+  const clean = t.affected === 0 && t.recommended_affected === 0 && (t.score == null || t.score >= 100);
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -160,11 +177,6 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
             {t.recommended.map((x) => <Chip key={x} label={x} onIgnore={() => onIgnore("expect", `${t.page_type}:${x}`, `${t.label}: ${x} is not wanted`)} />)}
             <button type="button" onClick={() => onIgnore("page_type", t.page_type, `${t.label}: ignored`)} className="ml-2 underline">Ignore this kind</button>
           </div>
-          {t.missing.length + t.missing_helpful.length > 0 ? (
-            <div className="mt-0.5 text-xs text-[var(--text-secondary)]">
-              {[...t.missing.map((m) => `Missing ${m.type} costs 40 points on ${m.pages} page${m.pages === 1 ? "" : "s"}.`), ...t.missing_helpful.map((m) => `Missing ${m.type} costs 10 points on ${m.pages} page${m.pages === 1 ? "" : "s"}.`)].join(" ")}
-            </div>
-          ) : null}
         </div>
         {t.score != null ? (
           <>
@@ -172,22 +184,32 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
             <div className="w-12 text-right text-sm font-bold tabular-nums">{t.score}</div>
           </>
         ) : <div className="w-52" />}
-        <div className="flex w-52 justify-end gap-3 text-xs">
-          {clean ? <span className="font-semibold text-green-700">Clean</span> : <button type="button" onClick={() => setOpen(open === "fix" ? null : "fix")} title={`${t.affected} page${t.affected === 1 ? "" : "s"} missing markup they need, or with an error or warning`} className="font-semibold underline">{open === "fix" ? "Hide" : `Show ${t.affected} to fix`}</button>}
-          {t.recommended_affected > 0 ? <button type="button" onClick={() => setOpen(open === "rec" ? null : "rec")} title={`${t.recommended_affected} page${t.recommended_affected === 1 ? "" : "s"} missing markup that would help`} className="text-[var(--text-secondary)] underline">{open === "rec" ? "Hide" : `${t.recommended_affected} could add more`}</button> : null}
+        <div className="flex w-64 justify-end text-xs">
+          {clean ? <span className="font-semibold text-green-700">Clean</span> : (
+            <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="text-right font-semibold underline">{open ? "Hide" : "See why it scored this way and how to fix it"}</button>
+          )}
         </div>
       </div>
       {open ? (
-        <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
-          {items.map((i) => (
-            <li key={i.url} className="flex flex-wrap items-start gap-2">
-              <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
-              <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
-              <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
-            </li>
-          ))}
-          {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
-        </ul>
+        <div className="mt-2 rounded-lg bg-[var(--bg)] p-4 text-sm">
+          <p className="font-semibold">{t.why.summary}</p>
+          {t.why.should_have ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{t.why.should_have}</p> : null}
+          {t.why.gaps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">Why it lost points</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+            </>
+          ) : null}
+          {t.why.steps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">What to do</div>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.steps.map((g) => <li key={g}>{g}</li>)}</ol>
+              {t.why.gain > 0 ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Doing all of this would bring the score to 100.</p> : null}
+            </>
+          ) : null}
+          <PageList title="Pages to fix" items={t.items} total={t.affected} onOpen={onOpen} onIgnore={onIgnore} />
+          <PageList title="Pages that could add more markup" items={t.recommended_items} total={t.recommended_affected} onOpen={onOpen} onIgnore={onIgnore} />
+        </div>
       ) : null}
     </li>
   );
@@ -566,7 +588,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
 
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">By kind of page</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">Every page starts at 100. Missing markup the page needs costs 40. Missing markup that would help costs 10. Each error or warning costs 5. A kind's score is the average of its pages. Green is 85 or more, amber 70 to 84, red under 70. Open any page to audit it or write corrected markup. From the crawl of {day(data.crawl_date)}.</p>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">Each page starts at 100 and loses points for markup it is missing. A kind's score is the average of its pages. Green is 85 or more, amber 70 to 84, red under 70. Open any page to audit it or write corrected markup. From the crawl of {day(data.crawl_date)}.</p>
             <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.types.map((t) => <TypeRow key={t.page_type} t={t} onOpen={setOpen} onIgnore={ignore} />)}</ul>
           </section>
 

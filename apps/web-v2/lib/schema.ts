@@ -6,10 +6,8 @@ export type ScType = {
   expects: string[];
   recommended: string[];
   score: number | null;
-  /** Required types a page is missing, and on how many pages. */
-  missing: { type: string; pages: number }[];
-  /** Recommended types a page is missing, and on how many pages. */
-  missing_helpful: { type: string; pages: number }[];
+  /** Why the kind scored what it did and what to do, in plain sentences. */
+  why: { summary: string; should_have: string; gaps: string[]; steps: string[]; gain: number };
   affected: number;
   items: ScItem[];
   recommended_affected: number;

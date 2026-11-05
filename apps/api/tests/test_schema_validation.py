@@ -414,6 +414,21 @@ def test_a_missing_required_type_is_a_warning_but_costs_its_forty_points_only_on
     assert "40 points" in missing[0].explanation
 
 
+def test_a_kind_explains_in_plain_sentences_why_it_scored_what_it_did_and_what_to_do():
+    blocks = [{"@context": CTX, "@type": "Organization", "name": "X", "url": "https://site.example/"}, {"@context": CTX, "@type": "WebSite", "name": "X", "url": "https://site.example/"}]
+    home = _page("https://site.example/", blocks)
+    score = schema_audit._average([home])
+    why = schema_audit.explain_kind("Home page", score, ["Organization", "WebSite", "WebPage"], [], [home])
+    assert why["summary"].startswith(f"Home page scored {score} out of 100.")
+    assert any("WebPage markup is missing on 1 page" in g for g in why["gaps"]) and "Add WebPage markup to the page that misses it." in why["steps"]
+    assert why["gain"] == 100 - score and "hidden code" in why["should_have"]
+    fine = {"page_type": "service", "has_markup": True, "missing_required": [], "missing_recommended": [], "corrections": []}
+    clean = schema_audit.explain_kind("Service pages", 100, ["Service"], [], [fine])
+    assert clean["gaps"] == [] and clean["steps"] == [] and "Every page has all the markup it needs." in clean["summary"]
+    none = schema_audit.explain_kind("Other pages", None, [], [], [])
+    assert none["steps"] == [] and "Nothing on the other pages" in none["summary"]
+
+
 def test_the_tile_counts_include_what_only_shows_across_pages():
     audits = [_page("https://site.example/p", [node("Organization", name="X", fooBarBaz=1)])]
     site = [F.Finding(url="https://site.example/", layer="graph", rule_id="graph.inconsistent_entity_ids", category=F.WARNING, title="t", message="m", explanation="e", recommendation="r", doc="d")]

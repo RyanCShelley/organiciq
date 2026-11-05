@@ -296,6 +296,41 @@ def _scored(a: dict[str, Any]) -> bool:
     return not (a["page_type"] == "generic" and not a["has_markup"])
 
 
+def _pages(n: int) -> str:
+    return f"{n} page" + ("" if n == 1 else "s")
+
+
+def explain_kind(label: str, score: int | None, expects: list[str], recommended: list[str], group: list[dict[str, Any]]) -> dict[str, Any]:
+    """Why a kind of page scored what it did and what to do about it, in plain sentences built from what the audit found on its pages."""
+    scored = [a for a in group if _scored(a)]
+    if score is None or not scored:
+        return {"summary": f"Nothing on the {label.lower()} is expected to carry markup.", "should_have": "", "gaps": [], "steps": []}
+    many = len(scored) > 1
+    summary = f"{label} scored {score} out of 100." + (f" That is the average of {len(scored)} pages. Each page starts at 100 and loses points for markup it is missing." if many else "")
+    should = "Markup is the hidden code that tells search engines and AI what a page is. For this kind of page it should say it is " + " and ".join([", ".join(expects)] if expects else ["a page"]) + (f", and it is stronger with {', '.join(recommended)}." if recommended else ".")
+    required: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_required"])
+    helpful: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_recommended"])
+    bare = sum(1 for a in scored if not a["has_markup"])
+    fixes: Counter[str] = Counter(_normal(c["detail"]) for a in scored for c in a["corrections"])
+    gaps: list[str] = []
+    steps: list[str] = []
+    if bare:
+        gaps.append(f"{_pages(bare)} {'has' if bare == 1 else 'have'} no markup at all, so {'it scores' if bare == 1 else 'they score'} 0.")
+        steps.append("Add markup to the pages that have none. Open a page here and choose to write corrected markup.")
+    for t, k in required.most_common():
+        gaps.append(f"{t} markup is missing on {_pages(k)}. A page without it loses 40 points.")
+        steps.append(f"Add {t} markup to {'the page' if k == 1 else f'the {k} pages'} that {'misses' if k == 1 else 'miss'} it.")
+    for text, k in fixes.most_common(3):
+        gaps.append(f"{_pages(k)} {'has' if k == 1 else 'have'} a problem in the markup: {text}. Each one loses 5 points.")
+        steps.append(f"Fix: {text}.")
+    for t, k in helpful.most_common(3):
+        gaps.append(f"{t} markup would help on {_pages(k)}. Without it a page loses 10 points. Nothing is wrong.")
+        steps.append(f"Optional: add {t} markup to the {_pages(k)} that {'lacks' if k == 1 else 'lack'} it.")
+    if not gaps:
+        summary += " Every page has all the markup it needs."
+    return {"summary": summary, "should_have": should, "gaps": gaps, "steps": steps, "gain": 100 - score if steps else 0}
+
+
 def _average(group: list[dict[str, Any]]) -> int | None:
     return round(100 * sum(a["score"] for a in group) / len(group)) if group else None
 
@@ -340,16 +375,13 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
                 fix.append({"url": a["url"], "text": " · ".join(bits)})
             elif a["missing_recommended"]:
                 recommended.append({"url": a["url"], "text": "Worth adding: " + ", ".join(a["missing_recommended"])})
-        missing_count: Counter[str] = Counter(t for a in group for t in a["missing_required"])
-        helpful_count: Counter[str] = Counter(t for a in group if a["has_markup"] for t in a["missing_recommended"])
         spec = expected_for(key)
         expects = [t for t in spec["required"] if f"{key}:{t}" not in ign["expect"]]
         types.append(
             {
                 "page_type": key, "label": label, "pages": len(group), "expects": expects, "recommended": [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]],
                 "score": _average([a for a in group if _scored(a)]),
-                "missing": [{"type": t, "pages": n} for t, n in missing_count.most_common()],
-                "missing_helpful": [{"type": t, "pages": n} for t, n in helpful_count.most_common()],
+                "why": explain_kind(label, _average([a for a in group if _scored(a)]), expects, [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]], group),
                 "affected": len(fix), "items": fix[:LISTED],
                 "recommended_affected": len(recommended), "recommended_items": recommended[:LISTED],
             }
