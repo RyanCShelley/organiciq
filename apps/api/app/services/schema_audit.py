@@ -403,65 +403,153 @@ def _has(node: dict[str, Any], prop: str) -> bool:
     return node.get(prop) not in (None, "", [], {})
 
 
+class _Tally:
+    """What was found, how many times, and on which pages: the rows behind a check, so each can be opened and traced to the markup."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+
+    def add(self, label: str, url: str, kind: str = "found") -> None:
+        r = self.rows.setdefault(label, {"label": label, "count": 0, "pages": [], "kind": kind})
+        r["count"] += 1
+        if url not in r["pages"] and len(r["pages"]) < 6:
+            r["pages"].append(url)
+
+    def out(self, limit: int = 40) -> list[dict[str, Any]]:
+        return sorted(self.rows.values(), key=lambda r: (-r["count"], r["label"]))[:limit]
+
+
+def _host(url: str) -> str:
+    return urlsplit(url if "//" in url else "//" + url).netloc.lower().removeprefix("www.")
+
+
+def _text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return _text(value.get("url") or value.get("contentUrl") or value.get("name") or value.get("@id") or "")
+    if isinstance(value, list):
+        return ", ".join(t for t in (_text(v) for v in value[:2]) if t)
+    return ""
+
+
+def _address(value: Any) -> str:
+    a = value[0] if isinstance(value, list) and value else value
+    if isinstance(a, dict):
+        return ", ".join(str(a[k]).strip() for k in ("streetAddress", "addressLocality", "addressRegion", "postalCode") if isinstance(a.get(k), str) and a[k].strip())
+    return _text(a)
+
+
 def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: dict[str, set[str]], ignored_checks: set[str] | None = None) -> dict[str, Any]:
-    """Does the markup describe the brand as one organization, tied to the profiles and the Wikidata item that identify it?"""
+    """Does the markup describe the brand as one organization, tied to the profiles and the Wikidata item that identify it?
+
+    Only the brand's own organization is judged. A page can name other organizations (a client in a case study, a company an article is about, a
+    publisher), and those are listed apart: they are not the brand under a different name, and their profiles are not the brand's.
+    """
     from app.models.llm_visibility import ClientLlmSettings
     from app.schema_tools.transforms import extract_graph
 
     saved = db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar()
     brand = (saved or client.client_name or "").strip()
-    standalone: list[dict[str, Any]] = []
-    every: list[dict[str, Any]] = []
-    for ents in blocks.values():
-        standalone += [n for b in ents for n in extract_graph(b) if _types(n) & _ORG_TYPES]
-        every += [n for n in _nodes(ents) if _types(n) & _ORG_TYPES]
-    names: Counter[str] = Counter(n["name"].strip() for n in every if isinstance(n.get("name"), str) and n["name"].strip())
+    site_host = _host(client.domain or "")
+
+    def own(n: dict[str, Any]) -> bool:
+        u = n.get("url") if isinstance(n.get("url"), str) else None
+        nm = n.get("name") if isinstance(n.get("name"), str) else ""
+        if u and site_host and _host(u) == site_host:
+            return True
+        return bool(nm and brand and (_norm(brand) in _norm(nm) or _norm(nm) in _norm(brand)))
+
+    standalone: list[tuple[str, dict[str, Any]]] = []
+    every: list[tuple[str, dict[str, Any]]] = []
+    for url, ents in blocks.items():
+        standalone += [(url, n) for b in ents for n in extract_graph(b) if _types(n) & _ORG_TYPES]
+        every += [(url, n) for n in _nodes(ents) if _types(n) & _ORG_TYPES]
+    mine = [(u, n) for u, n in every if own(n)]
+    others = [(u, n) for u, n in every if not own(n)]
+    own_standalone = [(u, n) for u, n in standalone if own(n)]
+    names = _Tally()
+    for u, n in mine:
+        if isinstance(n.get("name"), str) and n["name"].strip():
+            names.add(n["name"].strip(), u)
+    other_names = _Tally()
+    for u, n in others:
+        if isinstance(n.get("name"), str) and n["name"].strip():
+            other_names.add(n["name"].strip(), u, "other")
     micro_pages = sum(1 for ts in micro.values() if "Organization" in ts)
-    best = max(standalone, key=lambda o: sum(_has(o, p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")), default=None)
-    same_as = sorted({x for n in every for x in ([n["sameAs"]] if isinstance(n.get("sameAs"), str) else [v for v in (n.get("sameAs") or []) if isinstance(v, str)])})
+    best_u, best = max(own_standalone, key=lambda un: sum(_has(un[1], p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")), default=("", None))
+    links = _Tally()
+    for u, n in mine:
+        raw = n.get("sameAs")
+        for x in [raw] if isinstance(raw, str) else (raw or []):
+            if isinstance(x, str):
+                links.add(x, u)
+    same_as = sorted(links.rows)
     approved = db.query(ClientSchemaConcept).filter(ClientSchemaConcept.client_id == client.id).all()
     brand_concept = next((c for c in approved if _norm(c.name) == _norm(brand)), None)
 
-    def check(key: str, label: str, status: str, detail: str, fix: str | None = None) -> dict[str, Any]:
-        return {"key": key, "label": label, "status": status, "detail": detail, "fix": fix}
+    def check(key: str, label: str, status: str, detail: str, fix: str | None = None, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return {"key": key, "label": label, "status": status, "detail": detail, "fix": fix, "items": items or []}
 
     checks = []
-    if standalone:
-        checks.append(check("org", "Organization markup (JSON-LD)", "pass", f"Found on {len({id(n) for n in standalone})} blocks."))
+    org_pages = _Tally()
+    for u, _n in own_standalone:
+        org_pages.add(u, u)
+    org_items = [{"label": r["label"], "count": r["count"], "pages": [r["label"]], "kind": "found"} for r in org_pages.out(12)]
+    if own_standalone:
+        checks.append(check("org", "Organization markup (JSON-LD)", "pass", f"Found on {len({u for u, _ in own_standalone})} pages ({len(own_standalone)} blocks).", items=org_items))
     elif every:
-        checks.append(check("org", "Organization markup (JSON-LD)", "warn", "The organization only appears inside other markup (as an article's publisher), never as its own block describing the business.", "Generate the homepage markup below: it adds an Organization block."))
+        checks.append(check("org", "Organization markup (JSON-LD)", "warn", "The organization only appears inside other markup (as an article's publisher), never as its own block describing the business.", "Generate the homepage markup below: it adds an Organization block.",
+                            items=[{"label": f"Inside other markup: {r['label']}", "count": r["count"], "pages": r["pages"], "kind": "other"} for r in (names.out(5) or other_names.out(5))]))
     elif micro_pages:
         checks.append(check("org", "Organization markup (JSON-LD)", "warn", f"Only as microdata on {micro_pages} pages. Search engines read it, but JSON-LD is the form they and AI crawlers prefer.", "Generate the homepage markup below: it adds an Organization block."))
     else:
         checks.append(check("org", "Organization markup (JSON-LD)", "fail", "No Organization markup found on any crawled page.", "Generate the homepage markup below."))
-    distinct = {_norm(n) for n in names}
+    name_items = names.out() + [{**r, "label": f"Another organization: {r['label']}"} for r in other_names.out(15)]
+    distinct = {_norm(n) for n in names.rows}
+    others_note = f" {len(other_names.rows)} other organizations are named too (clients, mentions, publishers); they are not judged." if other_names.rows else ""
     if len(distinct) > 1:
-        checks.append(check("names", "One name everywhere", "fail", "The markup names the organization differently: " + ", ".join(f"“{n}” on {c}" for n, c in names.most_common()) + ".", "Use one exact name in every block."))
-    elif names:
-        only = next(iter(names))
+        checks.append(check("names", "One name everywhere", "fail", "The brand's own markup names it differently: " + ", ".join(f"“{n}” on {r['count']}" for n, r in sorted(names.rows.items(), key=lambda kv: -kv[1]["count"])) + "." + others_note, "Use one exact name in every block that describes the brand.", name_items))
+    elif names.rows:
+        only = next(iter(names.rows))
         ok = not brand or _norm(brand) in _norm(only) or _norm(only) in _norm(brand)
-        checks.append(check("names", "One name everywhere", "pass" if ok else "warn", f"Every block says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.", None if ok else "Make the markup and the brand name match."))
+        checks.append(check("names", "One name everywhere", "pass" if ok else "warn", (f"Every block that describes the brand says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.") + others_note, None if ok else "Make the markup and the brand name match.", name_items))
     else:
-        checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare."))
-    wikidata_linked = any("wikidata.org" in x for x in same_as)
+        checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare." + others_note, items=name_items))
+    wd_links = [x for x in same_as if "wikidata.org" in x]
+    wikidata_linked = bool(wd_links)
+    wd_items = [r for r in links.out() if "wikidata.org" in r["label"]]
+    if brand_concept:
+        wd_items = [{"label": f"Approved: {brand_concept.qid} {brand_concept.label or brand_concept.name}", "count": 1, "pages": [], "kind": "found"}] + wd_items
     checks.append(check("wikidata", "Linked to its Wikidata item", "pass" if (wikidata_linked or brand_concept) else "fail",
-                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else ("The markup links to Wikidata." if wikidata_linked else "The brand is not tied to a Wikidata item. That item is how search engines and AI recognize the brand as one known entity."),
-                        None if (wikidata_linked or brand_concept) else "Find the brand's Wikidata item below and approve it. If it has none, creating one is the first step."))
+                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand is not tied to a Wikidata item. That item is how search engines and AI recognize the brand as one known entity."),
+                        None if (wikidata_linked or brand_concept) else "Find the brand's Wikidata item below and approve it. If it has none, creating one is the first step.", wd_items))
     checks.append(check("same_as", "Links to the brand's other profiles (sameAs)", "pass" if same_as else "fail",
-                        f"{len(same_as)} linked: " + ", ".join(urlsplit(x).netloc.removeprefix("www.") for x in same_as[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
-                        None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block."))
+                        f"{len(same_as)} linked: " + ", ".join(sorted({_host(x) for x in same_as})[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
+                        None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block.", links.out()))
+    shown = {"logo": ("logo", _text), "contactPoint": ("contact", _text), "telephone": ("contact", _text), "address": ("contact", _address), "url": ("url", _text)}
     for key, label, props in (("logo", "Logo", ("logo",)), ("contact", "Contact details", ("contactPoint", "telephone", "address")), ("url", "Website address", ("url",))):
         present = best is not None and any(_has(best, p) for p in props)
-        checks.append(check(key, label, "pass" if present else "fail" if best is not None else "warn", f"{label} is in the Organization block." if present else (f"{label} is missing from the Organization block." if best is not None else "There is no standalone Organization block to read."), None if present else f"Add {' or '.join(props)} to the Organization block."))
+        items = []
+        if best is not None:
+            for p in props:
+                if _has(best, p):
+                    fmt = shown[p][1]
+                    items.append({"label": f"{p}: {fmt(best[p]) or '(set)'}", "count": 1, "pages": [best_u], "kind": "found"})
+                else:
+                    items.append({"label": f"{p}: missing", "count": 0, "pages": [best_u], "kind": "missing"})
+        checks.append(check(key, label, "pass" if present else "fail" if best is not None else "warn", f"{label} is in the Organization block." if present else (f"{label} is missing from the Organization block." if best is not None else "There is no standalone Organization block to read."), None if present else f"Add {' or '.join(props)} to the Organization block.", items))
     products = [u for u, ents in blocks.items() if any("Product" in _types(n) for n in extract_graph_all(ents))]
     branded = [u for u in products if any(_has(n, "brand") for n in extract_graph_all(blocks[u]) if "Product" in _types(n))]
     if products:
         good = len(branded) >= 0.8 * len(products)
-        checks.append(check("brand", "Products name their brand", "pass" if good else "warn", f"{len(branded)} of {len(products)} products carry a brand.", None if good else "Add the brand to each Product block so products tie back to the organization."))
+        unbranded = [u for u in products if u not in set(branded)]
+        checks.append(check("brand", "Products name their brand", "pass" if good else "warn", f"{len(branded)} of {len(products)} products carry a brand.", None if good else "Add the brand to each Product block so products tie back to the organization.",
+                            [{"label": u, "count": 1, "pages": [u], "kind": "missing"} for u in unbranded[:20]]))
     for c in checks:
         if c["key"] in (ignored_checks or set()):
             c["status"], c["fix"] = "ignored", None
-    return {"brand": brand, "names": [{"name": n, "blocks": c} for n, c in names.most_common()], "same_as": same_as, "checks": checks}
+    return {"brand": brand, "names": [{"name": r["label"], "blocks": r["count"]} for r in names.out()], "same_as": same_as, "checks": checks}
 
 
 def brand_facts(db: Session, client: Client) -> Any:
