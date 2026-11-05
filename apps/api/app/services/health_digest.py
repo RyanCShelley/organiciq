@@ -232,10 +232,13 @@ def render(digest: Digest, *, today: date) -> tuple[str, str]:
     return (f"OrganicIQ health {today:%b %d}: {n} to look at", "\n".join(lines).rstrip())
 
 
-def send_email(subject: str, body: str) -> bool:
-    """Send through the configured SMTP account. False when not configured."""
+def send_email(subject: str, body: str, to: list[str] | None = None) -> bool:
+    """Send through the configured SMTP account. False when not configured.
+
+    With no `to` it goes to the health digest recipients.
+    """
     settings = get_settings()
-    recipients = [a.strip() for a in settings.health_digest_to.split(",") if a.strip()]
+    recipients = to if to is not None else [a.strip() for a in settings.health_digest_to.split(",") if a.strip()]
     if not (recipients and settings.smtp_host):
         return False
     message = EmailMessage()

@@ -26,7 +26,7 @@ from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscDaily
 from app.models.integration import Integration
 from app.models.user import User, UserClient, UserRole
-from app.services import data_pull
+from app.services import data_pull, welcome_email
 from app.models.watchlist import WatchlistKeyword
 
 logger = logging.getLogger("organiciq.admin")
@@ -114,7 +114,7 @@ class PersonIn(BaseModel):
 @router.post("/team-access/people")
 def add_person(
     payload: PersonIn,
-    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    admin: Annotated[AuthUser, Depends(require_sma_admin)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Add someone before they have signed in, so they can be given clients now. They sign in with their own Google account and are matched on the address.
@@ -137,7 +137,8 @@ def add_person(
         outcome = "restored"
     db.commit()
     db.refresh(user)
-    return {"outcome": outcome, "id": str(user.id), "email": user.email, "name": user.name, "role": user.role.value}
+    emailed = welcome_email.send(name=user.name, email=user.email, added_by=admin.name or admin.email, restored=outcome == "restored")
+    return {"outcome": outcome, "id": str(user.id), "email": user.email, "name": user.name, "role": user.role.value, "emailed": emailed}
 
 
 class PeopleIn(BaseModel):
