@@ -46,12 +46,13 @@ def test_pages_are_grouped_by_kind_and_checked_against_the_markup_that_kind_need
     out = get(client, client_a, admin_user).json()["data"]
     assert out["pages"] == 6, "numbered list pages (/page/2) are not audited"
     by = {t["page_type"]: t for t in out["types"]}
-    assert by["product"]["pages"] == 3 and by["product"]["expects"] == ["Product", "Offer"]
+    assert by["product"]["pages"] == 3 and by["product"]["expects"] == ["Product", "Offer", "WebPage"]
     texts = {i["url"]: i["text"] for i in by["product"]["items"]}
     assert "Missing Offer" in texts[BASE + "/products/b"] and BASE + "/products/c" in texts, "a product with no markup, and one with no offer, both need work"
-    assert BASE + "/products/a" not in texts, "a bare logo address is valid Schema.org (logo takes a URL), so it is no longer a cleanup"
+    assert "cleanup" not in texts[BASE + "/products/a"], "a bare logo address is valid Schema.org (logo takes a URL), so it is no longer a cleanup"
+    assert "Missing WebPage" in texts[BASE + "/products/a"], "the baseline expects every page to be a WebPage in the site's graph"
     assert "cleanup" in texts[BASE + "/products/b"] and "needs 'review|aggregateRating|offers'" in texts[BASE + "/products/b"], "a Product with no offer, rating or review is not eligible for Google's product snippet"
-    assert by["editorial"]["affected"] == 0 and by["category"]["affected"] == 0
+    assert by["editorial"]["affected"] == 1 and by["category"]["affected"] == 0, "the article has no WebPage"
     assert by["homepage"]["items"][0]["text"].startswith("Missing Organization, WebSite")
     assert 0 <= out["score"] <= 100 and out["with_markup"] == 4 and out["cleanups"] >= 1
 
@@ -169,7 +170,7 @@ def test_what_does_not_apply_can_be_ignored_and_restored(client, db, client_a, a
     seed(db, client_a)
     base = get(client, client_a, admin_user).json()["data"]
     by = {t["page_type"]: t for t in base["types"]}
-    assert "WebSite" in by["homepage"]["expects"] and by["homepage"]["affected"] == 1 and by["product"]["affected"] == 2
+    assert "WebSite" in by["homepage"]["expects"] and by["homepage"]["affected"] == 1 and by["product"]["affected"] == 3
 
     # A markup type not expected of a kind of page: the home page then needs only an Organization.
     made = ignore(client, client_a, admin_user, "expect", "homepage:WebSite", "Home page: WebSite is not expected")
@@ -182,7 +183,7 @@ def test_what_does_not_apply_can_be_ignored_and_restored(client, db, client_a, a
     ignore(client, client_a, admin_user, "page", BASE + "/products/c")
     data = get(client, client_a, admin_user).json()["data"]
     types = {t["page_type"]: t for t in data["types"]}
-    assert "homepage" not in types and types["product"]["pages"] == 2 and types["product"]["affected"] == 1
+    assert "homepage" not in types and types["product"]["pages"] == 2 and types["product"]["affected"] == 2
     assert {i["scope"] for i in data["ignored"]} == {"expect", "page_type", "page"}
 
     # An entity check that cannot apply (this brand has no Wikidata item) stops counting against the brand.

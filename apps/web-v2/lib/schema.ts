@@ -12,7 +12,7 @@ export type ScType = {
   recommended_items: ScItem[];
 };
 export type ScCategory = "error" | "warning" | "enhancement" | "informational";
-export type ScLayer = "schemaorg" | "graph" | "google" | "recommendation";
+export type ScLayer = "schemaorg" | "graph" | "google" | "baseline" | "recommendation";
 /** One finding on one page. */
 export type ScFinding = {
   rule_id: string;

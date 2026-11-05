@@ -8,7 +8,8 @@ The layers do not depend on each other and can be changed, or one switched off, 
 1. `schemaorg_rules`: is the markup valid Schema.org (types, properties, domains through inheritance, ranges, deprecation)?
 2. `graph_rules`: do the entities hold together (references, duplicate and conflicting definitions, relationships)?
 3. `google_rules`: does the markup meet what a Google Search feature needs? (never an error)
-4. `recommendation_rules`: contextual suggestions for this kind of page (never an error)
+4. `baseline_rules`: SMA's own schema standard, the structured knowledge layer every client gets (never an error)
+5. `recommendation_rules`: contextual suggestions for this kind of page (never an error)
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.schema_validation import findings as F
-from app.schema_validation import google_rules, graph_rules, recommendation_rules, schemaorg_rules
+from app.schema_validation import baseline_rules, google_rules, graph_rules, recommendation_rules, schemaorg_rules
 from app.schema_validation import graph as graph_mod
 from app.schema_validation.vocabulary import Vocabulary, load
 
@@ -53,6 +54,7 @@ def validate_page(url: str, blocks: list[Any], *, page_type: str | None = None, 
         *schemaorg_rules.check(g, vocab),
         *graph_rules.check(g, vocab, site_ids=site_ids),
         *google_rules.check(g, vocab),
+        *baseline_rules.check(g, vocab, page_type),
         *recommendation_rules.main_entity(g, vocab, page_type),
     ]
     _contextualize(g, vocab, findings)

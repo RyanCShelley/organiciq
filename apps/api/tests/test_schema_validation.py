@@ -365,13 +365,14 @@ def test_a_page_without_any_article_markup_is_an_enhancement_and_one_with_a_subt
     from app.schema_tools.expected import find_missing_required
 
     assert find_missing_required("editorial", ["WebPage"]) == ["Article"]
-    assert find_missing_required("editorial", ["TechArticle"]) == []
+    assert find_missing_required("editorial", ["TechArticle"]) == ["WebPage"], "a subtype satisfies Article; the baseline also expects the page to be a WebPage"
+    assert find_missing_required("editorial", ["TechArticle", "WebPage"]) == []
     page = schema_audit.audit_page("https://site.example/blog/post", "Post", [{"@context": CTX, "@type": "WebPage", "name": "P"}], set())
     miss = [f for f in page["findings"] if f.rule_id == "recommendation.missing_type_required"]
     assert page["page_type"] == "editorial" and miss and miss[0].category == F.ENHANCEMENT and miss[0].layer == "recommendation"
     assert not page["corrections"] or all(c["transform"] != "recommendation.missing_type_required" for c in page["corrections"]), "an enhancement does not count against the page"
     done = schema_audit.audit_page("https://site.example/blog/post", "Post", [{"@context": CTX, "@type": "TechArticle", "headline": "H"}], set())
-    assert not [f for f in done["findings"] if f.rule_id == "recommendation.missing_type_required"]
+    assert not [f for f in done["findings"] if f.rule_id == "recommendation.missing_type_required" and f.type == "Article"], "a TechArticle is an Article"
 
 
 # ── the audit: grouping, counts, and what counts against a page ─────────────

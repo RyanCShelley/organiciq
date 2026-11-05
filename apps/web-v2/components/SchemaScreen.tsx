@@ -22,7 +22,7 @@ const CATEGORY: Record<ScCategory, { label: string; plural: string; chip: string
   enhancement: { label: "Enhancement", plural: "Enhancements", chip: "bg-[#e7fedc] text-[#2f6b0d]", hint: "Nothing is wrong. Worth adding." },
   informational: { label: "Informational", plural: "Informational", chip: "bg-[#eceef2] text-[#4a5468]", hint: "Valid, but worth knowing." },
 };
-const LAYER: Record<ScLayer, string> = { schemaorg: "Schema.org", graph: "Entities", google: "Google Search", recommendation: "Recommendation" };
+const LAYER: Record<ScLayer, string> = { schemaorg: "Schema.org", graph: "Entities", google: "Google Search", baseline: "SMA baseline", recommendation: "Recommendation" };
 
 function Evidence({ value }: { value: unknown }) {
   if (value == null) return null;
@@ -48,12 +48,12 @@ function Findings({ data, onOpen, onIgnore }: { data: ScData; onOpen: (url: stri
   const [openKey, setOpenKey] = useState<string | null>(null);
   const inCategory = data.findings.filter((g) => g.category === category);
   const shown = inCategory.filter((g) => layer === "all" || g.layer === layer);
-  const layers = (["schemaorg", "graph", "google", "recommendation"] as ScLayer[]).filter((l) => inCategory.some((g) => g.layer === l));
+  const layers = (["schemaorg", "graph", "google", "baseline", "recommendation"] as ScLayer[]).filter((l) => inCategory.some((g) => g.layer === l));
   return (
     <section className={card}>
       <h2 className="px-5 pt-4 text-lg font-bold">What the markup needs</h2>
       <p className="px-5 text-xs text-[var(--text-tertiary)]">
-        Four separate checks: is it valid Schema.org (version {data.validator.schemaorg_version}), do its entities hold together, does it meet what a Google Search feature needs (as last reviewed {data.validator.google_reviewed}), and what would make it say more.
+        Five separate checks: is it valid Schema.org (version {data.validator.schemaorg_version}), do its entities hold together, does it meet what a Google Search feature needs (as last reviewed {data.validator.google_reviewed}), does it meet the SMA schema baseline, and what would make it say more.
         A property Google does not use is never an error.
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2 px-5 sm:grid-cols-4" role="tablist" aria-label="Category">

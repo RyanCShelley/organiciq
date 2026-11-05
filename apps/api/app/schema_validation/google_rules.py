@@ -27,6 +27,11 @@ REVIEWED = "2026-11-04"
 _BASE = "https://developers.google.com/search/docs/appearance/structured-data/"
 
 
+_STRUCTURE = ("No change is required. The SMA schema baseline keeps this markup for its structure, not for a result: it breaks the page into pieces a machine can read and quote. "
+              "Keep it, and make sure it matches the visible page word for word.")
+_BASELINE = "Per the SMA schema baseline (v2, Oct 2026); not re-checked against Google's documentation."
+
+
 @dataclass(frozen=True)
 class Feature:
     key: str
@@ -38,6 +43,8 @@ class Feature:
     status: str = "supported"  # supported, restricted, deprecated
     note: str = ""
     exclude: tuple[str, ...] = ()  # subtypes another feature owns
+    keep: str = "No change is required. Keep it only if it serves another purpose."  # what to tell a person about markup that earns no result
+    source: str = ""  # where the row comes from when it is not Google's own page, so the finding says so
 
 
 FEATURES: tuple[Feature, ...] = (
@@ -52,8 +59,15 @@ FEATURES: tuple[Feature, ...] = (
     Feature("event", "Event", "Event", _BASE + "event", required=("name", "startDate", "location"), recommended=("description", "endDate", "image", "offers", "eventStatus")),
     Feature("review", "Review snippet", "Review", _BASE + "review-snippet", required=("itemReviewed", "reviewRating", "author")),
     Feature("faq", "FAQ", "FAQPage", _BASE + "faqpage", required=("mainEntity",), status="restricted",
-            note="Since August 2023 Google shows FAQ rich results only for well-known government and health websites."),
-    Feature("howto", "How-to", "HowTo", _BASE + "how-to", status="deprecated", note="Google stopped showing how-to rich results in 2023, so this markup no longer earns a result."),
+            note="Since August 2023 Google shows FAQ rich results only for well-known government and health websites.", keep=_STRUCTURE),
+    Feature("howto", "How-to", "HowTo", _BASE + "how-to", status="deprecated", note="Google stopped showing how-to rich results in 2023, so this markup no longer earns a result.", keep=_STRUCTURE),
+    # Retired features, from the SMA schema baseline (v2, Oct 2026). Not re-checked against Google's pages here; re-check a row against its `doc` before relying on its date.
+    Feature("course", "Course info", "Course", _BASE + "course", status="deprecated", note="Google retired the course info result.", source=_BASELINE),
+    Feature("claimreview", "Fact check", "ClaimReview", _BASE + "factcheck", status="deprecated", note="Google retired the fact check result.", source=_BASELINE),
+    Feature("dataset", "Dataset", "Dataset", _BASE + "dataset", status="restricted", note="Dataset markup is read only by Google's Dataset Search, not by Google Search.", source=_BASELINE),
+    Feature("specialannouncement", "Special announcement", "SpecialAnnouncement", _BASE + "special-announcements", status="deprecated", note="Google retired the special announcement result.", source=_BASELINE),
+    Feature("practiceproblem", "Practice problems", "Quiz", _BASE + "practice-problems", status="deprecated", note="Google retired the practice problem result.", source=_BASELINE),
+    Feature("vehicle", "Vehicle listing", "Vehicle", _BASE + "vehicle-listing", status="deprecated", note="Google retired the vehicle listing result.", source=_BASELINE),
 )
 
 
@@ -86,8 +100,8 @@ def check(graph: Graph, vocab: Vocabulary) -> list[F.Finding]:
             base = dict(url=graph.url, layer="google", entity_id=node.id or node.raw_id, type=t, doc=feature.doc)
             if feature.status != "supported":
                 out.append(F.Finding(rule_id=f"google.{feature.key}.{feature.status}", category=F.INFORMATIONAL, title=f"{feature.name}: {feature.note.split('.')[0]}",
-                                     message=f"{t} markup is present. {feature.note}", explanation=feature.note + " The markup is still valid Schema.org, and other consumers may read it.",
-                                     recommendation="No change is required. Keep it only if it serves another purpose.", evidence={"@type": t}, confidence="high", **base))
+                                     message=f"{t} markup is present. {feature.note}", explanation=feature.note + " The markup is still valid Schema.org, and other consumers may read it." + (f" {feature.source}" if feature.source else ""),
+                                     recommendation=feature.keep, evidence={"@type": t}, confidence="high" if not feature.source else "medium", **base))
                 if feature.status == "deprecated":
                     continue
             for spec in feature.required:
@@ -105,4 +119,27 @@ def check(graph: Graph, vocab: Vocabulary) -> list[F.Finding]:
                         rule_id="google.missing_recommended", category=F.ENHANCEMENT, property=prop, title=f"Google recommends '{prop}' on {feature.type} for its {feature.name} result",
                         message=f"{t} has no '{prop}', which Google recommends for its {feature.name} result", explanation="Recommended properties are not needed for eligibility, but they give Google more to show and to understand.",
                         recommendation=f"Add '{prop}' if the information exists on the page.", evidence={"@type": t}, confidence="high", **base))
+    out += _self_serving_reviews(graph, vocab)
+    return out
+
+
+def _self_serving_reviews(graph: Graph, vocab: Vocabulary) -> list[F.Finding]:
+    """Reviews of the business itself, in its own Organization or LocalBusiness markup, are not eligible for review snippets (Google's review snippet guidelines)."""
+    out: list[F.Finding] = []
+    for node in graph.nodes:
+        if not node.top_level:
+            continue
+        types = [t for t in (vocab.type_name(x) for x in node.types) if t]
+        if not any(vocab.is_a(t, "Organization") for t in types):
+            continue
+        for prop in ("aggregateRating", "review"):
+            if node.data.get(prop) in (None, "", [], {}):
+                continue
+            out.append(F.Finding(
+                rule_id="google.self_serving_review", layer="google", category=F.INFORMATIONAL, property=prop, url=graph.url, entity_id=node.id or node.raw_id, type="/".join(types),
+                title=f"Reviews of the business itself are not eligible for review snippets ('{prop}' on an organization)",
+                message=f"'{prop}' is on the {'/'.join(types)} node, which is the business itself",
+                explanation="Google does not show review stars for reviews a business writes or collects about itself and marks up on its own Organization or LocalBusiness node. The markup is valid Schema.org.",
+                recommendation="No change is required for validity. For stars, mark up genuine reviews of a product or software application on the page that shows them.", doc=_BASE + "review-snippet",
+                evidence={prop: snippet(node.data.get(prop), 120)}, confidence="medium"))
     return out

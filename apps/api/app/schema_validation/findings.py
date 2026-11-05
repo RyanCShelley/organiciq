@@ -3,7 +3,7 @@
 Two things are kept apart on every finding:
 
 * the **layer**: `schemaorg` (is the markup valid Schema.org?), `graph` (do the entities in the JSON-LD hold together?), `google` (does it make the page
-  eligible for a Google search feature?) or `recommendation` (a contextual suggestion no standard requires);
+  eligible for a Google search feature?), `baseline` (does it meet SMA's own schema standard?) or `recommendation` (a contextual suggestion no standard requires);
 * the **category**: `error` (technically wrong), `warning` (valid-looking markup that conflicts with the vocabulary, a feature's required fields or its own
   graph), `enhancement` (worth adding, nothing is wrong) and `informational` (valid, but worth knowing).
 
@@ -20,7 +20,7 @@ from typing import Any
 ERROR, WARNING, ENHANCEMENT, INFORMATIONAL = "error", "warning", "enhancement", "informational"
 CATEGORIES = (ERROR, WARNING, ENHANCEMENT, INFORMATIONAL)
 RANK = {c: i for i, c in enumerate(CATEGORIES)}
-LAYERS = ("schemaorg", "graph", "google", "recommendation")
+LAYERS = ("schemaorg", "graph", "google", "baseline", "recommendation")
 
 SCHEMA_DOCS = "https://schema.org/docs/full.html"
 GOOGLE_INTRO = "https://developers.google.com/search/docs/appearance/structured-data/intro-structured-data"
