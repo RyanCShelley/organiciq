@@ -95,35 +95,26 @@ def find_missing_required(
 ) -> list[str]:
     """Return required schema types not present on the page.
 
-    A required type counts as satisfied when ANY of its accepted aliases is
-    present (e.g. BlogPosting satisfies the editorial Article requirement).
+    A required type is met by the type itself, by any subtype the Schema.org vocabulary lists below it (TechArticle, ScholarlyArticle and every other
+    kind of Article satisfy "Article"), or by one of the accepted alternatives and their subtypes. This is a recommendation about the markup a page of
+    this kind usually carries, not a rule of Schema.org or Google; the audit reports it as an enhancement.
     """
+    from app.schema_validation.recommendation_rules import satisfied
+    from app.schema_validation.vocabulary import load
+
+    vocab = load()
     spec = expected_for(page_type)
-    present_set = {t for t in present_types}
-    missing: list[str] = []
-
-    required = spec.get("required", [])
-    accepts = set(spec.get("accepts", []))
-
-    for req in required:
-        # Either the exact required type, OR one of its accepts list, OR an
-        # explicitly listed accept that also satisfies the requirement.
-        if req in present_set:
-            continue
-        if any(a in present_set for a in accepts):
-            # An accepted alias is present — only counts if it's a natural
-            # substitute for THIS specific required entry. We treat any
-            # accepted alias as satisfying any required entry in the list
-            # because the lists are kept small and curated.
-            continue
-        missing.append(req)
-    return missing
+    accepts = tuple(spec.get("accepts", []))
+    return [req for req in spec.get("required", []) if not satisfied(vocab, list(present_types), req, accepts)]
 
 
 def find_missing_recommended(
     page_type: str | None, present_types: list[str]
 ) -> list[str]:
-    """Return recommended schema types not present on the page."""
+    """Return recommended schema types not present on the page (a subtype counts as its parent)."""
+    from app.schema_validation.recommendation_rules import satisfied
+    from app.schema_validation.vocabulary import load
+
+    vocab = load()
     spec = expected_for(page_type)
-    present_set = {t for t in present_types}
-    return [t for t in spec.get("recommended", []) if t not in present_set]
+    return [t for t in spec.get("recommended", []) if not satisfied(vocab, list(present_types), t)]
