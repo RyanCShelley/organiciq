@@ -192,10 +192,11 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
 function CheckRow({ c, open, onToggle, onIgnore, onOpen, extra }: { c: ScCheck; open: boolean; onToggle: () => void; onIgnore: Ignore; onOpen: (url: string) => void; extra?: React.ReactNode }) {
   const clean = c.status === "pass";
   const ignored = c.status === "ignored";
+  const optional = c.status === "optional";
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-start gap-3">
-        <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : "To fix"}</span>
+        <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored || optional ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : optional ? "Optional" : "To fix"}</span>
         <div className="min-w-0 flex-1">
           <button type="button" onClick={onToggle} aria-expanded={open} className={`flex items-center gap-1.5 text-left font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""}`}>
             <span aria-hidden className={`text-xs text-[var(--text-tertiary)] transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
@@ -536,7 +537,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
       if (r.ok) router.refresh();
       else setIgnoreError(r.error);
     });
-  const counted = data ? data.entity.checks.filter((c) => c.status !== "ignored") : [];
+  const counted = data ? data.entity.checks.filter((c) => c.status !== "ignored" && c.status !== "optional") : [];
   const passing = counted.filter((c) => c.status === "pass").length;
   return (
     <section className="max-w-6xl space-y-6">
@@ -566,15 +567,15 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
           </section>
 
           <section className={card}>
-            <h2 className="px-5 pt-4 text-lg font-bold">The brand as one entity</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">Does the markup describe {data.entity.brand || "the brand"} as one organization, tied to the profiles and the Wikidata item that identify it?</p>
+            <h2 className="px-5 pt-4 text-lg font-bold">Core topics and the brand</h2>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">Most brands have no Wikidata item of their own, so the markup links {data.entity.brand || "the brand"}&apos;s core topics to Wikidata items instead. Those are what search engines and AI recognize. The brand&apos;s own checks follow.</p>
             <div className="flex justify-end gap-3 px-5 text-xs">
               <button type="button" onClick={() => setOpenChecks(new Set(data.entity.checks.map((c) => c.key)))} className="underline">Expand all</button>
               <button type="button" onClick={() => setOpenChecks(new Set())} className="underline">Collapse all</button>
             </div>
             <ul className="divide-y divide-[var(--border)] px-5 pb-2">
               {data.entity.checks.map((c) => (
-                <CheckRow key={c.key} c={c} open={openChecks.has(c.key)} onToggle={() => toggleCheck(c.key)} onIgnore={ignore} onOpen={setOpen} extra={c.key === "wikidata" ? <Concepts client={client} data={data} flush /> : undefined} />
+                <CheckRow key={c.key} c={c} open={openChecks.has(c.key)} onToggle={() => toggleCheck(c.key)} onIgnore={ignore} onOpen={setOpen} extra={c.key === "topics" ? <Concepts client={client} data={data} flush /> : undefined} />
               ))}
             </ul>
           </section>

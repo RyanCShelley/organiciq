@@ -40,7 +40,7 @@ export type ScFindingGroup = Omit<ScFinding, "url" | "message" | "evidence" | "e
   example: { url: string; entity_id: string | null; message: string; evidence: unknown };
 };
 export type ScCheckItem = { label: string; count: number; pages: string[]; kind: "found" | "other" | "missing" };
-export type ScCheck = { key: string; label: string; status: "pass" | "warn" | "fail" | "ignored"; detail: string; fix: string | null; items: ScCheckItem[] };
+export type ScCheck = { key: string; label: string; status: "pass" | "warn" | "fail" | "ignored" | "optional"; detail: string; fix: string | null; items: ScCheckItem[] };
 export type ScIgnoreScope = "check" | "expect" | "page_type" | "page" | "cleanup";
 export type ScIgnoreRule = { id: string; scope: ScIgnoreScope; key: string; label: string };
 export type ScConcept = { id: string; name: string; qid: string; label: string; description: string; url: string };
