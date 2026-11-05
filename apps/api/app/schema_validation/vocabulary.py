@@ -41,10 +41,14 @@ class Vocabulary:
         self._lower_props = {p.lower(): p for p in self._props}
         self._lower_types = {t.lower(): t for t in self._types}
         self._ancestors: dict[str, frozenset[str]] = {}
+        # The vocabulary never changes once loaded, and an audit asks the same questions of the same few hundred names tens of thousands of times.
+        self._type_names: dict[str, str | None] = {}
+        self._infos: dict[str, PropertyInfo | None] = {}
 
     # ── names ────────────────────────────────────────────────────────────────
 
     @staticmethod
+    @lru_cache(maxsize=8192)
     def term(value: str) -> tuple[str | None, bool]:
         """(the bare Schema.org term, whether the name is a foreign vocabulary's). 'https://schema.org/Service' and 'Service' both give 'Service'."""
         m = _IRI.match(value.strip())
@@ -56,10 +60,13 @@ class Vocabulary:
 
     def type_name(self, value: str) -> str | None:
         """The canonical Schema.org type for a markup @type, or None when it is not one (a foreign IRI, a custom or misspelt type)."""
+        if value in self._type_names:
+            return self._type_names[value]
         bare, foreign = self.term(value)
-        if foreign or bare is None:
-            return None
-        return bare if bare in self._types else None
+        found = None if foreign or bare is None else (bare if bare in self._types else None)
+        if isinstance(value, str) and len(self._type_names) < 8192:
+            self._type_names[value] = found
+        return found
 
     def type_near_miss(self, value: str) -> str | None:
         """A type that differs only by letter case ('service' for 'Service'): markup is case-sensitive, so it is a mistake with an obvious fix."""
@@ -123,10 +130,13 @@ class Vocabulary:
     # ── properties ───────────────────────────────────────────────────────────
 
     def property(self, name: str) -> PropertyInfo | None:
+        if name in self._infos:
+            return self._infos[name]
         p = self._props.get(name)
-        if p is None:
-            return None
-        return PropertyInfo(name, tuple(p["domains"]), tuple(p["ranges"]), p.get("status"), tuple(p.get("superseded_by", ())))
+        info = None if p is None else PropertyInfo(name, tuple(p["domains"]), tuple(p["ranges"]), p.get("status"), tuple(p.get("superseded_by", ())))
+        if len(self._infos) < 8192:
+            self._infos[name] = info
+        return info
 
     def applies(self, prop: str, types: list[str]) -> bool:
         """Is the property defined on any of the node's types or on any type above one? A node with several @type values may use what any of them allows."""
