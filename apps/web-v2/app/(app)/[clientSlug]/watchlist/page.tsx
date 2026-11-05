@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Watchlist } from "@/lib/watchlist";
 
 export const metadata = { title: "Watchlist" };
@@ -13,7 +13,7 @@ export default async function WatchlistPage({
   params: Promise<{ clientSlug: string }>;
 }) {
   const { clientSlug } = await params;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const watchlist = await apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id });

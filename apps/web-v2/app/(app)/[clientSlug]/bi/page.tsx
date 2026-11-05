@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { BusinessIntelligence } from "@/components/BusinessIntelligence";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets, type Bi } from "@/lib/bi";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 
 export const metadata = { title: "OrganicIQ insights" };
 
@@ -18,7 +18,7 @@ export default async function BusinessIntelligencePage({
 }) {
   const { clientSlug } = await params;
   const { from, to, channel } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const first = presets()[0];
