@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { FocusForm } from "@/components/FocusForm";
 import { apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import { type ClientFocus, FOCUSES, currentMonth, monthLabel } from "@/lib/focus";
 import type { Watchlist } from "@/lib/watchlist";
 
@@ -18,7 +18,7 @@ export default async function FocusPage({
 }) {
   const { clientSlug } = await params;
   const { month: requested } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const month = requested && /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) ? requested : currentMonth();

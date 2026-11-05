@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { ContentGaps } from "@/components/ContentGaps";
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Gaps } from "@/lib/content";
 
 export const metadata = { title: "Content gaps" };
@@ -16,7 +16,7 @@ export default async function ContentGapsPage({
 }) {
   const { clientSlug } = await params;
   const { q, ignored } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   let data: Gaps | null = null;

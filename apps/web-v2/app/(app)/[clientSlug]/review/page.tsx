@@ -4,7 +4,7 @@ import { ReviewScreen } from "@/components/ReviewScreen";
 import { Suspense } from "react";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { ClientFocus } from "@/lib/focus";
 import type { ShippedResult } from "@/lib/engine";
 import { lastCompleteMonth, nextMonth, type Review } from "@/lib/review";
@@ -21,7 +21,7 @@ export default async function ReviewPage({
 }) {
   const { clientSlug } = await params;
   const { month: requested } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const month = requested && /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) ? requested : lastCompleteMonth();
