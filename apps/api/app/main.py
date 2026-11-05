@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -42,6 +43,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _warm_text_model() -> None:
+    """Load the text model now, so the first Inlink suggester visit does not wait for it."""
+    try:
+        from app.services import keyword_matcher
+
+        keyword_matcher._model()
+    except Exception:
+        logger.warning("Could not load the text model at startup; it loads on first use.", exc_info=True)
+
+
+if settings.is_production:
+    threading.Thread(target=_warm_text_model, daemon=True, name="warm-text-model").start()
 
 
 #: A request slower than this is named in the log, with the route it matched, so a slow screen can be found without guessing.

@@ -25,6 +25,7 @@ from app.models.client import Client
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
 from app.models.engine_task import EngineTask
 from app.models.gsc import FactGscQueryPage
+from app.services.memo import Memo
 
 #: A pair needs this many impressions in the range before its click-through says anything.
 MIN_IMPRESSIONS = 100
@@ -34,31 +35,54 @@ MONTHS_SHOWN = 12
 WINDOW_DAYS = 28
 
 
+#: The twelve-month trend is the heaviest part of the screen and does not depend on the range chosen, so it is kept per client until new Search Console data arrives.
+_MONTHLY = Memo(size=64, ttl=600.0)
+
+
 def expected_ctr(position: float) -> float:
     return expected_ctr_percent(position, scenario=REFERENCE_SCENARIO)
 
 
-def _pairs(db: Session, client: Client, start: date, end: date, brand: list[str]) -> dict[tuple[str, str], dict[str, float]]:
-    """Each non-brand (search, page) pair at positions 1 to 20: impressions, clicks, and the impression-weighted position."""
+def _keep(out: dict[Any, dict[str, float]], key: Any, query: str, imp: Any, clk: Any, weighted: Any, brand: list[str]) -> None:
+    imp = float(imp or 0)
+    if imp <= 0 or vc.is_brand(query, brand):
+        return
+    position = float(weighted or 0) / imp
+    if 1 <= position <= 20:
+        out[key] = {"impressions": imp, "clicks": float(clk or 0), "position": position}
+
+
+def _pairs(db: Session, client: Client, start: date, end: date, brand: list[str], url: str | None = None) -> dict[tuple[str, str], dict[str, float]]:
+    """Each non-brand (search, page) pair at positions 1 to 20: impressions, clicks, and the impression-weighted position. With `url`, only that page's pairs."""
     q = func.lower(func.trim(FactGscQueryPage.query))
+    query = db.query(
+        q, FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions), func.sum(FactGscQueryPage.clicks),
+        func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+    ).filter(FactGscQueryPage.client_id == client.id, FactGscQueryPage.date >= start, FactGscQueryPage.date <= end)
+    if url is not None:
+        query = query.filter(FactGscQueryPage.normalized_url == url)
+    out: dict[tuple[str, str], dict[str, float]] = {}
+    for text, page_url, imp, clk, weighted in query.group_by(q, FactGscQueryPage.normalized_url).all():
+        _keep(out, (text, page_url), text, imp, clk, weighted, brand)
+    return out
+
+
+def _pairs_by_month(db: Session, client: Client, start: date, end: date, brand: list[str]) -> dict[str, dict[tuple[str, str], dict[str, float]]]:
+    """The same pairs for every calendar month in the range, from one query instead of one per month."""
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    month = func.to_char(FactGscQueryPage.date, "YYYY-MM")
     rows = (
         db.query(
-            q, FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions), func.sum(FactGscQueryPage.clicks),
+            month, q, FactGscQueryPage.normalized_url, func.sum(FactGscQueryPage.impressions), func.sum(FactGscQueryPage.clicks),
             func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
         )
         .filter(FactGscQueryPage.client_id == client.id, FactGscQueryPage.date >= start, FactGscQueryPage.date <= end)
-        .group_by(q, FactGscQueryPage.normalized_url)
+        .group_by(month, q, FactGscQueryPage.normalized_url)
         .all()
     )
-    out: dict[tuple[str, str], dict[str, float]] = {}
-    for query, url, imp, clk, weighted in rows:
-        imp = float(imp or 0)
-        if imp <= 0 or vc.is_brand(query, brand):
-            continue
-        position = float(weighted or 0) / imp
-        if not 1 <= position <= 20:
-            continue
-        out[(query, url)] = {"impressions": imp, "clicks": float(clk or 0), "position": position}
+    out: dict[str, dict[tuple[str, str], dict[str, float]]] = defaultdict(dict)
+    for key, text, url, imp, clk, weighted in rows:
+        _keep(out[key], (text, url), text, imp, clk, weighted, brand)
     return out
 
 
@@ -93,17 +117,22 @@ def monthly(db: Session, client: Client, end: date, brand: list[str]) -> list[di
     first = _month_start(end)
     for _ in range(MONTHS_SHOWN - 1):
         first = _month_start(first - timedelta(days=1))
-    out = []
-    cursor = first
-    while cursor <= end:
-        nxt = _month_start(cursor + timedelta(days=32))
-        last = min(nxt - timedelta(days=1), end)
-        pairs = _pairs(db, client, cursor, last, brand)
-        score, clicks, expected = _score(pairs)
-        extra = sum(_grade(p)["extra_clicks"] for p in pairs.values())
-        out.append({"month": f"{cursor.year:04d}-{cursor.month:02d}", "score": score, "extra_clicks": round(extra), "clicks": round(clicks), "expected_clicks": round(expected)})
-        cursor = nxt
-    return out
+    newest = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
+
+    def work() -> list[dict[str, Any]]:
+        by_month = _pairs_by_month(db, client, first, end, brand)
+        out = []
+        cursor = first
+        while cursor <= end:
+            key = f"{cursor.year:04d}-{cursor.month:02d}"
+            pairs = by_month.get(key, {})
+            score, clicks, expected = _score(pairs)
+            extra = sum(_grade(p)["extra_clicks"] for p in pairs.values())
+            out.append({"month": key, "score": score, "extra_clicks": round(extra), "clicks": round(clicks), "expected_clicks": round(expected)})
+            cursor = _month_start(cursor + timedelta(days=32))
+        return out
+
+    return _MONTHLY.get((str(client.id), end, newest, tuple(brand)), work)
 
 
 def build(db: Session, client: Client, start: date, end: date, q: str | None = None) -> dict[str, Any]:
@@ -187,7 +216,7 @@ def bing_summary(db: Session, client: Client, start: date, end: date, brand: lis
 
 def page_detail(db: Session, client: Client, url: str, start: date, end: date) -> dict[str, Any]:
     brand = vc.brand_keys(client)
-    pairs = {k: v for k, v in _pairs(db, client, start, end, brand).items() if k[1] == url}
+    pairs = _pairs(db, client, start, end, brand, url)
     snap = db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == client.id, FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot.normalized_url == url).first()
     searches = [{"query": q, "impressions": round(p["impressions"]), "clicks": round(p["clicks"]), "position": round(p["position"], 1), **_grade(p)} for (q, _), p in pairs.items()]
     searches.sort(key=lambda r: (-r["extra_clicks"], -r["impressions"]))
@@ -207,7 +236,7 @@ def page_detail(db: Session, client: Client, url: str, start: date, end: date) -
 
 
 def _ctr_between(db: Session, client: Client, url: str, start: date, end: date, brand: list[str]) -> dict[str, Any] | None:
-    pairs = {k: v for k, v in _pairs(db, client, start, end, brand).items() if k[1] == url}
+    pairs = _pairs(db, client, start, end, brand, url)
     imp = sum(p["impressions"] for p in pairs.values())
     if imp < 30:
         return None

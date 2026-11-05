@@ -345,3 +345,14 @@ def _no_real_teamwork_subtasks(monkeypatch, request):
     from app.integrations import teamwork
 
     monkeypatch.setattr(teamwork, "create_subtask", lambda **kw: {"id": f"sub-{kw['name'][:12]}", "url": ""})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_result_caches():
+    """The CTR and Inlink screens keep results between requests; a test starts with none."""
+    from app.services import ctr_optimizer, inlinks
+
+    ctr_optimizer._MONTHLY.clear()
+    inlinks._RESULTS.clear()
+    inlinks._VECTORS.clear()
+    yield
