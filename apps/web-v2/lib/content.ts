@@ -79,6 +79,10 @@ export type RefreshPage = {
   ignored: boolean;
   watch: WatchTerm[];
   watch_slipping: boolean;
+  /** The watchlist terms the page is for (ranked for, or named in its title or address). */
+  on_topic: boolean;
+  in_focus: boolean;
+  topics: { term: string; volume: number | null; focus: boolean }[];
 };
 export type WatchTerm = { term: string; position: number; change: number | null; slipping: boolean; striking: boolean; volume: number | null };
 export type Competing = { query: string; impressions: number; pages: { url: string; impressions: number; clicks: number; position: number }[] };
@@ -111,8 +115,10 @@ export type Refreshes = {
   q: string | null;
   showing_ignored: boolean;
   has_last_year: boolean;
+  /** False when the client has no watchlist yet, so pages are not split by topic. */
+  topics_known: boolean;
   site: { sessions: { current: number; previous: number }; three_months: { current: number; last_year: number; change_pct: number | null } };
-  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; watch: number; at_stake: number };
+  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; watch: number; at_stake: number; off_topic: number };
   ignored_total: number;
   pages: RefreshPage[];
   pages_total: number;

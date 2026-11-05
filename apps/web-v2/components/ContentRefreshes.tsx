@@ -300,16 +300,31 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
   // A page opened from a split search may not be on the refresh list; it opens with what is known of it.
   const stub = (url: string): RefreshPage => ({
     url, title: null, label: "steady", status: "Not on the list", sessions: { current: 0, previous: 0, change_pct: null }, three_months: { current: 0, last_year: 0, change_pct: null }, at_stake: 0,
-    last_updated: null, months_since_update: null, words: null, stale: false, thin: false, reasons: [], ignored: false, watch: [], watch_slipping: false,
+    last_updated: null, months_since_update: null, words: null, stale: false, thin: false, reasons: [], ignored: false, watch: [], watch_slipping: false, on_topic: false, in_focus: false, topics: [],
   });
   const page = open ? (data?.pages.find((p) => p.url === open) ?? stub(open)) : null;
   const c = data?.counts;
+  const split = !!data && data.topics_known && !q && !ignored;
+  const onTopic = data ? data.pages.filter((p) => !split || p.on_topic) : [];
+  const offTopic = data && split ? data.pages.filter((p) => !p.on_topic) : [];
+  const renderRow = (p: RefreshPage) => (
+    <tr key={p.url} className="cursor-pointer border-t border-[var(--border)] align-top hover:bg-[var(--bg)]" onClick={() => setOpen(p.url)}>
+      <td className="max-w-sm px-3 py-2"><div className="break-all font-semibold">{shortPage(p.url)}</div><div className="truncate text-xs text-[var(--text-tertiary)]" title={p.title ?? undefined}>{p.title ?? "no title found"}</div></td>
+      <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${TONE[p.label]}`}>{p.status}</span></td>
+      <td className={td}>{num(p.three_months.current)}</td>
+      <td className={td}>{num(p.three_months.last_year)}{p.three_months.change_pct != null ? <span className={`ml-1 text-xs ${p.three_months.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{p.three_months.change_pct > 0 ? "+" : ""}{p.three_months.change_pct}%</span> : null}</td>
+      <td className={`${td} font-semibold ${p.at_stake ? "text-red-700" : ""}`}>{p.at_stake ? `−${num(p.at_stake)}` : "–"}</td>
+      <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]">{p.reasons.slice(0, 2).join(" ")}</td>
+      <td className="px-3 py-2"><StatusChip status={data?.calendar[p.url]} /></td>
+    </tr>
+  );
+  const head = <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>Lost a month</th><th className={th}>Why</th><th className={th}>Calendar</th></tr></thead>;
 
   return (
     <section className="max-w-6xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold">Content refreshes</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Pages worth updating, ranked by the organic sessions at stake. A page is judged against the whole site&apos;s own change, so a dip everyone had does not count.</p>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Pages worth updating. Pages on topics you want to rank for come first, then the most sessions lost a month. A page is judged against the whole site&apos;s own change, so a dip everyone had does not count.</p>
       </header>
 
       <div className="flex flex-wrap items-end gap-3 text-sm">
@@ -328,7 +343,7 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Kpi label="Pages to refresh" value={num(c.pages)} note={c.pages === 0 ? "Clean" : `${num(c.losing)} losing traffic, ${num(c.quiet)} gone quiet, ${num(c.slipping)} slipping`} />
-            <Kpi label="Sessions at stake" value={num(c.at_stake)} note="a month, against what the site's own trend says these pages should have" />
+            <Kpi label="Sessions lost a month" value={num(c.at_stake)} note="against what the site's own trend says these pages should have" />
             <Kpi label="Stale" value={num(c.stale)} note="not updated in 18 months, and still earning" />
             <Kpi label="Thin" value={num(c.thin)} note="under 300 words, and still earning" />
             <Kpi label="Watchlist slipping" value={num(c.watch)} note="pages where a tracked term fell three or more places" />
@@ -345,27 +360,25 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
           </form>
 
           <section className={card}>
-            <h2 className="px-5 pt-4 text-lg font-bold">{ignored ? "Ignored pages" : q ? `Pages matching “${q}”` : "Pages to refresh, most at stake first"}</h2>
+            <h2 className="px-5 pt-4 text-lg font-bold">{ignored ? "Ignored pages" : q ? `Pages matching “${q}”` : data.topics_known ? "Pages on your target topics, most lost first" : "Pages to refresh, most lost first"}</h2>
             <p className="px-5 text-xs text-[var(--text-tertiary)]">Open a page to see the searches it lost, the pages it competes with, how much it says, and to have the model plan the refresh.</p>
             <div className="overflow-x-auto">
               <table className="mt-2 w-full text-sm">
-                <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>At stake</th><th className={th}>Why</th><th className={th}>Calendar</th></tr></thead>
+                {head}
                 <tbody>
-                  {data.pages.map((p) => (
-                    <tr key={p.url} className="cursor-pointer border-t border-[var(--border)] align-top hover:bg-[var(--bg)]" onClick={() => setOpen(p.url)}>
-                      <td className="max-w-sm px-3 py-2"><div className="break-all font-semibold">{shortPage(p.url)}</div><div className="truncate text-xs text-[var(--text-tertiary)]" title={p.title ?? undefined}>{p.title ?? "no title found"}</div></td>
-                      <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${TONE[p.label]}`}>{p.status}</span></td>
-                      <td className={td}>{num(p.three_months.current)}</td>
-                      <td className={td}>{num(p.three_months.last_year)}{p.three_months.change_pct != null ? <span className={`ml-1 text-xs ${p.three_months.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{p.three_months.change_pct > 0 ? "+" : ""}{p.three_months.change_pct}%</span> : null}</td>
-                      <td className={`${td} font-semibold ${p.at_stake ? "text-red-700" : ""}`}>{p.at_stake ? `−${num(p.at_stake)}` : "–"}</td>
-                      <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]">{p.reasons.slice(0, 2).join(" ")}</td>
-                      <td className="px-3 py-2"><StatusChip status={data.calendar[p.url]} /></td>
-                    </tr>
-                  ))}
+                  {onTopic.map(renderRow)}
+                  {onTopic.length === 0 && offTopic.length > 0 ? <tr><td colSpan={7} className="px-5 py-4 font-semibold text-green-700">Clean: no page on your target topics needs a refresh. Other pages are below.</td></tr> : null}
                   {data.pages.length === 0 ? <tr><td colSpan={7} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No page with traffic matches “${q}”.` : "Clean: no page needs a refresh this month."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
+            {offTopic.length > 0 ? (
+              <details className="mx-5 mb-3 rounded-lg border border-[var(--border)]">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Not on your target topics ({offTopic.length})</summary>
+                <p className="px-3 text-xs text-[var(--text-tertiary)]">These pages are losing traffic, but none of the watchlist&apos;s terms is tracked for them or named in their title or address.</p>
+                <div className="overflow-x-auto"><table className="mt-2 w-full text-sm">{head}<tbody>{offTopic.map(renderRow)}</tbody></table></div>
+              </details>
+            ) : null}
             {data.pages_total > data.pages.length ? <p className="px-5 pb-3 text-xs text-[var(--text-tertiary)]">The first {data.pages.length} of {data.pages_total}. Find a page to see the rest.</p> : null}
           </section>
 

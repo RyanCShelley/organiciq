@@ -191,6 +191,55 @@ def test_refreshes_rank_the_pages_losing_more_than_the_site_and_say_why(client, 
     assert out["competing"][0]["query"] == "shared search" and {p["url"] for p in out["competing"][0]["pages"]} == {OLD, STEADY}
 
 
+def _two_losers(db, client):
+    """A big page that lost a lot (not about any target topic) and a small one that lost less (its title names a target term); the rest of the site is steady."""
+    big = page(db, client, "company-news", "Company news", updated=date(2026, 6, 1))
+    small = page(db, client, "seo-audit-guide", "SEO audit guide", updated=date(2026, 6, 1))
+    steady = page(db, client, "steady", "Steady", updated=date(2026, 6, 1))
+    for year, per in ((2025, {big: 600, small: 200, steady: 3000}), (2026, {big: 100, small: 100, steady: 3000})):
+        for m in (8, 9, 10):
+            for url, n in per.items():
+                traffic(db, client, date(year, m, 5), url, n)
+    return big, small
+
+
+def test_refreshes_put_pages_on_a_target_topic_first_and_say_which_topic(client, db, client_a, admin_user):
+    from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+    big, small = _two_losers(db, client_a)
+    db.commit()
+    hd = h(client_a, admin_user)
+    plain = client.get("/v2/content/refreshes", params={"month": "2026-10"}, headers=hd).json()
+    assert plain["topics_known"] is False and [p["url"] for p in plain["pages"]][0] == big, "with no watchlist the order is sessions lost alone"
+    assert not any("target topic" in r for p in plain["pages"] for r in p["reasons"])
+
+    bucket = WatchlistBucket(client_id=client_a.id, name="Audits", name_key="audits", sort_order=0)
+    db.add(bucket)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=bucket.id, keyword="SEO audit", keyword_key="seo audit", volume=320, source="csv"))
+    db.commit()
+    out = client.get("/v2/content/refreshes", params={"month": "2026-10"}, headers=hd).json()
+    by_url = {p["url"]: p for p in out["pages"]}
+    assert out["topics_known"] is True and [p["url"] for p in out["pages"]][:2] == [small, big], "the page on a target topic comes first although it lost less"
+    assert by_url[small]["on_topic"] is True and by_url[small]["topics"][0]["term"] == "seo audit"
+    assert by_url[small]["reasons"][0] == "On a target topic: “seo audit” (320 searches a month)."
+    assert by_url[big]["on_topic"] is False and by_url[big]["reasons"][0] == "Not on a target topic." and out["counts"]["off_topic"] == 1
+
+
+def test_a_small_page_is_not_gone_quiet_and_its_loss_is_measured_against_the_site_trend(client, db, client_a, admin_user):
+    tiny = page(db, client_a, "swot", "SWOT", updated=date(2026, 6, 1))
+    steady = page(db, client_a, "steady", "Steady", updated=date(2026, 6, 1))
+    for year, per in ((2025, {tiny: 17, steady: 5000}), (2026, {tiny: 1, steady: 2250})):
+        for m in (8, 9, 10):
+            for url, n in per.items():
+                traffic(db, client_a, date(year, m, 5), url, n)
+    db.commit()
+    out = client.get("/v2/content/refreshes", params={"month": "2026-10"}, headers=h(client_a, admin_user)).json()
+    row = {p["url"]: p for p in out["pages"]}[tiny]
+    assert row["label"] != "quiet", "52 sessions a year ago is too small a past to count as gone quiet"
+    assert row["at_stake"] <= 8, "the site fell 55%, so the page's expected loss is about 7, not the raw 16"
+
+
 def test_a_refresh_can_be_set_aside_found_by_search_and_a_bad_month_is_refused(client, db, client_a, admin_user):
     seed_refresh(db, client_a)
     hd = h(client_a, admin_user)
