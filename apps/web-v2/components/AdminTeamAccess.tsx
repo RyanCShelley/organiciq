@@ -77,7 +77,7 @@ export function AdminTeamAccess({ data }: { data: TeamAccessData }) {
       setNewName("");
       setNewRole("sma_team");
       setAdding(false);
-      setMessage({ ok: true, text: `${r.value.outcome === "restored" ? "Let back in" : "Added"} ${r.value.email}. Choose their clients, then Give access. They sign in with their own Google account.` });
+      setMessage({ ok: true, text: `${r.value.outcome === "restored" ? "Let back in" : "Added"} ${r.value.email}. ${r.value.emailed ? "We emailed them how to sign in." : "We could not email them, so send them the sign-in link yourself."} Choose their clients, then Give access.` });
       router.refresh();
     });
 

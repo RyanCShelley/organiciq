@@ -95,9 +95,9 @@ export async function addPersonAction(
   email: string,
   name: string,
   role: "sma_team" | "sma_admin",
-): Promise<Result<{ outcome: "added" | "restored"; id: string; email: string }>> {
+): Promise<Result<{ outcome: "added" | "restored"; id: string; email: string; emailed: boolean }>> {
   try {
-    const value = await apiFetch<{ outcome: "added" | "restored"; id: string; email: string }>("/v2/admin/team-access/people", { method: "POST", body: { email, name: name.trim() || null, role } });
+    const value = await apiFetch<{ outcome: "added" | "restored"; id: string; email: string; emailed: boolean }>("/v2/admin/team-access/people", { method: "POST", body: { email, name: name.trim() || null, role } });
     revalidatePath("/admin");
     return { ok: true, value };
   } catch (error) {
