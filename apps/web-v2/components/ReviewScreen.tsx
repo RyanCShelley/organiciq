@@ -552,6 +552,9 @@ export function ReviewScreen({
                           OrganicIQ channels (organic, AI, direct, referral): {num(review.services.rows[0].sessions.current)} sessions, {num(review.services.rows[0].lead_events.current)} conversion events.
                         </p>
                       ) : null}
+                      {review.services.settings?.ad_accelerator ? (
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">Paid sessions come from Google Analytics. Ad spend and campaign data are not connected yet.</p>
+                      ) : null}
                     </div>
                     <div className="rounded-2xl border border-[var(--border)] bg-white p-4">
                       <h3 className="text-sm font-semibold">Top pages</h3>
