@@ -6,6 +6,8 @@ export type ScType = {
   expects: string[];
   recommended: string[];
   score: number | null;
+  /** Why the kind scored what it did and what to do, in plain sentences. */
+  why: { summary: string; should_have: string; gaps: string[]; steps: string[]; gain: number };
   affected: number;
   items: ScItem[];
   recommended_affected: number;

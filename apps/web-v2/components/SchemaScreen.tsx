@@ -17,10 +17,10 @@ const tone = (score: number) => (score >= 85 ? "#0f766e" : score >= 70 ? "#b4530
 const DEPTH: Record<ScDepth, string> = { quick: "Quick (Sonnet 5.5)", deep: "Deep dive (Opus 5.5)", deepest: "Deepest (Fable 5.1)" };
 
 const CATEGORY: Record<ScCategory, { label: string; plural: string; chip: string; hint: string }> = {
-  error: { label: "Error", plural: "Errors", chip: "bg-[#fde8e4] text-[#b23a15]", hint: "Not valid Schema.org: a term that does not exist." },
-  warning: { label: "Warning", plural: "Warnings", chip: "bg-[#fdf1d3] text-[#8a5a00]", hint: "Valid-looking markup that conflicts with the vocabulary, its own entities, or what a Google feature requires." },
-  enhancement: { label: "Enhancement", plural: "Enhancements", chip: "bg-[#e7fedc] text-[#2f6b0d]", hint: "Nothing is wrong. Worth adding." },
-  informational: { label: "Informational", plural: "Informational", chip: "bg-[#eceef2] text-[#4a5468]", hint: "Valid, but worth knowing." },
+  error: { label: "Error", plural: "Errors", chip: "bg-[#fde8e4] text-[#b23a15]", hint: "Not real Schema.org. Fix." },
+  warning: { label: "Warning", plural: "Warnings", chip: "bg-[#fdf1d3] text-[#8a5a00]", hint: "Something the page needs is missing, or the markup conflicts. Fix." },
+  enhancement: { label: "Enhancement", plural: "Enhancements", chip: "bg-[#e7fedc] text-[#2f6b0d]", hint: "Would help. Nothing is wrong." },
+  informational: { label: "Informational", plural: "Informational", chip: "bg-[#eceef2] text-[#4a5468]", hint: "Good to know." },
 };
 const LAYER: Record<ScLayer, string> = { schemaorg: "Schema.org", graph: "Entities", google: "Google Search", baseline: "SMA baseline", recommendation: "Recommendation" };
 
@@ -53,7 +53,7 @@ function Findings({ data, onOpen, onIgnore }: { data: ScData; onOpen: (url: stri
     <section className={card}>
       <h2 className="px-5 pt-4 text-lg font-bold">What the markup needs</h2>
       <p className="px-5 text-xs text-[var(--text-tertiary)]">
-        Five separate checks: is it valid Schema.org (version {data.validator.schemaorg_version}), do its entities hold together, does it meet what a Google Search feature needs (as last reviewed {data.validator.google_reviewed}), does it meet the SMA schema baseline, and what would make it say more.
+        Five checks: valid Schema.org (version {data.validator.schemaorg_version}), entities that agree, what Google Search features need (reviewed {data.validator.google_reviewed}), the SMA baseline, and what would add more.
         A property Google does not use is never an error.
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2 px-5 sm:grid-cols-4" role="tablist" aria-label="Category">
@@ -64,7 +64,7 @@ function Findings({ data, onOpen, onIgnore }: { data: ScData; onOpen: (url: stri
               className={`rounded-xl border px-3 py-2 text-left ${category === c ? "border-[var(--brand-navy)] bg-white shadow-sm" : "border-[var(--border)] bg-[var(--bg)] hover:bg-white"}`}>
               <div className="text-xs font-semibold text-[var(--text-secondary)]">{CATEGORY[c].plural}</div>
               <div className="font-[family-name:var(--font-heading)] text-xl font-bold tabular-nums">{n.groups}</div>
-              <div className="text-[0.7rem] text-[var(--text-tertiary)]">{n.pages} page{n.pages === 1 ? "" : "s"} · {n.occurrences} in all</div>
+              <div className="text-[0.7rem] text-[var(--text-tertiary)]">issue{n.groups === 1 ? "" : "s"} on {n.pages} page{n.pages === 1 ? "" : "s"}</div>
             </button>
           );
         })}
@@ -143,15 +143,32 @@ function Chip({ label, onIgnore }: { label: string; onIgnore: () => void }) {
   );
 }
 
+function PageList({ title, items, total, onOpen, onIgnore }: { title: string; items: ScItem[]; total: number; onOpen: (url: string) => void; onIgnore: Ignore }) {
+  if (total === 0) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold">{title} ({total})</div>
+      <ul className="mt-1 max-h-60 space-y-1.5 overflow-y-auto text-xs">
+        {items.map((i) => (
+          <li key={i.url} className="flex flex-wrap items-start gap-2">
+            <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
+            <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
+            <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
+          </li>
+        ))}
+        {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
+      </ul>
+    </div>
+  );
+}
+
 function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => void; onIgnore: Ignore }) {
-  const [open, setOpen] = useState<"fix" | "rec" | null>(null);
-  const items: ScItem[] = open === "rec" ? t.recommended_items : t.items;
-  const total = open === "rec" ? t.recommended_affected : t.affected;
-  const clean = t.affected === 0;
+  const [open, setOpen] = useState(false);
+  const clean = t.affected === 0 && t.recommended_affected === 0 && (t.score == null || t.score >= 100);
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[16rem] flex-1">
           <div className="font-semibold">{t.label} <span className="font-normal text-[var(--text-tertiary)]">· {t.pages} page{t.pages === 1 ? "" : "s"}</span></div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-[var(--text-secondary)]">
             {t.expects.length > 0 ? <span>Expected:</span> : <span>Nothing in particular is expected.</span>}
@@ -167,22 +184,32 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
             <div className="w-12 text-right text-sm font-bold tabular-nums">{t.score}</div>
           </>
         ) : <div className="w-52" />}
-        <div className="flex w-52 justify-end gap-3 text-xs">
-          {clean ? <span className="font-semibold text-green-700">Clean</span> : <button type="button" onClick={() => setOpen(open === "fix" ? null : "fix")} className="font-semibold underline">{open === "fix" ? "Hide" : `Show ${t.affected} to fix`}</button>}
-          {t.recommended_affected > 0 ? <button type="button" onClick={() => setOpen(open === "rec" ? null : "rec")} className="text-[var(--text-secondary)] underline">{open === "rec" ? "Hide" : `${t.recommended_affected} could add more`}</button> : null}
+        <div className="flex w-64 justify-end text-xs">
+          {clean ? <span className="font-semibold text-green-700">Clean</span> : (
+            <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="text-right font-semibold underline">{open ? "Hide" : "See why it scored this way and how to fix it"}</button>
+          )}
         </div>
       </div>
       {open ? (
-        <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
-          {items.map((i) => (
-            <li key={i.url} className="flex flex-wrap items-start gap-2">
-              <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
-              <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
-              <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
-            </li>
-          ))}
-          {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
-        </ul>
+        <div className="mt-2 rounded-lg bg-[var(--bg)] p-4 text-sm">
+          <p className="font-semibold">{t.why.summary}</p>
+          {t.why.should_have ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{t.why.should_have}</p> : null}
+          {t.why.gaps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">Why it lost points</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+            </>
+          ) : null}
+          {t.why.steps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">What to do</div>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.steps.map((g) => <li key={g}>{g}</li>)}</ol>
+              {t.why.gain > 0 ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Doing all of this would bring the score to 100.</p> : null}
+            </>
+          ) : null}
+          <PageList title="Pages to fix" items={t.items} total={t.affected} onOpen={onOpen} onIgnore={onIgnore} />
+          <PageList title="Pages that could add more markup" items={t.recommended_items} total={t.recommended_affected} onOpen={onOpen} onIgnore={onIgnore} />
+        </div>
       ) : null}
     </li>
   );
@@ -551,9 +578,9 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
       {data ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi label="Markup score" value={String(data.score)} note="how complete each page's markup is for its kind" />
+            <Kpi label="Markup score" value={String(data.score)} note="average of every page, out of 100" />
             <Kpi label="Pages with markup" value={`${data.with_markup} of ${data.pages}`} note="indexable pages with a JSON-LD block" />
-            <Kpi label="Errors and warnings" value={String(data.cleanups)} note="technical problems in the markup now; enhancements are separate" />
+            <Kpi label="Errors and warnings" value={String(data.cleanups)} note="found across all pages" />
             <Kpi label="Brand entity checks" value={`${passing} of ${counted.length}`} note="clean" />
           </div>
 
@@ -561,7 +588,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
 
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">By kind of page</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">The score is how complete the markup is for that kind of page. Open any page to audit it or write corrected markup. Worked out from the crawl of {day(data.crawl_date)}.</p>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">Each page starts at 100 and loses points for markup it is missing. A kind's score is the average of its pages. Green is 85 or more, amber 70 to 84, red under 70. Open any page to audit it or write corrected markup. From the crawl of {day(data.crawl_date)}.</p>
             <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.types.map((t) => <TypeRow key={t.page_type} t={t} onOpen={setOpen} onIgnore={ignore} />)}</ul>
           </section>
 

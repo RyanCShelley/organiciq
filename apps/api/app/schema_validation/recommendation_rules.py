@@ -70,16 +70,17 @@ def main_entity(graph: Graph, vocab: Vocabulary, page_type: str | None) -> list[
 def missing_types(vocab: Vocabulary, page_type: str, present: list[str], spec: dict[str, Any], url: str, ignored: set[str] | None = None) -> list[F.Finding]:
     out: list[F.Finding] = []
     accepts = tuple(spec.get("accepts", ()))
-    for kind, label, level in (("required", "expected", "enhancement"), ("recommended", "recommended", "enhancement")):
+    for kind, label, level in (("required", "expected", F.WARNING), ("recommended", "recommended", F.ENHANCEMENT)):
         for t in spec.get(kind, ()):
             if satisfied(vocab, present, t, accepts if kind == "required" else ()):
                 continue
             subtypes = sorted(n for n in (vocab._types if hasattr(vocab, "_types") else {}) if vocab.is_a(n, t) and n != t)[:6]
             out.append(F.Finding(
-                url=url, layer="recommendation", rule_id=f"recommendation.missing_type_{kind}", category=F.ENHANCEMENT, type=t,
+                url=url, layer="recommendation", rule_id=f"recommendation.missing_type_{kind}", category=level, type=t,
                 title=f"No {t} markup on {page_type.replace('_', ' ')} pages" if kind == "required" else f"No {t} markup on {page_type.replace('_', ' ')} pages (recommended)",
                 message=f"The page reads as a {page_type.replace('_', ' ')} page and carries no {t} markup" + (f" (or a subtype such as {', '.join(subtypes)})" if subtypes else ""),
-                explanation=f"{t} markup is {label} for this kind of page. Its absence is an opportunity, not a fault: nothing in Schema.org or Google's requirements makes it mandatory.",
+                explanation=(f"{t} markup is expected for this kind of page. Nothing in Schema.org or Google's rules makes it mandatory, but without it the page loses 40 points of its score."
+                             if kind == "required" else f"{t} markup would help on this kind of page. Nothing is wrong without it: the page loses 10 points of its score."),
                 recommendation=f"Add {t} markup if the page is a {t}.", doc=F.schema_doc(t), evidence={"present": present[:10]}, confidence="medium",
             ))
     return out

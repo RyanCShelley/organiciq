@@ -149,7 +149,8 @@ def apply_ignores(a: dict[str, Any], ign: dict[str, set[str]]) -> dict[str, Any]
 
 def _corrections(findings: list[F.Finding]) -> list[dict[str, str]]:
     """What counts against a page's score and is listed as a fix: errors, and warnings. Enhancements and informational notices do not."""
-    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING)]
+    # A missing type is already scored by `score` (40 or 10 points), so it is not counted a second time here.
+    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING) and not f.rule_id.startswith("recommendation.missing_type")]
 
 
 def site_registry(blocks: dict[str, list[Any]]) -> dict[str, int]:
@@ -220,8 +221,11 @@ def group_findings(audits: list[dict[str, Any]], extra: list[F.Finding] | None =
     return out[:GROUPS_LISTED]
 
 
-def finding_counts(audits: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all."""
+def finding_counts(audits: list[dict[str, Any]], site: list[F.Finding] | None = None) -> dict[str, dict[str, int]]:
+    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all.
+
+    `site` is what only shows across pages; the list a tile opens includes it, so the tile counts it too.
+    """
     out = {c: {"groups": 0, "pages": 0, "occurrences": 0} for c in F.CATEGORIES}
     seen_groups: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
     pages: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
@@ -230,6 +234,10 @@ def finding_counts(audits: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
             out[f.category]["occurrences"] += 1
             seen_groups[f.category].add(f.template_key)
             pages[f.category].add(a["url"])
+    for f in site or []:
+        out[f.category]["occurrences"] += 1
+        seen_groups[f.category].add(f.template_key)
+        pages[f.category].add(f.url)
     for c in F.CATEGORIES:
         out[c]["groups"], out[c]["pages"] = len(seen_groups[c]), len(pages[c])
     return out
@@ -288,6 +296,41 @@ def _scored(a: dict[str, Any]) -> bool:
     return not (a["page_type"] == "generic" and not a["has_markup"])
 
 
+def _pages(n: int) -> str:
+    return f"{n} page" + ("" if n == 1 else "s")
+
+
+def explain_kind(label: str, score: int | None, expects: list[str], recommended: list[str], group: list[dict[str, Any]]) -> dict[str, Any]:
+    """Why a kind of page scored what it did and what to do about it, in plain sentences built from what the audit found on its pages."""
+    scored = [a for a in group if _scored(a)]
+    if score is None or not scored:
+        return {"summary": f"Nothing on the {label.lower()} is expected to carry markup.", "should_have": "", "gaps": [], "steps": []}
+    many = len(scored) > 1
+    summary = f"{label} scored {score} out of 100." + (f" That is the average of {len(scored)} pages. Each page starts at 100 and loses points for markup it is missing." if many else "")
+    should = "Markup is the hidden code that tells search engines and AI what a page is. For this kind of page it should say it is " + " and ".join([", ".join(expects)] if expects else ["a page"]) + (f", and it is stronger with {', '.join(recommended)}." if recommended else ".")
+    required: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_required"])
+    helpful: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_recommended"])
+    bare = sum(1 for a in scored if not a["has_markup"])
+    fixes: Counter[str] = Counter(_normal(c["detail"]) for a in scored for c in a["corrections"])
+    gaps: list[str] = []
+    steps: list[str] = []
+    if bare:
+        gaps.append(f"{_pages(bare)} {'has' if bare == 1 else 'have'} no markup at all, so {'it scores' if bare == 1 else 'they score'} 0.")
+        steps.append("Add markup to the pages that have none. Open a page here and choose to write corrected markup.")
+    for t, k in required.most_common():
+        gaps.append(f"{t} markup is missing on {_pages(k)}. A page without it loses 40 points.")
+        steps.append(f"Add {t} markup to {'the page' if k == 1 else f'the {k} pages'} that {'misses' if k == 1 else 'miss'} it.")
+    for text, k in fixes.most_common(3):
+        gaps.append(f"{_pages(k)} {'has' if k == 1 else 'have'} a problem in the markup: {text}. Each one loses 5 points.")
+        steps.append(f"Fix: {text}.")
+    for t, k in helpful.most_common(3):
+        gaps.append(f"{t} markup would help on {_pages(k)}. Without it a page loses 10 points. Nothing is wrong.")
+        steps.append(f"Optional: add {t} markup to the {_pages(k)} that {'lacks' if k == 1 else 'lack'} it.")
+    if not gaps:
+        summary += " Every page has all the markup it needs."
+    return {"summary": summary, "should_have": should, "gaps": gaps, "steps": steps, "gain": 100 - score if steps else 0}
+
+
 def _average(group: list[dict[str, Any]]) -> int | None:
     return round(100 * sum(a["score"] for a in group) / len(group)) if group else None
 
@@ -338,6 +381,7 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             {
                 "page_type": key, "label": label, "pages": len(group), "expects": expects, "recommended": [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]],
                 "score": _average([a for a in group if _scored(a)]),
+                "why": explain_kind(label, _average([a for a in group if _scored(a)]), expects, [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]], group),
                 "affected": len(fix), "items": fix[:LISTED],
                 "recommended_affected": len(recommended), "recommended_items": recommended[:LISTED],
             }
@@ -368,13 +412,14 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
     invalid = [{"url": r.normalized_url, "error": (r.parse_error or "")[:200]} for r in rows if r.parse_error][:LISTED]
     with_markup = sum(1 for a in audits if a["has_jsonld"])
     entity = _entity(db, client, blocks, micro, ign["check"])
+    site_findings = _site_findings(blocks, [a["url"] for a in audits])
     return {
         "crawl_date": max(s.snapshot_date for s in snaps).isoformat(),
         "pages": len(pages), "with_markup": with_markup,
         "score": _average([a for a in audits if _scored(a)]) or 0,
         "cleanups": sum(len(a["corrections"]) for a in audits),
         "types": types, "fixes": fixes, "present": [{"type": t, "pages": n} for t, n in present.most_common()],
-        "findings": group_findings(audits, _site_findings(blocks, [a["url"] for a in audits])), "finding_counts": finding_counts(audits),
+        "findings": group_findings(audits, site_findings), "finding_counts": finding_counts(audits, site_findings),
         "validator": {"schemaorg_version": load_vocabulary().version, "google_reviewed": google_reviewed()},
         "invalid": invalid, "entity": entity,
         "ignored": [{"id": str(i.id), "scope": i.scope, "key": i.key, "label": i.label or i.key} for i in db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id).order_by(ClientSchemaIgnore.created_at)],
