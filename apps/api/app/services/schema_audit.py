@@ -464,6 +464,26 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
     return {"brand": brand, "names": [{"name": n, "blocks": c} for n, c in names.most_common()], "same_as": same_as, "checks": checks}
 
 
+def brand_facts(db: Session, client: Client) -> Any:
+    """What the crawled markup says about the organization, for comparing a Wikidata candidate against it."""
+    from app.schema_tools.transforms import extract_graph
+    from app.schema_tools.wikidata_evidence import Facts
+
+    rows = db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.syntax == "json_ld").all()
+    orgs = [n for r in rows if r.raw and not r.parse_error for n in extract_graph(r.raw) if _types(n) & _ORG_TYPES]
+    if not orgs:
+        return Facts()
+    best = max(orgs, key=lambda o: sum(_has(o, p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")))
+    places: list[str] = []
+    for a in (best.get("address") if isinstance(best.get("address"), list) else [best.get("address")]):
+        if isinstance(a, dict):
+            places += [str(a[k]).strip() for k in ("addressLocality", "addressRegion") if isinstance(a.get(k), str) and a[k].strip()]
+    raw = best.get("sameAs")
+    same_as = sorted({x for x in ([raw] if isinstance(raw, str) else raw or []) if isinstance(x, str)} | {x for n in orgs for x in ([n["sameAs"]] if isinstance(n.get("sameAs"), str) else n.get("sameAs") or []) if isinstance(x, str)})
+    url = best.get("url") if isinstance(best.get("url"), str) else None
+    return Facts(url=url, types=sorted(_types(best)), places=places, same_as=same_as)
+
+
 def extract_graph_all(blocks: list[Any]) -> list[dict[str, Any]]:
     from app.schema_tools.transforms import extract_graph
 
