@@ -369,8 +369,8 @@ def test_a_page_without_any_article_markup_is_an_enhancement_and_one_with_a_subt
     assert find_missing_required("editorial", ["TechArticle", "WebPage"]) == []
     page = schema_audit.audit_page("https://site.example/blog/post", "Post", [{"@context": CTX, "@type": "WebPage", "name": "P"}], set())
     miss = [f for f in page["findings"] if f.rule_id == "recommendation.missing_type_required"]
-    assert page["page_type"] == "editorial" and miss and miss[0].category == F.ENHANCEMENT and miss[0].layer == "recommendation"
-    assert not page["corrections"] or all(c["transform"] != "recommendation.missing_type_required" for c in page["corrections"]), "an enhancement does not count against the page"
+    assert page["page_type"] == "editorial" and miss and miss[0].category == F.WARNING and miss[0].layer == "recommendation"
+    assert not page["corrections"] or all(c["transform"] != "recommendation.missing_type_required" for c in page["corrections"]), "a missing type is scored once, by its own 40 points, not again as a cleanup"
     done = schema_audit.audit_page("https://site.example/blog/post", "Post", [{"@context": CTX, "@type": "TechArticle", "headline": "H"}], set())
     assert not [f for f in done["findings"] if f.rule_id == "recommendation.missing_type_required" and f.type == "Article"], "a TechArticle is an Article"
 
@@ -401,9 +401,24 @@ def test_a_page_counts_once_per_group_however_often_the_finding_repeats_on_it():
 
 def test_only_errors_and_warnings_count_against_a_page_and_enhancements_do_not():
     clean = _page("https://site.example/", [node("Organization", name="X", url=HOME)])
-    assert {f.category for f in clean["findings"]} <= {F.ENHANCEMENT, F.INFORMATIONAL} and clean["corrections"] == []
+    assert {f.category for f in clean["findings"] if not f.rule_id.startswith("recommendation.missing_type")} <= {F.ENHANCEMENT, F.INFORMATIONAL} and clean["corrections"] == []
     broken = _page("https://site.example/", [node("Organization", name="X", fooBarBaz=1)])
     assert [c["transform"] for c in broken["corrections"]] == ["schemaorg.unknown_property"] and broken["score"] < clean["score"] or broken["score"] <= clean["score"]
+
+
+def test_a_missing_required_type_is_a_warning_but_costs_its_forty_points_only_once():
+    bare = _page("https://site.example/", [node("Organization", name="X", url=HOME)])
+    missing = [f for f in bare["findings"] if f.rule_id == "recommendation.missing_type_required"]
+    assert missing and {f.category for f in missing} == {F.WARNING}
+    assert bare["corrections"] == [] and bare["score"] == round(1 - 0.4 * len(bare["missing_required"]) - 0.1 * len(bare["missing_recommended"]), 3)
+    assert "40 points" in missing[0].explanation
+
+
+def test_the_tile_counts_include_what_only_shows_across_pages():
+    audits = [_page("https://site.example/p", [node("Organization", name="X", fooBarBaz=1)])]
+    site = [F.Finding(url="https://site.example/", layer="graph", rule_id="graph.inconsistent_entity_ids", category=F.WARNING, title="t", message="m", explanation="e", recommendation="r", doc="d")]
+    plain, with_site = schema_audit.finding_counts(audits), schema_audit.finding_counts(audits, site)
+    assert with_site[F.WARNING]["groups"] == plain[F.WARNING]["groups"] + 1 and with_site[F.WARNING]["pages"] == plain[F.WARNING]["pages"] + 1
 
 
 def test_a_finding_carries_everything_needed_to_check_it():
