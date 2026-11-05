@@ -236,7 +236,9 @@ function CheckRow({ c, open, onToggle, onIgnore, onOpen, extra }: { c: ScCheck; 
 /** Find the brand's item on Wikidata and approve it, so generated markup can link to it. Only approved items are ever linked. */
 function Concepts({ client, data, flush = false }: { client: Client; data: ScData; flush?: boolean }) {
   const router = useRouter();
-  const [name, setName] = useState(data.entity.brand);
+  // Start with the first core topic that has no Wikidata item yet; the brand's own item is optional.
+  const firstOpen = data.entity.checks.find((c) => c.key === "topics")?.items.find((i) => i.kind === "missing")?.label.split(":")[0];
+  const [name, setName] = useState(firstOpen || data.entity.brand);
   const [found, setFound] = useState<Record<string, ScCandidate[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
