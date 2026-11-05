@@ -252,7 +252,7 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
       ) : null}
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[14rem] flex-1 text-xs font-semibold">
-          Concept to look up
+          Concept to look up, or a Wikidata ID (Q…)
           <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" />
         </label>
         <button type="button" onClick={search} disabled={pending || name.trim().length < 2} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
@@ -264,18 +264,65 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
         options.length === 0 ? (
           <p className="text-[var(--text-secondary)]">Wikidata has no item for “{name}”. If the brand is notable enough, creating one is the first step; until then the markup links to the brand&apos;s own profiles instead.</p>
         ) : (
-          <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-            {options.map((c) => (
-              <li key={c.qid} className="flex flex-wrap items-center gap-3 px-3 py-2">
-                <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold underline">{c.qid}</a>
-                <span className="min-w-0 flex-1 text-xs"><strong>{c.label}</strong>{c.description ? `: ${c.description}` : ""}</span>
-                <button type="button" onClick={() => approve(c)} disabled={pending} className="rounded-lg bg-[var(--brand-dark)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">Approve this one</button>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            {options.map((c) => <CandidateCard key={c.qid} c={c} pending={pending} onApprove={approve} />)}
+          </div>
         )
       ) : null}
     </div>
+  );
+}
+
+const VERDICT: Record<string, { text: string; cls: string }> = {
+  strong: { text: "Strong match", cls: "bg-green-100 text-green-800" },
+  possible: { text: "Possible match", cls: "bg-amber-100 text-amber-800" },
+  weak: { text: "Weak match", cls: "bg-amber-100 text-amber-800" },
+  unlikely: { text: "Not this one", cls: "bg-red-100 text-red-800" },
+};
+const STATUS: Record<string, { text: string; cls: string }> = {
+  match: { text: "Match", cls: "text-green-700" },
+  conflict: { text: "Conflict", cls: "text-red-700" },
+  missing: { text: "Not on the site", cls: "text-red-700" },
+  none: { text: "No evidence", cls: "text-[var(--text-tertiary)]" },
+  info: { text: "", cls: "" },
+};
+
+/** One Wikidata candidate. Closed until opened: the header says how well it fits, the body sets what Wikidata says beside what the site says. */
+function CandidateCard({ c, pending, onApprove }: { c: ScCandidate; pending: boolean; onApprove: (c: ScCandidate) => void }) {
+  const ev = c.evidence;
+  const v = ev ? VERDICT[ev.verdict] : null;
+  return (
+    <details className="group rounded-lg border border-[var(--border)] bg-white">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 px-3 py-2">
+        <span className="text-xs text-[var(--text-tertiary)] group-open:rotate-90" aria-hidden>▸</span>
+        <span className="min-w-0 flex-1 text-xs"><strong>{c.label}</strong> <span className="text-[var(--text-tertiary)]">{c.qid}</span>{c.description ? <span className="block text-[var(--text-secondary)]">{c.description}</span> : null}</span>
+        {v && ev ? <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${v.cls}`}>{v.text}{ev.matched + ev.conflicts > 0 ? ` · ${ev.matched} of ${ev.checked}` : " · nothing on the site to compare"}</span> : <span className="text-xs text-[var(--text-tertiary)]">No evidence fetched</span>}
+      </summary>
+      <div className="border-t border-[var(--border)] px-3 py-2 text-xs">
+        {ev ? (
+          <table className="w-full table-fixed border-collapse">
+            <thead><tr className="text-left text-[var(--text-tertiary)]"><th className="w-[24%] py-1 font-normal" /><th className="w-[32%] py-1 font-normal">Wikidata says</th><th className="w-[30%] py-1 font-normal">The site says</th><th className="w-[14%] py-1 font-normal" /></tr></thead>
+            <tbody>
+              {ev.rows.map((r) => (
+                <tr key={r.key} className="border-t border-[var(--border)] align-top">
+                  <th className="py-1.5 pr-2 text-left font-semibold">{r.label}</th>
+                  <td className="py-1.5 pr-2 break-words">{r.wikidata}</td>
+                  <td className="py-1.5 pr-2 break-words">{r.site}</td>
+                  <td className={`py-1.5 font-semibold ${STATUS[r.status]?.cls ?? ""}`}>{STATUS[r.status]?.text}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <p className="text-[var(--text-secondary)]">Wikidata could not be read for this item just now, so there is only its name and description to go on.</p>}
+        {ev && ev.profiles.length > 0 ? <p className="mt-2 text-[var(--text-secondary)]">Profiles listed on the item: {ev.profiles.join(", ")}</p> : null}
+        <div className="mt-3 flex items-center gap-3">
+          <button type="button" onClick={() => onApprove(c)} disabled={pending} className={`rounded-lg px-3 py-1 text-xs font-semibold disabled:opacity-50 ${ev?.verdict === "unlikely" || ev?.verdict === "weak" ? "border border-[var(--border)] bg-white" : "bg-[var(--brand-dark)] text-white"}`}>
+            {ev?.verdict === "unlikely" || ev?.verdict === "weak" ? "Approve anyway" : "Approve this one"}
+          </button>
+          <a href={c.url} target="_blank" rel="noreferrer" className="underline">Open on Wikidata</a>
+        </div>
+      </div>
+    </details>
   );
 }
 

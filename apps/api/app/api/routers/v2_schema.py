@@ -37,10 +37,15 @@ class SearchIn(BaseModel):
 
 
 @router.post("/concepts/search")
-def search_concepts(payload: SearchIn, _: Annotated[AuthUser, Depends(require_sma_staff)], client: Annotated[Client, Depends(require_client)]) -> dict:
+def search_concepts(
+    payload: SearchIn,
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    client: Annotated[Client, Depends(require_client)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
     """Wikidata items for each name, so the right one can be approved."""
     names = [n.strip() for n in payload.names if n.strip()]
-    return {"candidates": schema_pages.search_concepts(names)}
+    return {"candidates": schema_pages.search_concepts(names, schema_audit.brand_facts(db, client))}
 
 
 class ConceptIn(BaseModel):

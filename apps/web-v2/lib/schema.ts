@@ -62,7 +62,9 @@ export type ScData = {
 };
 export type ScResponse = { data: ScData | null; ready: boolean; depths: Record<string, string> };
 export type ScDepth = "quick" | "deep" | "deepest";
-export type ScCandidate = { qid: string; label: string; description: string; url: string };
+export type ScEvidenceRow = { key: string; label: string; wikidata: string; site: string; status: "match" | "conflict" | "none" | "info" | "missing" };
+export type ScEvidence = { rows: ScEvidenceRow[]; matched: number; checked: number; conflicts: number; verdict: "strong" | "possible" | "weak" | "unlikely"; profiles: string[] };
+export type ScCandidate = { qid: string; label: string; description: string; url: string; evidence?: ScEvidence | null };
 
 export type ScReport = {
   id: string;
