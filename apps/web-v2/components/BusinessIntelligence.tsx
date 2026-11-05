@@ -8,6 +8,8 @@ import { addChangeAction, removeChangeAction } from "@/app/(app)/[clientSlug]/bi
 import { Spinner } from "@/components/ui/Spinner";
 import { CoverageDonut, TrendChart } from "@/components/bi/Charts";
 import type { Client } from "@/lib/api";
+import { money, type AdsSummary } from "@/lib/ads";
+import { monthLabel } from "@/lib/focus";
 import { presets, type Bi, type BiChange, type BiKeyword } from "@/lib/bi";
 
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
@@ -221,7 +223,42 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
   );
 }
 
-export function BusinessIntelligence({ client, from, to, channel, data, error }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null }) {
+function PaidSection({ client, ads }: { client: Client; ads: AdsSummary }) {
+  if (!ads.enabled) return null;
+  const k = (label: string, value: string, note?: string) => (
+    <div className={`${card} p-4`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{label}</div>
+      <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
+      {note ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{note}</div> : null}
+    </div>
+  );
+  const vs = (now: number | null | undefined, before: number | null | undefined) => (now == null || !before ? undefined : `${Math.round((now / before - 1) * 100) >= 0 ? "+" : ""}${Math.round((now / before - 1) * 100)}% on the month before`);
+  return (
+    <Section n="Paid" title="How are the paid ads doing?" sub={`Google Ads through Ads Accelerator, for ${monthLabel(ads.month)}. This section is always the last complete month.`}>
+      {!ads.available ? <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{ads.reason}</p> : (
+        <>
+          {ads.source === "demo" ? <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">These numbers are made up, to show how this section will look.</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            {k("Impressions", ads.totals.impressions.toLocaleString(), vs(ads.totals.impressions, ads.previous?.impressions))}
+            {k("Clicks", ads.totals.clicks.toLocaleString(), vs(ads.totals.clicks, ads.previous?.clicks))}
+            {k("Click-through rate", ads.totals.ctr == null ? "–" : `${ads.totals.ctr.toFixed(2)}%`)}
+            {k("Avg cost per click", money(ads.totals.avg_cpc))}
+            {k("Cost", money(ads.totals.cost), vs(ads.totals.cost, ads.previous?.cost))}
+            {k("Conversions", ads.totals.conversions.toLocaleString(), ads.totals.cost_per_conversion ? `${money(ads.totals.cost_per_conversion)} each` : undefined)}
+          </div>
+          {ads.text ? <p className="text-sm">{ads.text}</p> : null}
+          <p className="text-xs text-[var(--text-secondary)]">
+            {ads.top_group ? <>Most spend: {ads.top_group.name} ({money(ads.top_group.cost)}). </> : null}
+            {ads.top_term ? <>Most clicks from the search “{ads.top_term.term}”. </> : null}
+            <Link href={`/${client.slug}/ads?month=${ads.month}`} className="font-semibold underline">Open the Ads Accelerator report</Link>
+          </p>
+        </>
+      )}
+    </Section>
+  );
+}
+
+export function BusinessIntelligence({ client, from, to, channel, data, error, ads }: { client: Client; from: string; to: string; channel: string; data: Bi | null; error: string | null; ads?: AdsSummary | null }) {
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
   const go = (f: string, t: string, c = channel) => {
@@ -479,6 +516,8 @@ export function BusinessIntelligence({ client, from, to, channel, data, error }:
               </div>
             </div>
           </Section>
+
+          {ads ? <PaidSection client={client} ads={ads} /> : null}
 
           <Section n="04" title="What changed?" sub="Work shipped and changes made to the site, so a movement above can be tied to something. Marked on the charts.">
             <ChangeLog clientId={client.id} slug={client.slug} from={from} to={to} changes={data.changes} />

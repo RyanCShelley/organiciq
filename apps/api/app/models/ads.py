@@ -1,0 +1,82 @@
+"""Google Ads performance for clients on Ads Accelerator, kept by day, and the notes on work done on the account.
+
+Rows are written by the Google Ads pull (not built yet) or, for a demo, by a seed. `source` says which.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+class AdsDaily(Base):
+    """One day of one campaign and ad group, split by market and device.
+
+    `eligible_impressions` is the searches the ads could have shown on (impressions divided by the search impression share), and
+    `lost_budget` and `lost_rank` are the ones missed because the budget was reached or the bid was outbid.
+    """
+
+    __tablename__ = "ads_daily"
+    __table_args__ = (
+        UniqueConstraint("client_id", "date", "campaign", "ad_group", "market", "device", "network", name="uq_ads_daily_grain"),
+        Index("ix_ads_daily_client_date", "client_id", "date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    campaign: Mapped[str] = mapped_column(Text, nullable=False)
+    ad_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    market: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    device: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    network: Mapped[str] = mapped_column(String(24), nullable=False, default="search", server_default="search")
+    impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    eligible_impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lost_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lost_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdsSearchTerm(Base):
+    """What people searched for, by day, for the clicks Google lists (searches made by only a few people are not listed)."""
+
+    __tablename__ = "ads_search_terms"
+    __table_args__ = (
+        UniqueConstraint("client_id", "date", "term", "ad_group", name="uq_ads_search_terms_grain"),
+        Index("ix_ads_search_terms_client_date", "client_id", "date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    term: Mapped[str] = mapped_column(Text, nullable=False)
+    ad_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+
+
+class AdsNote(Base):
+    """A change made to the account (budget, bids, keywords, ads), written by a person: the report's "Work completed"."""
+
+    __tablename__ = "ads_notes"
+    __table_args__ = (Index("ix_ads_notes_client_date", "client_id", "date"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

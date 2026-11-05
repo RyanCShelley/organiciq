@@ -1,6 +1,6 @@
 import { BarChart3, Eye, FileText, Target, type LucideIcon } from "lucide-react";
 
-export type NavItem = { label: string; path: string };
+export type NavItem = { label: string; path: string; /** Shown only for clients on Ads Accelerator. */ ads?: boolean };
 export type NavGroup = { title: string; icon: LucideIcon; items: NavItem[] };
 
 /** The order Ryan set: what each group answers. */
@@ -11,6 +11,7 @@ export const GROUPS: NavGroup[] = [
     items: [
       { label: "Monthly review", path: "/review" },
       { label: "OrganicIQ insights", path: "/bi" },
+      { label: "Ads Accelerator", path: "/ads", ads: true },
       { label: "Decision engine", path: "/engine" },
     ],
   },
@@ -62,6 +63,7 @@ export function locate(pathname: string, clientSlug: string | undefined): { grou
 /** Starter questions for the Ask panel, by page. Free: no model is asked until one is chosen. */
 export const SUGGESTIONS: Record<string, string[]> = {
   "/review": ["Why did orders and revenue move this month?", "What should we do first in the next month?", "Write a short summary of this month for the client"],
+  "/ads": ["What changed in the ads this month?", "Which ad group is wasting money?", "Write a short summary of the ads for the client"],
   "/bi": ["Which channel drove the change?", "Compare this period with the same period last year", "Explain what these charts show in plain words"],
   "/engine": ["Which task would move the most traffic?", "What did we ship, and did it work?", "Why is the first action on the list?"],
   "/search-visibility": ["Which terms moved the most?", "Where are we close to page one?", "Which terms are we losing?"],

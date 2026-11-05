@@ -65,6 +65,7 @@ SYNCED = (
     "facts_ser_keywords", "facts_ser_rankings", "facts_ser_site_summary", "facts_serp_features",
     "ga4_lead_measurements", "ga4_native_channel_observations", "keyword_page_suggestions",
     "refresh_queue", "sync_jobs", "data_watermarks", "monthly_review_snapshots", "site_health_snapshots",
+    "ads_daily", "ads_search_terms",
 )
 SETUP = (
     "llm_responses", "llm_runs", "engine_tasks", "engine_actions", "client_focuses", "watchlist_keywords",
@@ -74,7 +75,7 @@ SETUP = (
     "decisions", "topics",
 )
 #: Never touched.
-KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "ask_scope_state","client_schema_concepts", "schema_page_reports", "client_schema_ignores", "ctr_title_drafts", "inlink_states", "content_states", "content_model_runs", "content_items")
+KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "ask_scope_state","client_schema_concepts", "schema_page_reports", "client_schema_ignores", "ctr_title_drafts", "inlink_states", "content_states", "content_model_runs", "content_items", "ads_notes")
 #: Annotations point at decisions and topics, which are deleted, so the links go and the notes stay.
 UNLINK_ANNOTATIONS = "update annotations set decision_id = null, topic_id = null where client_id = :c"
 

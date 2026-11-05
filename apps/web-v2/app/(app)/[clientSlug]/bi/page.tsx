@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 
 import { BusinessIntelligence } from "@/components/BusinessIntelligence";
 import { ApiError, apiFetch } from "@/lib/api";
+import type { AdsSummary } from "@/lib/ads";
 import { presets, type Bi } from "@/lib/bi";
 import { findClient } from "@/lib/clients";
+import { lastCompleteMonth } from "@/lib/review";
 
 export const metadata = { title: "OrganicIQ insights" };
 
@@ -35,11 +37,13 @@ export default async function BusinessIntelligencePage({
     error = e instanceof ApiError ? e.message : "OrganicIQ insights could not be built: the API did not answer.";
   }
 
-  // Questions are optional: without them the screen still works.
+  // Paid ads sit beside the organic picture for clients on Ads Accelerator. If they cannot be read, the rest of the page still shows.
+  const adsMonth = lastCompleteMonth();
+  const ads = client.service_reporting?.ad_accelerator ? await apiFetch<AdsSummary>(`/v2/ads/summary?month=${adsMonth}`, { clientId: client.id }).catch(() => null) : null;
 
   return (
     <>
-      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} />
+      <BusinessIntelligence client={client} from={start} to={end} channel={channel ?? ""} data={data} error={error} ads={ads} />
     </>
   );
 }
