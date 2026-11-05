@@ -1,9 +1,9 @@
 import logging
-
 import os
+import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import admin, annotations, auth, clients, copilot, dashboard, decisions, integrations, jobs, oauth_google, seranking, site_crawl, v2_admin, v2_ask, v2_bi, v2_connections, v2_content, v2_conversions, v2_ctr, v2_engine, v2_feeds, v2_focus, v2_inlinks, v2_llm, v2_review, v2_schema, v2_search_visibility, v2_site_health, v2_tasks, v2_watchlist, watch_list
@@ -42,6 +42,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+#: A request slower than this is named in the log, with the route it matched, so a slow screen can be found without guessing.
+SLOW_REQUEST_SECONDS = 0.75
+
+
+@app.middleware("http")
+async def time_requests(request: Request, call_next):
+    """Report how long the API itself took, in the response (`Server-Timing`) and, when slow, in the log.
+
+    The web app's own wait on a screen is the API's time plus the network between them; this is the first of those, and the only one the API can see.
+    """
+    started = time.perf_counter()
+    response = await call_next(request)
+    took = time.perf_counter() - started
+    response.headers["Server-Timing"] = f"api;dur={took * 1000:.0f}"
+    if took >= SLOW_REQUEST_SECONDS and request.url.path != "/health":
+        route = request.scope.get("route")
+        logger.warning("Slow request: %s %s took %.2fs", request.method, getattr(route, "path", request.url.path), took)
+    return response
 
 
 def _migration_state() -> tuple[str, str | None]:
