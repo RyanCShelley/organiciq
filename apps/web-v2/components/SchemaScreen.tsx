@@ -168,7 +168,7 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[16rem] flex-1">
           <div className="font-semibold">{t.label} <span className="font-normal text-[var(--text-tertiary)]">· {t.pages} page{t.pages === 1 ? "" : "s"}</span></div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-[var(--text-secondary)]">
             {t.expects.length > 0 ? <span>Expected:</span> : <span>Nothing in particular is expected.</span>}
