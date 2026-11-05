@@ -208,3 +208,33 @@ def test_a_recurring_cleanup_can_be_ignored_everywhere(client, db, client_a, adm
     after = get(client, client_a, admin_user).json()["data"]
     assert after["cleanups"] == first["cleanups"] - 1
     assert BASE + "/products/b" not in [i["url"] for i in next(x for x in after["types"] if x["page_type"] == "product")["items"] if "cleanup" in i["text"]]
+
+
+def test_only_the_brands_own_organization_is_judged_and_other_organizations_are_listed_apart(client, db, client_a, admin_user):
+    """A page that names a client, a partner or a publisher is not the brand under another name, and their profiles are not the brand's."""
+    client_a.domain, brand = "shop.example", client_a.client_name
+    db.commit()
+    seed(db, client_a)
+    ld(db, client_a, "/", {"@context": "https://schema.org", "@type": "Organization", "name": brand, "url": BASE, "sameAs": ["https://www.facebook.com/shop"], "logo": "https://shop.example/l.png", "telephone": "555"})
+    ld(db, client_a, "/blogs/news/post", {"@context": "https://schema.org", "@type": "Article", "headline": "H", "about": {"@type": "Organization", "name": "OpenAI", "url": "https://openai.com", "sameAs": ["https://openai.com/about"]}})
+    db.commit()
+    entity = get(client, client_a, admin_user).json()["data"]["entity"]
+    checks = {c["key"]: c for c in entity["checks"]}
+    assert checks["names"]["status"] == "pass", "OpenAI is another organization, not a second name for the brand"
+    assert [r["label"] for r in checks["names"]["items"] if r["kind"] == "found"] == [brand]
+    assert any(r["label"] == "Another organization: OpenAI" for r in checks["names"]["items"])
+    assert entity["same_as"] == ["https://www.facebook.com/shop"], "the other organization's profile is not the brand's"
+    assert checks["same_as"]["items"][0]["pages"] == [BASE + "/"], "each link says which pages carry it"
+    assert checks["logo"]["items"][0]["label"].startswith("logo: https://shop.example/l.png")
+
+
+def test_a_brand_named_two_ways_lists_each_name_with_its_pages(client, db, client_a, admin_user):
+    client_a.domain, brand = "shop.example", client_a.client_name
+    db.commit()
+    seed(db, client_a)
+    ld(db, client_a, "/", {"@context": "https://schema.org", "@type": "Organization", "name": brand, "url": BASE})
+    ld(db, client_a, "/products/a", {"@context": "https://schema.org", "@type": "Organization", "name": "Shop Ex.", "url": BASE})
+    db.commit()
+    names = next(c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"] if c["key"] == "names")
+    assert names["status"] == "fail"
+    assert {r["label"]: r["pages"] for r in names["items"] if r["kind"] == "found"} == {brand: [BASE + "/"], "Shop Ex.": [BASE + "/products/a"]}
