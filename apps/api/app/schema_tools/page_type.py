@@ -104,6 +104,9 @@ _PRODUCT_SCHEMAS = frozenset({
 _GENERIC_SERVICE_SCHEMAS = frozenset({
     "Service", "ProfessionalService", "Course", "MedicalProcedure", "TaxiService",
 })
+# What a page offers, as against who it belongs to. A ProfessionalService or a LocalBusiness is how a site describes its own business, and is repeated on
+# every page (the publisher of a blog post, the organization in the footer), so on its own it says nothing about what this page is.
+_OFFERING_SCHEMAS = frozenset({"Service", "Course", "MedicalProcedure", "TaxiService"})
 _FAQ_SCHEMAS = frozenset({"FAQPage", "QAPage"})
 _HOWTO_SCHEMAS = frozenset({"HowTo", "Recipe"})
 _CATEGORY_SCHEMAS = frozenset({"CollectionPage", "ItemList"})
@@ -173,6 +176,10 @@ def _schema_override(schema_types: list[str]) -> PageType | None:
     has_offer = "Offer" in types or "AggregateOffer" in types
     has_local = _is_local_business(types)
 
+    # An article on a page is what the page is, whoever publishes it: the business markup beside it is the site's own, not this page's subject.
+    if types & _EDITORIAL_SCHEMAS and not (types & _OFFERING_SCHEMAS) and not has_product:
+        return "editorial"
+
     # Productized service: Product + Service co-marked, OR LocalBusiness with
     # an Offer that points to a Service (we can't see the link without parsing
     # makesOffer, but Offer + Service on the same page is the same idea).
@@ -240,6 +247,10 @@ def detect_page_type(
         return "homepage"
 
     schema_guess = _schema_override(schema_types)
+    if schema_guess in ("service", "productized_service") and url_guess not in (None, "service", "productized_service"):
+        # Only the site's own business is marked up (no Service, Course or Product on the page): the address says more than a business node repeated everywhere.
+        if not (set(schema_types) & (_OFFERING_SCHEMAS | _PRODUCT_SCHEMAS)):
+            return url_guess
     if schema_guess is not None:
         return schema_guess
 

@@ -429,3 +429,64 @@ def test_markup_the_tool_generates_keeps_every_property_schema_org_defines_and_d
     org = cleaned["@graph"][0]
     assert org["disambiguatingDescription"] == "d" and "provider" in org, "a valid property, and one used on a type it is not defined for, are left for a person to judge"
     assert "inventedProperty" not in org and any("inventedProperty" in c["detail"] for c in corrections)
+
+
+# ── what real sites write that is valid ──────────────────────────────────────
+
+
+@pytest.mark.parametrize("value", ["2009", "2009-05", "2009-05-14", "2009-05-14T08:30:00Z"])
+def test_a_year_or_a_month_is_a_valid_date(value):
+    out = run(node("Organization", name="Co", foundingDate=value), url=HOME)
+    assert "schemaorg.property_range" not in rules(out)
+
+
+@pytest.mark.parametrize("value", ["a long time ago", "2009-13-45x", "May 2009"])
+def test_text_that_is_not_a_date_is_still_reported(value):
+    out = run(node("Organization", name="Co", foundingDate=value), url=HOME)
+    assert "schemaorg.property_range" in rules(out)
+
+
+def test_query_input_is_a_valid_annotation_on_a_search_action():
+    site = node("WebSite", name="Co", url=HOME, potentialAction={"@type": "SearchAction", "target": HOME + "?s={q}", "query-input": "required name=q"})
+    out = run(site, url=HOME)
+    assert not [f for f in out if f.property == "query-input"]
+
+
+def test_a_misspelt_property_that_only_looks_like_an_annotation_is_still_unknown():
+    out = run(node("Organization", name="Co", **{"nonsense-input": "x"}), url=HOME)
+    assert any(f.rule_id == "schemaorg.unknown_property" and f.property == "nonsense-input" for f in out)
+
+
+def test_generated_markup_keeps_query_input():
+    from app.schema_tools.transforms import validate_properties
+
+    graph = [{"@type": "SearchAction", "target": "x", "query-input": "required name=q", "madeUp": 1}]
+    out, corrections = validate_properties(graph)
+    assert "query-input" in out[0] and "madeUp" not in out[0] and len(corrections) == 1
+
+
+def test_a_deprecated_property_is_reported_once_as_deprecated_not_as_misplaced():
+    out = run(node("VideoObject", name="V", interactionCount="5"), url=HOME)
+    assert "schemaorg.deprecated_property" in rules(out)
+    assert not about(out, "interactionCount")
+
+
+# ── what kind of page it is ──────────────────────────────────────────────────
+
+
+def test_a_blog_post_is_editorial_even_though_the_site_marks_up_its_business_on_every_page():
+    from app.schema_tools.page_type import detect_page_type
+
+    assert detect_page_type("https://site.example/blog/some-post", ["BlogPosting", "ProfessionalService", "Organization", "WebPage"]) == "editorial"
+
+
+def test_a_page_marked_up_only_with_the_sites_business_takes_its_kind_from_its_address():
+    from app.schema_tools.page_type import detect_page_type
+
+    assert detect_page_type("https://site.example/blog/some-post", ["ProfessionalService", "Organization"]) == "editorial"
+
+
+def test_a_page_that_offers_a_service_is_still_a_service_page():
+    from app.schema_tools.page_type import detect_page_type
+
+    assert detect_page_type("https://site.example/services/seo", ["Service", "ProfessionalService", "Organization"]) == "service"

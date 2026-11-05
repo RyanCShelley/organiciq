@@ -74,6 +74,17 @@ class Vocabulary:
             return None
         return bare if bare in self._props else None
 
+    def action_annotation(self, value: str) -> str | None:
+        """The property a `<property>-input` or `<property>-output` key annotates, or None.
+
+        Schema.org's Actions convention (https://schema.org/docs/actions.html) allows any property of an action to be described by a key with this suffix, such as
+        `query-input` on a SearchAction. These are not in the vocabulary as terms and are valid.
+        """
+        for suffix in ("-input", "-output"):
+            if value.endswith(suffix) and self.property_name(value[: -len(suffix)]):
+                return value[: -len(suffix)]
+        return None
+
     def property_near_miss(self, value: str) -> str | None:
         bare, foreign = self.term(value)
         if foreign or bare is None or bare in self._props:

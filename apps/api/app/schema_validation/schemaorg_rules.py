@@ -22,7 +22,7 @@ from app.schema_validation import findings as F
 from app.schema_validation.graph import KEYWORDS, Graph, Node, as_list
 from app.schema_validation.vocabulary import Vocabulary
 
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")  # a year, a month or a day: ISO 8601 allows each, and Schema.org and Google read them
 _DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$")
 _TIME = re.compile(r"^\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$")
 _NUMBER = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
@@ -54,7 +54,7 @@ def _literal_problem(vocab: Vocabulary, prop: str, value: str) -> str | None:
         return None  # free text is accepted, or a name where a thing is expected (consumers read it)
     text = value.strip()
     if ranges <= {"Date", "DateTime"} and not (_DATE.match(text) or _DATETIME.match(text)):
-        return "a date (ISO 8601, like 2026-10-31)"
+        return "a date (ISO 8601, like 2026-10-31, or a year like 2009)"
     if ranges == {"Time"} and not _TIME.match(text):
         return "a time (ISO 8601, like 09:30)"
     if ranges <= {"Number", "Integer", "Float"} and not _NUMBER.match(text):
@@ -108,7 +108,7 @@ def check(graph: Graph, vocab: Vocabulary) -> list[F.Finding]:
                 continue
             prop = vocab.property_name(key)
             if prop is None:
-                if not judge_domain:
+                if not judge_domain or vocab.action_annotation(key):
                     continue
                 near = vocab.property_near_miss(key)
                 if near:
@@ -133,6 +133,8 @@ def check(graph: Graph, vocab: Vocabulary) -> list[F.Finding]:
                     explanation="Schema.org has retired this property. It still parses, but new markup should use its replacement.",
                     recommendation=(f"Use {_list(info.superseded_by)} instead." if info.superseded_by else "Use a current property."), doc=F.schema_doc(prop), evidence={key: snippet(value)}, confidence="high")
 
+            if info.status == "deprecated":
+                continue  # already reported as deprecated; where a retired property may sit is not worth a second finding
             if judge_domain and not vocab.applies(prop, known):
                 add(node, rule_id="schemaorg.property_domain", category=F.WARNING, type=_joined(known), property=prop,
                     title=f"'{prop}' is not defined on {_joined(known)}",

@@ -278,7 +278,7 @@ def validate_properties(
         types = [node_type] if isinstance(node_type, str) else list(node_type)
         if not any(vocab.type_name(t) for t in types):
             continue
-        for k in [k for k in node if k not in _META_KEYS and not k.startswith("@") and ":" not in k and vocab.property_name(k) is None]:
+        for k in [k for k in node if k not in _META_KEYS and not k.startswith("@") and ":" not in k and vocab.property_name(k) is None and vocab.action_annotation(k) is None]:
             node.pop(k)
             corrections.append(
                 {
