@@ -188,21 +188,19 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
   );
 }
 
-/** One check. Click it to see what was found behind it, and open any page that carries it. */
-function CheckRow({ c, onIgnore, onOpen }: { c: ScCheck; onIgnore: Ignore; onOpen: (url: string) => void }) {
-  const [open, setOpen] = useState(false);
+/** One check. Every check opens: to what was found behind it and the pages that carry it, or, when nothing was found, to what to do about it. */
+function CheckRow({ c, open, onToggle, onIgnore, onOpen, extra }: { c: ScCheck; open: boolean; onToggle: () => void; onIgnore: Ignore; onOpen: (url: string) => void; extra?: React.ReactNode }) {
   const clean = c.status === "pass";
   const ignored = c.status === "ignored";
-  const n = c.items.length;
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-start gap-3">
         <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : "To fix"}</span>
         <div className="min-w-0 flex-1">
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} disabled={n === 0} className={`flex items-center gap-1.5 text-left font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""} ${n === 0 ? "cursor-default" : ""}`}>
-            {n > 0 ? <span aria-hidden className={`text-xs text-[var(--text-tertiary)] transition-transform ${open ? "rotate-90" : ""}`}>▸</span> : null}
+          <button type="button" onClick={onToggle} aria-expanded={open} className={`flex items-center gap-1.5 text-left font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""}`}>
+            <span aria-hidden className={`text-xs text-[var(--text-tertiary)] transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
             {c.label}
-            {n > 0 ? <span className="text-xs font-normal text-[var(--text-secondary)] underline">{open ? "Hide" : "See what was found"}</span> : null}
+            <span className="text-xs font-normal text-[var(--text-secondary)] underline">{open ? "Hide" : clean ? "See what was found" : "See what to do"}</span>
           </button>
           <div className="text-xs text-[var(--text-secondary)]">{c.detail}</div>
           {c.fix ? <div className="mt-0.5 text-xs font-medium">{c.fix}</div> : null}
@@ -210,25 +208,32 @@ function CheckRow({ c, onIgnore, onOpen }: { c: ScCheck; onIgnore: Ignore; onOpe
         {!clean && !ignored ? <button type="button" onClick={() => onIgnore("check", c.key, c.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button> : null}
       </div>
       {open ? (
-        <ul className="ml-[4.25rem] mt-2 max-h-80 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
-          {c.items.map((i) => (
-            <li key={i.label} className="flex flex-wrap items-start gap-x-3 gap-y-0.5">
-              <span className={`min-w-0 break-all font-semibold ${i.kind === "missing" ? "text-red-700" : i.kind === "other" ? "text-[var(--text-secondary)]" : ""}`}>{i.label}</span>
-              {i.count > 1 ? <span className="text-[var(--text-tertiary)]">on {i.count} blocks</span> : null}
-              <span className="flex flex-wrap gap-2">
-                {i.pages.map((u) => <button key={u} type="button" onClick={() => onOpen(u)} className="break-all underline">{shortPage(u)}</button>)}
-                {i.count > i.pages.length && i.pages.length > 0 ? <span className="text-[var(--text-tertiary)]">and more</span> : null}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="ml-[4.25rem] mt-2 space-y-3">
+          {c.items.length > 0 ? (
+            <ul className="max-h-80 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
+              {c.items.map((i) => (
+                <li key={i.label} className="flex flex-wrap items-start gap-x-3 gap-y-0.5">
+                  <span className={`min-w-0 break-all font-semibold ${i.kind === "missing" ? "text-red-700" : i.kind === "other" ? "text-[var(--text-secondary)]" : ""}`}>{i.label}</span>
+                  {i.count > 1 ? <span className="text-[var(--text-tertiary)]">on {i.count} blocks</span> : null}
+                  <span className="flex flex-wrap gap-2">
+                    {i.pages.map((u) => <button key={u} type="button" onClick={() => onOpen(u)} className="break-all underline">{shortPage(u)}</button>)}
+                    {i.count > i.pages.length && i.pages.length > 0 ? <span className="text-[var(--text-tertiary)]">and more</span> : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : !extra ? (
+            <p className="rounded-lg bg-[var(--bg)] p-3 text-xs text-[var(--text-secondary)]">Nothing was found on any crawled page.</p>
+          ) : null}
+          {extra}
+        </div>
       ) : null}
     </li>
   );
 }
 
 /** Find the brand's item on Wikidata and approve it, so generated markup can link to it. Only approved items are ever linked. */
-function Concepts({ client, data }: { client: Client; data: ScData }) {
+function Concepts({ client, data, flush = false }: { client: Client; data: ScData; flush?: boolean }) {
   const router = useRouter();
   const [name, setName] = useState(data.entity.brand);
   const [found, setFound] = useState<Record<string, ScCandidate[]> | null>(null);
@@ -257,7 +262,7 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
     });
   const options = found ? Object.values(found)[0] ?? [] : [];
   return (
-    <div className="space-y-3 px-5 pb-5 text-sm">
+    <div className={`space-y-3 text-sm ${flush ? "" : "px-5 pb-5"}`}>
       <p className="text-xs text-[var(--text-tertiary)]">
         A Wikidata item is how search engines and AI recognize something as one known entity. Search for the brand or a topic, approve the item that is right, and generated markup will link to it. The model never chooses these.
       </p>
@@ -508,6 +513,13 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+  const [openChecks, setOpenChecks] = useState<Set<string>>(new Set());
+  const toggleCheck = (key: string) =>
+    setOpenChecks((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   const [ignoreError, setIgnoreError] = useState<string | null>(null);
   const [, startIgnore] = useTransition();
   const ignore: Ignore = (scope, key, label) =>
@@ -556,9 +568,15 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">The brand as one entity</h2>
             <p className="px-5 text-xs text-[var(--text-tertiary)]">Does the markup describe {data.entity.brand || "the brand"} as one organization, tied to the profiles and the Wikidata item that identify it?</p>
-            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.entity.checks.map((c) => <CheckRow key={c.key} c={c} onIgnore={ignore} onOpen={setOpen} />)}</ul>
-            <h3 className="px-5 pt-2 font-semibold">Wikidata items</h3>
-            <Concepts client={client} data={data} />
+            <div className="flex justify-end gap-3 px-5 text-xs">
+              <button type="button" onClick={() => setOpenChecks(new Set(data.entity.checks.map((c) => c.key)))} className="underline">Expand all</button>
+              <button type="button" onClick={() => setOpenChecks(new Set())} className="underline">Collapse all</button>
+            </div>
+            <ul className="divide-y divide-[var(--border)] px-5 pb-2">
+              {data.entity.checks.map((c) => (
+                <CheckRow key={c.key} c={c} open={openChecks.has(c.key)} onToggle={() => toggleCheck(c.key)} onIgnore={ignore} onOpen={setOpen} extra={c.key === "wikidata" ? <Concepts client={client} data={data} flush /> : undefined} />
+              ))}
+            </ul>
           </section>
 
           {ignoreError ? <p role="alert" className="text-sm font-semibold text-red-700">{ignoreError}</p> : null}
