@@ -18,7 +18,7 @@ from app.core.settings import get_settings
 from app.models.client import Client
 from app.integrations import teamwork
 from app.models.schema_tools import ContentItem, ContentState
-from app.services import content_briefs, content_calendar, content_gaps_view, content_refresh, model_spend
+from app.services import content_briefs, content_calendar, content_prompts, content_gaps_view, content_refresh, model_spend
 
 router = APIRouter(prefix="/v2/content", tags=["v2 content"])
 
@@ -309,7 +309,7 @@ def calendar_send(
 ) -> dict:
     """Make the item's own list in the client's Teamwork content project, with its task. A second press returns the first task."""
     item = _item(db, client, item_id, lock=True)
-    if item.teamwork_task_id:
+    if item.teamwork_task_id and len(item.teamwork_subtasks or {}) >= len(content_prompts.subtasks(item, client)):
         return content_calendar.out(item)
     if not teamwork.configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Teamwork is not set up on this install, so the item cannot be sent.")
@@ -318,7 +318,7 @@ def calendar_send(
     if not item.due:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Set a publish date (the due date) first: it goes in the Teamwork list's name.")
     try:
-        content_calendar.send(db, client, item)
+        pending = content_calendar.send(db, client, item)
     except teamwork.TeamworkError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    return content_calendar.out(item)
+    return {**content_calendar.out(item), "subtasks_pending": pending}

@@ -25,7 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import task_results
+from app.services import task_results, teamwork_subtasks
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -79,6 +79,7 @@ def _out(task: EngineTask) -> dict:
         "due": task.due.isoformat() if task.due else None,
         "teamwork_task_id": task.teamwork_task_id,
         "teamwork_task_url": task.teamwork_task_url,
+        "teamwork_subtasks": len(task.teamwork_subtasks or {}),
         "shipped_at": task.shipped_at.isoformat() if task.shipped_at else None,
         "check_on": task.check_on.isoformat() if task.check_on else None,
     }
@@ -276,40 +277,41 @@ def send_task(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Push the task to the client's Teamwork tasklist. Idempotent: a second press returns the first task."""
+    """Push the task to the client's Teamwork tasklist, with a subtask for each of its steps. Idempotent: a second press returns the first task
+    and makes only the subtasks that are missing."""
     task = _get(db, client, task_id, lock=True)
-    if task.teamwork_task_id:
+    subs = teamwork_subtasks.from_steps(task.steps or [], growth=task.kind == "growth_action")
+    if task.teamwork_task_id and len(task.teamwork_subtasks or {}) >= min(len(subs), teamwork_subtasks.MAX_SUBTASKS):
         return _out(task)
     if task.status == "dropped":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This task was dropped. Confirm it again first.")
     if not teamwork.configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Teamwork is not set up on this install, so the task can be copied but not sent.")
-    if not client.teamwork_tasklist_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This client has no Teamwork tasklist yet. Choose one in Settings → Connections.")
-
-    assignee = None
-    if task.assignee_email:
+    assignee = teamwork_subtasks.assignee_id(task.assignee_email)
+    if not task.teamwork_task_id:
+        if not client.teamwork_tasklist_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This client has no Teamwork tasklist yet. Choose one in Settings → Connections.")
+        name, description = _description(task, client)
         try:
-            assignee = teamwork.person_id_for(task.assignee_email, teamwork.list_people())
-        except teamwork.TeamworkError:
-            assignee = None  # sent unassigned rather than not sent
-    name, description = _description(task, client)
-    try:
-        created = teamwork.create_task(
-            tasklist_id=client.teamwork_tasklist_id,
-            name=name,
-            description=description,
-            due=task.due.isoformat() if task.due else None,
-            assignee_teamwork_id=assignee,
-        )
-    except teamwork.TeamworkError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    task.teamwork_task_id, task.teamwork_task_url = str(created["id"]), created["url"]
-    if task.status == "confirmed":
-        task.status = "sent"
-    db.commit()
+            created = teamwork.create_task(
+                tasklist_id=client.teamwork_tasklist_id,
+                name=name,
+                description=description,
+                due=task.due.isoformat() if task.due else None,
+                assignee_teamwork_id=assignee,
+            )
+        except teamwork.TeamworkError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        task.teamwork_task_id, task.teamwork_task_url = str(created["id"]), created["url"]
+        if task.status == "confirmed":
+            task.status = "sent"
+        db.commit()
+    pending = teamwork_subtasks.send(
+        db, task, task.teamwork_task_id, subs,
+        due=task.due.isoformat() if task.due else None, assignee=assignee,
+    )
     db.refresh(task)
-    return _out(task)
+    return {**_out(task), "subtasks_pending": pending}
 
 
 @router.get("/{task_id}/text")
