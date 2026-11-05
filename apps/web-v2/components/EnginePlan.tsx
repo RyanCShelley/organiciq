@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronRight } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
@@ -12,6 +13,94 @@ const STATUS_STYLE: Record<string, string> = {
   sent: "bg-blue-50 text-blue-800",
   shipped: "bg-green-50 text-green-800",
 };
+
+/** A growth action's steps come under "# " headings (its parts); any other task's steps are a plain list. */
+function Steps({ steps, grouped }: { steps: string[]; grouped: boolean }) {
+  if (!grouped) {
+    return (
+      <ol className="list-decimal space-y-1 pl-5">
+        {steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {steps.map((step, i) =>
+        step.startsWith("# ") ? (
+          <div key={i} className="font-medium text-[var(--text-primary)]">
+            {step.slice(2)}
+          </div>
+        ) : (
+          <div key={i} className="flex gap-2 pl-3">
+            <span aria-hidden className="text-[var(--text-secondary)]">☐</span>
+            <span>{step}</span>
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+/** What was confirmed, in full: the same words that go to Teamwork, readable here at any time, before or after it is sent. */
+function TaskDetails({ task }: { task: EngineTask }) {
+  const measured = [task.metric ? `Measured on ${task.metric}` : null, task.check_on ? `checked ${task.check_on}` : null].filter(Boolean).join(", ");
+  return (
+    <div className="mt-3 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 text-sm text-[var(--text-secondary)]">
+      <Detail label="Page">
+        <a href={task.page} target="_blank" rel="noreferrer" className="break-all text-[var(--brand-teal)] hover:underline">
+          {task.page}
+        </a>
+      </Detail>
+      {task.why ? <Detail label="Why this page">{task.why}</Detail> : null}
+      {task.steps.length > 0 ? (
+        <Detail label={task.kind === "growth_action" ? "The parts, and what to do in each" : "Steps"}>
+          <Steps steps={task.steps} grouped={task.kind === "growth_action"} />
+        </Detail>
+      ) : null}
+      {task.done_when ? <Detail label="Done when">{task.done_when}</Detail> : null}
+      {measured || task.effort_min ? (
+        <Detail label="Measured and sized">
+          {[measured, task.effort_min ? `Estimated ${task.effort_min} minutes` : null].filter(Boolean).join(" · ")}
+        </Detail>
+      ) : null}
+      {task.evidence.length > 0 ? (
+        <Detail label="Evidence and limitations">
+          <ul className="list-disc space-y-1 pl-5">
+            {task.evidence.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </Detail>
+      ) : null}
+      <Detail label="Where it stands">
+        Confirmed by {task.confirmed_by}
+        {task.teamwork_task_url ? (
+          <>
+            {" · "}
+            <a href={task.teamwork_task_url} target="_blank" rel="noreferrer" className="text-[var(--brand-teal)] hover:underline">
+              In Teamwork
+            </a>
+            {task.teamwork_subtasks ? ` with ${task.teamwork_subtasks} subtask${task.teamwork_subtasks === 1 ? "" : "s"}` : ""}
+          </>
+        ) : (
+          " · not sent to Teamwork yet"
+        )}
+        {task.shipped_at ? ` · shipped ${task.shipped_at.slice(0, 10)}` : ""}
+      </Detail>
+    </div>
+  );
+}
 
 function shortPage(url: string): string {
   return url.replace(/^https?:\/\/[^/]+/, "") || "/";
@@ -33,6 +122,7 @@ function TaskRow({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
 
   function run(task_: () => Promise<{ ok: true; value: EngineTask } | { ok: false; error: string }>) {
     setError(null);
@@ -48,7 +138,18 @@ function TaskRow({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="font-medium">
-            {task.title}
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              aria-label={`${open ? "Hide" : "Show"} the details of ${task.title}`}
+              className="mr-1 inline-flex align-middle text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <ChevronRight size={16} aria-hidden className={`transition-transform ${open ? "rotate-90" : ""}`} />
+            </button>
+            <button type="button" onClick={() => setOpen((o) => !o)} className="text-left hover:underline">
+              {task.title}
+            </button>
             {task.kind === "growth_action" ? (
               <span className="ml-2 rounded bg-green-50 px-1.5 py-0.5 text-xs font-semibold text-green-800">growth action</span>
             ) : task.kind === "suggestion" ? (
@@ -152,6 +253,7 @@ function TaskRow({
           Drop
         </button>
       </div>
+      {open ? <TaskDetails task={task} /> : null}
       {error ? (
         <p role="alert" className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-800">
           {error}

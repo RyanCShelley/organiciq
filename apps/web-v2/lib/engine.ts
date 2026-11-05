@@ -118,6 +118,7 @@ export type EngineTask = {
   due: string | null;
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
+  teamwork_subtasks?: number;
   shipped_at?: string | null;
   check_on?: string | null;
 };
