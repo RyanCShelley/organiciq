@@ -246,12 +246,7 @@ function PaidSection({ client, ads }: { client: Client; ads: AdsSummary }) {
             {k("Cost", money(ads.totals.cost), vs(ads.totals.cost, ads.previous?.cost))}
             {k("Conversions", ads.totals.conversions.toLocaleString(), ads.totals.cost_per_conversion ? `${money(ads.totals.cost_per_conversion)} each` : undefined)}
           </div>
-          {ads.text ? <p className="text-sm">{ads.text}</p> : null}
-          <p className="text-xs text-[var(--text-secondary)]">
-            {ads.top_group ? <>Most spend: {ads.top_group.name} ({money(ads.top_group.cost)}). </> : null}
-            {ads.top_term ? <>Most clicks from the search “{ads.top_term.term}”. </> : null}
-            <Link href={`/${client.slug}/ads?month=${ads.month}`} className="font-semibold underline">Open the Ads Accelerator report</Link>
-          </p>
+          <p className="text-xs"><Link href={`/${client.slug}/ads?month=${ads.month}`} className="font-semibold underline">Open the Ads Accelerator report</Link></p>
         </>
       )}
     </Section>

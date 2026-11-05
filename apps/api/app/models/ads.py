@@ -1,4 +1,4 @@
-"""Google Ads performance for clients on Ads Accelerator, kept by day, and the notes on work done on the account.
+"""Google Ads performance for clients on Ads Accelerator, kept by day.
 
 Rows are written by the Google Ads pull (not built yet) or, for a demo, by a seed. `source` says which.
 """
@@ -19,8 +19,7 @@ from app.core.db import Base
 class AdsDaily(Base):
     """One day of one campaign and ad group, split by market and device.
 
-    `eligible_impressions` is the searches the ads could have shown on (impressions divided by the search impression share), and
-    `lost_budget` and `lost_rank` are the ones missed because the budget was reached or the bid was outbid.
+    `eligible_impressions` is the searches the ads could have shown on (impressions divided by the search impression share).
     """
 
     __tablename__ = "ads_daily"
@@ -42,8 +41,6 @@ class AdsDaily(Base):
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     eligible_impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    lost_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    lost_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -66,17 +63,3 @@ class AdsSearchTerm(Base):
     clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
-
-
-class AdsNote(Base):
-    """A change made to the account (budget, bids, keywords, ads), written by a person: the report's "Work completed"."""
-
-    __tablename__ = "ads_notes"
-    __table_args__ = (Index("ix_ads_notes_client_date", "client_id", "date"),)
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,4 +1,4 @@
-"""Google Ads performance by day, search terms, and the notes on work done on the account. Additive.
+"""Google Ads performance by day and search terms. Additive.
 
 Revision ID: 0099_ads_accelerator
 Revises: 0098_speed_indexes
@@ -30,8 +30,6 @@ def upgrade() -> None:
         sa.Column("cost", sa.Numeric(12, 2), nullable=False, server_default="0"),
         sa.Column("conversions", sa.Numeric(12, 2), nullable=False, server_default="0"),
         sa.Column("eligible_impressions", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("lost_budget", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("lost_rank", sa.Integer, nullable=False, server_default="0"),
         sa.Column("source", sa.String(16), nullable=False, server_default="google_ads"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint("client_id", "date", "campaign", "ad_group", "market", "device", "network", name="uq_ads_daily_grain"),
@@ -51,19 +49,8 @@ def upgrade() -> None:
         sa.UniqueConstraint("client_id", "date", "term", "ad_group", name="uq_ads_search_terms_grain"),
     )
     op.create_index("ix_ads_search_terms_client_date", "ads_search_terms", ["client_id", "date"])
-    op.create_table(
-        "ads_notes",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("client_id", UUID(as_uuid=True), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("date", sa.Date, nullable=False),
-        sa.Column("text", sa.Text, nullable=False),
-        sa.Column("created_by", sa.String(255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_index("ix_ads_notes_client_date", "ads_notes", ["client_id", "date"])
 
 
 def downgrade() -> None:
-    op.drop_table("ads_notes")
     op.drop_table("ads_search_terms")
     op.drop_table("ads_daily")
