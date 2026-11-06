@@ -13,6 +13,7 @@ The page's depth score is Topic Hub's (`content_depth`), run on the page as it i
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any
@@ -26,12 +27,14 @@ from app.decisions import visibility_candidates as vc
 from app.decisions.visibility_candidates import add_months
 from app.models.annotation import Annotation
 from app.models.client import Client
+from app.models.client_focus import ClientFocus
 from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
 from app.models.engine_task import EngineTask
 from app.models.gsc import FactGscQueryPage
 from app.core.urls import normalize_url
 from app.models.schema_tools import ContentState
 from app.models.seranking import FactSerKeyword
+from app.models.watchlist import WatchlistKeyword
 from app.services.content_depth import score_content_depth
 from app.services.page_diagnostic import read_page
 
@@ -40,6 +43,9 @@ STALE_MONTHS = 18
 THIN_WORDS = 300
 GROWING_RATIO = 1.25
 GONE_QUIET = 0.2
+#: A page only "goes quiet" when it had this many organic sessions in the same three months last year. A page that had 50 and now has 3 is too small to matter.
+QUIET_MIN_BASELINE = 100.0
+TOPICS_SHOWN = 3
 COMPETING_MIN_IMPRESSIONS = 30
 COMPETING_SHARE = 0.25
 COMPETING_MAX_POSITION = 30
@@ -63,7 +69,7 @@ def _months_since(day: date | None, today: date) -> int | None:
 def _label(m: dict[str, float], j: dict[str, Any], site_ratio: float | None, series: dict[str, float], cur3: list[str]) -> str:
     if m["ly3"] <= 0 and m["cur3"] > 0:
         return "new"
-    if m["ly3"] >= tc.POSSIBLE_MIN_BASELINE and m["cur3"] <= GONE_QUIET * m["ly3"]:
+    if m["ly3"] >= QUIET_MIN_BASELINE and m["cur3"] <= GONE_QUIET * m["ly3"]:
         return "quiet"
     if j["sudden"] or j["slow_bleed"]:
         return "losing"
@@ -128,6 +134,57 @@ def watch_by_page(db: Session, client: Client) -> dict[str, list[dict[str, Any]]
     return pages
 
 
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def target_terms(db: Session, client: Client) -> list[dict[str, Any]]:
+    """The terms the site wants to rank for: the client's watchlist (brand terms left out), each marked when it is in the focus bucket.
+
+    The focus bucket is the one chosen for the most recent month that has one.
+    """
+    focus = db.query(ClientFocus.bucket_id).filter(ClientFocus.client_id == client.id, ClientFocus.bucket_id.isnot(None)).order_by(ClientFocus.month.desc()).limit(1).scalar()
+    brand = vc.brand_keys(client)
+    out: dict[str, dict[str, Any]] = {}
+    for row in db.query(WatchlistKeyword).filter(WatchlistKeyword.client_id == client.id):
+        term = " ".join((row.keyword or "").lower().split())
+        if not term or vc.is_brand(term, brand):
+            continue
+        held = out.get(term)
+        in_focus = focus is not None and row.bucket_id == focus
+        if held is None:
+            out[term] = {"term": term, "volume": int(row.volume) if row.volume is not None else None, "focus": in_focus, "words": _words(term)}
+        else:
+            held["focus"] = held["focus"] or in_focus
+    return list(out.values())
+
+
+def ranked_terms(db: Session, client: Client) -> dict[str, set[str]]:
+    """The terms each page is tracked as ranking for, at any position."""
+    pages: dict[str, set[str]] = defaultdict(set)
+    for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True), FactSerKeyword.ranking_url.isnot(None)):
+        term = " ".join((row.keyword or "").lower().split())
+        if term and row.current_position is not None:
+            pages[normalize_url(row.ranking_url or "")].add(term)
+    return pages
+
+
+def topics_for(url: str, title: str | None, terms: list[dict[str, Any]], ranked: dict[str, set[str]]) -> list[dict[str, Any]]:
+    """The target terms a page is for: it is tracked as ranking for them, or its title and address say all their words. Focus first, then by searches a month."""
+    held = ranked.get(url, set())
+    page_words = _words(f"{title or ''} {url}")
+    found = [t for t in terms if t["term"] in held or (t["words"] and t["words"] <= page_words)]
+    found.sort(key=lambda t: (not t["focus"], -(t["volume"] or 0), t["term"]))
+    return found
+
+
+def _topic_reasons(found: list[dict[str, Any]]) -> list[str]:
+    if not found:
+        return ["Not on a target topic."]
+    names = ", ".join(f"“{t['term']}”" + (f" ({t['volume']:,} searches a month)" if t["volume"] else "") for t in found[:TOPICS_SHOWN])
+    return [f"On a target topic: {names}." + (" In this month's focus." if any(t["focus"] for t in found) else "")]
+
+
 def build(db: Session, client: Client, month: str, *, show_ignored: bool = False, q: str | None = None) -> dict[str, Any]:
     year, mon = int(month[:4]), int(month[5:7])
     month_start = date(year, mon, 1)
@@ -149,6 +206,9 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
 
     snaps = _snapshots(db, client)
     watch = watch_by_page(db, client)
+    terms = target_terms(db, client)
+    ranked = ranked_terms(db, client) if terms else {}
+    topics_known = bool(terms)
     set_aside = {k for (k,) in db.query(ContentState.key).filter(ContentState.client_id == client.id, ContentState.area == "refresh")}
     needle = " ".join((q or "").lower().split())
 
@@ -174,36 +234,43 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
             continue
         at_stake = j["at_stake"]
         if label == "quiet":
-            at_stake = max(at_stake, round((m["ly3"] - m["cur3"]) / 3, 1))
+            # Against what the page should have if it had moved with the whole site, not the raw drop.
+            expected = m["ly3"] * (site_ratio if site_ratio is not None else 1.0) / 3
+            at_stake = max(at_stake, round(max(0.0, expected - m["cur3"] / 3), 1))
+        found = topics_for(url, snap.title if snap else None, terms, ranked)
         rows.append(
             {
                 "url": url, "title": snap.title if snap else None, "label": label, "status": LABELS[label],
                 "sessions": {"current": round(m["current"]), "previous": round(m["previous"]), "change_pct": tc._pct(m["current"], m["previous"])},
                 "three_months": {"current": round(m["cur3"]), "last_year": round(m["ly3"]), "change_pct": tc._pct(m["cur3"], m["ly3"])},
                 "at_stake": round(at_stake), "last_updated": snap.content_updated_on.isoformat() if snap and snap.content_updated_on else None,
-                "months_since_update": age, "words": words, "stale": stale, "thin": thin, "reasons": _reasons(label, m, j, site_ratio, age, words) + [f"Watchlist: “{w['term']}” moved from position {round(w['position'] + (w['change'] or 0))} to {round(w['position'])}." for w in held if w["slipping"]][:3],
+                "months_since_update": age, "words": words, "stale": stale, "thin": thin,
+                "on_topic": bool(found), "in_focus": any(t["focus"] for t in found), "topics": [{"term": t["term"], "volume": t["volume"], "focus": t["focus"]} for t in found[:TOPICS_SHOWN]],
+                "reasons": (_topic_reasons(found) if topics_known else []) + _reasons(label, m, j, site_ratio, age, words) + [f"Watchlist: “{w['term']}” moved from position {round(w['position'] + (w['change'] or 0))} to {round(w['position'])}." for w in held if w["slipping"]][:3],
                 "watch": held[:WATCH_SHOWN], "watch_slipping": watch_slip,
                 "ignored": url in set_aside,
             }
         )
     live = [r for r in rows if not r["ignored"]]
     rows = [r for r in rows if r["ignored"] == show_ignored]
-    order = {"losing": 0, "quiet": 1, "slipping": 2}
-    rows.sort(key=lambda r: (order.get(r["label"], 3), -r["at_stake"], -r["three_months"]["current"]))
+    # Pages on a target topic first, then by sessions lost a month (doubled for this month's focus), then by the searches the topics get.
+    # With no watchlist yet there are no topics, so the order is sessions lost alone.
+    rows.sort(key=lambda r: (0 if (r["on_topic"] or not topics_known) else 1, -(r["at_stake"] * (2 if r["in_focus"] else 1)), -sum(t["volume"] or 0 for t in r["topics"]), -r["three_months"]["current"]))
 
     return {
-        "month": month, "q": needle or None, "showing_ignored": show_ignored, "has_last_year": has_last_year,
+        "month": month, "q": needle or None, "topics_known": topics_known, "showing_ignored": show_ignored, "has_last_year": has_last_year,
         "site": {"sessions": {"current": round(site["current"]), "previous": round(site["previous"])}, "three_months": {"current": round(site["cur3"]), "last_year": round(site["ly3"]), "change_pct": tc._pct(site["cur3"], site["ly3"])}},
         "counts": {
             "pages": len(live), "losing": sum(1 for r in live if r["label"] == "losing"), "quiet": sum(1 for r in live if r["label"] == "quiet"),
-            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]), "watch": sum(1 for r in live if r["watch_slipping"]),
+            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]), "watch": sum(1 for r in live if r["watch_slipping"]), "off_topic": sum(1 for r in live if topics_known and not r["on_topic"]),
             "at_stake": sum(r["at_stake"] for r in live),
         },
         "ignored_total": len(set_aside), "pages": rows[:LIST_SIZE], "pages_total": len(rows),
         "competing": competing(db, client),
         "notes": [
             "Organic search sessions by landing page, judged against the whole site's own change on the same three months last year.",
-            ("Last year's months are missing from the data, so only sudden falls are caught." if not has_last_year else "At stake is the sessions a month the page has lost against what the site's own trend says it should have."),
+            ("Last year's months are missing from the data, so only sudden falls are caught." if not has_last_year else "Lost a month is the sessions a month the page has lost against what the site's own trend says it should have."),
+            ("Pages on the watchlist's terms (tracked as ranking for one, or named in the page's title or address) come first; the focus bucket counts double." if topics_known else "No watchlist yet, so pages are ranked by sessions lost alone."),
             "Watchlist: a tracked term that fell three or more places on this page also lists it. Tracked terms between positions 4 and 20 are shown beside the page as within reach.",
             f"Stale means not updated in {STALE_MONTHS} months or more while it still earns sessions. Thin means under {THIN_WORDS} words.",
         ],

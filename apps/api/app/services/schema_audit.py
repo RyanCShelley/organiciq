@@ -149,7 +149,8 @@ def apply_ignores(a: dict[str, Any], ign: dict[str, set[str]]) -> dict[str, Any]
 
 def _corrections(findings: list[F.Finding]) -> list[dict[str, str]]:
     """What counts against a page's score and is listed as a fix: errors, and warnings. Enhancements and informational notices do not."""
-    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING)]
+    # A missing type is already scored by `score` (40 or 10 points), so it is not counted a second time here.
+    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING) and not f.rule_id.startswith("recommendation.missing_type")]
 
 
 def site_registry(blocks: dict[str, list[Any]]) -> dict[str, int]:
@@ -220,8 +221,11 @@ def group_findings(audits: list[dict[str, Any]], extra: list[F.Finding] | None =
     return out[:GROUPS_LISTED]
 
 
-def finding_counts(audits: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all."""
+def finding_counts(audits: list[dict[str, Any]], site: list[F.Finding] | None = None) -> dict[str, dict[str, int]]:
+    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all.
+
+    `site` is what only shows across pages; the list a tile opens includes it, so the tile counts it too.
+    """
     out = {c: {"groups": 0, "pages": 0, "occurrences": 0} for c in F.CATEGORIES}
     seen_groups: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
     pages: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
@@ -230,6 +234,10 @@ def finding_counts(audits: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
             out[f.category]["occurrences"] += 1
             seen_groups[f.category].add(f.template_key)
             pages[f.category].add(a["url"])
+    for f in site or []:
+        out[f.category]["occurrences"] += 1
+        seen_groups[f.category].add(f.template_key)
+        pages[f.category].add(f.url)
     for c in F.CATEGORIES:
         out[c]["groups"], out[c]["pages"] = len(seen_groups[c]), len(pages[c])
     return out
@@ -288,6 +296,41 @@ def _scored(a: dict[str, Any]) -> bool:
     return not (a["page_type"] == "generic" and not a["has_markup"])
 
 
+def _pages(n: int) -> str:
+    return f"{n} page" + ("" if n == 1 else "s")
+
+
+def explain_kind(label: str, score: int | None, expects: list[str], recommended: list[str], group: list[dict[str, Any]]) -> dict[str, Any]:
+    """Why a kind of page scored what it did and what to do about it, in plain sentences built from what the audit found on its pages."""
+    scored = [a for a in group if _scored(a)]
+    if score is None or not scored:
+        return {"summary": f"Nothing on the {label.lower()} is expected to carry markup.", "should_have": "", "gaps": [], "steps": []}
+    many = len(scored) > 1
+    summary = f"{label} scored {score} out of 100." + (f" That is the average of {len(scored)} pages. Each page starts at 100 and loses points for markup it is missing." if many else "")
+    should = "Markup is the hidden code that tells search engines and AI what a page is. For this kind of page it should say it is " + " and ".join([", ".join(expects)] if expects else ["a page"]) + (f", and it is stronger with {', '.join(recommended)}." if recommended else ".")
+    required: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_required"])
+    helpful: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_recommended"])
+    bare = sum(1 for a in scored if not a["has_markup"])
+    fixes: Counter[str] = Counter(_normal(c["detail"]) for a in scored for c in a["corrections"])
+    gaps: list[str] = []
+    steps: list[str] = []
+    if bare:
+        gaps.append(f"{_pages(bare)} {'has' if bare == 1 else 'have'} no markup at all, so {'it scores' if bare == 1 else 'they score'} 0.")
+        steps.append("Add markup to the pages that have none. Open a page here and choose to write corrected markup.")
+    for t, k in required.most_common():
+        gaps.append(f"{t} markup is missing on {_pages(k)}. A page without it loses 40 points.")
+        steps.append(f"Add {t} markup to {'the page' if k == 1 else f'the {k} pages'} that {'misses' if k == 1 else 'miss'} it.")
+    for text, k in fixes.most_common(3):
+        gaps.append(f"{_pages(k)} {'has' if k == 1 else 'have'} a problem in the markup: {text}. Each one loses 5 points.")
+        steps.append(f"Fix: {text}.")
+    for t, k in helpful.most_common(3):
+        gaps.append(f"{t} markup would help on {_pages(k)}. Without it a page loses 10 points. Nothing is wrong.")
+        steps.append(f"Optional: add {t} markup to the {_pages(k)} that {'lacks' if k == 1 else 'lack'} it.")
+    if not gaps:
+        summary += " Every page has all the markup it needs."
+    return {"summary": summary, "should_have": should, "gaps": gaps, "steps": steps, "gain": 100 - score if steps else 0}
+
+
 def _average(group: list[dict[str, Any]]) -> int | None:
     return round(100 * sum(a["score"] for a in group) / len(group)) if group else None
 
@@ -338,6 +381,7 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             {
                 "page_type": key, "label": label, "pages": len(group), "expects": expects, "recommended": [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]],
                 "score": _average([a for a in group if _scored(a)]),
+                "why": explain_kind(label, _average([a for a in group if _scored(a)]), expects, [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]], group),
                 "affected": len(fix), "items": fix[:LISTED],
                 "recommended_affected": len(recommended), "recommended_items": recommended[:LISTED],
             }
@@ -368,13 +412,14 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
     invalid = [{"url": r.normalized_url, "error": (r.parse_error or "")[:200]} for r in rows if r.parse_error][:LISTED]
     with_markup = sum(1 for a in audits if a["has_jsonld"])
     entity = _entity(db, client, blocks, micro, ign["check"])
+    site_findings = _site_findings(blocks, [a["url"] for a in audits])
     return {
         "crawl_date": max(s.snapshot_date for s in snaps).isoformat(),
         "pages": len(pages), "with_markup": with_markup,
         "score": _average([a for a in audits if _scored(a)]) or 0,
         "cleanups": sum(len(a["corrections"]) for a in audits),
         "types": types, "fixes": fixes, "present": [{"type": t, "pages": n} for t, n in present.most_common()],
-        "findings": group_findings(audits, _site_findings(blocks, [a["url"] for a in audits])), "finding_counts": finding_counts(audits),
+        "findings": group_findings(audits, site_findings), "finding_counts": finding_counts(audits, site_findings),
         "validator": {"schemaorg_version": load_vocabulary().version, "google_reviewed": google_reviewed()},
         "invalid": invalid, "entity": entity,
         "ignored": [{"id": str(i.id), "scope": i.scope, "key": i.key, "label": i.label or i.key} for i in db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id).order_by(ClientSchemaIgnore.created_at)],
@@ -536,14 +581,15 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
         checks.append(check("names", "One name everywhere", "pass" if ok else "warn", (f"Every block that describes the brand says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.") + others_note, None if ok else "Make the markup and the brand name match.", name_items))
     else:
         checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare." + others_note, items=name_items))
+    checks.insert(0, _topics_check(db, client, blocks, approved, brand_concept, check))
     wd_links = [x for x in same_as if "wikidata.org" in x]
     wikidata_linked = bool(wd_links)
     wd_items = [r for r in links.out() if "wikidata.org" in r["label"]]
     if brand_concept:
         wd_items = [{"label": f"Approved: {brand_concept.qid} {brand_concept.label or brand_concept.name}", "count": 1, "pages": [], "kind": "found"}] + wd_items
-    checks.append(check("wikidata", "Linked to its Wikidata item", "pass" if (wikidata_linked or brand_concept) else "fail",
-                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand is not tied to a Wikidata item. That item is how search engines and AI recognize the brand as one known entity."),
-                        None if (wikidata_linked or brand_concept) else "Find the brand's Wikidata item below and approve it. If it has none, creating one is the first step.", wd_items))
+    checks.append(check("wikidata", "Brand linked to its own Wikidata item (optional)", "pass" if (wikidata_linked or brand_concept) else "optional",
+                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand has no Wikidata item. Most brands do not, and one is hard to get approved, so this is optional. The core topics above matter more."),
+                        None, wd_items))
     checks.append(check("same_as", "Links to the brand's other profiles (sameAs)", "pass" if same_as else "fail",
                         f"{len(same_as)} linked: " + ", ".join(sorted({_host(x) for x in same_as})[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
                         None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block.", links.out()))
@@ -570,6 +616,49 @@ def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: di
         if c["key"] in (ignored_checks or set()):
             c["status"], c["fix"] = "ignored", None
     return {"brand": brand, "names": [{"name": r["label"], "blocks": r["count"]} for r in names.out()], "same_as": same_as, "checks": checks}
+
+
+_WIKIDATA_ID = re.compile(r"wikidata\.org/(?:wiki|entity)/(Q\d+)")
+
+
+def _topics_check(db: Session, client: Client, blocks: dict[str, list[Any]], approved: list[Any], brand_concept: Any, check: Any) -> dict[str, Any]:
+    """The brand's core topics, each tied to a Wikidata item and linked from the markup.
+
+    Most small brands have no Wikidata item of their own, so what search engines and AI can recognize is the topics the brand is about.
+    The topics are the watchlist's buckets and any other approved concept (a product line, a topic); the brand's own item is not one.
+    """
+    import json
+
+    from app.models.watchlist import WatchlistBucket
+
+    by_name = {_norm(c.name): c for c in approved if c is not brand_concept}
+    names: list[str] = []
+    for n in [b.name for b in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order, WatchlistBucket.name)] + [c.name for c in by_name.values()]:
+        if _norm(n) and _norm(n) not in {_norm(x) for x in names}:
+            names.append(n)
+    on_site: Counter[str] = Counter()
+    for ents in blocks.values():
+        on_site.update(set(_WIKIDATA_ID.findall(json.dumps(ents, default=str))))
+    items, with_id, linked = [], 0, 0
+    for name in names:
+        c = by_name.get(_norm(name))
+        if c is None:
+            items.append({"label": f"{name}: no Wikidata item approved yet", "count": 0, "pages": [], "kind": "missing"})
+        elif on_site.get(c.qid):
+            with_id += 1
+            linked += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + f", on {on_site[c.qid]} page{'' if on_site[c.qid] == 1 else 's'}", "count": on_site[c.qid], "pages": [], "kind": "found"})
+        else:
+            with_id += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + ", approved but not in the site's markup yet", "count": 0, "pages": [], "kind": "other"})
+    label = "Core topics linked to Wikidata IDs"
+    if not names:
+        return check("topics", label, "warn", "No core topics are set yet. They come from the watchlist's topic groups.", "Add topics on the watchlist, then link each one to its Wikidata item below.", [])
+    detail = f"{linked} of {len(names)} topics are linked from the site's markup" + (f"; {with_id - linked} more are approved but not on the site yet." if with_id > linked else ".")
+    if linked == len(names):
+        return check("topics", label, "pass", detail, None, items)
+    fix = "Find each topic's Wikidata item below and approve it. Then add it to the pages that cover that topic (as what the page is about, with a sameAs link to the item). A topic with no Wikidata item can stay as plain text."
+    return check("topics", label, "warn" if with_id else "fail", detail, fix, items)
 
 
 def brand_facts(db: Session, client: Client) -> Any:
