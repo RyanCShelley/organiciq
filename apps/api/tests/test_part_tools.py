@@ -16,7 +16,8 @@ def test_a_part_id_belongs_to_one_tool():
     assert part_tools.tool_for("S-5")["key"] == "ctr"
     assert part_tools.tool_for("V-4")["key"] == "inlinks"
     assert part_tools.tool_for("V-7")["key"] == "schema"
-    assert part_tools.tool_for("A-1")["key"] == "refresh"
+    assert part_tools.tool_for("A-1")["key"] == "optimizer" and part_tools.tool_for("A-1")["kind"] == "opening"
+    assert part_tools.tool_for("S-2")["kind"] == "faq" and part_tools.tool_for("S-3")["key"] == "refresh"
     assert part_tools.tool_for("L-S2") is None
 
 

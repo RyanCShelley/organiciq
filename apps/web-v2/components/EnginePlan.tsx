@@ -58,7 +58,7 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
 function toolHref(slug: string, part: TaskPart, task: EngineTask): string | null {
   if (!part.tool_path || !part.tool_param) return null;
   const value = part.tool_param === "term" ? task.search : task.page;
-  return `/${slug}${part.tool_path}?${part.tool_param}=${encodeURIComponent(value)}&from=plan`;
+  return `/${slug}${part.tool_path}?${part.tool_param}=${encodeURIComponent(value)}${part.tool_kind ? `&kind=${part.tool_kind}` : ""}&from=plan`;
 }
 
 /** Each part of the action and the tool that carries it out; a part no tool covers is a plain step. */

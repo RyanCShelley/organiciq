@@ -126,6 +126,7 @@ export type TaskPart = {
   tool_path: string | null;
   tool_param: string | null;
   tool_verb: string | null;
+  tool_kind?: string | null;
   status: "open" | "done";
   done_at: string | null;
   done_by: string | null;
