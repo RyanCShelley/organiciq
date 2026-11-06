@@ -623,9 +623,27 @@ export function EngineScreen({
                           >
                             {o.level === "problem" ? "⚠ " : o.level === "ok" ? "✓ " : "• "}
                             {o.text}
+                            {o.how ? (
+                              <details className="ml-5 mt-0.5 text-xs text-[var(--text-secondary)]">
+                                <summary className="cursor-pointer font-semibold">How we know</summary>
+                                <p className="mt-1">{o.how}</p>
+                              </details>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
+                      {d.read.received && d.read.blocked ? (
+                        <details className="mt-2 rounded-lg bg-[var(--bg)] p-3 text-xs text-[var(--text-secondary)]" open>
+                          <summary className="cursor-pointer font-semibold">What we received</summary>
+                          <dl className="mt-1 grid grid-cols-[7rem_1fr] gap-x-2 gap-y-0.5">
+                            <dt>Asked for</dt><dd className="break-all">{d.read.received.requested_url ?? d.read.received.final_url}</dd>
+                            <dt>Answer</dt><dd>HTTP {d.read.received.status}, {d.read.received.bytes.toLocaleString()} bytes</dd>
+                            <dt>Asked as</dt><dd>{d.read.received.user_agent ?? "unknown"}</dd>
+                            {Object.entries(d.read.received.headers).map(([k, v]) => (<><dt key={`${k}-k`}>{k}</dt><dd key={`${k}-v`} className="break-all">{v}</dd></>))}
+                            <dt>Started with</dt><dd className="break-all font-mono">{d.read.received.body_starts || "(nothing)"}</dd>
+                          </dl>
+                        </details>
+                      ) : null}
                       <GrowthActionPlanner
                         clientId={client.id}
                         month={workMonth}

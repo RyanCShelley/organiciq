@@ -68,8 +68,27 @@ export type Diagnosis = {
   position?: number;
   impressions?: number;
   clicks?: number;
-  read: { ok: boolean; status?: number | null; error?: string | null; final_url?: string };
-  observations: { level: "problem" | "note" | "ok"; text: string }[];
+  read: {
+    ok: boolean;
+    status?: number | null;
+    error?: string | null;
+    final_url?: string;
+    /** Set when the response was not the page (a host's bot check, or nothing readable): nothing is judged from it. */
+    blocked?: string;
+    /** What our reader was served, kept so any finding can be traced to it. */
+    received?: {
+      requested_url: string | null;
+      final_url: string;
+      status: number;
+      user_agent: string | null;
+      fetched_at: string | null;
+      bytes: number;
+      headers: Record<string, string>;
+      body_starts: string;
+    };
+  };
+  /** `how` says exactly where the finding was read from: the tag or header, the address, the status, the time and who asked. */
+  observations: { level: "problem" | "note" | "ok"; text: string; how?: string }[];
   prescriptions: {
     action_id: string;
     title: string;
