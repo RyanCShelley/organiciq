@@ -16,7 +16,7 @@ export const GROUPS: NavGroup[] = [
     title: "Consulting",
     icon: Briefcase,
     consulting: true,
-    items: [{ label: "Workspace", path: "/consulting" }],
+    items: [{ label: "Workspace", path: "/consulting" }, { label: "Report", path: "/consulting/report" }, { label: "Recommendations", path: "/consulting/recommendations" }],
   },
   {
     title: "Analytics",
@@ -68,11 +68,20 @@ export function locate(pathname: string, clientSlug: string | undefined): { grou
   if (!clientSlug) return { group: null, page: null };
   const rest = pathname.slice(`/${clientSlug}`.length);
   if (SETTINGS_PATHS.some((p) => rest.startsWith(p))) return { group: null, page: "Client settings" };
+  // The longest matching address wins: /consulting/recommendations is Recommendations, not Workspace.
+  let best: { group: string; label: string; length: number } | null = null;
   for (const g of GROUPS) {
-    const item = g.items.find((i) => rest.startsWith(i.path));
-    if (item) return { group: g.title, page: item.label };
+    for (const i of g.items) if (rest.startsWith(i.path) && (!best || i.path.length > best.length)) best = { group: g.title, label: i.label, length: i.path.length };
   }
-  return { group: null, page: null };
+  return best ? { group: best.group, page: best.label } : { group: null, page: null };
+}
+
+/** The menu address a page belongs to: the longest item path that the address starts with. */
+export function activeItemPath(pathname: string, clientSlug: string | undefined): string | null {
+  if (!clientSlug) return null;
+  const rest = pathname.slice(`/${clientSlug}`.length);
+  const paths = GROUPS.flatMap((g) => g.items.map((i) => i.path)).filter((p) => rest.startsWith(p));
+  return paths.sort((a, b) => b.length - a.length)[0] ?? null;
 }
 
 /** Starter questions for the Ask panel, by page. Free: no model is asked until one is chosen. */

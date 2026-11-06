@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 import { LogoWordmark } from "@/components/brand/Logo";
 import { ClientPicker } from "@/components/layout/ClientPicker";
-import { GROUPS, SETTINGS_PATHS } from "@/components/layout/nav-config";
+import { GROUPS, SETTINGS_PATHS, activeItemPath } from "@/components/layout/nav-config";
 import type { Client } from "@/lib/api";
 
 const SHUT_KEY = "oiq-nav-shut";
@@ -21,6 +21,7 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
   const { clientSlug } = useParams<{ clientSlug?: string }>();
   const pathname = usePathname();
   const isActive = (path: string) => pathname.startsWith(`/${clientSlug}${path}`);
+  const activeItem = activeItemPath(pathname, clientSlug);
   const current = clients.find((c) => c.slug === clientSlug);
   const onAds = !!current?.service_reporting?.ad_accelerator;
   const consulting = current?.service_mode === "consulting";
@@ -83,9 +84,9 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
                     <ul className="mt-0.5 space-y-0.5">
                       {group.items.filter((item) => (!item.ads || onAds) && !(consulting && item.execution)).map((item) => (
                         <li key={item.label}>
-                          <Link href={`/${clientSlug}${item.path}`} aria-current={isActive(item.path) ? "page" : undefined} className={`${link} pl-8 ${isActive(item.path) ? active : idle}`}>
+                          <Link href={`/${clientSlug}${item.path}`} aria-current={activeItem === item.path ? "page" : undefined} className={`${link} pl-8 ${activeItem === item.path ? active : idle}`}>
                             {item.label}
-                            {isActive(item.path) ? <ChevronRight size={14} className="ml-auto text-[var(--brand-teal-soft)]" aria-hidden /> : null}
+                            {activeItem === item.path ? <ChevronRight size={14} className="ml-auto text-[var(--brand-teal-soft)]" aria-hidden /> : null}
                           </Link>
                         </li>
                       ))}

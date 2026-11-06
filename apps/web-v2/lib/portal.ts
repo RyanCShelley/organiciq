@@ -19,6 +19,134 @@ export type Profile = {
   editorial_rules: string | null;
   resources: string | null;
   internal_notes: string | null;
+  ai_visibility_focus: boolean;
   updated_by: string | null;
   updated_at: string | null;
+};
+
+export type RecState = "draft" | "under_review" | "approved" | "published" | "archived";
+export type RecSummary = {
+  id: string;
+  title: string;
+  category: "visibility" | "traffic" | "leads";
+  focus: "seo" | "geo" | "both";
+  source_kind: string;
+  priority: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low";
+  review_state: RecState;
+  impl_status: "recommended" | "planned" | "in_progress" | "completed" | "blocked";
+  impl_status_source: "consultant" | "client" | "live_check" | null;
+  verification: "unverified" | "verified" | "not_seen" | "unreadable";
+  published_at: string | null;
+  revision: number;
+  updated_at: string | null;
+  last_follow_up_on: string | null;
+};
+export type RecList = { counts: Record<RecState, number>; recommendations: RecSummary[]; follow_ups: number };
+export type Rec = RecSummary & {
+  finding: string | null;
+  explanation: string | null;
+  cause_kind: "hypothesis" | "confirmed";
+  cause_text: string | null;
+  action: string | null;
+  instructions: { text: string }[];
+  target_urls: { url: string; check: { state: string; live_url?: string | null; note?: string | null } }[];
+  expected_impact: string | null;
+  confidence_reasons: string[];
+  effort_min: number | null;
+  owner: string | null;
+  baseline: { metric: string; value: string; source?: string; period?: string }[];
+  success_metrics: { metric: string; baseline?: string; target?: string; window_days?: number }[];
+  measure_on: string | null;
+  evidence: { text: string; source?: string; as_of?: string }[];
+  internal_notes: string | null;
+  implemented_on: string | null;
+  implemented_on_estimated: boolean;
+  client_notes: string | null;
+  evidence_links: string[];
+  verified_how: string | null;
+  verified_at: string | null;
+  publish_gaps: string[];
+  next_states: RecState[];
+  published_by: string | null;
+  events?: { kind: string; from: string | null; to: string | null; by: string; at: string; detail: Record<string, unknown> }[];
+};
+
+export const STATE_LABEL: Record<RecState, string> = { draft: "Draft", under_review: "Under review", approved: "Approved", published: "Published", archived: "Archived" };
+export const CATEGORY_LABEL = { visibility: "Visibility", traffic: "Traffic", leads: "Leads" } as const;
+export const FOCUS_LABEL = { seo: "Search", geo: "AI visibility", both: "Search and AI" } as const;
+export const IMPL_LABEL = { recommended: "Recommended", planned: "Planned", in_progress: "In progress", completed: "Completed", blocked: "Blocked" } as const;
+
+/** A published brief as its client sees it. */
+export type ClientRec = {
+  id: string;
+  title: string;
+  category: "visibility" | "traffic" | "leads";
+  focus: "seo" | "geo" | "both";
+  priority: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low";
+  finding: string | null;
+  explanation: string | null;
+  cause_kind: "hypothesis" | "confirmed";
+  cause_text: string | null;
+  action: string | null;
+  instructions: { text: string }[];
+  target_urls: { url: string; state: string; live_url: string | null }[];
+  expected_impact: string | null;
+  effort_min: number | null;
+  owner: string | null;
+  baseline: { metric: string; value: string; source?: string; period?: string }[];
+  success_metrics: { metric: string; baseline?: string; target?: string; window_days?: number }[];
+  measure_on: string | null;
+  evidence: { text: string; source?: string; as_of?: string }[];
+  impl_status: "recommended" | "planned" | "in_progress" | "completed" | "blocked";
+  implemented_on: string | null;
+  implemented_on_estimated: boolean;
+  client_notes: string | null;
+  evidence_links: string[];
+  verification: "unverified" | "verified" | "not_seen" | "unreadable";
+  verified_at: string | null;
+  published_at: string | null;
+  reported: boolean;
+  can_update?: boolean;
+};
+export type PortalOverview = {
+  total: number;
+  counts: Record<ClientRec["impl_status"], number>;
+  not_reported: number;
+  verified: number;
+  top: ClientRec[];
+};
+
+export type ReportMetric = { label: string; current: number | null; previous: number | null; change_pct: number | null; unit: string; source: string; lower_is_better: boolean; note: string | null };
+export type ReportSection = { key: "visibility" | "traffic" | "leads"; label: string; question: string; metrics: ReportMetric[]; read: string | null; limitation: string | null };
+export type ReportData = {
+  month: string;
+  previous_month: string;
+  headline: string | null;
+  sections: ReportSection[];
+  caveats: string[];
+  as_of?: Record<string, string | null> | null;
+  locked?: boolean;
+  /** The monthly review's own payload and scorecards, as published, and a little more from Insights. Absent on a report published before they were kept. */
+  review?: import("@/lib/review").Review;
+  cards?: import("@/lib/review").Scorecards;
+  insights?: { keywords: import("@/lib/bi").Bi["keywords"] | null; ai: import("@/lib/bi").Bi["ai"]; key_events: string[] };
+  /** How each AI prompt did on each platform over the month's runs. */
+  visibility_detail?: { prompts: PromptRow[]; runs: number; run_dates: string[]; in_month: boolean } | null;
+};
+export type StaffReport = { month: string; title: string | null; analysis: string | null; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
+export type ClientReport = { month: string; title: string | null; analysis: string | null; published_at: string | null; data: ReportData };
+
+export type PromptRow = {
+  query: string;
+  keyword: string | null;
+  topic_cluster: string | null;
+  by_platform: Record<string, string>;
+  score: number;
+  max_score: number;
+  previous_score: number | null;
+  change: number | null;
+  avg_brand_rank: number | null;
+  top_competitors: { name: string; count: number }[];
 };

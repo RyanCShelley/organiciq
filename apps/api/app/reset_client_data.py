@@ -75,7 +75,7 @@ SETUP = (
     "decisions", "topics",
 )
 #: Never touched.
-KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "ask_scope_state","client_schema_concepts", "schema_page_reports", "client_schema_ignores", "ctr_title_drafts", "inlink_states", "content_states", "content_model_runs", "content_items", "client_ads_accounts", "consulting_profiles")
+KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "ask_scope_state","client_schema_concepts", "schema_page_reports", "client_schema_ignores", "ctr_title_drafts", "inlink_states", "content_states", "content_model_runs", "content_items", "client_ads_accounts", "consulting_profiles", "consulting_recommendations", "consulting_recommendation_events", "consulting_reports")
 #: Annotations point at decisions and topics, which are deleted, so the links go and the notes stay.
 UNLINK_ANNOTATIONS = "update annotations set decision_id = null, topic_id = null where client_id = :c"
 

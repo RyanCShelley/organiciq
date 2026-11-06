@@ -4,7 +4,7 @@ from app.models.google_update import GoogleSearchUpdate
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, ContentItem, ContentModelRun, ContentState, CtrTitleDraft, InlinkState, SchemaPageReport
 from app.models.site_health import SiteHealthSnapshot
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
-from app.models.consulting import ConsultingProfile
+from app.models.consulting import ConsultingProfile, ConsultingRecommendation, ConsultingRecommendationEvent, ConsultingReport
 from app.models.client import Client, ClientGroup, ClientStatus, Tier
 from app.models.copilot import CopilotConversation, CopilotMessage
 from app.models.config import ChannelRule, ConversionDefinition, LeadExclusion, OrganicChannel, Topic, TopicStatus
@@ -61,6 +61,9 @@ __all__ = [
     "Client",
     "ClientGroup",
     "ConsultingProfile",
+    "ConsultingRecommendation",
+    "ConsultingRecommendationEvent",
+    "ConsultingReport",
     "ClientStatus",
     "Annotation",
     "AnnotationType",
