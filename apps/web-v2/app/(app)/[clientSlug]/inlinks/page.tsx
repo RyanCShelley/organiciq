@@ -8,9 +8,11 @@ import type { InResponse } from "@/lib/inlinks";
 
 export const metadata = { title: "Inlink suggester" };
 
-export default async function InlinksPage({ params, searchParams }: { params: Promise<{ clientSlug: string }>; searchParams: Promise<{ q?: string }> }) {
+export default async function InlinksPage({ params, searchParams }: { params: Promise<{ clientSlug: string }>; searchParams: Promise<{ q?: string; target?: string }> }) {
   const { clientSlug } = await params;
-  const { q } = await searchParams;
+  const { q: asked, target } = await searchParams;
+  // A link from the plan names the page: the list is narrowed to it, so it is there to open however far down the ranking it sits.
+  const q = asked ?? (target ? (target.replace(/^https?:\/\/[^/]+/, "").replace(/\/+$/, "") || "/") : undefined);
   const client = await findClient(clientSlug);
   if (!client) notFound();
 
