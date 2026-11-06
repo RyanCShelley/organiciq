@@ -34,7 +34,8 @@ from app.models.gsc import FactGscQueryPage
 from app.core.urls import normalize_url
 from app.models.schema_tools import ContentState
 from app.models.seranking import FactSerKeyword
-from app.models.watchlist import WatchlistKeyword
+from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+from app.services import refresh_signals as rs
 from app.services.content_depth import score_content_depth
 from app.services.page_diagnostic import read_page
 
@@ -56,8 +57,10 @@ WATCH_SLIPPING_MAX_POSITION = 30
 WATCH_STRIKING = (4, 20)
 WATCH_SHOWN = 5
 WINDOW_DAYS = 28
+#: A page's Bing clicks are mentioned only when they reach this many in either period.
+BING_MIN_CLICKS = 5.0
 
-LABELS = {"growing": "Growing", "steady": "Steady", "slipping": "Slipping", "losing": "Losing traffic", "quiet": "Gone quiet", "new": "New"}
+LABELS = {"tracking": "Check tracking", "growing": "Growing", "steady": "Steady", "slipping": "Slipping", "losing": "Losing traffic", "quiet": "Gone quiet", "new": "New"}
 
 
 def _months_since(day: date | None, today: date) -> int | None:
@@ -86,7 +89,7 @@ def _reasons(label: str, m: dict[str, float], j: dict[str, Any], site_ratio: flo
     if label in ("losing", "slipping", "quiet") and m["ly3"]:
         change = round((m["cur3"] / m["ly3"] - 1) * 100)
         site = f", while the whole site is {round((site_ratio - 1) * 100):+d}%" if site_ratio is not None else ""
-        out.append(f"Organic sessions are {change:+d}% on the same three months last year{site}.")
+        out.append(f"Analytics organic sessions are {change:+d}% on the same three months last year{site}.")
     if j["sudden"] or (label in ("losing", "slipping") and j["soft_sudden"]):
         out.append(f"Last month it fell {round(j['drop'] * 100)}% against the month before.")
     if age is not None and age >= STALE_MONTHS:
@@ -145,6 +148,7 @@ def target_terms(db: Session, client: Client) -> list[dict[str, Any]]:
     """
     focus = db.query(ClientFocus.bucket_id).filter(ClientFocus.client_id == client.id, ClientFocus.bucket_id.isnot(None)).order_by(ClientFocus.month.desc()).limit(1).scalar()
     brand = vc.brand_keys(client)
+    buckets = {b.id: b.name for b in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id)}
     out: dict[str, dict[str, Any]] = {}
     for row in db.query(WatchlistKeyword).filter(WatchlistKeyword.client_id == client.id):
         term = " ".join((row.keyword or "").lower().split())
@@ -153,7 +157,7 @@ def target_terms(db: Session, client: Client) -> list[dict[str, Any]]:
         held = out.get(term)
         in_focus = focus is not None and row.bucket_id == focus
         if held is None:
-            out[term] = {"term": term, "volume": int(row.volume) if row.volume is not None else None, "focus": in_focus, "words": _words(term)}
+            out[term] = {"term": term, "volume": int(row.volume) if row.volume is not None else None, "focus": in_focus, "words": _words(term), "topic": buckets.get(row.bucket_id)}
         else:
             held["focus"] = held["focus"] or in_focus
     return list(out.values())
@@ -185,6 +189,30 @@ def _topic_reasons(found: list[dict[str, Any]]) -> list[str]:
     return [f"On a target topic: {names}." + (" In this month's focus." if any(t["focus"] for t in found) else "")]
 
 
+TIER_ORDER = {"topic": 0, "related": 1, "unrelated": 2}
+
+
+def _pct_text(change: int | None) -> str:
+    return "no figure" if change is None else f"{change:+d}%"
+
+
+def _search_reasons(g: dict[str, float], click_ratio: float | None, bing: dict[str, float] | None, gap: bool) -> list[str]:
+    out = []
+    if g["clicks_ly"] >= rs.GSC_PAGE_MIN_CLICKS:
+        site = f", while the whole site is {round((click_ratio - 1) * 100):+d}%" if click_ratio is not None else ""
+        out.append(f"Search Console clicks are {_pct_text(rs.window_change(g['clicks'], g['clicks_ly']))} on the same three months last year{site}.")
+    if bing and max(bing["clicks"], bing["clicks_ly"]) >= BING_MIN_CLICKS:
+        out.append(f"Bing clicks are {_pct_text(rs.window_change(bing['clicks'], bing['clicks_ly']))} ({round(bing['clicks'])} against {round(bing['clicks_ly'])}).")
+    if gap:
+        out.append("Search Console clicks held up, so the fall in Analytics sessions may be a tracking gap, not lost traffic.")
+    return out
+
+
+def _related_reason(rel: dict[str, Any]) -> str:
+    topic = f"the topic “{rel['topic']}”" if rel.get("topic") else f"“{rel['term']}”"
+    return f"Related to {topic} (closest term “{rel['term']}”, {round(rel['similarity'] * 100)}% alike)."
+
+
 def build(db: Session, client: Client, month: str, *, show_ignored: bool = False, q: str | None = None) -> dict[str, Any]:
     year, mon = int(month[:4]), int(month[5:7])
     month_start = date(year, mon, 1)
@@ -204,75 +232,126 @@ def build(db: Session, client: Client, month: str, *, show_ignored: bool = False
     has_last_year = site["ly3"] > 0
     site_ratio = (site["cur3"] / site["ly3"]) if has_last_year else None
 
+    # Search Console and Bing, over the same three months against the same three a year earlier.
+    cur_win, ly_win = rs.windows(month_start)
+    gsc = rs.search_console(db, client, cur_win, ly_win)
+    site_clicks, site_clicks_ly = sum(g["clicks"] for g in gsc.values()), sum(g["clicks_ly"] for g in gsc.values())
+    click_ratio = (site_clicks / site_clicks_ly) if site_clicks_ly >= rs.GSC_SITE_MIN_CLICKS else None
+    owner = rs.page_for_search(db, client, cur_win)
+    bing_pages, bing_known = rs.bing(db, client, cur_win, ly_win, owner)
+
     snaps = _snapshots(db, client)
     watch = watch_by_page(db, client)
     terms = target_terms(db, client)
     ranked = ranked_terms(db, client) if terms else {}
+    for t in terms:  # the page Search Console shows most for a watchlist term is on that topic
+        if t["term"] in owner:
+            ranked.setdefault(owner[t["term"]], set()).add(t["term"])
     topics_known = bool(terms)
     set_aside = {k for (k,) in db.query(ContentState.key).filter(ContentState.client_id == client.id, ContentState.area == "refresh")}
     needle = " ".join((q or "").lower().split())
+    zero = {"clicks": 0.0, "clicks_ly": 0.0, "impressions": 0.0, "impressions_ly": 0.0}
 
-    rows: list[dict[str, Any]] = []
-    for url, series in pages.items():
+    candidates = set(pages) | {u for u, g in gsc.items() if max(g["clicks"], g["clicks_ly"]) >= rs.GSC_PAGE_MIN_CLICKS}
+    staged: list[dict[str, Any]] = []
+    for url in candidates:
+        series = pages.get(url, {})
         m = tc._measure(series, cur, prev, cur3, ly3)
+        g = gsc.get(url, zero)
         snap = snaps.get(url)
         if needle:
             if needle not in url.lower() and needle not in ((snap.title if snap else None) or "").lower():
                 continue
-        elif max(m["cur3"], m["ly3"]) < tc.PAGE_MIN_SESSIONS:
+        elif max(m["cur3"], m["ly3"]) < tc.PAGE_MIN_SESSIONS and max(g["clicks"], g["clicks_ly"]) < rs.GSC_PAGE_MIN_CLICKS:
             continue
         j = tc.judge(m, site_ratio)
         label = _label(m, j, site_ratio, series, cur3)
+        sessions_fell = label in ("losing", "slipping", "quiet")
+        # Search Console can catch what Analytics misses: a page whose clicks fell further than the site's.
+        has_search = click_ratio is not None and g["clicks_ly"] >= rs.GSC_PAGE_MIN_CLICKS
+        retention = g["clicks"] / g["clicks_ly"] if g["clicks_ly"] else None
+        if has_search and retention is not None and label in ("steady", "growing") and g["clicks_ly"] >= 30 and retention <= 0.75 * click_ratio:
+            label = "losing" if g["clicks_ly"] >= 60 and retention <= 0.5 * click_ratio else "slipping"
+        gap = rs.tracking_gap(sessions_fell, g["clicks"], g["clicks_ly"], click_ratio)
+        ga_label = label
+        if gap:
+            label = "tracking"  # Analytics says it fell, Search Console says it did not: the page is not "losing" until the tracking is checked
         age = _months_since(snap.content_updated_on, today) if snap else None
         words = snap.word_count if snap else None
-        stale = age is not None and age >= STALE_MONTHS and m["cur3"] >= tc.PAGE_MIN_SESSIONS
-        thin = words is not None and 0 < words < THIN_WORDS and m["cur3"] >= tc.PAGE_MIN_SESSIONS
+        stale = age is not None and age >= STALE_MONTHS and (m["cur3"] >= tc.PAGE_MIN_SESSIONS or g["clicks"] >= rs.GSC_PAGE_MIN_CLICKS)
+        thin = words is not None and 0 < words < THIN_WORDS and (m["cur3"] >= tc.PAGE_MIN_SESSIONS or g["clicks"] >= rs.GSC_PAGE_MIN_CLICKS)
         held = watch.get(url, [])
         watch_slip = any(w["slipping"] for w in held)
-        needs = label in ("losing", "slipping", "quiet") or stale or thin or watch_slip
+        needs = label in ("losing", "slipping", "quiet", "tracking") or stale or thin or watch_slip
         if not needs and not needle:
             continue
-        at_stake = j["at_stake"]
-        if label == "quiet":
+        lost_sessions = j["at_stake"]
+        if ga_label == "quiet":
             # Against what the page should have if it had moved with the whole site, not the raw drop.
             expected = m["ly3"] * (site_ratio if site_ratio is not None else 1.0) / 3
-            at_stake = max(at_stake, round(max(0.0, expected - m["cur3"] / 3), 1))
+            lost_sessions = max(lost_sessions, round(max(0.0, expected - m["cur3"] / 3), 1))
+        # Search Console clicks decide how much was lost; Analytics sessions stand in only for a page with too little Search Console history.
+        lost = rs.lost_a_month(g["clicks"], g["clicks_ly"], click_ratio) if has_search else lost_sessions
         found = topics_for(url, snap.title if snap else None, terms, ranked)
+        staged.append({"url": url, "m": m, "g": g, "j": j, "label": label, "gap": gap, "age": age, "words": words, "stale": stale, "thin": thin, "held": held, "watch_slip": watch_slip,
+                       "lost": lost, "lost_sessions": lost_sessions, "found": found, "snap": snap, "series": series, "ga_label": ga_label})
+
+    # How close the pages not tied to a target term are to the watchlist, by meaning.
+    related = rs.similarity(db, client, {s["url"]: s["snap"] for s in staged if not s["found"]}, terms) if topics_known else {}
+
+    rows: list[dict[str, Any]] = []
+    for s in staged:
+        url, m, g, j, label, found, snap = s["url"], s["m"], s["g"], s["j"], s["label"], s["found"], s["snap"]
+        rel = related.get(url)
+        tier = "topic" if (found or not topics_known) else "related" if (rel and rel["similarity"] >= rs.RELATED_MIN_SIMILARITY) else "unrelated"
+        topic_reason = _topic_reasons(found) if found else [_related_reason(rel)] if tier == "related" else ["Not on a target topic."] if topics_known else []
+        b = bing_pages.get(url)
         rows.append(
             {
-                "url": url, "title": snap.title if snap else None, "label": label, "status": LABELS[label],
+                "url": url, "title": snap.title if snap else None, "label": label, "status": LABELS[label], "tier": tier, "tracking_gap": s["gap"],
                 "sessions": {"current": round(m["current"]), "previous": round(m["previous"]), "change_pct": tc._pct(m["current"], m["previous"])},
                 "three_months": {"current": round(m["cur3"]), "last_year": round(m["ly3"]), "change_pct": tc._pct(m["cur3"], m["ly3"])},
-                "at_stake": round(at_stake), "last_updated": snap.content_updated_on.isoformat() if snap and snap.content_updated_on else None,
-                "months_since_update": age, "words": words, "stale": stale, "thin": thin,
-                "on_topic": bool(found), "in_focus": any(t["focus"] for t in found), "topics": [{"term": t["term"], "volume": t["volume"], "focus": t["focus"]} for t in found[:TOPICS_SHOWN]],
-                "reasons": (_topic_reasons(found) if topics_known else []) + _reasons(label, m, j, site_ratio, age, words) + [f"Watchlist: “{w['term']}” moved from position {round(w['position'] + (w['change'] or 0))} to {round(w['position'])}." for w in held if w["slipping"]][:3],
-                "watch": held[:WATCH_SHOWN], "watch_slipping": watch_slip,
+                "search": {"clicks": {"current": round(g["clicks"]), "last_year": round(g["clicks_ly"]), "change_pct": rs.window_change(g["clicks"], g["clicks_ly"])},
+                           "impressions": {"current": round(g["impressions"]), "last_year": round(g["impressions_ly"]), "change_pct": rs.window_change(g["impressions"], g["impressions_ly"])}},
+                "bing": {"clicks": {"current": round(b["clicks"]), "last_year": round(b["clicks_ly"]), "change_pct": rs.window_change(b["clicks"], b["clicks_ly"])}} if b else None,
+                "at_stake": round(s["lost"]), "last_updated": snap.content_updated_on.isoformat() if snap and snap.content_updated_on else None,
+                "months_since_update": s["age"], "words": s["words"], "stale": s["stale"], "thin": s["thin"],
+                "on_topic": tier == "topic" and topics_known, "in_focus": any(t["focus"] for t in found), "topics": [{"term": t["term"], "volume": t["volume"], "focus": t["focus"]} for t in found[:TOPICS_SHOWN]],
+                "related": {"term": rel["term"], "topic": rel["topic"], "similarity": rel["similarity"]} if tier == "related" else None,
+                "reasons": topic_reason + _search_reasons(g, click_ratio, b, s["gap"]) + _reasons(s["ga_label"], m, j, site_ratio, s["age"], s["words"])
+                + [f"Watchlist: “{w['term']}” moved from position {round(w['position'] + (w['change'] or 0))} to {round(w['position'])}." for w in s["held"] if w["slipping"]][:3],
+                "watch": s["held"][:WATCH_SHOWN], "watch_slipping": s["watch_slip"],
                 "ignored": url in set_aside,
             }
         )
     live = [r for r in rows if not r["ignored"]]
     rows = [r for r in rows if r["ignored"] == show_ignored]
-    # Pages on a target topic first, then by sessions lost a month (doubled for this month's focus), then by the searches the topics get.
-    # With no watchlist yet there are no topics, so the order is sessions lost alone.
-    rows.sort(key=lambda r: (0 if (r["on_topic"] or not topics_known) else 1, -(r["at_stake"] * (2 if r["in_focus"] else 1)), -sum(t["volume"] or 0 for t in r["topics"]), -r["three_months"]["current"]))
+    # Pages tied to a target term first, then related ones, then the rest. Within each, the clicks lost a month (doubled for this month's focus),
+    # then the searches the topics get. With no watchlist yet every page is in the first group and the order is clicks lost alone.
+    rows.sort(key=lambda r: (TIER_ORDER[r["tier"]], -(r["at_stake"] * (2 if r["in_focus"] else 1)), -sum(t["volume"] or 0 for t in r["topics"]), -r["search"]["clicks"]["current"], -r["three_months"]["current"]))
 
     return {
         "month": month, "q": needle or None, "topics_known": topics_known, "showing_ignored": show_ignored, "has_last_year": has_last_year,
-        "site": {"sessions": {"current": round(site["current"]), "previous": round(site["previous"])}, "three_months": {"current": round(site["cur3"]), "last_year": round(site["ly3"]), "change_pct": tc._pct(site["cur3"], site["ly3"])}},
+        "site": {"sessions": {"current": round(site["current"]), "previous": round(site["previous"])}, "three_months": {"current": round(site["cur3"]), "last_year": round(site["ly3"]), "change_pct": tc._pct(site["cur3"], site["ly3"])},
+                 "clicks": {"current": round(site_clicks), "last_year": round(site_clicks_ly), "change_pct": rs.window_change(site_clicks, site_clicks_ly)}},
+        "search_available": click_ratio is not None, "bing_available": bing_known,
         "counts": {
             "pages": len(live), "losing": sum(1 for r in live if r["label"] == "losing"), "quiet": sum(1 for r in live if r["label"] == "quiet"),
-            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]), "watch": sum(1 for r in live if r["watch_slipping"]), "off_topic": sum(1 for r in live if topics_known and not r["on_topic"]),
+            "slipping": sum(1 for r in live if r["label"] == "slipping"), "stale": sum(1 for r in live if r["stale"]), "thin": sum(1 for r in live if r["thin"]), "watch": sum(1 for r in live if r["watch_slipping"]),
+            "off_topic": sum(1 for r in live if topics_known and r["tier"] == "unrelated"), "related": sum(1 for r in live if r["tier"] == "related"), "tracking_gap": sum(1 for r in live if r["tracking_gap"]),
             "at_stake": sum(r["at_stake"] for r in live),
         },
         "ignored_total": len(set_aside), "pages": rows[:LIST_SIZE], "pages_total": len(rows),
         "competing": competing(db, client),
         "notes": [
-            "Organic search sessions by landing page, judged against the whole site's own change on the same three months last year.",
-            ("Last year's months are missing from the data, so only sudden falls are caught." if not has_last_year else "Lost a month is the sessions a month the page has lost against what the site's own trend says it should have."),
-            ("Pages on the watchlist's terms (tracked as ranking for one, or named in the page's title or address) come first; the focus bucket counts double." if topics_known else "No watchlist yet, so pages are ranked by sessions lost alone."),
+            "Three sources, each over the last three months against the same three a year earlier and judged against the whole site's own change: Search Console clicks and impressions, Analytics organic sessions, and Bing clicks.",
+            ("Lost a month is the Search Console clicks a month the page has lost against what the site's own trend says it should have. Analytics sessions stand in for a page with too little Search Console history." if click_ratio is not None
+             else "There is too little Search Console data for last year, so lost a month is the Analytics sessions lost."),
+            "Bing reports by search, not by page, so each Bing search is counted for the page Search Console shows for it.",
+            ("Pages tied to a watchlist term come first, then pages whose meaning is close to one, then the rest. The focus bucket counts double." if topics_known else "No watchlist yet, so pages are ranked by what they lost alone."),
+            "Check tracking: Analytics sessions fell but Search Console clicks held up with the site, so the visits may be going unrecorded.",
             "Watchlist: a tracked term that fell three or more places on this page also lists it. Tracked terms between positions 4 and 20 are shown beside the page as within reach.",
-            f"Stale means not updated in {STALE_MONTHS} months or more while it still earns sessions. Thin means under {THIN_WORDS} words.",
+            f"Stale means not updated in {STALE_MONTHS} months or more while it still earns. Thin means under {THIN_WORDS} words.",
         ],
     }
 

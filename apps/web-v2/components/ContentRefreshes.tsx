@@ -12,7 +12,18 @@ import type { Client } from "@/lib/api";
 import type { CalendarStatus, ClickWindow, Competing, ContentDepthChoice, RefreshDetail, RefreshPage, Refreshes, SplitSearch } from "@/lib/content";
 import { monthLabel } from "@/lib/focus";
 
-const TONE: Record<string, string> = { losing: "bg-red-100 text-red-800", quiet: "bg-red-100 text-red-800", slipping: "bg-amber-100 text-amber-900", growing: "bg-green-100 text-green-800", steady: "bg-gray-100 text-gray-700", new: "bg-blue-100 text-blue-800" };
+const TONE: Record<string, string> = { tracking: "bg-amber-100 text-amber-900", losing: "bg-red-100 text-red-800", quiet: "bg-red-100 text-red-800", slipping: "bg-amber-100 text-amber-900", growing: "bg-green-100 text-green-800", steady: "bg-gray-100 text-gray-700", new: "bg-blue-100 text-blue-800" };
+
+/** A figure for the three months, with how it moved on the same three a year earlier. */
+function Moved({ c }: { c: { current: number; last_year: number; change_pct: number | null } }) {
+  return (
+    <>
+      <span className="font-semibold">{num(c.current)}</span>
+      {c.change_pct != null ? <span className={`ml-1 text-xs ${c.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{c.change_pct > 0 ? "+" : ""}{c.change_pct}%</span> : null}
+      <div className="text-xs text-[var(--text-tertiary)]">last year {num(c.last_year)}</div>
+    </>
+  );
+}
 
 function Clicks({ w }: { w: ClickWindow }) {
   return w ? <span className="tabular-nums">{num(w.clicks)} clicks of {num(w.impressions)}</span> : <span className="text-[var(--text-tertiary)]">too little data</span>;
@@ -301,30 +312,35 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
   const stub = (url: string): RefreshPage => ({
     url, title: null, label: "steady", status: "Not on the list", sessions: { current: 0, previous: 0, change_pct: null }, three_months: { current: 0, last_year: 0, change_pct: null }, at_stake: 0,
     last_updated: null, months_since_update: null, words: null, stale: false, thin: false, reasons: [], ignored: false, watch: [], watch_slipping: false, on_topic: false, in_focus: false, topics: [],
+    tier: "unrelated", related: null, tracking_gap: false, search: { clicks: { current: 0, last_year: 0, change_pct: null }, impressions: { current: 0, last_year: 0, change_pct: null } }, bing: null,
   });
   const page = open ? (data?.pages.find((p) => p.url === open) ?? stub(open)) : null;
   const c = data?.counts;
   const split = !!data && data.topics_known && !q && !ignored;
-  const onTopic = data ? data.pages.filter((p) => !split || p.on_topic) : [];
-  const offTopic = data && split ? data.pages.filter((p) => !p.on_topic) : [];
+  const onTopic = data ? data.pages.filter((p) => !split || p.tier === "topic") : [];
+  const relatedPages = data && split ? data.pages.filter((p) => p.tier === "related") : [];
+  const offTopic = data && split ? data.pages.filter((p) => p.tier === "unrelated") : [];
   const renderRow = (p: RefreshPage) => (
     <tr key={p.url} className="cursor-pointer border-t border-[var(--border)] align-top hover:bg-[var(--bg)]" onClick={() => setOpen(p.url)}>
       <td className="max-w-sm px-3 py-2"><div className="break-all font-semibold">{shortPage(p.url)}</div><div className="truncate text-xs text-[var(--text-tertiary)]" title={p.title ?? undefined}>{p.title ?? "no title found"}</div></td>
-      <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${TONE[p.label]}`}>{p.status}</span></td>
-      <td className={td}>{num(p.three_months.current)}</td>
-      <td className={td}>{num(p.three_months.last_year)}{p.three_months.change_pct != null ? <span className={`ml-1 text-xs ${p.three_months.change_pct < 0 ? "text-red-700" : "text-green-700"}`}>{p.three_months.change_pct > 0 ? "+" : ""}{p.three_months.change_pct}%</span> : null}</td>
+      <td className="px-3 py-2">
+        <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${TONE[p.label]}`}>{p.status}</span>
+      </td>
+      <td className={td}><Moved c={p.search.clicks} /><div className="text-xs text-[var(--text-tertiary)]">{num(p.search.impressions.current)} impr.</div></td>
+      <td className={td}><Moved c={p.three_months} /></td>
+      <td className={td}>{p.bing ? <Moved c={p.bing.clicks} /> : <span className="text-[var(--text-tertiary)]">–</span>}</td>
       <td className={`${td} font-semibold ${p.at_stake ? "text-red-700" : ""}`}>{p.at_stake ? `−${num(p.at_stake)}` : "–"}</td>
-      <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]">{p.reasons.slice(0, 2).join(" ")}</td>
+      <td className="max-w-xs px-3 py-2 text-xs text-[var(--text-secondary)]">{p.reasons.slice(0, 3).join(" ")}</td>
       <td className="px-3 py-2"><StatusChip status={data?.calendar[p.url]} /></td>
     </tr>
   );
-  const head = <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th}>Sessions, 3 months</th><th className={th}>Last year</th><th className={th}>Lost a month</th><th className={th}>Why</th><th className={th}>Calendar</th></tr></thead>;
+  const head = <thead><tr><th className={th}>Page</th><th className={th}>Status</th><th className={th} title="Google, over the last three months, against the same three a year earlier">Search Console clicks</th><th className={th} title="Analytics organic sessions">Analytics sessions</th><th className={th} title="Counted for the page Search Console shows for each Bing search">Bing clicks</th><th className={th} title={data?.search_available ? "Search Console clicks a month lost against the site's own trend" : "Analytics sessions a month lost against the site's own trend"}>Lost a month</th><th className={th}>Why</th><th className={th}>Calendar</th></tr></thead>;
 
   return (
     <section className="max-w-6xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold">Content refreshes</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Pages worth updating. Pages on topics you want to rank for come first, then the most sessions lost a month. A page is judged against the whole site&apos;s own change, so a dip everyone had does not count.</p>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Pages worth updating, judged on Search Console, Analytics and Bing together. Pages on the topics you are going after come first, then pages close to them, then the rest. A page is judged against the whole site&apos;s own change, so a dip everyone had does not count.</p>
       </header>
 
       <div className="flex flex-wrap items-end gap-3 text-sm">
@@ -342,15 +358,17 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
       {data && c ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Kpi label="Pages to refresh" value={num(c.pages)} note={c.pages === 0 ? "Clean" : `${num(c.losing)} losing traffic, ${num(c.quiet)} gone quiet, ${num(c.slipping)} slipping`} />
-            <Kpi label="Sessions lost a month" value={num(c.at_stake)} note="against what the site's own trend says these pages should have" />
+            <Kpi label="Pages to refresh" value={num(c.pages)} note={c.pages === 0 ? "Clean" : `${num(c.losing)} losing traffic, ${num(c.quiet)} gone quiet, ${num(c.slipping)} slipping${c.tracking_gap ? `, ${num(c.tracking_gap)} to check tracking` : ""}`} />
+            <Kpi label={data.search_available ? "Clicks lost a month" : "Sessions lost a month"} value={num(c.at_stake)} note="against what the site's own trend says these pages should have" />
             <Kpi label="Stale" value={num(c.stale)} note="not updated in 18 months, and still earning" />
             <Kpi label="Thin" value={num(c.thin)} note="under 300 words, and still earning" />
             <Kpi label="Watchlist slipping" value={num(c.watch)} note="pages where a tracked term fell three or more places" />
           </div>
-          {data.has_last_year ? (
-            <p className="-mt-3 text-xs text-[var(--text-secondary)]">The whole site: {num(data.site.three_months.current)} organic sessions in these three months{data.site.three_months.change_pct != null ? `, ${data.site.three_months.change_pct > 0 ? "+" : ""}${data.site.three_months.change_pct}% on last year` : ""}.</p>
-          ) : null}
+          <p className="-mt-3 text-xs text-[var(--text-secondary)]">
+            The whole site in these three months: {num(data.site.three_months.current)} organic sessions{data.site.three_months.change_pct != null ? ` (${data.site.three_months.change_pct > 0 ? "+" : ""}${data.site.three_months.change_pct}% on last year)` : ""}
+            {data.search_available ? `, ${num(data.site.clicks.current)} Search Console clicks${data.site.clicks.change_pct != null ? ` (${data.site.clicks.change_pct > 0 ? "+" : ""}${data.site.clicks.change_pct}%)` : ""}` : ", too little Search Console data from last year to compare"}
+            {data.bing_available ? "" : ". No Bing data yet"}.
+          </p>
 
           <form className="flex flex-wrap items-center gap-2 text-sm" onSubmit={(e) => { e.preventDefault(); go(month, search.trim()); }} role="search">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a page: part of its address or its title" aria-label="Find a page" className="min-w-[20rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-2" />
@@ -367,15 +385,22 @@ export function ContentRefreshes({ client, month, months, q, ignored, data, erro
                 {head}
                 <tbody>
                   {onTopic.map(renderRow)}
-                  {onTopic.length === 0 && offTopic.length > 0 ? <tr><td colSpan={7} className="px-5 py-4 font-semibold text-green-700">Clean: no page on your target topics needs a refresh. Other pages are below.</td></tr> : null}
-                  {data.pages.length === 0 ? <tr><td colSpan={7} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No page with traffic matches “${q}”.` : "Clean: no page needs a refresh this month."}</td></tr> : null}
+                  {onTopic.length === 0 && (offTopic.length > 0 || relatedPages.length > 0) ? <tr><td colSpan={8} className="px-5 py-4 font-semibold text-green-700">Clean: no page on your target topics needs a refresh. Other pages are below.</td></tr> : null}
+                  {data.pages.length === 0 ? <tr><td colSpan={8} className={`px-5 py-4 font-semibold ${q || ignored ? "text-[var(--text-secondary)]" : "text-green-700"}`}>{ignored ? "Nothing is ignored." : q ? `No page with traffic matches “${q}”.` : "Clean: no page needs a refresh this month."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
+            {relatedPages.length > 0 ? (
+              <div className="mx-5 mb-3 rounded-lg border border-[var(--border)]">
+                <h3 className="px-3 pt-2 text-sm font-semibold">Close to your target topics ({relatedPages.length})</h3>
+                <p className="px-3 text-xs text-[var(--text-tertiary)]">Not tied to a watchlist term, but about much the same thing: the page&apos;s meaning is close to one of the terms.</p>
+                <div className="overflow-x-auto"><table className="mt-2 w-full text-sm">{head}<tbody>{relatedPages.map(renderRow)}</tbody></table></div>
+              </div>
+            ) : null}
             {offTopic.length > 0 ? (
               <details className="mx-5 mb-3 rounded-lg border border-[var(--border)]">
-                <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Not on your target topics ({offTopic.length})</summary>
-                <p className="px-3 text-xs text-[var(--text-tertiary)]">These pages are losing traffic, but none of the watchlist&apos;s terms is tracked for them or named in their title or address.</p>
+                <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Not related to your target topics ({offTopic.length})</summary>
+                <p className="px-3 text-xs text-[var(--text-tertiary)]">These pages are losing traffic, but they are not tied to a watchlist term and their meaning is not close to one.</p>
                 <div className="overflow-x-auto"><table className="mt-2 w-full text-sm">{head}<tbody>{offTopic.map(renderRow)}</tbody></table></div>
               </details>
             ) : null}
