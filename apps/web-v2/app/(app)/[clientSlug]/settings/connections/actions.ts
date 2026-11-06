@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { AdsDiagnosis, ConnectResult, OptionsResult } from "@/lib/connections";
+import type { AdsDiagnosis, AdsPullResult, ConnectResult, OptionsResult } from "@/lib/connections";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -201,10 +201,21 @@ export async function removeAdsAccountAction(clientId: string, slug: string, cus
   return result;
 }
 
-export async function pullAdsAction(clientId: string, slug: string): Promise<ActionResult> {
-  const result = await save(slug, "/v2/ads/pull", clientId, undefined);
-  revalidatePath(`/${slug}/ads`);
-  return result;
+/** Change an account's kind or name without pulling. */
+export async function updateAdsAccountAction(clientId: string, slug: string, customerId: string, name: string, kind: "ads" | "lsa"): Promise<ActionResult> {
+  return save(slug, "/v2/ads/accounts", clientId, { customer_id: customerId, name, kind });
+}
+
+export async function pullAdsAction(clientId: string, slug: string): Promise<{ ok: true; data: AdsPullResult } | { ok: false; error: string }> {
+  try {
+    const data = await apiFetch<AdsPullResult>("/v2/ads/pull", { method: "POST", clientId });
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: message(error, DID_NOT_ANSWER) };
+  } finally {
+    revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}/ads`);
+  }
 }
 
 /** Ask Google Ads, account by account, what it returns: what works, what is empty, what is refused. Read-only; nothing is stored. */

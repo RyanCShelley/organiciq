@@ -246,3 +246,27 @@ def test_diagnose_says_per_account_what_works_what_is_empty_and_what_is_refused(
     monkeypatch.setattr(google_ads, "search", refuse)
     refused = client.post("/v2/ads/diagnose", headers=hd).json()
     assert all(c["status"] == "error" and "test accounts" in c["detail"] for a in refused["accounts"] for c in a["checks"])
+
+
+def test_two_accounts_with_the_same_campaign_and_ad_group_names_are_both_kept(db, ads_client, monkeypatch):
+    client, calls = ads_client
+    db.add(ClientAdsAccount(client_id=client.id, customer_id="6588596576", name="LSA - Aquaman", kind="ads"))
+    db.commit()
+    monkeypatch.setattr(google_ads, "search", fake_search(calls))  # both accounts answer with the same campaign "Pool" and ad group "pool leak"
+    first = ads_pull.pull(db, client, today=TODAY)
+    assert first["errors"] == [] and len(first["accounts"]) == 2
+    again = ads_pull.pull(db, client, today=TODAY)  # the refresh deletes only each account's own window, and puts back rows that share names with the other's
+    assert again["errors"] == [] and len(again["accounts"]) == 2
+    rows = db.query(AdsDaily).filter(AdsDaily.client_id == client.id).all()
+    assert len(rows) == 4 and {r.account_id for r in rows} == {"1835262013", "6588596576"}
+    assert len(db.query(AdsMarketDaily).filter(AdsMarketDaily.client_id == client.id).all()) == 4 and len(db.query(AdsSearchTerm).filter(AdsSearchTerm.client_id == client.id).all()) == 2
+
+
+def test_an_accounts_kind_and_name_can_be_changed_without_pulling(client, db, client_a, admin_user):
+    client_a.service_reporting = {"organiciq": True, "ad_accelerator": True}
+    db.commit()
+    hd = client_header(client_a.id, admin_user.email)
+    client.post("/v2/ads/accounts", json={"customer_id": "658-959-6576", "name": "", "kind": "ads"}, headers=hd)
+    changed = client.post("/v2/ads/accounts", json={"customer_id": "658-959-6576", "name": "LSA - Aquaman Leak Detection", "kind": "lsa"}, headers=hd).json()
+    assert changed["kind"] == "lsa" and changed["name"] == "LSA - Aquaman Leak Detection"
+    assert len(client.get("/v2/ads/connection", headers=hd).json()["accounts"]) == 1, "the same account is changed, not added again"

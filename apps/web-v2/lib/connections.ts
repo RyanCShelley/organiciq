@@ -58,3 +58,9 @@ export type AdsDiagnosis = {
   days: number;
   accounts: { customer_id: string; name: string; kind: "ads" | "lsa"; checks: AdsCheck[] }[];
 };
+
+/** What a pull brought, per account. */
+export type AdsPullResult = {
+  accounts: { account: string; from: string; to: string; days: number; rows: number; markets: number; terms: number }[];
+  errors: string[];
+};
