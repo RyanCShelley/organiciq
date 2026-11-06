@@ -352,3 +352,19 @@ def set_gsc_lean(
     queued = data_pull.set_lean_pull(db, client, payload.enabled)
     logger.warning("Search Console pull set to %s for %s by %s; queued %s", "lean" if payload.enabled else "full", client.client_name, user.email, queued)
     return {"gsc_lean": bool(client.gsc_lean_pull), "queued": queued}
+
+
+#: Where the address is read from: a service that answers with the address the request came from.
+OUTBOUND_IP_SERVICE = "https://api.ipify.org"
+
+
+@router.get("/outbound-ip")
+def outbound_ip(_: Annotated[AuthUser, Depends(require_sma_admin)]) -> dict:
+    """The address this service is sending from right now, to check against what a host has been told to allow."""
+    import httpx
+
+    try:
+        found = httpx.get(OUTBOUND_IP_SERVICE, timeout=8.0).text.strip()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"The address could not be looked up: {type(exc).__name__}.") from exc
+    return {"address": found, "asked": OUTBOUND_IP_SERVICE, "user_agent": "OrganicIQ-page-diagnostic/1.0"}

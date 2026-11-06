@@ -189,3 +189,15 @@ def test_adding_refuses_a_stranger_a_repeat_and_a_non_admin_and_restores_the_rem
     assert back.status_code == 200 and back.json()["outcome"] == "restored"
     assert client.post("/v2/admin/team-access/people", json={"email": "boss@smamarketing.com", "role": "sma_admin"}, headers=h).json()["role"] == "sma_admin"
     assert client.post("/v2/admin/team-access/people", json={"email": "bad@smamarketing.com", "role": "client_viewer"}, headers=h).status_code == 422
+
+
+def test_the_outbound_address_is_looked_up_for_an_admin_only(client, admin_user, team_user, monkeypatch):
+    import httpx
+
+    class Reply:
+        text = "152.55.176.240\n"
+
+    monkeypatch.setattr(httpx, "get", lambda url, timeout: Reply())
+    ok = client.get("/v2/admin/outbound-ip", headers=auth_header(admin_user.email))
+    assert ok.status_code == 200 and ok.json()["address"] == "152.55.176.240" and ok.json()["user_agent"] == "OrganicIQ-page-diagnostic/1.0"
+    assert client.get("/v2/admin/outbound-ip", headers=auth_header(team_user.email)).status_code == 403
