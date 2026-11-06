@@ -49,6 +49,17 @@ class Tier(Base):
     clients: Mapped[list["Client"]] = relationship(back_populates="tier")
 
 
+class ClientGroup(Base):
+    """A set of clients that belong together, such as the sites of one company. Each site is still its own client."""
+
+    __tablename__ = "client_groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Client(Base):
     __tablename__ = "clients"
 
@@ -66,6 +77,9 @@ class Client(Base):
     #: orders and revenue, a lead-gen client on leads; the dashboard and baseline read this.
     business_model: Mapped[str | None] = mapped_column(String(16), nullable=True)
     service_reporting: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: execution: we do the work and track it here. consulting: we review the data and hand the client's own team a report; they never log in.
+    service_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="execution", server_default="execution")
+    group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
     #: The Teamwork tasklist a sent growth action lands in. The site and token
     #: are install-wide; this is the only per-client part of the mapping.
@@ -155,3 +169,4 @@ class Client(Base):
     )
 
     tier: Mapped[Tier] = relationship(back_populates="clients")
+    group: Mapped["ClientGroup | None"] = relationship()

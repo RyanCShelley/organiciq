@@ -1,6 +1,13 @@
 import { BarChart3, Eye, FileText, Target, type LucideIcon } from "lucide-react";
 
-export type NavItem = { label: string; path: string; /** Shown only for clients on Ads Accelerator. */ ads?: boolean };
+export type NavItem = {
+  label: string;
+  path: string;
+  /** Shown only for clients on Ads Accelerator. */
+  ads?: boolean;
+  /** Left out for consulting clients: the work it plans is done by their own team. */
+  execution?: boolean;
+};
 export type NavGroup = { title: string; icon: LucideIcon; items: NavItem[] };
 
 /** The order Ryan set: what each group answers. */
@@ -41,7 +48,7 @@ export const GROUPS: NavGroup[] = [
       { label: "Content gaps", path: "/content-gaps" },
       { label: "Content refreshes", path: "/content-refreshes" },
       { label: "Content optimizer", path: "/content-optimizer" },
-      { label: "Content calendar", path: "/content-calendar" },
+      { label: "Content calendar", path: "/content-calendar", execution: true },
     ],
   },
 ];
