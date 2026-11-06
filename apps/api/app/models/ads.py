@@ -24,7 +24,7 @@ class AdsDaily(Base):
 
     __tablename__ = "ads_daily"
     __table_args__ = (
-        UniqueConstraint("client_id", "date", "campaign", "ad_group", "market", "device", "network", name="uq_ads_daily_grain"),
+        UniqueConstraint("client_id", "account_id", "date", "campaign", "ad_group", "market", "device", "network", name="uq_ads_daily_account_grain"),
         Index("ix_ads_daily_client_date", "client_id", "date"),
     )
 
@@ -53,7 +53,7 @@ class AdsMarketDaily(Base):
 
     __tablename__ = "ads_market_daily"
     __table_args__ = (
-        UniqueConstraint("client_id", "date", "campaign", "market", name="uq_ads_market_daily_grain"),
+        UniqueConstraint("client_id", "account_id", "date", "campaign", "market", name="uq_ads_market_daily_account_grain"),
         Index("ix_ads_market_daily_client_date", "client_id", "date"),
     )
 
@@ -75,7 +75,7 @@ class AdsSearchTerm(Base):
 
     __tablename__ = "ads_search_terms"
     __table_args__ = (
-        UniqueConstraint("client_id", "date", "term", "ad_group", name="uq_ads_search_terms_grain"),
+        UniqueConstraint("client_id", "account_id", "date", "term", "ad_group", name="uq_ads_search_terms_account_grain"),
         Index("ix_ads_search_terms_client_date", "client_id", "date"),
     )
 

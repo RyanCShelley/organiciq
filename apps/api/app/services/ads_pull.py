@@ -150,7 +150,7 @@ def _replace(db: Session, client: Client, account_id: str, start: date, end: dat
         db.flush()
     except IntegrityError as exc:
         db.rollback()
-        raise google_ads.GoogleAdsError("Two of this client's Google Ads accounts have a campaign and ad group with the same names, so their rows cannot be told apart.") from exc
+        raise google_ads.GoogleAdsError(f"The pulled rows could not be saved: {str(getattr(exc, 'orig', exc))[:200]}") from exc
 
 
 def pull_account(db: Session, client: Client, account: ClientAdsAccount, token: str, *, today: date) -> dict[str, Any]:

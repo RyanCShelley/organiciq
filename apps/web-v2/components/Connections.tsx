@@ -9,7 +9,7 @@ import { inputClass } from "@/components/ui/form";
 import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { AdsAccount, AdsConnection, AdsDiagnosis, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
+import type { AdsAccount, AdsConnection, AdsDiagnosis, AdsPullResult, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Tone = "ok" | "warn" | "bad" | "off";
@@ -204,6 +204,7 @@ export function ConnectionsPanel({
   const [adsError, setAdsError] = useState<string | null>(null);
   const [adsKind, setAdsKind] = useState<"ads" | "lsa">("ads");
   const [adsRemoving, startAdsRemove] = useTransition();
+  const [adsPulled, setAdsPulled] = useState<AdsPullResult | null>(null);
   const [adsChecking, startAdsCheck] = useTransition();
   const [adsReport, setAdsReport] = useState<AdsDiagnosis | null>(null);
   const [adsReportError, setAdsReportError] = useState<string | null>(null);
@@ -238,7 +239,14 @@ export function ConnectionsPanel({
   const pullAds = () =>
     startAdsPull(async () => {
       setAdsError(null);
+      setAdsPulled(null);
       const r = await act.pullAdsAction(client.id, client.slug);
+      if (r.ok) setAdsPulled(r.data);
+      else setAdsError(r.error);
+    });
+  const changeAccount = (a: AdsAccount, name: string, kind: "ads" | "lsa") =>
+    startAdsRemove(async () => {
+      const r = await act.updateAdsAccountAction(client.id, client.slug, a.customer_id, name, kind);
       if (!r.ok) setAdsError(r.error);
     });
 
@@ -401,10 +409,18 @@ export function ConnectionsPanel({
                       <li key={a.customer_id} className="p-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{a.name || a.customer_id}</span>
-                          <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">{a.kind === "lsa" ? "Local Services Ads" : "Ads"}</span>
+                          {isAdmin ? (
+                            <select aria-label={`Kind of account ${a.name || a.customer_id}`} value={a.kind} disabled={adsRemoving} onChange={(e) => changeAccount(a, a.name, e.target.value as "ads" | "lsa")} className="rounded border border-[var(--border)] bg-white px-1.5 py-0.5 text-xs font-semibold">
+                              <option value="ads">Ads</option>
+                              <option value="lsa">Local Services Ads</option>
+                            </select>
+                          ) : <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">{a.kind === "lsa" ? "Local Services Ads" : "Ads"}</span>}
                           <span className="text-xs text-[var(--text-tertiary)]">{a.customer_id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3")}{a.last_pull_at ? ` · pulled ${new Date(a.last_pull_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
                           {isAdmin ? (
-                            <button type="button" disabled={adsRemoving} onClick={() => startAdsRemove(async () => { const r = await act.removeAdsAccountAction(client.id, client.slug, a.customer_id); if (!r.ok) setAdsError(r.error); })} className="ml-auto text-xs underline disabled:opacity-50">Remove</button>
+                            <button type="button" disabled={adsRemoving} onClick={() => { const n = window.prompt("What should this account be called?", a.name || ""); if (n !== null && n.trim()) changeAccount(a, n.trim(), a.kind); }} className="ml-auto text-xs underline disabled:opacity-50">Rename</button>
+                          ) : null}
+                          {isAdmin ? (
+                            <button type="button" disabled={adsRemoving} onClick={() => startAdsRemove(async () => { const r = await act.removeAdsAccountAction(client.id, client.slug, a.customer_id); if (!r.ok) setAdsError(r.error); })} className="text-xs underline disabled:opacity-50">Remove</button>
                           ) : null}
                         </div>
                         {a.last_error ? <Problem text={a.last_error} /> : null}
@@ -439,6 +455,15 @@ export function ConnectionsPanel({
                       </div>
                     ) : null}
                     <Problem text={adsError} />
+                    {adsPulled ? (
+                      <div className="rounded-lg bg-white p-3 text-xs text-[var(--text-secondary)]">
+                        <div className="font-semibold text-[var(--text-primary,inherit)]">What this pull brought</div>
+                        <ul className="mt-1 space-y-0.5">
+                          {adsPulled.accounts.map((p) => <li key={p.account}>{accounts.find((a) => a.customer_id === p.account)?.name || p.account}: {p.rows.toLocaleString()} daily rows over {p.days} days ({p.from} to {p.to}), {p.markets.toLocaleString()} market rows, {p.terms.toLocaleString()} search rows</li>)}
+                        </ul>
+                        {adsPulled.errors.map((e) => <p key={e} className="mt-1 text-red-700">{e}</p>)}
+                      </div>
+                    ) : null}
                   </div>
                 ) : <p className="text-sm text-[var(--text-secondary)]">Ask an admin to add the Google Ads accounts.</p>}
                 {isAdmin && accounts.length > 0 ? (
