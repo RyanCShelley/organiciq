@@ -11,6 +11,8 @@ export type OptDraft = {
   cost_usd: number;
   created_by: string;
   created_at: string | null;
+  /** Where the page text came from: read live, the site crawl (our reader was blocked), or text a person pasted. */
+  source?: { kind: "live" | "crawl" | "pasted"; note: string };
   searches_used?: number;
   from?: string;
   to?: string;

@@ -53,3 +53,8 @@ def test_the_prompt_for_a_page_with_an_faq_asks_only_for_new_questions():
     spot = co.read_spot(FAQ_PAGE)
     prompt = co.build_prompt("faq", url="https://x.example/a", brand="X", detail={"title": "T", "searches": []}, spot=spot, text="t", start="2026-08-01", end="2026-11-01", terms=[])
     assert "already has an FAQ" in prompt and "Does it damage floors?" in prompt
+
+
+def test_pasted_text_is_read_the_same_way():
+    spot = co.spot_from_text("Slab leak detection\n\nWe find leaks under your slab with listening gear and thermal imaging, no digging first.\n\nHow long does it take?\n\nDoes it damage floors?\n\nNo.")
+    assert spot["h1"] == "Slab leak detection" and spot["opening"].startswith("We find leaks") and spot["has_faq"] is True and len(spot["faq_questions"]) == 2

@@ -26,8 +26,9 @@ from app.core.db import SessionLocal
 from app.models.client import Client
 from app.models.schema_tools import ContentModelRun
 from app.schema_tools import llm
-from app.services import ctr_optimizer
-from app.services.page_diagnostic import read_page
+from app.services import crawl_fallback, ctr_optimizer
+from app.ingestion.crawler.parse import parse_page
+from app.services.page_diagnostic import read_page, unreadable_reason
 from app.services.schema_pages import content_text
 
 logger = logging.getLogger("organiciq.content_optimizer")
@@ -62,6 +63,15 @@ def read_spot(body: str) -> dict[str, Any]:
     questions = [h for h in headings if h.endswith("?")]
     has_faq = faq_at is not None or len(questions) >= 2
     return {"h1": h1, "opening": opening, "has_faq": has_faq, "faq_questions": questions[:12]}
+
+
+def spot_from_text(text: str) -> dict[str, Any]:
+    """The same reading of text a person pasted: blank-line paragraphs, a line ending in a question mark counts as a question."""
+    blocks = [" ".join(b.split()) for b in re.split(r"\n\s*\n", text) if b.strip()]
+    paragraphs = [b for b in blocks if len(b) >= 40 and not b.endswith("?")]
+    questions = [b for b in blocks if b.endswith("?") and len(b) < 200]
+    has_faq = len(questions) >= 2 or any(_FAQ_HEADING.search(b) for b in blocks if len(b) < 80)
+    return {"h1": blocks[0] if blocks and len(blocks[0]) < 120 else "", "opening": " ".join(paragraphs)[:900], "has_faq": has_faq, "faq_questions": questions[:12]}
 
 
 def _rows(detail: dict[str, Any]) -> str:
@@ -191,8 +201,8 @@ def clean(kind: str, parsed: dict[str, Any], *, spot: dict[str, Any], text: str)
     return {"items": items, "markup": faq_markup(items) if items else "", "already_has_faq": spot["has_faq"]}
 
 
-def start(db: Session, client: Client, kind: str, url: str, depth: str, who: str) -> ContentModelRun:
-    row = ContentModelRun(client_id=client.id, kind=kind, key=url, depth=depth, status="running", created_by=who, payload={})
+def start(db: Session, client: Client, kind: str, url: str, depth: str, who: str, text: str | None = None) -> ContentModelRun:
+    row = ContentModelRun(client_id=client.id, kind=kind, key=url, depth=depth, status="running", created_by=who, payload={"input_text": text} if text else {})
     db.add(row)
     db.commit()
     return row
@@ -224,17 +234,32 @@ def run(run_id: UUID) -> None:
         detail = ctr_optimizer.page_detail(db, client, row.key, start_d, end)
         if not detail["searches"]:
             raise RuntimeError("This page has no searches with enough data in the last 90 days, so there is nothing to write from.")
-        try:
-            found = read_page(row.key, client.domain)
-            body = found.body if 200 <= found.status < 300 else ""
-        except Exception:  # noqa: BLE001 - the screen says the page could not be read
-            body = ""
-        if not body:
-            raise RuntimeError("The page could not be read, so there is no text to work on. Check that the address loads, then run it again.")
+        pasted = ((row.payload or {}).get("input_text") or "").strip()
+        source = {"kind": "pasted", "note": f"Text pasted by {row.created_by}. Nothing was read from the site."}
+        if pasted:
+            body, text, spot = "", pasted, spot_from_text(pasted)
+        else:
+            try:
+                found = read_page(row.key, client.domain, crawl_fallback.with_crawl(db, client))
+                body = found.body if 200 <= found.status < 300 else ""
+            except Exception:  # noqa: BLE001 - the screen says the page could not be read
+                found, body = None, ""
+            if body and found.source == "live":
+                blocked = unreadable_reason(found, parse_page(url=found.final_url, body=found.body, headers=found.headers))
+                if blocked:
+                    raise RuntimeError(f"{blocked} The site crawl has no copy of the page either, so paste the page's text to work from instead.")
+            if not body:
+                raise RuntimeError("The page could not be read, and the site crawl has no copy of it either. Paste the page's text to work from instead.")
+            if found.source != "live":
+                if row.kind == "terms":
+                    raise RuntimeError("Our reader was blocked, and the site crawl keeps only the first paragraph under each heading, which is not enough to find the sentences to reword. Paste the page's text to use this.")
+                source = {"kind": "crawl", "note": found.source_note + "."}
+            else:
+                source = {"kind": "live", "note": f"Read live from {found.final_url}."}
+            spot, text = read_spot(body), content_text(body)
         from app.models.llm_visibility import ClientLlmSettings
 
         brand = (db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar() or client.client_name or "").strip()
-        spot, text = read_spot(body), content_text(body)
         prompt = build_prompt(row.kind, url=row.key, brand=brand, detail=detail, spot=spot, text=text, start=start_d.isoformat(), end=end.isoformat(), terms=missing_terms(detail, text))
         reply, t_in, t_out = llm.call(row.depth, prompt, max_tokens=6000)
         parsed = llm.extract_json(reply)
@@ -243,7 +268,7 @@ def run(run_id: UUID) -> None:
         result = clean(row.kind, parsed, spot=spot, text=text)
         if not any(result.get(k) for k in ("options", "edits", "items")):
             raise llm.ModelError("The model gave nothing that can be used as written. Run it again, or try a deeper setting.")
-        row.payload = {**result, "url": row.key, "searches_used": len(detail["searches"]), "from": start_d.isoformat(), "to": end.isoformat()}
+        row.payload = {**result, "url": row.key, "source": source, "searches_used": len(detail["searches"]), "from": start_d.isoformat(), "to": end.isoformat()}
         row.cost_usd, row.status = Decimal(str(llm.cost(row.depth, t_in, t_out))), "done"
         db.commit()
     except Exception as exc:  # noqa: BLE001 - the failure is the result; the screen shows it

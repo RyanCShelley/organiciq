@@ -236,6 +236,7 @@ export function GrowthActionPlanner({
                 {pending ? <><Spinner />Adding…</> : `Confirm as a growth action (${kept} part${kept === 1 ? "" : "s"})`}
               </button>
             )}
+            {!inPlan(bundle.page) && kept === 0 ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Nothing here to confirm: no part applies to this page. Choose a different page, or see why each part was left out above.</p> : null}
           </div>
         </div>
       ) : null}

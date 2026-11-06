@@ -64,6 +64,8 @@ class DraftIn(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     kind: Literal["opening", "terms", "faq"]
     depth: Literal["quick", "deep", "deepest"] = "quick"
+    #: The page's text, pasted by a person when the site cannot be read.
+    text: str | None = Field(default=None, max_length=60000)
 
 
 @router.post("/draft", status_code=status.HTTP_202_ACCEPTED)
@@ -80,6 +82,6 @@ def write_draft(
     cap = get_settings().ask_monthly_cap_usd
     if float(model_spend.month_spend(db, client)) >= cap:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"This client has used its ${cap:.0f} for model questions this month. The limit resets on the 1st.")
-    row = content_optimizer.start(db, client, payload.kind, normalize_url(payload.url) or payload.url, payload.depth, user.email)
+    row = content_optimizer.start(db, client, payload.kind, normalize_url(payload.url) or payload.url, payload.depth, user.email, payload.text)
     background.add_task(content_optimizer.run, row.id)
     return {"id": str(row.id)}

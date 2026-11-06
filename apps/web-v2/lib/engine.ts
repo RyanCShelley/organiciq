@@ -75,6 +75,9 @@ export type Diagnosis = {
     final_url?: string;
     /** Set when the response was not the page (a host's bot check, or nothing readable): nothing is judged from it. */
     blocked?: string;
+    /** "crawl" when the host blocked our reader and the page was read from the site crawl instead; the note says which crawl and what that means. */
+    source?: string;
+    source_note?: string;
     /** What our reader was served, kept so any finding can be traced to it. */
     received?: {
       requested_url: string | null;

@@ -14,7 +14,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
 from app.models.client import Client
-from app.services import crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic
+from app.services import crawl_fallback, crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -164,7 +164,7 @@ def diagnose_selected(
                 url=pick.page,
                 row=row,
                 client_domain=client.domain,
-                fetch=page_diagnostic._fetch,
+                fetch=crawl_fallback.with_crawl(db, client),
                 evidence=_evidence(db, client, month, row["search"], pick.page),
             )
         )
@@ -208,7 +208,7 @@ def diagnose_selected_pages(
     leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
     results = [
         page_diagnostic.diagnose_page(
-            focus=payload.focus, url=url, client_domain=client.domain, fetch=page_diagnostic._fetch,
+            focus=payload.focus, url=url, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client),
             evidence=_page_evidence(db, client, month, payload.focus, url, leads),
         )
         for url in payload.pages
@@ -281,7 +281,7 @@ def build_growth_action(
         if worked == payload.candidate_page:
             leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
             own = page_diagnostic.diagnose_page(
-                focus=payload.focus, url=worked, client_domain=client.domain, fetch=page_diagnostic._fetch,
+                focus=payload.focus, url=worked, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client),
                 evidence=_page_evidence(db, client, month, payload.focus, worked, leads),
             )
             extras = own.get("suggestions") or []
@@ -292,7 +292,7 @@ def build_growth_action(
         payload.keyword,
         page=payload.page,
         diagnose=lambda search, url, row, evidence: page_diagnostic.diagnose(
-            search=search, url=url, row=row, client_domain=client.domain, fetch=page_diagnostic._fetch, evidence=evidence
+            search=search, url=url, row=row, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client), evidence=evidence
         ),
         evidence_for=lambda search, url: _evidence(db, client, month, search, url),
         extra_suggestions=extras,

@@ -19,6 +19,11 @@ function Copy({ text, label = "Copy" }: { text: string; label?: string }) {
   );
 }
 
+function Source({ d }: { d: OptDraft }) {
+  if (!d.source) return null;
+  return <p className={`rounded-lg p-2 text-xs ${d.source.kind === "live" ? "bg-[var(--bg)] text-[var(--text-secondary)]" : "bg-amber-50 text-amber-900"}`}><span className="font-semibold">Where the page text came from.</span> {d.source.note}</p>;
+}
+
 function Result({ d }: { d: OptDraft }) {
   if (d.kind === "opening")
     return (
@@ -71,6 +76,7 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
   const [page, setPage] = useState<OptPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
+  const [pasted, setPasted] = useState("");
   const [pending, start] = useTransition();
   const load = useCallback(async () => {
     const r = await optimizerPageAction(client.id, url);
@@ -84,7 +90,7 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
     const t = setInterval(load, 2500);
     return () => clearInterval(t);
   }, [running, load]);
-  const write = () => start(async () => { const r = await optimizerDraftAction(client.id, url, kind, depth); if (r.ok) await load(); else setError(r.error); });
+  const write = () => start(async () => { const r = await optimizerDraftAction(client.id, url, kind, depth, pasted); if (r.ok) await load(); else setError(r.error); });
   return (
     <section className={`${card} space-y-4 p-5`}>
       <div>
@@ -105,7 +111,13 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
           <p className="text-sm text-[var(--text-secondary)]">{queueKinds[kind].does} It works from the {num(page.searches_total)} {page.searches_total === 1 ? "search" : "searches"} this page earns in the last 90 days (Search Console) and the page&apos;s own words. Nothing is sent to the site.</p>
           <AskModel ready={page.model_ready} depth={depth} onDepth={setDepth} busy={pending || running} again={draft?.status === "done"} label={queueKinds[kind].label} onRun={write} />
           {draft?.status === "failed" ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{draft.error}</p> : null}
-          {draft?.status === "done" ? <Result d={draft} /> : null}
+          {draft?.status === "failed" && /paste/i.test(draft.error ?? "") ? <p className="text-xs text-[var(--text-secondary)]">Paste the page&apos;s text below, then write again.</p> : null}
+          <details open={draft?.status === "failed" && /paste/i.test(draft.error ?? "")} className="text-sm">
+            <summary className="cursor-pointer font-semibold">The site blocks our reader? Paste the page&apos;s text</summary>
+            <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={8} placeholder="Select the page in your browser, copy it, and paste it here. Put a blank line between paragraphs." className="mt-2 w-full rounded-lg border border-[var(--border)] bg-white p-3 text-sm" />
+            <p className="text-xs text-[var(--text-tertiary)]">Used only for this run, and the result says it was written from text you pasted.</p>
+          </details>
+          {draft?.status === "done" ? <><Source d={draft} /><Result d={draft} /></> : null}
           <details className="text-sm">
             <summary className="cursor-pointer font-semibold">The searches it works from</summary>
             <ul className="mt-2 divide-y divide-[var(--border)]">

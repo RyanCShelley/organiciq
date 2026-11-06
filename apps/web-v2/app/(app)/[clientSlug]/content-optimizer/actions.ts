@@ -14,9 +14,9 @@ export async function optimizerPageAction(clientId: string, url: string): Promis
   }
 }
 
-export async function optimizerDraftAction(clientId: string, url: string, kind: OptKind, depth: OptDepth): Promise<R<true>> {
+export async function optimizerDraftAction(clientId: string, url: string, kind: OptKind, depth: OptDepth, text?: string): Promise<R<true>> {
   try {
-    await apiFetch("/v2/optimizer/draft", { method: "POST", clientId, body: { url, kind, depth } });
+    await apiFetch("/v2/optimizer/draft", { method: "POST", clientId, body: { url, kind, depth, text: text?.trim() || null } });
     return { ok: true, value: true };
   } catch (e) {
     return fail(e, "The change could not be requested: the API did not answer.");

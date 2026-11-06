@@ -615,6 +615,7 @@ export function EngineScreen({
                     </p>
                   ) : (
                     <>
+                      {d.read.source === "crawl" ? <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900"><span className="font-semibold">Read from the site crawl, not the live page.</span> {d.read.source_note}.</p> : null}
                       <ul className="mt-3 space-y-1 text-sm">
                         {d.observations.map((o) => (
                           <li
