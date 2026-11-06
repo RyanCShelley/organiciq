@@ -62,6 +62,7 @@ function Row({ client, e }: { client: Client; e: Entry }) {
           </select>
         </label>
       </div>
+      {e.verified_how ? <p className="rounded-lg bg-green-50 p-2 text-xs text-green-900">{e.verified_how}</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <input value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== (e.notes ?? "") && save({ notes })} placeholder="Add a note" aria-label="Note" className="min-w-[16rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs" />
         {!e.from_plan ? <button type="button" onClick={remove} disabled={pending} className="text-xs font-semibold text-red-700 underline">Remove</button> : null}
@@ -71,20 +72,21 @@ function Row({ client, e }: { client: Client; e: Entry }) {
   );
 }
 
-export function CompletedWork({ client, data, error, page }: { client: Client; data: Completed | null; error: string | null; page: string | null }) {
+export function Annotations({ client, data, error, page }: { client: Client; data: Completed | null; error: string | null; page: string | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [text, setText] = useState("");
   const [notePage, setNotePage] = useState("");
+  const [noteType, setNoteType] = useState("event");
   const [formError, setFormError] = useState<string | null>(null);
   const add = () =>
-    start(async () => { const r = await addNoteAction(client.id, date, text, notePage); if (r.ok) { setText(""); setNotePage(""); setFormError(null); router.refresh(); } else setFormError(r.error); });
+    start(async () => { const r = await addNoteAction(client.id, date, text, notePage, noteType); if (r.ok) { setText(""); setNotePage(""); setFormError(null); router.refresh(); } else setFormError(r.error); });
   return (
     <section className="max-w-5xl space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">Completed work</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Everything marked done on the plan, and anything noted by hand, with what happened to the page&apos;s visits, leads and clicks in the 28 days after compared with the 28 before. A change in the numbers is not proof the work caused it.</p>
+        <h1 className="text-2xl font-bold">Annotations</h1>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Work marked done on the plan, and anything else worth tying to the numbers: an event, a trade show, a campaign, a change to the site. Each shows what happened to visits, leads and clicks in the 28 days after compared with the 28 before. A change in the numbers is not proof it caused them.</p>
       </header>
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       {data ? (
@@ -96,14 +98,15 @@ export function CompletedWork({ client, data, error, page }: { client: Client; d
           </div>
           {page ? <p className="text-sm">Showing only <span className="font-semibold">{shortPage(page)}</span>. <Link href={`/${client.slug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Show everything</Link></p> : null}
           <section className={`${card} px-5`}>
-            {data.entries.length === 0 ? <p className="py-4 text-sm text-[var(--text-secondary)]">Nothing yet. Mark a part of the plan done and it appears here.</p> : <ul className="divide-y divide-[var(--border)]">{data.entries.map((e) => <Row key={e.id} client={client} e={e} />)}</ul>}
+            {data.entries.length === 0 ? <p className="py-4 text-sm text-[var(--text-secondary)]">Nothing yet. Mark a part of the plan done, or add an event or change below.</p> : <ul className="divide-y divide-[var(--border)]">{data.entries.map((e) => <Row key={e.id} client={client} e={e} />)}</ul>}
           </section>
           <section className={`${card} space-y-3 p-5`}>
-            <h2 className="text-lg font-bold">Add a note</h2>
-            <p className="text-xs text-[var(--text-secondary)]">For a change made outside the plan: a new form, a redesign, a campaign, a search update.</p>
+            <h2 className="text-lg font-bold">Add an annotation</h2>
+            <p className="text-xs text-[var(--text-secondary)]">For anything outside the plan that could move the numbers. Everything except a plain note is followed for 28 days from its date. For a page, add its address; without one, the whole site is measured.</p>
             <div className="flex flex-wrap items-end gap-2 text-sm">
+              <label className="text-xs font-semibold">Type<select value={noteType} onChange={(e) => setNoteType(e.target.value)} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal">{data.manual_types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
               <label className="text-xs font-semibold">Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" /></label>
-              <label className="min-w-[16rem] flex-1 text-xs font-semibold">What changed<input value={text} onChange={(e) => setText(e.target.value)} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" /></label>
+              <label className="min-w-[16rem] flex-1 text-xs font-semibold">What happened<input value={text} onChange={(e) => setText(e.target.value)} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" /></label>
               <label className="min-w-[12rem] text-xs font-semibold">Page (optional)<input value={notePage} onChange={(e) => setNotePage(e.target.value)} placeholder="Full address" className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" /></label>
               <button type="button" onClick={add} disabled={pending || text.trim().length < 3} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Add</button>
             </div>

@@ -89,3 +89,14 @@ def test_only_a_note_by_hand_is_removed_and_a_plan_entry_says_how(client, db, cl
     assert client.delete(f"/v2/annotations/{note}", headers=h).status_code == 200
     edited = client.patch(f"/v2/annotations/{plan_id}", json={"notes": "Title now leads with the service", "result": "improved"}, headers=h).json()
     assert edited["notes"] == "Title now leads with the service" and edited["result"] == "improved"
+
+
+def test_an_event_is_added_by_hand_and_followed_for_28_days(client, db, client_a, admin_user):
+    h = client_header(client_a.id, admin_user.email)
+    made = client.post("/v2/annotations", json={"date": "2026-10-20", "description": "Home show booth", "type": "event"}, headers=h)
+    assert made.status_code == 201
+    entry = next(e for e in client.get("/v2/annotations", headers=h).json()["entries"] if e["description"] == "Home show booth")
+    assert entry["type_label"] == "Event or trade show" and entry["measure_from"] == "2026-10-20" and entry["measure_to"] == "2026-11-17" and entry["how"] == "Added by hand"
+    note = client.post("/v2/annotations", json={"date": "2026-10-21", "description": "Just a note"}, headers=h).json()["id"]
+    assert next(e for e in client.get("/v2/annotations", headers=h).json()["entries"] if e["id"] == note)["measure_to"] is None
+    assert {t["key"] for t in client.get("/v2/annotations", headers=h).json()["manual_types"]} >= {"event", "campaign_change", "manual_note"}

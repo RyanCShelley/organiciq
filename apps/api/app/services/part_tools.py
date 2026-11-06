@@ -79,5 +79,6 @@ def describe(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "id": p.get("id") or "", "name": p.get("name") or "", "tool": tool["key"] if tool else None, "tool_label": tool["label"] if tool else None,
             "tool_path": tool["path"] if tool else None, "tool_param": tool["param"] if tool else None, "tool_verb": tool["verb"] if tool else None, "tool_kind": tool.get("kind") if tool else None,
             "status": p.get("status") or "open", "done_at": p.get("done_at"), "done_by": p.get("done_by"),
+            "verified_at": p.get("verified_at"), "verified_how": p.get("verified_how"), "last_check": p.get("last_check"), "auto": not p.get("no_auto"),
         })
     return out

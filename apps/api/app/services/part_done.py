@@ -49,7 +49,7 @@ def _path(url: str) -> str:
     return urlsplit(url).path or "/"
 
 
-def _write(db: Session, client: Client, task: EngineTask, index: int, part: dict[str, Any], today: date, who: str) -> None:
+def _write(db: Session, client: Client, task: EngineTask, index: int, part: dict[str, Any], today: date, who: str, verified: str | None = None) -> None:
     tool = part_tools.tool_for(str(part.get("id") or ""))
     kind, action = _KIND.get(tool["key"] if tool else "", (AnnotationType.WEBSITE_CHANGE, None))
     key = uid(task, index)
@@ -62,6 +62,7 @@ def _write(db: Session, client: Client, task: EngineTask, index: int, part: dict
     row.description = f"{part['name']} on {_path(task.page_url)}"
     row.page_url = task.page_url
     row.success_metric = task.metric
+    row.verified_how = verified
     row.teamwork_task_id = task.teamwork_task_id
     row.measurement_start_date, row.measurement_end_date = today, today + timedelta(days=MEASURE_DAYS)
     db.flush()
@@ -72,7 +73,7 @@ def _remove(db: Session, client: Client, task: EngineTask, index: int) -> None:
     db.query(Annotation).filter(Annotation.client_id == client.id, Annotation.engine_uid == uid(task, index)).delete()
 
 
-def set_part(db: Session, client: Client, task: EngineTask, index: int, done: bool, who: str) -> EngineTask:
+def set_part(db: Session, client: Client, task: EngineTask, index: int, done: bool, who: str, verified: str | None = None) -> EngineTask:
     parts = parts_of(task)
     if not 0 <= index < len(parts):
         raise IndexError("That part is not in this action.")
@@ -80,9 +81,12 @@ def set_part(db: Session, client: Client, task: EngineTask, index: int, done: bo
     part = parts[index]
     if done and part.get("status") != "done":
         part.update(status="done", done_at=datetime.now(timezone.utc).isoformat(), done_by=who)
-        _write(db, client, task, index, part, today, who)
+        if verified:
+            part.update(verified_at=part["done_at"], verified_how=verified)
+        _write(db, client, task, index, part, today, who, verified)
     elif not done and part.get("status") == "done":
-        part.update(status="open", done_at=None, done_by=None)
+        # A person taking a part back is not to be overruled by the next live check.
+        part.update(status="open", done_at=None, done_by=None, verified_at=None, verified_how=None, no_auto=True)
         _remove(db, client, task, index)
     task.parts = parts
     _settle(db, client, task)

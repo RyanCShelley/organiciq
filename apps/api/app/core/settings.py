@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     google_ads_api_version: str = "v26"
     #: The daily Google Ads pull runs once, after this UTC hour.
     ads_pull_hour_utc: int = 12
+    #: When, each day, the live pages of confirmed actions are read to see which changes have gone live.
+    task_verify_hour_utc: int = 14
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
     #: Where the Google connect flow returns to when v2 started it.

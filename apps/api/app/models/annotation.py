@@ -16,6 +16,7 @@ from app.models.decision import GrowthAction
 
 class AnnotationType(str, enum.Enum):
     GROWTH_ACTION = "growth_action"
+    EVENT = "event"
     CONTENT_PUBLISHED = "content_published"
     CONTENT_UPDATED = "content_updated"
     TECHNICAL_CHANGE = "technical_change"
@@ -70,6 +71,8 @@ class Annotation(Base):
     #: marking it again updates this row and un-marking it removes this row.
     #: Null for everything a person typed or imported.
     engine_uid: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    #: When the live check saw the change on the page: what it read, from where, and when. Null for work a person marked done or noted.
+    verified_how: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     measurement_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     measurement_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)

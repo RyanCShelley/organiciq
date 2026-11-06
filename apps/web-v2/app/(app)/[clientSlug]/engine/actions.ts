@@ -134,3 +134,11 @@ export async function markPartAction(clientId: string, id: string, index: number
     return failure(error, "The part could not be updated: the API did not answer.");
   }
 }
+
+export async function checkLiveAction(clientId: string, id: string): Promise<{ ok: true; value: { task: EngineTask; check: { checked: number; live: number; unreadable: string | null } } } | { ok: false; error: string }> {
+  try {
+    return { ok: true, value: await apiFetch(`/v2/engine/tasks/${id}/check`, { method: "POST", clientId }) };
+  } catch (error) {
+    return failure(error, "The page could not be checked: the API did not answer.");
+  }
+}
