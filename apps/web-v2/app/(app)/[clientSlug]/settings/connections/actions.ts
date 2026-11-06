@@ -167,3 +167,33 @@ export async function loadTeamworkTasklistsAction(clientId: string): Promise<Opt
     return { ok: false, error: message(error, DID_NOT_ANSWER) };
   }
 }
+
+export async function loadAdsAccountsAction(): Promise<OptionsResult> {
+  try {
+    const r = await apiFetch<{ accounts: { id: string; name: string }[] }>("/v2/ads/accounts");
+    return { ok: true, options: r.accounts.map((a) => ({ value: a.id, label: `${a.name} (${a.id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3")})` })) };
+  } catch (error) {
+    return { ok: false, error: message(error, DID_NOT_ANSWER) };
+  }
+}
+
+/** Choose the Google Ads account this client is, then pull it once so the pages have numbers. The save worked even when the pull did not. */
+export async function saveAdsAccountAction(clientId: string, slug: string, customerId: string): Promise<ActionResult> {
+  const result = await save(slug, "/v2/ads/connection", clientId, { customer_id: customerId }, "PUT");
+  if (result.ok) {
+    try {
+      await apiFetch("/v2/ads/pull", { method: "POST", clientId });
+    } catch {
+      /* the connection card shows why the pull failed */
+    }
+    revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}/ads`);
+  }
+  return result;
+}
+
+export async function pullAdsAction(clientId: string, slug: string): Promise<ActionResult> {
+  const result = await save(slug, "/v2/ads/pull", clientId, undefined);
+  revalidatePath(`/${slug}/ads`);
+  return result;
+}

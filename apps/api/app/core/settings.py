@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     worker_poll_interval_seconds: float = 2.0
     google_data_oauth_client_id: str = ""
     google_data_oauth_client_secret: str = ""
+    #: The manager (MCC) account the Google Ads calls go through; digits only, no dashes.
+    google_ads_login_customer_id: str = ""
+    #: Google no longer requires a developer token; when one is set it is still sent.
+    google_ads_developer_token: str = ""
+    google_ads_api_version: str = "v26"
+    #: The daily Google Ads pull runs once, after this UTC hour.
+    ads_pull_hour_utc: int = 12
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
     #: Where the Google connect flow returns to when v2 started it.

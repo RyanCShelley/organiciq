@@ -17,7 +17,7 @@ from app.core.db import Base
 
 
 class AdsDaily(Base):
-    """One day of one campaign and ad group, split by market and device.
+    """One day of one campaign and ad group, split by device.
 
     `eligible_impressions` is the searches the ads could have shown on (impressions divided by the search impression share).
     """
@@ -33,6 +33,7 @@ class AdsDaily(Base):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     campaign: Mapped[str] = mapped_column(Text, nullable=False)
     ad_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    #: Not used: a pulled day is split by device only, and markets are in `ads_market_daily`. Kept because migrations only add.
     market: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     device: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
     network: Mapped[str] = mapped_column(String(24), nullable=False, default="search", server_default="search")
@@ -43,6 +44,27 @@ class AdsDaily(Base):
     eligible_impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdsMarketDaily(Base):
+    """One day of one campaign in one market (a country). Google reports markets apart from ad groups and devices, so they are kept apart."""
+
+    __tablename__ = "ads_market_daily"
+    __table_args__ = (
+        UniqueConstraint("client_id", "date", "campaign", "market", name="uq_ads_market_daily_grain"),
+        Index("ix_ads_market_daily_client_date", "client_id", "date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    campaign: Mapped[str] = mapped_column(Text, nullable=False)
+    market: Mapped[str] = mapped_column(Text, nullable=False)
+    impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")
 
 
 class AdsSearchTerm(Base):
@@ -63,3 +85,4 @@ class AdsSearchTerm(Base):
     clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")

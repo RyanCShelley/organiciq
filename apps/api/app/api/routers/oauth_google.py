@@ -21,7 +21,7 @@ from app.core.security import AuthUser, require_sma_admin, require_sma_staff
 from app.models.user import UserRole
 from app.core.settings import get_settings
 from app.ingestion.ga4.client import list_ga4_properties
-from app.ingestion.google_auth import DATA_OAUTH_SCOPES
+from app.ingestion.google_auth import CONNECT_SCOPES
 from app.ingestion.google_credentials import (
     access_token_for_client,
     client_has_google_credentials,
@@ -84,7 +84,7 @@ def _normalize_secondary_urls(value: object) -> list[str]:
 
 
 def _scope_param() -> str:
-    return " ".join(DATA_OAUTH_SCOPES)
+    return " ".join(CONNECT_SCOPES)
 
 
 def _upsert_google_credentials(db: Session, client_id: UUID, cred_payload: dict) -> None:
