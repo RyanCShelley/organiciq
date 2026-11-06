@@ -56,6 +56,7 @@ def conversion_pages_seen_by_ga4(
 @router.get("/completion-patterns", response_model=list[PatternOut])
 def list_completion_patterns(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[PatternOut]:
     rows = (
@@ -90,4 +91,4 @@ def replace_completion_patterns(
         ClientCompletionPattern(client_id=client.id, pattern=p, label=label) for p, label in cleaned.items()
     )
     db.commit()
-    return list_completion_patterns(client=client, db=db)
+    return list_completion_patterns(client=client, _=_, db=db)

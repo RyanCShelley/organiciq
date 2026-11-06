@@ -31,6 +31,7 @@ router = APIRouter(prefix="/v2/watchlist", tags=["v2 watchlist"])
 @router.get("", response_model=WatchlistOut)
 def get_watchlist(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> WatchlistOut:
     buckets = (
