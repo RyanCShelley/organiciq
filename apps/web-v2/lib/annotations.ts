@@ -1,0 +1,21 @@
+export type Metrics = { sessions?: number; leads?: number; clicks?: number; impressions?: number };
+export type Changes = { sessions_change_pct?: number | null; leads_change_pct?: number | null; clicks_change_pct?: number | null; impressions_change_pct?: number | null };
+export type Entry = {
+  id: string;
+  date: string;
+  type: string;
+  type_label: string;
+  description: string;
+  page: string | null;
+  from_plan: { task_id: string; part: number } | null;
+  how: string;
+  notes: string | null;
+  result: "improved" | "no_meaningful_change" | "declined" | "not_enough_data" | "not_yet_measured";
+  measure_from: string | null;
+  measure_to: string | null;
+  baseline: Metrics;
+  after: Metrics;
+  changes: Changes;
+  waiting: string | null;
+};
+export type Completed = { entries: Entry[]; counts: { total: number; from_plan: number; improved: number }; types: Record<string, string> };

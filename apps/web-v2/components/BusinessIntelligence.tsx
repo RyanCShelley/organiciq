@@ -178,7 +178,7 @@ function ChangeLog({ clientId, slug, from, to, changes }: { clientId: string; sl
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <h3 className="text-sm font-semibold">Change log</h3>
       <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-        What changed on the site or in the work, so a movement in the numbers above can be tied to something. Shipping a task adds its entry here; add anything else by hand.
+        What changed on the site or in the work, so a movement in the numbers above can be tied to something. Marking a part of the plan done adds its entry here (see Completed work); add anything else by hand.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="text-xs font-semibold">
