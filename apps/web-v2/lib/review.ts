@@ -140,6 +140,8 @@ export type Review = {
   visibility: Visibility | null;
   summary: string[];
   scorecards?: Scorecards;
+  /** What was approved for the month and how far it got: parts done, and how many the page has been seen to show. */
+  work?: import("@/lib/engine").MonthWork;
 };
 
 export function nextMonth(month: string): string {

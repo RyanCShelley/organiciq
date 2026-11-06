@@ -168,8 +168,14 @@ export type EngineTask = {
 
 export type Allowance = { monthly: number | null; used: number; over: boolean };
 
+/** A month's approved work counted by the tool that does it. */
+export type WorkItem = { task_id: string; part: number; name: string; page: string; search: string; kind: string | null; done: boolean; seen_live: boolean };
+export type WorkTool = { tool: string; label: string; path: string | null; param: string | null; open: number; done: number; seen_live: number; items: WorkItem[] };
+export type MonthWork = { month: string; actions: number; parts: number; done: number; open: number; seen_live: number; by_tool: WorkTool[] };
+
 export type TaskPlan = {
   month: string;
+  work?: MonthWork;
   tasks: EngineTask[];
   allowance: Allowance;
   teamwork: { configured: boolean; tasklist_id: string | null };

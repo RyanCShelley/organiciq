@@ -3,11 +3,11 @@
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
-import { checkLiveAction, markPartAction, sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
+import { checkLiveAction, markPartAction, workAction, sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { monthLabel } from "@/lib/focus";
-import type { Allowance, EngineTask, TaskPart, TaskPlan } from "@/lib/engine";
+import type { Allowance, EngineTask, MonthWork, TaskPart, TaskPlan, WorkTool } from "@/lib/engine";
 import { Spinner } from "@/components/ui/Spinner";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -340,12 +340,52 @@ function TaskRow({
   );
 }
 
+/** The month's work by the tool that does it: what is open, what is done, and what the page has been seen to show. */
+function ByTool({ work }: { work: MonthWork }) {
+  const { clientSlug } = useParams<{ clientSlug: string }>();
+  const href = (t: WorkTool, i: WorkTool["items"][number]) =>
+    t.path && t.param ? `/${clientSlug}${t.path}?${t.param}=${encodeURIComponent(t.param === "term" ? i.search : i.page)}${i.kind ? `&kind=${i.kind}` : ""}&from=plan` : null;
+  return (
+    <div className="mt-5 border-t border-[var(--border)] pt-4">
+      <h3 className="text-sm font-semibold">This month&apos;s work, by tool</h3>
+      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+        {work.done} of {work.parts} parts done{work.seen_live ? `, ${work.seen_live} seen live on the page` : ""}. See them measured in{" "}
+        <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Annotations</Link>.
+      </p>
+      <ul className="mt-2 divide-y divide-[var(--border)] text-sm">
+        {work.by_tool.map((t) => (
+          <li key={t.tool} className="py-2">
+            <details>
+              <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-2">
+                <span className="font-semibold">{t.label}</span>
+                <span className="text-xs tabular-nums text-[var(--text-secondary)]">{t.open} open · {t.done} done{t.seen_live ? ` · ${t.seen_live} seen live` : ""}</span>
+              </summary>
+              <ul className="mt-2 space-y-1 pl-3 text-xs">
+                {t.items.map((i) => {
+                  const to = href(t, i);
+                  return (
+                    <li key={`${i.task_id}-${i.part}`} className="flex flex-wrap items-center justify-between gap-2">
+                      <span className={i.done ? "text-[var(--text-tertiary)] line-through" : ""}>{i.name} <span className="text-[var(--text-tertiary)]">· {shortPage(i.page)}</span>{i.seen_live ? <span className="ml-1 font-semibold text-green-800">✓ seen live</span> : null}</span>
+                      {!i.done && to ? <Link href={to} className="font-semibold text-[var(--brand-teal)] hover:underline">Open</Link> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function EnginePlan({
   clientId,
   month,
   tasks,
   allowance,
   teamwork,
+  work: firstWork,
   team,
   onTaskChange,
 }: {
@@ -354,10 +394,18 @@ export function EnginePlan({
   tasks: EngineTask[];
   allowance: Allowance;
   teamwork: TaskPlan["teamwork"];
+  work: MonthWork | null;
   team: { email: string; name: string | null }[];
   onTaskChange: (task: EngineTask) => void;
 }) {
   const live = tasks.filter((t) => t.status !== "dropped");
+  // The counts come from the server, so they are asked for again when a task changes (a part marked done, a subtask ticked, a page seen live).
+  const [work, setWork] = useState<MonthWork | null>(firstWork);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    workAction(clientId, month).then((w) => w && setWork(w));
+  }, [tasks, clientId, month]);
   const pct = allowance.monthly ? Math.min(100, (allowance.used / allowance.monthly) * 100) : 0;
 
   return (
@@ -390,6 +438,7 @@ export function EnginePlan({
           ))}
         </ul>
       )}
+      {work && work.parts > 0 ? <ByTool work={work} /> : null}
     </div>
   );
 }
