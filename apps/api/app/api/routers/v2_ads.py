@@ -16,7 +16,7 @@ from app.models.ads import ClientAdsAccount
 from app.models.client import Client
 from app.core.settings import get_settings
 from app.integrations import google_ads
-from app.services import ads_pull, ads_report
+from app.services import ads_diagnose, ads_pull, ads_report
 
 router = APIRouter(prefix="/v2/ads", tags=["v2 ads accelerator"])
 
@@ -96,5 +96,14 @@ def pull_now(client: Annotated[Client, Depends(require_client)], _: Annotated[Au
     """Pull every Google Ads account this client has now, instead of waiting for the daily run."""
     try:
         return ads_pull.pull(db, client)
+    except google_ads.GoogleAdsError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.post("/diagnose")
+def diagnose(client: Annotated[Client, Depends(require_client)], _: Annotated[AuthUser, Depends(require_sma_admin)], db: Annotated[Session, Depends(get_db)]) -> dict:
+    """Ask Google Ads what each of this client's accounts will give us, and say what works, what is empty and what is refused. Read-only; nothing is stored."""
+    try:
+        return ads_diagnose.diagnose(db, client)
     except google_ads.GoogleAdsError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

@@ -195,3 +195,54 @@ def test_accounts_can_be_added_removed_and_pulled_by_an_admin(client, db, client
     failed = client.post("/v2/ads/pull", headers=hd)
     assert failed.status_code == 502 and "not been approved" in failed.json()["detail"]
     assert "not been approved" in client.get("/v2/ads/connection", headers=hd).json()["accounts"][0]["last_error"]
+
+
+def test_diagnose_says_per_account_what_works_what_is_empty_and_what_is_refused(client, db, client_a, admin_user, team_user, monkeypatch):
+    client_a.service_reporting = {"organiciq": True, "ad_accelerator": True}
+    db.add(ClientAdsAccount(client_id=client_a.id, customer_id="1835262013", name="Aquaman", kind="ads"))
+    db.add(ClientAdsAccount(client_id=client_a.id, customer_id="9876543210", name="Aquaman LSA", kind="lsa"))
+    db.commit()
+    seen = []
+
+    def search(token, customer, query):
+        seen.append((customer, query))
+        if "FROM customer" in query and "customer_client" not in query:
+            return [{"customer": {"id": customer, "descriptiveName": "Aquaman" if customer == "1835262013" else "Aquaman LSA", "currencyCode": "USD"}}]
+        if "FROM campaign WHERE" in query:  # the Local Services campaign report
+            return [{"segments": {"date": "2026-11-03"}, "campaign": {"name": "Local Services"}, "metrics": {"impressions": "40", "clicks": "7", "costMicros": "140000000"}}]
+        if "FROM campaign" in query:
+            kind = "SEARCH" if customer == "1835262013" else "LOCAL_SERVICES"
+            return [{"campaign": {"id": "1", "name": "Pool", "status": "ENABLED", "advertisingChannelType": kind}}]
+        if "local_services_lead" in query:
+            return [{"localServicesLead": {"id": "9", "leadType": "PHONE_CALL", "leadStatus": "BOOKED", "leadCharged": True}}, {"localServicesLead": {"id": "10", "leadType": "MESSAGE", "leadStatus": "NEW"}}]
+        if "FROM ad_group" in query:
+            return [{"segments": {"date": "2026-11-03", "device": "MOBILE"}, "campaign": {"name": "Pool"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "100", "clicks": "5", "costMicros": "62500000"}}]
+        if "search_term_view" in query:
+            return []
+        if "geographic_view" in query:
+            raise google_ads.GoogleAdsError("PERMISSION_DENIED: not allowed to query geographic views")
+        raise AssertionError(query)
+
+    monkeypatch.setattr(google_ads, "access_token", lambda db: "token")
+    monkeypatch.setattr(google_ads, "search", search)
+    hd = client_header(client_a.id, admin_user.email)
+    assert client.post("/v2/ads/diagnose", headers=client_header(client_a.id, team_user.email)).status_code == 403
+    out = client.post("/v2/ads/diagnose", headers=hd).json()
+    ads, lsa = out["accounts"]
+    by = {c["name"]: c for c in ads["checks"]}
+    assert by["The account"]["status"] == "ok" and by["The account"]["detail"] == "Aquaman (USD)"
+    assert by["Campaigns"]["detail"] == "1 Search; 1 enabled" and "Local Services campaigns" not in by, "a search account is not asked for Local Services data"
+    assert by["Daily performance"]["status"] == "ok" and "1 days, 100 impressions, 5 clicks, $62.50" in by["Daily performance"]["detail"] and by["Daily performance"]["sample"]
+    assert by["What people searched for"]["status"] == "empty" and "no individual searches" in by["What people searched for"]["detail"].lower()
+    assert by["Markets"]["status"] == "error" and by["Markets"]["detail"].startswith("PERMISSION_DENIED")
+    lby = {c["name"]: c for c in lsa["checks"]}
+    assert lby["Campaigns"]["detail"] == "1 Local Services; 1 enabled" and "Daily performance" not in lby, "an LSA account has no ad groups or devices"
+    assert lby["Local Services campaigns"]["status"] == "ok" and "$140.00" in lby["Local Services campaigns"]["detail"]
+    assert lby["Local Services leads"]["status"] == "ok" and lby["Local Services leads"]["detail"].startswith("2 leads: 1 phone call, 1 message; 1 booked, 1 new; 1 charged")
+
+    def refuse(token, customer, query):
+        raise google_ads.GoogleAdsError("PERMISSION_DENIED: only approved for test accounts")
+
+    monkeypatch.setattr(google_ads, "search", refuse)
+    refused = client.post("/v2/ads/diagnose", headers=hd).json()
+    assert all(c["status"] == "error" and "test accounts" in c["detail"] for a in refused["accounts"] for c in a["checks"])
