@@ -50,3 +50,11 @@ export type AdsConnection = {
   manager_set: boolean;
   accounts: AdsAccount[];
 };
+
+/** One read-only check of what Google Ads returns for an account: worked, came back empty, or was refused. */
+export type AdsCheck = { name: string; status: "ok" | "empty" | "error"; detail: string; rows: number; sample: string | null };
+export type AdsDiagnosis = {
+  checked_at: string;
+  days: number;
+  accounts: { customer_id: string; name: string; kind: "ads" | "lsa"; checks: AdsCheck[] }[];
+};
