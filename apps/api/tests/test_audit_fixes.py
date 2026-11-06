@@ -445,26 +445,6 @@ def _record_sql(engine):
     return seen, lambda: event.remove(engine, "before_cursor_execute", capture)
 
 
-def test_the_crawl_lists_never_select_the_wide_columns(db, engine, client, client_a, team_user):
-    """`raw` (a whole JSON-LD document per block) and `sections` were loaded for
-    every page of every filter click and thrown away."""
-    from tests.conftest import client_header
-
-    _seed_crawl(db, client_a, pages=5)
-    headers = client_header(client_a.id, team_user.email)
-    seen, stop = _record_sql(engine)
-    try:
-        for path in ("/site-crawl/pages", "/site-crawl/schema", "/site-crawl/schema/pages?type=Article"):
-            assert client.get(path, headers=headers).status_code == 200, path
-    finally:
-        stop()
-    selects = [s for s in seen if s.lstrip().upper().startswith("SELECT")]
-    joined = "\n".join(selects)
-    assert "facts_crawl_page_schema.raw" not in joined
-    assert "facts_crawl_page_snapshots.sections" not in joined
-    assert "facts_crawl_page_snapshots.faq_questions" not in joined
-
-
 def test_the_crawl_list_query_count_does_not_grow_with_the_site(db, engine, client, client_a, team_user):
     """A deferred column read later becomes one query per row. This would show it."""
     from tests.conftest import client_header

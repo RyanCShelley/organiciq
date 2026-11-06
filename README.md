@@ -14,7 +14,7 @@ SMA Marketing's operating system for predictable organic growth.
 ## Repository layout
 
 ```
-apps/web     Next.js app
+apps/web-v2  Next.js app
 apps/api     FastAPI + worker
 docker-compose.yml
 ```
@@ -30,7 +30,7 @@ Production target: **Postgres + API + worker on Railway**, **web on Vercel**. De
 | Postgres 16 | Railway plugin | Source of `DATABASE_URL` for API + worker |
 | API | Railway service, [`apps/api/Dockerfile`](apps/api/Dockerfile) | Start: `scripts/start-api.sh` (alembic + uvicorn on `$PORT`) |
 | Worker | Railway service, same Dockerfile | Start: `scripts/start-worker.sh` → `python -m app.worker` |
-| Web | Vercel, Root Directory `apps/web` | Auth.js Google login; server calls API via `API_URL` |
+| Web | Vercel, Root Directory `apps/web-v2` | Auth.js Google login; server calls API via `API_URL` |
 
 Healthcheck: `GET https://<railway-api-host>/health` → `{"status":"ok"}`.
 
@@ -64,7 +64,7 @@ Printable env matrix + smoke checklist: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 ### 2. Vercel
 
 1. Import the GitHub repo.
-2. **Root Directory:** `apps/web`
+2. **Root Directory:** `apps/web-v2`
 3. Framework preset: Next.js (build `npm run build`).
 4. Env vars (must match Railway where noted):
    - `AUTH_SECRET` (same as API)
@@ -102,7 +102,7 @@ Point DNS at Vercel/Railway, then update `AUTH_URL` / `NEXTAUTH_URL`, `ALLOWED_O
 
 Requires **Python 3.13** for the API (3.14 is not yet supported by pydantic-core).
 
-1. Copy `.env.example` to `.env` / `apps/web/.env.local` and set login + data OAuth credentials.
+1. Copy `.env.example` to `.env` / `apps/web-v2/.env.local` and set login + data OAuth credentials.
 2. Start Postgres, then API + worker + web (see below).
 
 Seed data:
@@ -127,9 +127,9 @@ python -m app.worker
 ### Web
 
 ```bash
-cd apps/web
+cd apps/web-v2
 npm install
-npm run dev -- --hostname 127.0.0.1 --port 3000
+npm run dev -- --hostname 127.0.0.1 --port 3001
 ```
 
 ## Phase 2 — GSC setup
