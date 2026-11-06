@@ -113,3 +113,22 @@ def test_the_consultant_sees_the_live_numbers_beside_their_draft(client, db, cli
     body = client.get("/v2/consulting/report?month=2026-10", headers=h).json()
     assert body["report"]["exists"] is False and [s["key"] for s in body["data"]["sections"]] == ["visibility", "traffic", "leads"]
     assert client.get("/v2/consulting/report?month=October", headers=h).status_code == 400
+
+
+def test_a_client_sees_the_reviews_own_sections_but_none_of_its_internal_fields():
+    review = {**REVIEW, "locked": True, "locked_by": "ryan@x.com", "locked_at": "2026-11-02", "lock_note": "n", "model": "lead_gen", "work": {"parts": 3}, "noun": "leads", "summary": ["a"]}
+    shown = cr.client_review(review)
+    assert "locked_by" not in shown and "work" not in shown and "model" not in shown and "lock_note" not in shown
+    assert shown["search"]["clicks"]["current"] == 480 and shown["month"] == "2026-10" and shown["summary"] == ["a"]
+
+
+def test_the_published_report_carries_the_review_sections_and_insights_and_no_internal_fields(client, db, client_a, admin_user):
+    consult(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    viewer(db, client_a, "viewer@cato.example")
+    put(client, h, analysis="Words.")
+    client.post("/v2/consulting/report/state", json={"month": "2026-10", "to": "published"}, headers=h)
+    data = client.get("/v2/consulting/portal/report", headers=client_header(client_a.id, "viewer@cato.example")).json()["report"]["data"]
+    assert {"review", "cards", "insights", "sections"} <= set(data) and set(data["insights"]) == {"keywords", "ai", "key_events"}
+    for internal in ("locked_by", "locked_at", "lock_note", "work", "model"):
+        assert internal not in data["review"]

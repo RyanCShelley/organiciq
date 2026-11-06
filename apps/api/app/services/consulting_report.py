@@ -10,11 +10,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.consulting import ConsultingReport
-from app.services import monthly_review, review_scorecards
+from app.services import bi, monthly_review, review_scorecards
 
 
 class ReportError(ValueError):
@@ -93,15 +94,32 @@ def shape(review: dict[str, Any], cards: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: What of the monthly review a client may be shown: the figures and the notes about them. Everything else in that payload (who locked it, the plan's work
+#: counts, the model setting) stays internal. An allow-list, so a key added to the review later is not shown until it is listed here.
+REVIEW_FIELDS = (
+    "month", "previous_month", "noun", "conversions", "conversion_rate", "organic_conversions", "sessions", "organic_sessions", "search", "has_search_data", "goal",
+    "channels", "top_pages", "services", "freshness", "revenue", "visibility", "summary", "data_through",
+)
+
+
+def client_review(review: dict[str, Any]) -> dict[str, Any]:
+    return {k: review[k] for k in REVIEW_FIELDS if k in review}
+
+
 def headline(db: Session, client: Client, month: str) -> dict[str, Any]:
-    """The month's headline numbers, worked out now from the monthly review."""
+    """The month's numbers, worked out now: the monthly review's own sections (Visibility, Traffic, Leads), and a little more from Insights."""
     try:
-        monthly_review.parse_month(month)
+        first, last = monthly_review.parse_month(month)
     except ValueError as exc:
         raise ReportError(str(exc)) from exc
     review = monthly_review.review_for(db, client, month)
     cards = review_scorecards.build(db, client, review)
-    return {**shape(review, cards), "as_of": review.get("data_through"), "locked": bool(review.get("locked"))}
+    insights = bi.build(db, client, first, last)
+    return jsonable_encoder({
+        **shape(review, cards), "as_of": review.get("data_through"), "locked": bool(review.get("locked")),
+        "review": client_review(review), "cards": cards,
+        "insights": {"keywords": insights.get("keywords"), "ai": insights.get("ai"), "key_events": [e.get("name") or e.get("event") for e in insights.get("key_events") or []]},
+    })
 
 
 def get(db: Session, client: Client, month: str) -> ConsultingReport | None:
@@ -131,7 +149,7 @@ def publish(db: Session, client: Client, rep: ConsultingReport, who: str) -> Con
     """Show the report to the client, with the numbers as they stand now."""
     if not rep.analysis:
         raise ReportError("Write your analysis before publishing: the client reads the numbers alongside your words.")
-    rep.metrics_snapshot = headline(db, client, rep.period_month)
+    rep.metrics_snapshot = headline(db, client, rep.period_month)  # already plain JSON
     rep.review_state, rep.published_at, rep.published_by = "published", datetime.now(timezone.utc), who
     rep.revision += 1
     db.commit()
