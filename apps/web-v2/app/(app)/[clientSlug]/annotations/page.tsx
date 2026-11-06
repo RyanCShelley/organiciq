@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 
-import { CompletedWork } from "@/components/CompletedWork";
+import { Annotations } from "@/components/Annotations";
 import { ApiError, apiFetch } from "@/lib/api";
 import type { Completed } from "@/lib/annotations";
 import { findClient } from "@/lib/clients";
 
-export const metadata = { title: "Completed work" };
+export const metadata = { title: "Annotations" };
 
 export default async function AnnotationsPage({ params, searchParams }: { params: Promise<{ clientSlug: string }>; searchParams: Promise<{ page?: string }> }) {
   const { clientSlug } = await params;
@@ -18,7 +18,7 @@ export default async function AnnotationsPage({ params, searchParams }: { params
   try {
     data = await apiFetch<Completed>(`/v2/annotations${page ? `?${new URLSearchParams({ page })}` : ""}`, { clientId: client.id });
   } catch (e) {
-    error = e instanceof ApiError ? e.message : "The completed work could not be loaded: the API did not answer.";
+    error = e instanceof ApiError ? e.message : "The annotations could not be loaded: the API did not answer.";
   }
-  return <CompletedWork client={client} data={data} error={error} page={page ?? null} />;
+  return <Annotations client={client} data={data} error={error} page={page ?? null} />;
 }

@@ -6,9 +6,9 @@ import type { Entry } from "@/lib/annotations";
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 const fail = (error: unknown, fallback: string): { ok: false; error: string } => ({ ok: false, error: error instanceof ApiError ? error.message : fallback });
 
-export async function addNoteAction(clientId: string, date: string, description: string, page: string): Promise<R<true>> {
+export async function addNoteAction(clientId: string, date: string, description: string, page: string, type: string): Promise<R<true>> {
   try {
-    await apiFetch("/v2/annotations", { method: "POST", clientId, body: { date, description, page: page.trim() || null } });
+    await apiFetch("/v2/annotations", { method: "POST", clientId, body: { date, description, page: page.trim() || null, type } });
     return { ok: true, value: true };
   } catch (e) {
     return fail(e, "The note could not be added: the API did not answer.");

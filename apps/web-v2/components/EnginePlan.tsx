@@ -120,7 +120,7 @@ function Parts({ task, clientId, onChange }: { task: EngineTask; clientId: strin
         <button type="button" disabled={pending} onClick={check} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">{pending ? <><Spinner />Reading the page…</> : "Check what is live"}</button>
         {message ? <span className="text-xs text-[var(--text-secondary)]">{message}</span> : null}
       </div>
-      <p className="mt-2 text-xs text-[var(--text-tertiary)]">Marking a part done adds it to <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Completed work</Link> and starts measuring it. The page is also read once a day: when it shows a part&apos;s change, that part is marked done for you and says how it was known. The action ships itself when every part is done.</p>
+      <p className="mt-2 text-xs text-[var(--text-tertiary)]">Marking a part done adds it to <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Annotations</Link> and starts measuring it. The page is also read once a day: when it shows a part&apos;s change, that part is marked done for you and says how it was known. The action ships itself when every part is done.</p>
     </Detail>
   );
 }

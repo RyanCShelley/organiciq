@@ -16,6 +16,7 @@ from app.models.decision import GrowthAction
 
 class AnnotationType(str, enum.Enum):
     GROWTH_ACTION = "growth_action"
+    EVENT = "event"
     CONTENT_PUBLISHED = "content_published"
     CONTENT_UPDATED = "content_updated"
     TECHNICAL_CHANGE = "technical_change"

@@ -1,8 +1,8 @@
-"""Completed work: everything marked done on the plan, and anything noted by hand, with what happened to the page's numbers afterwards."""
+"""Annotations: everything marked done on the plan, and anything else worth tying to the numbers (an event, a trade show, a campaign, a site change), with what happened to the page's numbers afterwards."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -17,12 +17,12 @@ from app.core.urls import normalize_url
 from app.models.annotation import Annotation, AnnotationResult
 from app.models.client import Client
 from app.services import annotations as annotation_service
-from app.services import bi
+from app.schemas import AnnotationCreate
 
 router = APIRouter(prefix="/v2/annotations", tags=["v2-annotations"])
 
 TYPE_LABELS = {
-    "growth_action": "Growth action", "content_published": "New content", "content_updated": "Content change", "technical_change": "Technical change",
+    "growth_action": "Growth action", "event": "Event or trade show", "content_published": "New content", "content_updated": "Content change", "technical_change": "Technical change",
     "website_change": "Website change", "conversion_change": "Conversion change", "campaign_change": "Campaign change", "algorithm_event": "Search update", "manual_note": "Note",
 }
 
@@ -67,13 +67,18 @@ def list_completed(
     if changed:
         db.commit()
     out = [_out(r) for r in rows]
-    return {"entries": out, "counts": {"total": len(out), "from_plan": sum(1 for e in out if e["from_plan"]), "improved": sum(1 for e in out if e["result"] == "improved")}, "types": TYPE_LABELS}
+    return {"manual_types": [{"key": k, "label": TYPE_LABELS[k]} for k in MANUAL_TYPES], "entries": out, "counts": {"total": len(out), "from_plan": sum(1 for e in out if e["from_plan"]), "improved": sum(1 for e in out if e["result"] == "improved")}, "types": TYPE_LABELS}
+
+
+#: What a person can add by hand. Everything but a plain note is followed for 28 days after its date, like work marked done on the plan.
+MANUAL_TYPES = ["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "manual_note"]
 
 
 class NoteIn(BaseModel):
     date: date
     description: str = Field(min_length=3, max_length=2000)
     page: str | None = Field(default=None, max_length=2048)
+    type: Literal["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "manual_note"] = "manual_note"
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -83,8 +88,13 @@ def add_note(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    note = bi.add_note(db, client, payload.date, payload.description, payload.page)
-    return {"id": str(note.id)}
+    measured = payload.type != "manual_note"
+    row = annotation_service.create_annotation(db, client, AnnotationCreate(
+        date=payload.date, annotation_type=payload.type, description=payload.description.strip(), page_url=payload.page or None,
+        completed_at=payload.date if measured else None, measurement_start_date=payload.date if measured else None,
+        measurement_end_date=payload.date + timedelta(days=28) if measured else None,
+    ))
+    return {"id": str(row.id)}
 
 
 class Edit(BaseModel):

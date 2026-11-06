@@ -19,4 +19,4 @@ export type Entry = {
   changes: Changes;
   waiting: string | null;
 };
-export type Completed = { entries: Entry[]; counts: { total: number; from_plan: number; improved: number }; types: Record<string, string> };
+export type Completed = { manual_types: { key: string; label: string }[]; entries: Entry[]; counts: { total: number; from_plan: number; improved: number }; types: Record<string, string> };
