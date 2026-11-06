@@ -242,6 +242,9 @@ def maybe_check_open(db: Session) -> bool:
         try:
             client = db.get(Client, task.client_id)
             if client is not None:
+                from app.services import teamwork_sync
+
+                teamwork_sync.sync_task(db, client, task)
                 check_task(db, client, task)
         except Exception:  # noqa: BLE001 - one task must not stop the rest
             db.rollback()

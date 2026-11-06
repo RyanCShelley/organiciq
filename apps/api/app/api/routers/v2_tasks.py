@@ -25,7 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import part_done, part_tools, task_results, task_verify, teamwork_subtasks
+from app.services import part_done, part_tools, task_results, task_verify, teamwork_subtasks, teamwork_sync
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -283,11 +283,12 @@ def check_live(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Read the live page now and mark done every part the page shows. A part marked not done by a person is checked too, since this was asked for."""
+    """Ask Teamwork which subtasks are completed, then read the live page and mark done every part it shows. A part marked not done by a person is checked too, since this was asked for."""
     task = _get(db, client, task_id)
+    tw = teamwork_sync.sync_task(db, client, task, force=True)  # subtasks finished in Teamwork mark their parts done first
     result = task_verify.check_task(db, client, task, force=True)
     db.refresh(task)
-    return {"task": _out(task), "check": result}
+    return {"task": _out(task), "check": {**result, "teamwork": tw}}
 
 
 def _description(task: EngineTask, client: Client) -> tuple[str, str]:
