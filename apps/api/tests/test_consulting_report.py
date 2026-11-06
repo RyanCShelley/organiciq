@@ -129,6 +129,6 @@ def test_the_published_report_carries_the_review_sections_and_insights_and_no_in
     put(client, h, analysis="Words.")
     client.post("/v2/consulting/report/state", json={"month": "2026-10", "to": "published"}, headers=h)
     data = client.get("/v2/consulting/portal/report", headers=client_header(client_a.id, "viewer@cato.example")).json()["report"]["data"]
-    assert {"review", "cards", "insights", "sections"} <= set(data) and set(data["insights"]) == {"keywords", "ai", "key_events"}
+    assert {"review", "cards", "insights", "sections", "visibility_detail"} <= set(data) and set(data["insights"]) == {"keywords", "ai", "key_events"}
     for internal in ("locked_by", "locked_at", "lock_note", "work", "model"):
         assert internal not in data["review"]

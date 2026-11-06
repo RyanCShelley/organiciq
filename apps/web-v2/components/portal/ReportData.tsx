@@ -1,4 +1,5 @@
 import { ShowingUp } from "@/components/portal/ShowingUp";
+import { VisibilityDetail } from "@/components/portal/VisibilityDetail";
 import { card } from "@/components/portal/BriefParts";
 import { Band, LeadsCards, SectionHead, TrafficCards, VisibilityCards } from "@/components/review/Sections";
 import type { ReportData, ReportMetric } from "@/lib/portal";
@@ -30,6 +31,7 @@ function ReviewData({ data }: { data: ReportData }) {
       <section>
         <SectionHead kind="visibility" title="Visibility" read={cards.reads?.visibility} />
         <VisibilityCards review={review} cards={cards} />
+        <VisibilityDetail review={review} keywords={data.insights?.keywords ?? null} prompts={data.visibility_detail?.prompts ?? []} runs={data.visibility_detail?.runs ?? 0} runDates={data.visibility_detail?.run_dates ?? []} />
         {limit("visibility") ? <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{limit("visibility")}</p> : null}
       </section>
       <section>

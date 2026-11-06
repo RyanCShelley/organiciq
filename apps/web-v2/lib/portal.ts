@@ -132,6 +132,21 @@ export type ReportData = {
   review?: import("@/lib/review").Review;
   cards?: import("@/lib/review").Scorecards;
   insights?: { keywords: import("@/lib/bi").Bi["keywords"] | null; ai: import("@/lib/bi").Bi["ai"]; key_events: string[] };
+  /** How each AI prompt did on each platform over the month's runs. */
+  visibility_detail?: { prompts: PromptRow[]; runs: number; run_dates: string[]; in_month: boolean } | null;
 };
 export type StaffReport = { month: string; title: string | null; analysis: string | null; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
 export type ClientReport = { month: string; title: string | null; analysis: string | null; published_at: string | null; data: ReportData };
+
+export type PromptRow = {
+  query: string;
+  keyword: string | null;
+  topic_cluster: string | null;
+  by_platform: Record<string, string>;
+  score: number;
+  max_score: number;
+  previous_score: number | null;
+  change: number | null;
+  avg_brand_rank: number | null;
+  top_competitors: { name: string; count: number }[];
+};
