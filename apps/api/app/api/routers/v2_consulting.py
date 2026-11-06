@@ -22,7 +22,7 @@ from app.core.security import STAFF_ROLES, AuthUser, get_current_user, require_s
 from app.models.user import UserRole
 from app.models.client import Client
 from app.models.consulting import ConsultingProfile
-from app.services import consulting_recs
+from app.services import consulting_recs, consulting_report, monthly_review
 
 router = APIRouter(prefix="/v2/consulting", tags=["v2-consulting"])
 
@@ -369,3 +369,85 @@ def portal_progress(
     source = "consultant" if ctx.is_staff else "client"
     done = _guard(lambda: consulting_recs.record_progress(db, rec, status=payload.status, source=source, who=ctx.user.email, implemented_on=payload.implemented_on, estimated=payload.estimated, notes=payload.notes, links=payload.links))
     return {**consulting_recs.client_out(done), "can_update": True}
+
+
+# ── the report: Data, then the consultant's Analysis ─────────────────────────
+
+
+def _month(value: str | None) -> str:
+    return value or monthly_review.last_complete_month()
+
+
+def _report_guard(call):
+    try:
+        return call()
+    except consulting_report.ReportConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (consulting_report.ReportError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/report")
+def get_report(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    month: Annotated[str | None, Query()] = None,
+) -> dict:
+    """One month's report as the consultant works on it: their analysis so far, and the headline numbers as they stand now."""
+    m = _month(month)
+    rep = _report_guard(lambda: consulting_report.get(db, client, m))
+    return {"report": consulting_report.staff_out(rep, m), "data": _report_guard(lambda: consulting_report.headline(db, client, m))}
+
+
+class ReportIn(BaseModel):
+    month: str
+    analysis: str | None = Field(default=None, max_length=20000)
+    title: str | None = Field(default=None, max_length=300)
+    revision: int | None = None
+
+
+@router.put("/report")
+def save_report(
+    payload: ReportIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    rep = _report_guard(lambda: consulting_report.save(db, client, payload.month, analysis=payload.analysis, title=payload.title, revision=payload.revision, who=user.email))
+    return consulting_report.staff_out(rep, payload.month)
+
+
+class ReportState(BaseModel):
+    month: str
+    to: str
+
+
+@router.post("/report/state")
+def move_report(
+    payload: ReportState,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Publish the report to the client (freezing its numbers) or take it back to a draft."""
+    rep = consulting_report.get(db, client, payload.month)
+    if rep is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Write and save your analysis first.")
+    if payload.to == "published":
+        rep = _report_guard(lambda: consulting_report.publish(db, client, rep, user.email))
+    elif payload.to == "draft":
+        rep = consulting_report.unpublish(db, rep)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A report is either published or a draft.")
+    return consulting_report.staff_out(rep, payload.month)
+
+
+@router.get("/portal/report")
+def portal_report(
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The latest published report: the numbers as they were when it was published, and the consultant's analysis. None until one is published."""
+    rep = consulting_report.latest_published(db, ctx.client)
+    return {"report": consulting_report.client_out(rep) if rep else None}

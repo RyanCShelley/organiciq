@@ -39,7 +39,7 @@ export function ConsultingWorkspace({ client, profile, error }: { client: Client
           <h1 className="text-2xl font-bold">Consulting workspace</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">{client.client_name}{client.group_name ? ` · ${client.group_name}` : ""}. Start with what you know about the business. The rest of the consulting steps join this page as they are built.</p>
         </div>
-        <div className="flex gap-2"><Link href={`/${client.slug}/consulting/recommendations`} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white">Recommendations</Link><Link href={`/consulting/${client.slug}`} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)] hover:underline">Preview as client</Link></div>
+        <div className="flex gap-2"><Link href={`/${client.slug}/consulting/report`} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white">Report</Link><Link href={`/${client.slug}/consulting/recommendations`} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white">Recommendations</Link><Link href={`/consulting/${client.slug}`} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)] hover:underline">Preview as client</Link></div>
       </header>
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">

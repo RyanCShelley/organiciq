@@ -117,3 +117,9 @@ export type PortalOverview = {
   verified: number;
   top: ClientRec[];
 };
+
+export type ReportMetric = { label: string; current: number | null; previous: number | null; change_pct: number | null; unit: string; source: string; lower_is_better: boolean; note: string | null };
+export type ReportSection = { key: "visibility" | "traffic" | "leads"; label: string; question: string; metrics: ReportMetric[]; read: string | null; limitation: string | null };
+export type ReportData = { month: string; previous_month: string; headline: string | null; sections: ReportSection[]; caveats: string[]; as_of?: Record<string, string | null> | null; locked?: boolean };
+export type StaffReport = { month: string; title: string | null; analysis: string | null; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
+export type ClientReport = { month: string; title: string | null; analysis: string | null; published_at: string | null; data: ReportData };

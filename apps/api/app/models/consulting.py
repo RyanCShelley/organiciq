@@ -7,7 +7,7 @@ from datetime import datetime
 
 from datetime import date
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -127,3 +127,29 @@ class ConsultingRecommendationEvent(Base):
     by: Mapped[str] = mapped_column(String(255), nullable=False)
     detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConsultingReport(Base):
+    """One month's report to a client: the consultant's own analysis, with the headline numbers frozen at the moment it is published.
+
+    The numbers are frozen so the client is shown what the consultant saw and wrote about, not figures that move underneath the words. A draft shows the
+    live numbers to the consultant; publishing keeps them.
+    """
+
+    __tablename__ = "consulting_reports"
+    __table_args__ = (UniqueConstraint("client_id", "period_month", name="uq_consulting_report_month"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    period_month: Mapped[str] = mapped_column(String(7), nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: draft | published.
+    review_state: Mapped[str] = mapped_column(String(12), nullable=False, default="draft", server_default="draft")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    metrics_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

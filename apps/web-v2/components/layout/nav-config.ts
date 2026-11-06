@@ -16,7 +16,7 @@ export const GROUPS: NavGroup[] = [
     title: "Consulting",
     icon: Briefcase,
     consulting: true,
-    items: [{ label: "Workspace", path: "/consulting" }, { label: "Recommendations", path: "/consulting/recommendations" }],
+    items: [{ label: "Workspace", path: "/consulting" }, { label: "Report", path: "/consulting/report" }, { label: "Recommendations", path: "/consulting/recommendations" }],
   },
   {
     title: "Analytics",
