@@ -117,6 +117,20 @@ export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; e
 
 export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped";
 
+/** One part of a growth action, with the tool that carries it out (none for a plain step). */
+export type TaskPart = {
+  id: string;
+  name: string;
+  tool: string | null;
+  tool_label: string | null;
+  tool_path: string | null;
+  tool_param: string | null;
+  tool_verb: string | null;
+  status: "open" | "done";
+  done_at: string | null;
+  done_by: string | null;
+};
+
 export type EngineTask = {
   id: string;
   month: string;
@@ -138,6 +152,7 @@ export type EngineTask = {
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
   teamwork_subtasks?: number;
+  parts?: TaskPart[];
   shipped_at?: string | null;
   check_on?: string | null;
 };
@@ -170,6 +185,7 @@ export type TaskDraft = {
   metric: string | null;
   effort_min: number | null;
   evidence: string[];
+  parts?: { id: string; name: string }[];
 };
 
 export type TaskResult<T = EngineTask> = { ok: true; value: T; allowance?: Allowance } | { ok: false; error: string };

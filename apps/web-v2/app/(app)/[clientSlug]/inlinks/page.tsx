@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { PlanBanner } from "@/components/PlanBanner";
 import { InlinkSuggester } from "@/components/InlinkSuggester";
 import { ApiError, apiFetch } from "@/lib/api";
 import { findClient } from "@/lib/clients";
@@ -22,6 +23,7 @@ export default async function InlinksPage({ params, searchParams }: { params: Pr
   }
   return (
     <>
+      <PlanBanner doing="Add the links this page is missing." />
       <InlinkSuggester client={client} q={q?.trim() ?? ""} data={result?.data ?? null} error={error} />
     </>
   );

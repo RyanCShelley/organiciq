@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ignoreInlinkAction, restoreInlinkAction, verifyInlinkAction } from "@/app/(app)/[clientSlug]/inlinks/actions";
@@ -78,8 +78,15 @@ function Suggestion({ client, target, s, onChanged }: { client: Client; target: 
   );
 }
 
+/** The same page however its address is written: with or without www, a trailing slash, a query. */
+function sameAddress(a: string, b: string): boolean {
+  const clean = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+  return clean(a) === clean(b);
+}
+
 function TargetRow({ client, t, onChanged }: { client: Client; t: InTarget; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
+  const wanted = useSearchParams().get("target");
+  const [open, setOpen] = useState(!!wanted && sameAddress(wanted, t.target_url));
   const [pending, start] = useTransition();
   const ignorePage = () =>
     start(async () => {

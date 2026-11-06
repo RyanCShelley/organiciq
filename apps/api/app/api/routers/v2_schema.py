@@ -17,6 +17,7 @@ from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
 from app.models.client import Client
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore
+from app.core.urls import normalize_url
 from app.services import schema_audit, schema_pages
 
 router = APIRouter(prefix="/v2/schema", tags=["v2 schema"])
@@ -89,6 +90,7 @@ def page(
     url: Annotated[str, Query(min_length=8, max_length=2048)],
 ) -> dict:
     """What the crawl holds for a page and the latest audit and markup written for it."""
+    url = normalize_url(url) or url
     stored = schema_pages.stored_page(db, client, url)
     audit = stored["audit"]
     return {

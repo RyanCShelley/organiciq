@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { PlanBanner } from "@/components/PlanBanner";
 import { CtrOptimizer } from "@/components/CtrOptimizer";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets } from "@/lib/bi";
@@ -38,6 +39,7 @@ export default async function CtrPage({
   }
   return (
     <>
+      <PlanBanner doing="Rewrite the title and description for this page." />
       <CtrOptimizer client={client} from={start} to={end} q={q?.trim() ?? ""} data={data} error={error} />
     </>
   );

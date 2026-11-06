@@ -18,6 +18,7 @@ from app.core.settings import get_settings
 from app.models.client import Client
 from app.integrations import teamwork
 from app.models.schema_tools import ContentItem, ContentState
+from app.core.urls import normalize_url
 from app.services import content_briefs, content_calendar, content_prompts, content_gaps_view, content_refresh, model_spend
 
 router = APIRouter(prefix="/v2/content", tags=["v2 content"])
@@ -98,6 +99,7 @@ def refresh_page(
     month: Annotated[str | None, Query()] = None,
 ) -> dict:
     month = _month(month or content_briefs.last_complete_month())
+    url = normalize_url(url) or url
     return {**content_refresh.page_detail(db, client, month, url), "month": month, "plan": content_briefs.latest(db, client, "refresh", url)}
 
 

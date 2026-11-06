@@ -25,6 +25,7 @@ function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: Grow
     why: `This page gets the most impressions for “${bundle.keyword}” (${bundle.chosen.impressions.toLocaleString()} over three months). The work is ${chosen.length} part${chosen.length === 1 ? "" : "s"}, done together on this one page: ${chosen.map((p) => p.name.toLowerCase()).join(", ")}.`,
     steps,
     evidence,
+    parts: chosen.map((p) => ({ id: p.id, name: p.name })),
   };
 }
 

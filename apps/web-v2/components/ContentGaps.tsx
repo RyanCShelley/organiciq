@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { briefAction, dismissTopicAction, draftAction, setAsideAction, topicDetailAction, topicsAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
@@ -305,7 +305,7 @@ function Topics({ client }: { client: Client }) {
 export function ContentGaps({ client, q, ignored, data, error }: { client: Client; q: string; ignored: boolean; data: Gaps | null; error: string | null }) {
   const router = useRouter();
   const [search, setSearch] = useState(q);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(useSearchParams().get("term"));
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);

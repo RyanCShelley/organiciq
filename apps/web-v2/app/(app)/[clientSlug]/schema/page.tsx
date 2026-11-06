@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { PlanBanner } from "@/components/PlanBanner";
 import { SchemaScreen } from "@/components/SchemaScreen";
 import { ApiError, apiFetch } from "@/lib/api";
 import { findClient } from "@/lib/clients";
@@ -21,6 +22,7 @@ export default async function SchemaPage({ params }: { params: Promise<{ clientS
   }
   return (
     <>
+      <PlanBanner doing="Write the markup this page needs." />
       <SchemaScreen client={client} result={result} error={error} />
     </>
   );

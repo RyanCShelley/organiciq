@@ -42,6 +42,8 @@ class EngineTask(Base):
     metric: Mapped[str | None] = mapped_column(Text, nullable=True)
     effort_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    #: The parts of a growth action, as `[{"id": "S-5", "name": "...", "status": "open"}]`. Empty for a task made before parts were stored: they are read back from `steps`.
+    parts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
     confirmed_by: Mapped[str] = mapped_column(String(255), nullable=False)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
