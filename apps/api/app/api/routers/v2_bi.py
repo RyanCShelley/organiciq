@@ -63,12 +63,12 @@ def remove_change(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Only a note a person typed can be removed here; an entry written by shipping a task is removed by un-shipping the task."""
+    """Only a note a person typed can be removed here; an entry written by marking a part done is removed by marking it not done."""
     row = db.query(Annotation).filter(Annotation.id == change_id, Annotation.client_id == client.id).one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That entry is not on this client.")
     if row.engine_uid is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This entry came from a shipped task. Un-ship the task to remove it.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This entry came from the plan. Mark its part not done on the plan to remove it.")
     db.delete(row)
     db.commit()
     return {"ok": True}

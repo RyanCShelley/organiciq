@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
+import { markPartAction, sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { monthLabel } from "@/lib/focus";
 import type { Allowance, EngineTask, TaskPart, TaskPlan } from "@/lib/engine";
 import { Spinner } from "@/components/ui/Spinner";
@@ -62,8 +62,15 @@ function toolHref(slug: string, part: TaskPart, task: EngineTask): string | null
 }
 
 /** Each part of the action and the tool that carries it out; a part no tool covers is a plain step. */
-function Parts({ task }: { task: EngineTask }) {
+function Parts({ task, clientId, onChange }: { task: EngineTask; clientId: string; onChange: (t: EngineTask) => void }) {
   const { clientSlug } = useParams<{ clientSlug: string }>();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const mark = (index: number, done: boolean) =>
+    start(async () => {
+      const r = await markPartAction(clientId, task.id, index, done);
+      if (r.ok) { setError(null); onChange(r.value); } else setError(r.error);
+    });
   const parts = task.parts ?? [];
   if (parts.length === 0) return null;
   return (
@@ -73,9 +80,9 @@ function Parts({ task }: { task: EngineTask }) {
           const href = toolHref(clientSlug, part, task);
           return (
             <li key={`${part.id}-${i}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-              <span className="font-medium text-[var(--text-primary)]">{i + 1}. {part.name}</span>
+              <span className="font-medium text-[var(--text-primary)]">{i + 1}. {part.name}{part.status === "done" ? <span className="ml-2 text-xs font-semibold text-green-800">✓ Done{part.done_at ? ` ${part.done_at.slice(0, 10)}` : ""}{part.done_by ? ` by ${part.done_by}` : ""}</span> : null}</span>
               {href ? (
-                <span className="flex items-center gap-2">
+                <span className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-[var(--text-tertiary)]">{part.tool_label}</span>
                   <Link href={href} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold text-[var(--brand-teal)] hover:underline">
                     {part.tool_verb}
@@ -84,16 +91,23 @@ function Parts({ task }: { task: EngineTask }) {
               ) : (
                 <span className="text-xs text-[var(--text-tertiary)]">No tool for this one yet: it is a step to do by hand</span>
               )}
+              {part.status === "done" ? (
+                <button type="button" disabled={pending} onClick={() => mark(i, false)} className="text-xs font-semibold underline disabled:opacity-50">Not done</button>
+              ) : (
+                <button type="button" disabled={pending} onClick={() => mark(i, true)} className="rounded-lg bg-[var(--brand-dark)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">Mark done</button>
+              )}
             </li>
           );
         })}
       </ul>
+      {error ? <p role="alert" className="mt-2 text-xs text-red-800">{error}</p> : null}
+      <p className="mt-2 text-xs text-[var(--text-tertiary)]">Marking a part done adds it to <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Completed work</Link> and starts measuring it. The action ships itself when every part is done.</p>
     </Detail>
   );
 }
 
 /** What was confirmed, in full: the same words that go to Teamwork, readable here at any time, before or after it is sent. */
-function TaskDetails({ task }: { task: EngineTask }) {
+function TaskDetails({ task, clientId, onChange }: { task: EngineTask; clientId: string; onChange: (t: EngineTask) => void }) {
   const measured = [task.metric ? `Measured on ${task.metric}` : null, task.check_on ? `checked ${task.check_on}` : null].filter(Boolean).join(", ");
   return (
     <div className="mt-3 space-y-4 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-4 text-sm text-[var(--text-secondary)]">
@@ -103,7 +117,7 @@ function TaskDetails({ task }: { task: EngineTask }) {
         </a>
       </Detail>
       {task.why ? <Detail label="Why this page">{task.why}</Detail> : null}
-      {task.kind === "growth_action" ? <Parts task={task} /> : null}
+      {task.kind === "growth_action" ? <Parts task={task} clientId={clientId} onChange={onChange} /> : null}
       {task.steps.length > 0 ? (
         <Detail label={task.kind === "growth_action" ? "The parts, and what to do in each" : "Steps"}>
           <Steps steps={task.steps} grouped={task.kind === "growth_action"} />
@@ -294,7 +308,7 @@ function TaskRow({
           Drop
         </button>
       </div>
-      {open ? <TaskDetails task={task} /> : null}
+      {open ? <TaskDetails task={task} clientId={clientId} onChange={onChange} /> : null}
       {error ? (
         <p role="alert" className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-800">
           {error}

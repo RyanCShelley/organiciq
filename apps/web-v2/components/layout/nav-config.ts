@@ -13,6 +13,7 @@ export const GROUPS: NavGroup[] = [
       { label: "OrganicIQ insights", path: "/bi" },
       { label: "Ads Accelerator", path: "/ads", ads: true },
       { label: "Decision engine", path: "/engine" },
+      { label: "Completed work", path: "/annotations" },
     ],
   },
   {

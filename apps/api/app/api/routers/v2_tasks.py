@@ -25,7 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import part_tools, task_results, teamwork_subtasks
+from app.services import part_done, part_tools, task_results, teamwork_subtasks
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -224,7 +224,7 @@ def update_task(
     task_id: UUID,
     payload: TaskUpdate,
     client: Annotated[Client, Depends(require_client)],
-    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     task = _get(db, client, task_id)
@@ -243,9 +243,35 @@ def update_task(
             task.status = payload.status
         task.shipped_at = datetime.now(timezone.utc) if payload.status == "shipped" else None
         if payload.status == "shipped":
+            # Every part is done, and each writes its own annotation.
+            part_done.set_all(db, client, task, True, user.email)
             task_results.take_baseline(db, client, task)
+        elif task.parts:
+            part_done.set_all(db, client, task, False, user.email)
     db.commit()
     db.refresh(task)
+    return _out(task)
+
+
+class PartDone(BaseModel):
+    done: bool
+
+
+@router.patch("/{task_id}/parts/{index}")
+def mark_part(
+    task_id: UUID,
+    index: int,
+    payload: PartDone,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Mark one part of an action done, or not done. Done writes an annotation for it; the action ships itself when every part is done."""
+    task = _get(db, client, task_id)
+    try:
+        part_done.set_part(db, client, task, index, payload.done, user.email)
+    except IndexError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _out(task)
 
 

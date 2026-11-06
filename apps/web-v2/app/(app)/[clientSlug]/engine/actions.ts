@@ -125,3 +125,12 @@ export async function buildGrowthActionAction(
     return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };
   }
 }
+
+export async function markPartAction(clientId: string, id: string, index: number, done: boolean): Promise<TaskResult> {
+  try {
+    const task = await apiFetch<EngineTask>(`/v2/engine/tasks/${id}/parts/${index}`, { method: "PATCH", clientId, body: { done } });
+    return { ok: true, value: task };
+  } catch (error) {
+    return failure(error, "The part could not be updated: the API did not answer.");
+  }
+}
