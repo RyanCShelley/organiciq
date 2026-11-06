@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm
+from app.models.ads import AdsDaily, AdsLsaLead, AdsMarketDaily, AdsSearchTerm, ClientAdsAccount
 from app.models.client import Client
 from app.services.monthly_review import parse_month, previous_month
 
@@ -61,6 +61,41 @@ def _markets(db: Session, client: Client, first: date, last: date) -> list[dict[
     return out
 
 
+def _words(value: str) -> str:
+    return (value or "Not stated").replace("_", " ").capitalize()
+
+
+def _lsa(db: Session, client: Client, first: date, last: date, prev_first: date, prev_last: date) -> dict[str, Any] | None:
+    """Local Services Ads: the leads created in the month (how many, how they came in, what became of them), and what the account spent."""
+    accounts = {a.customer_id for a in db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id, ClientAdsAccount.kind == "lsa")}
+    in_month = db.query(AdsLsaLead).filter(AdsLsaLead.client_id == client.id, AdsLsaLead.date >= first, AdsLsaLead.date <= last).all()
+    before = db.query(AdsLsaLead).filter(AdsLsaLead.client_id == client.id, AdsLsaLead.date >= prev_first, AdsLsaLead.date <= prev_last).all()
+    if not accounts and not in_month and not before:
+        return None
+    spend = _totals(db.query(AdsDaily).filter(AdsDaily.client_id == client.id, AdsDaily.account_id.in_(accounts), AdsDaily.date >= first, AdsDaily.date <= last).all()) if accounts else _totals([])
+    charged = sum(1 for l in in_month if l.charged)
+
+    def counted(key: str) -> list[dict[str, Any]]:
+        n: dict[str, int] = defaultdict(int)
+        for l in in_month:
+            n[_words(getattr(l, key))] += 1
+        return [{"name": k, "leads": v} for k, v in sorted(n.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+    weekly = []
+    cursor = first
+    while cursor <= last:
+        end = min(cursor + timedelta(days=6 - cursor.weekday()), last)
+        part = [l for l in in_month if cursor <= l.date <= end]
+        if part:
+            weekly.append({"week": _week_label(cursor, end), "leads": len(part), "charged": sum(1 for l in part if l.charged)})
+        cursor = end + timedelta(days=1)
+    return {
+        "leads": len(in_month), "charged": charged, "previous": {"leads": len(before), "charged": sum(1 for l in before if l.charged)} if before else None,
+        "cost": spend["cost"], "impressions": spend["impressions"], "clicks": spend["clicks"], "cost_per_charged_lead": round(spend["cost"] / charged, 2) if charged and spend["cost"] else None,
+        "by_status": counted("lead_status"), "by_type": counted("lead_type"), "weekly": weekly,
+    }
+
+
 def _week_label(start: date, end: date) -> str:
     return f"{start:%b} {start.day}–{end.day}" if start.month == end.month else f"{start:%b} {start.day}–{end:%b} {end.day}"
 
@@ -102,7 +137,7 @@ def report(db: Session, client: Client, month: str) -> dict[str, Any]:
         "source": held[2], "reason": None if rows else "The ads did not run this month.",
         "totals": _totals(rows), "previous": _totals(prev_rows) if prev_rows else None, "weekly": _weekly(rows, first, last), "groups": _by(rows, "ad_group"),
         "terms": [{"term": t, "ad_group": g, "clicks": int(c or 0), "cost": round(_f(cost), 2)} for t, g, c, cost in terms[:TERMS_SHOWN]],
-        "markets": _markets(db, client, first, last), "devices": _by(rows, "device"),
+        "markets": _markets(db, client, first, last), "devices": _by(rows, "device"), "lsa": _lsa(db, client, first, last, prev_first, prev_last),
     }
 
 

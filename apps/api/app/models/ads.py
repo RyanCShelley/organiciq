@@ -9,7 +9,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -108,3 +108,25 @@ class ClientAdsAccount(Base):
     last_pull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdsLsaLead(Base):
+    """One Local Services Ads lead, by the day it was created. Its status changes later (new, active, booked, declined), so recent ones are pulled again."""
+
+    __tablename__ = "ads_lsa_leads"
+    __table_args__ = (
+        UniqueConstraint("client_id", "account_id", "lead_id", name="uq_ads_lsa_leads_lead"),
+        Index("ix_ads_lsa_leads_client_date", "client_id", "date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
+    lead_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    #: PHONE_CALL, MESSAGE or BOOKING, as Google names them.
+    lead_type: Mapped[str] = mapped_column(String(24), nullable=False, default="", server_default="")
+    #: NEW, ACTIVE, BOOKED, DECLINED, EXPIRED and so on, as Google names them.
+    lead_status: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    charged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    category_id: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")

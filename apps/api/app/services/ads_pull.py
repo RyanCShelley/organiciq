@@ -13,12 +13,12 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.integrations import google_ads
-from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm, ClientAdsAccount
+from app.models.ads import AdsDaily, AdsLsaLead, AdsMarketDaily, AdsSearchTerm, ClientAdsAccount
 from app.models.client import Client
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
 from app.models.scheduler import SchedulerCheckpoint
@@ -133,51 +133,115 @@ def _window(db: Session, client: Client, account_id: str, today: date) -> tuple[
     return today - timedelta(days=REFRESH_DAYS if held else FIRST_PULL_DAYS), today
 
 
-def _replace(db: Session, client: Client, account_id: str, start: date, end: date, daily: list, markets: list, terms: list) -> None:
-    for model in (AdsDaily, AdsMarketDaily, AdsSearchTerm):
-        db.query(model).filter(model.client_id == client.id, model.account_id == account_id, model.date >= start, model.date <= end).delete(synchronize_session=False)
-        db.query(model).filter(model.client_id == client.id, model.source == "demo").delete(synchronize_session=False)  # demo rows go with the first real pull
-    for r in daily:
+LEADS = (
+    "SELECT local_services_lead.id, local_services_lead.lead_type, local_services_lead.lead_status, local_services_lead.lead_charged, local_services_lead.category_id, "
+    "local_services_lead.creation_date_time FROM local_services_lead WHERE local_services_lead.creation_date_time >= '{start} 00:00:00'"
+)
+#: A lead's status changes after it arrives (new, then booked or declined), so leads are pulled again this far back every time.
+LEAD_REFRESH_DAYS = 60
+#: One query asks for no more than this many days: a long window on a big account is slow enough to time out.
+CHUNK_DAYS = 30
+
+
+def _chunked(token: str, customer: str, template: str, start: date, end: date) -> list[dict[str, Any]]:
+    """Every row of one report over the window, asked for in 30-day parts."""
+    rows: list[dict[str, Any]] = []
+    cursor = start
+    while cursor <= end:
+        last = min(cursor + timedelta(days=CHUNK_DAYS - 1), end)
+        rows += google_ads.search(token, customer, template.format(start=cursor.isoformat(), end=last.isoformat()))
+        cursor = last + timedelta(days=1)
+    return rows
+
+
+def _leads(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        lead = r.get("localServicesLead") or {}
+        lead_id, created = str(lead.get("id") or ""), str(lead.get("creationDateTime") or "")[:10]
+        if lead_id and created:
+            out[lead_id] = {"lead_id": lead_id, "date": created, "lead_type": str(lead.get("leadType") or ""), "lead_status": str(lead.get("leadStatus") or ""),
+                            "charged": bool(lead.get("leadCharged")), "category_id": str(lead.get("categoryId") or "")}
+    return list(out.values())
+
+
+def _replace(db: Session, client: Client, account_id: str, start: date, end: date, daily: list | None, markets: list | None, terms: list | None, leads: list | None = None, lead_start: date | None = None) -> None:
+    """Replace the window in each table whose pull worked. A table whose pull failed keeps what it had."""
+    db.query(AdsDaily).filter(AdsDaily.client_id == client.id, AdsDaily.source == "demo").delete(synchronize_session=False)  # demo rows go with the first real pull
+    db.query(AdsMarketDaily).filter(AdsMarketDaily.client_id == client.id, AdsMarketDaily.source == "demo").delete(synchronize_session=False)
+    db.query(AdsSearchTerm).filter(AdsSearchTerm.client_id == client.id, AdsSearchTerm.source == "demo").delete(synchronize_session=False)
+    for model, rows in ((AdsDaily, daily), (AdsMarketDaily, markets), (AdsSearchTerm, terms)):
+        if rows is not None:
+            db.query(model).filter(model.client_id == client.id, model.account_id == account_id, model.date >= start, model.date <= end).delete(synchronize_session=False)
+    for r in daily or []:
         db.add(AdsDaily(client_id=client.id, account_id=account_id, date=date.fromisoformat(r["date"]), campaign=r["campaign"], ad_group=r["ad_group"], device=r["device"], impressions=r["impressions"],
                         clicks=r["clicks"], cost=r["cost"], conversions=r["conversions"], eligible_impressions=r["eligible"], source="google_ads"))
-    for r in markets:
+    for r in markets or []:
         db.add(AdsMarketDaily(client_id=client.id, account_id=account_id, date=date.fromisoformat(r["date"]), campaign=r["campaign"], market=r["market"], impressions=r["impressions"], clicks=r["clicks"],
                               cost=r["cost"], conversions=r["conversions"], source="google_ads"))
-    for r in terms:
+    for r in terms or []:
         db.add(AdsSearchTerm(client_id=client.id, account_id=account_id, date=date.fromisoformat(r["date"]), term=r["term"], ad_group=r["ad_group"], impressions=r["impressions"], clicks=r["clicks"],
                              cost=r["cost"], conversions=r["conversions"]))
+    if leads is not None and lead_start is not None:
+        db.query(AdsLsaLead).filter(AdsLsaLead.client_id == client.id, AdsLsaLead.account_id == account_id, AdsLsaLead.date >= lead_start).delete(synchronize_session=False)
+        for r in leads:
+            db.add(AdsLsaLead(client_id=client.id, account_id=account_id, lead_id=r["lead_id"], date=date.fromisoformat(r["date"]), lead_type=r["lead_type"], lead_status=r["lead_status"],
+                              charged=r["charged"], category_id=r["category_id"]))
     try:
         db.flush()
-    except IntegrityError as exc:
+    except SQLAlchemyError as exc:
         db.rollback()
         raise google_ads.GoogleAdsError(f"The pulled rows could not be saved: {str(getattr(exc, 'orig', exc))[:200]}") from exc
 
 
 def pull_account(db: Session, client: Client, account: ClientAdsAccount, token: str, *, today: date) -> dict[str, Any]:
-    """One account: pull the window and replace what the tables held for it from that account."""
+    """One account. Each report (daily numbers, searches, markets, leads) is pulled on its own: one that fails is named and the rest are still kept.
+
+    Raises `GoogleAdsError` only when nothing at all could be pulled.
+    """
     customer = google_ads.digits(account.customer_id)
     start, end = _window(db, client, customer, today)
-    span = {"start": start.isoformat(), "end": end.isoformat()}
-    markets: list[dict[str, Any]] = []
-    terms: list[dict[str, Any]] = []
+    lead_start = min(start, today - timedelta(days=LEAD_REFRESH_DAYS))
+    errors: list[str] = []
+
+    def step(label: str, work: Any) -> Any:
+        try:
+            return work()
+        except google_ads.GoogleAdsError as exc:
+            errors.append(f"{label}: {exc}")
+            return None
+
+    daily = markets = terms = leads = None
     if account.kind == "lsa":
-        daily = _lsa_daily(google_ads.search(token, customer, LSA_DAILY.format(**span)))
+        got = step("Local Services campaigns", lambda: _chunked(token, customer, LSA_DAILY, start, end))
+        daily = None if got is None else _lsa_daily(got)
+        got = step("Local Services leads", lambda: google_ads.search(token, customer, LEADS.format(start=lead_start.isoformat())))
+        leads = None if got is None else _leads(got)
     else:
-        daily = _daily(google_ads.search(token, customer, DAILY.format(**span)))
-        terms = _terms(google_ads.search(token, customer, TERMS.format(**span)))
-        market_rows = google_ads.search(token, customer, MARKETS.format(**span))
-        ids = sorted({str((r.get("geographicView") or {}).get("countryCriterionId") or "") for r in market_rows} - {""} - set(COUNTRIES))
-        names: dict[str, str] = {}
-        if ids:
-            for r in google_ads.search(token, customer, COUNTRY_NAMES.format(ids=", ".join(ids))):
-                c = r.get("geoTargetConstant") or {}
-                names[str(c.get("id"))] = str(c.get("name") or "")
-        markets = _markets(market_rows, names)
-    _replace(db, client, customer, start, end, daily, markets, terms)
+        got = step("Daily performance", lambda: _chunked(token, customer, DAILY, start, end))
+        daily = None if got is None else _daily(got)
+        got = step("What people searched for", lambda: _chunked(token, customer, TERMS, start, end))
+        terms = None if got is None else _terms(got)
+
+        def market_rows() -> list[dict[str, Any]]:
+            rows = _chunked(token, customer, MARKETS, start, end)
+            ids = sorted({str((r.get("geographicView") or {}).get("countryCriterionId") or "") for r in rows} - {""} - set(COUNTRIES))
+            names: dict[str, str] = {}
+            if ids:
+                for r in google_ads.search(token, customer, COUNTRY_NAMES.format(ids=", ".join(ids))):
+                    c = r.get("geoTargetConstant") or {}
+                    names[str(c.get("id"))] = str(c.get("name") or "")
+            return _markets(rows, names)
+
+        markets = step("Markets", market_rows)
+    if daily is None and terms is None and markets is None and leads is None:
+        raise google_ads.GoogleAdsError("; ".join(errors))
+    _replace(db, client, customer, start, end, daily, markets, terms, leads, lead_start)
     account.last_pull_at = datetime.now(timezone.utc)
-    account.last_error = None
+    account.last_error = "; ".join(errors)[:500] if errors else None
     db.commit()
-    return {"account": customer, "from": span["start"], "to": span["end"], "days": len({r["date"] for r in daily}), "rows": len(daily), "markets": len(markets), "terms": len(terms)}
+    return {"account": customer, "from": start.isoformat(), "to": end.isoformat(), "days": len({r["date"] for r in daily or []}), "rows": len(daily or []), "markets": len(markets or []),
+            "terms": len(terms or []), "leads": len(leads or []), "errors": errors}
 
 
 def accounts_of(db: Session, client: Client) -> list[ClientAdsAccount]:
@@ -195,7 +259,9 @@ def pull(db: Session, client: Client, *, today: date | None = None) -> dict[str,
     errors: list[str] = []
     for account in accounts:
         try:
-            done.append(pull_account(db, client, account, token, today=today))
+            result = pull_account(db, client, account, token, today=today)
+            done.append(result)
+            errors += [f"{account.name or account.customer_id} · {e}" for e in result["errors"]]
         except google_ads.GoogleAdsError as exc:
             db.rollback()
             account.last_error = str(exc)[:500]
@@ -205,7 +271,7 @@ def pull(db: Session, client: Client, *, today: date | None = None) -> dict[str,
         raise google_ads.GoogleAdsError("; ".join(errors))
     return {
         "accounts": done, "errors": errors, "from": min(d["from"] for d in done), "to": max(d["to"] for d in done), "days": max(d["days"] for d in done),
-        "rows": sum(d["rows"] for d in done), "markets": sum(d["markets"] for d in done), "terms": sum(d["terms"] for d in done),
+        "rows": sum(d["rows"] for d in done), "markets": sum(d["markets"] for d in done), "terms": sum(d["terms"] for d in done), "leads": sum(d["leads"] for d in done),
     }
 
 

@@ -459,7 +459,7 @@ export function ConnectionsPanel({
                       <div className="rounded-lg bg-white p-3 text-xs text-[var(--text-secondary)]">
                         <div className="font-semibold text-[var(--text-primary,inherit)]">What this pull brought</div>
                         <ul className="mt-1 space-y-0.5">
-                          {adsPulled.accounts.map((p) => <li key={p.account}>{accounts.find((a) => a.customer_id === p.account)?.name || p.account}: {p.rows.toLocaleString()} daily rows over {p.days} days ({p.from} to {p.to}), {p.markets.toLocaleString()} market rows, {p.terms.toLocaleString()} search rows</li>)}
+                          {adsPulled.accounts.map((p) => <li key={p.account}>{accounts.find((a) => a.customer_id === p.account)?.name || p.account}: {p.rows.toLocaleString()} daily rows over {p.days} days ({p.from} to {p.to}), {p.markets.toLocaleString()} market rows, {p.terms.toLocaleString()} search rows{p.leads ? `, ${p.leads.toLocaleString()} Local Services leads` : ""}</li>)}
                         </ul>
                         {adsPulled.errors.map((e) => <p key={e} className="mt-1 text-red-700">{e}</p>)}
                       </div>

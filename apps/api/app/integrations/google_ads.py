@@ -21,7 +21,7 @@ from app.ingestion.google_credentials import _GOOGLE_PROVIDERS, workspace_google
 from app.models.integration import Integration
 
 BASE = "https://googleads.googleapis.com"
-TIMEOUT_SECONDS = 90.0
+TIMEOUT_SECONDS = 120.0
 
 _TOKEN_TTL = timedelta(minutes=45)
 _tokens: dict[str, tuple[str, datetime]] = {}

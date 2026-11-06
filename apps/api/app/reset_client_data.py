@@ -65,7 +65,7 @@ SYNCED = (
     "facts_ser_keywords", "facts_ser_rankings", "facts_ser_site_summary", "facts_serp_features",
     "ga4_lead_measurements", "ga4_native_channel_observations", "keyword_page_suggestions",
     "refresh_queue", "sync_jobs", "data_watermarks", "monthly_review_snapshots", "site_health_snapshots",
-    "ads_daily", "ads_market_daily", "ads_search_terms",
+    "ads_daily", "ads_market_daily", "ads_search_terms", "ads_lsa_leads",
 )
 SETUP = (
     "llm_responses", "llm_runs", "engine_tasks", "engine_actions", "client_focuses", "watchlist_keywords",
