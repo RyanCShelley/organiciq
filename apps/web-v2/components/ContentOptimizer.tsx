@@ -102,7 +102,7 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
               </button>
             ))}
           </div>
-          <p className="text-sm text-[var(--text-secondary)]">{queueKinds[kind].does} It works from the {num(page.searches_total)} searches this page earns in the last 90 days (Search Console) and the page&apos;s own words. Nothing is sent to the site.</p>
+          <p className="text-sm text-[var(--text-secondary)]">{queueKinds[kind].does} It works from the {num(page.searches_total)} {page.searches_total === 1 ? "search" : "searches"} this page earns in the last 90 days (Search Console) and the page&apos;s own words. Nothing is sent to the site.</p>
           <AskModel ready={page.model_ready} depth={depth} onDepth={setDepth} busy={pending || running} again={draft?.status === "done"} label={queueKinds[kind].label} onRun={write} />
           {draft?.status === "failed" ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{draft.error}</p> : null}
           {draft?.status === "done" ? <Result d={draft} /> : null}
