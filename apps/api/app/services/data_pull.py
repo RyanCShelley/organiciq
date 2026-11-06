@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.ads import ClientAdsAccount
 from app.models.client_bing_site import ClientBingSite
 from app.models.integration import Integration
 from app.models.job import SyncJob, SyncJobStatus
@@ -33,6 +34,7 @@ LABELS = {
     "se_ranking_ai": "SE Ranking: AI search",
     "site_crawl": "Site crawl",
     "bing_query_stats": "Bing Webmaster",
+    "google_ads": "Google Ads",
     "dataforseo_competitor_keywords": "Competitor rankings",
 }
 ACTIVE = (
@@ -86,6 +88,10 @@ def pull_plan(db: Session, client: Any, today: date | None = None) -> list[dict]
         plan.append({"source": "site_crawl", "start": today, "end": today, "reach": "the site as it is today"})
     if db.query(ClientBingSite).filter(ClientBingSite.client_id == client.id).first() is not None:
         plan.append({"source": "bing_query_stats", "start": today, "end": today, "reach": "everything Bing returns for the site"})
+    if db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id).first() is not None and (client.service_reporting or {}).get("ad_accelerator"):
+        from app.services.ads_pull import FIRST_PULL_DAYS
+
+        plan.append({"source": "google_ads", "start": today - timedelta(days=FIRST_PULL_DAYS), "end": today, "reach": "up to 90 days of daily data from each Google Ads account"})
     # The competitors named in settings: their rankings are bought once a month per competitor, so pulling again within the
     # month reads nothing new and costs nothing.
     from app.ingestion.dataforseo.competitor_keywords import named_competitors

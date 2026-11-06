@@ -225,6 +225,7 @@ def _job_handlers() -> dict[str, object]:
     )
     from app.ingestion.seranking.pipeline_domain import run_seranking_domain_keywords_job
     from app.llm_visibility.runner import run_llm_visibility_job
+    from app.services.ads_pull import run_google_ads_job
     from app.services.bing_sync import run_bing_query_stats_job
 
     return {
@@ -260,6 +261,8 @@ def _job_handlers() -> dict[str, object]:
         "site_crawl": run_site_crawl_job,
         # Bing's query statistics are weekly; scheduled by daily_sync.enqueue_due_bing_syncs.
         "bing_query_stats": run_bing_query_stats_job,
+        # Google Ads for a client on Ads Accelerator, every account it has; queued daily by ads_pull.maybe_pull_ads and by Pull data.
+        "google_ads": run_google_ads_job,
         # Asks the AI platforms the watchlist's paired prompts; monthly, by daily_sync.enqueue_due_llm_runs.
         "llm_visibility": run_llm_visibility_job,
     }

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.integrations import google_ads
-from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm
+from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm, ClientAdsAccount
 from app.services import ads_pull
 from tests.conftest import client_header
 
@@ -42,7 +42,7 @@ def fake_search(calls):
 @pytest.fixture
 def ads_client(db, client_a, monkeypatch):
     client_a.service_reporting = {"organiciq": True, "ad_accelerator": True}
-    client_a.google_ads_customer_id = "1835262013"
+    db.add(ClientAdsAccount(client_id=client_a.id, customer_id="1835262013", name="Aquaman", kind="ads"))
     db.commit()
     calls: list = []
     monkeypatch.setattr(google_ads, "access_token", lambda db: "token")
@@ -65,7 +65,8 @@ def test_a_pull_turns_googles_rows_into_days_terms_and_markets_and_clears_the_de
     assert days[(date(2026, 11, 4), "Desktop")].eligible_impressions == 100
     assert {m.market: m.clicks for m in db.query(AdsMarketDaily).filter(AdsMarketDaily.client_id == client.id)} == {"United States": 5, "Japan": 1}
     assert [(t.term, t.clicks) for t in db.query(AdsSearchTerm).filter(AdsSearchTerm.client_id == client.id)] == [("pool leak detection near me", 3)]
-    assert client.google_ads_last_pull_at is not None and client.google_ads_last_error is None
+    account = db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id).one()
+    assert account.last_pull_at is not None and account.last_error is None
     assert all(c[0] == "1835262013" for c in calls) and len(calls) == 4, "the account is used as digits; Japan is looked up, the United States is known"
 
 
@@ -75,6 +76,51 @@ def test_a_later_pull_reaches_back_two_weeks_and_replaces_the_window(db, ads_cli
     again = ads_pull.pull(db, client, today=TODAY)
     assert again["from"] == (TODAY - timedelta(days=14)).isoformat()
     assert db.query(AdsDaily).filter(AdsDaily.client_id == client.id).count() == 2, "the same days are not added twice"
+
+
+def test_a_client_can_have_several_accounts_and_an_lsa_account_is_read_by_campaign(db, ads_client, monkeypatch):
+    client, calls = ads_client
+    db.add(ClientAdsAccount(client_id=client.id, customer_id="9876543210", name="Aquaman LSA", kind="lsa"))
+    db.commit()
+
+    def search(token, customer, query):
+        calls.append((customer, query))
+        if customer == "9876543210":
+            assert "LOCAL_SERVICES" in query
+            return [{"segments": {"date": "2026-11-03"}, "campaign": {"name": "Local Services"}, "metrics": {"impressions": "40", "clicks": "7", "costMicros": "140000000"}}]
+        return fake_search([])(token, customer, query)
+
+    monkeypatch.setattr(google_ads, "search", search)
+    stats = ads_pull.pull(db, client, today=TODAY)
+    assert len(stats["accounts"]) == 2 and stats["errors"] == []
+    mine = {(r.account_id, r.ad_group): r for r in db.query(AdsDaily).filter(AdsDaily.client_id == client.id)}
+    assert ("9876543210", "Local Services") in mine and mine[("9876543210", "Local Services")].cost == Decimal("140.00") and mine[("9876543210", "Local Services")].device == ""
+    assert {r.account_id for r in db.query(AdsDaily).filter(AdsDaily.client_id == client.id)} == {"1835262013", "9876543210"}
+    # one account failing is recorded on it, the other still pulls
+    def half(token, customer, query):
+        if customer == "9876543210":
+            raise google_ads.GoogleAdsError("PERMISSION_DENIED: not linked")
+        return fake_search([])(token, customer, query)
+
+    monkeypatch.setattr(google_ads, "search", half)
+    again = ads_pull.pull(db, client, today=TODAY)
+    assert len(again["accounts"]) == 1 and "Aquaman LSA: PERMISSION_DENIED" in again["errors"][0]
+    lsa = db.query(ClientAdsAccount).filter(ClientAdsAccount.customer_id == "9876543210").one()
+    assert "not linked" in lsa.last_error
+    assert db.query(AdsDaily).filter(AdsDaily.client_id == client.id, AdsDaily.account_id == "9876543210").count() == 1, "its earlier rows stay when its refresh fails"
+
+
+def test_google_ads_is_a_pull_data_source_and_runs_as_a_job(db, ads_client):
+    from app.models.job import SyncJob, SyncJobStatus
+    from app.schemas import SyncJobCreate
+    from app.services import data_pull, jobs
+
+    client, _ = ads_client
+    plan = {p["source"]: p for p in data_pull.pull_plan(db, client, today=TODAY)}
+    assert plan["google_ads"]["label"] == "Google Ads" and "90 days" in plan["google_ads"]["reach"]
+    job = jobs.enqueue_sync_job(db, client.id, SyncJobCreate(source="google_ads", start_date=TODAY, end_date=TODAY))
+    done = jobs.process_job(db, db.get(SyncJob, job.id))
+    assert done.status == SyncJobStatus.SUCCESSFUL and done.records_written == 2 and "through" in done.error_message
 
 
 def test_a_pull_needs_an_account_and_says_so(db, client_a):
@@ -92,7 +138,16 @@ def test_the_daily_run_pulls_each_client_on_ads_accelerator_and_records_a_failur
     monkeypatch.setattr(google_ads, "search", refuse)
     assert ads_pull.maybe_pull_ads(db) is True
     db.refresh(client)
-    assert "not linked" in client.google_ads_last_error and client.google_ads_last_pull_at is None
+    from app.models.job import SyncJob
+
+    jobs = db.query(SyncJob).filter(SyncJob.client_id == client.id, SyncJob.source == "google_ads").all()
+    assert len(jobs) == 1, "queued as a job, so it shows in Pull data"
+    from app.services import jobs as job_runner
+
+    done = job_runner.process_job(db, jobs[0])
+    assert done.status.value == "failed" and "not linked" in done.error_message
+    account = db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id).one()
+    assert "not linked" in account.last_error and account.last_pull_at is None
     assert ads_pull.maybe_pull_ads(db) is False, "once a day"
 
 
@@ -112,21 +167,26 @@ def test_googles_rest_rows_are_read_and_its_errors_are_put_in_plain_words(monkey
     assert google_ads.digits("183-526-2013") == "1835262013"
 
 
-def test_the_connection_can_be_read_chosen_and_pulled_by_an_admin(client, db, client_a, admin_user, team_user, monkeypatch):
+def test_accounts_can_be_added_removed_and_pulled_by_an_admin(client, db, client_a, admin_user, team_user, monkeypatch):
     client_a.service_reporting = {"organiciq": True, "ad_accelerator": True}
     db.commit()
     hd, ht = client_header(client_a.id, admin_user.email), client_header(client_a.id, team_user.email)
     state = client.get("/v2/ads/connection", headers=hd).json()
-    assert state["customer_id"] is None and state["permission"] is False and state["enabled"] is True
-    assert client.put("/v2/ads/connection", json={"customer_id": "12345"}, headers=hd).status_code == 400
-    assert client.put("/v2/ads/connection", json={"customer_id": "183-526-2013"}, headers=ht).status_code == 403, "choosing the account is for admins"
-    assert client.put("/v2/ads/connection", json={"customer_id": "183-526-2013"}, headers=hd).json() == {"customer_id": "1835262013"}
+    assert state["accounts"] == [] and state["permission"] is False and state["enabled"] is True
+    assert client.post("/v2/ads/accounts", json={"customer_id": "12345"}, headers=hd).status_code == 400
+    assert client.post("/v2/ads/accounts", json={"customer_id": "183-526-2013"}, headers=ht).status_code == 403, "choosing accounts is for admins"
+    one = client.post("/v2/ads/accounts", json={"customer_id": "183-526-2013", "name": "Aquaman"}, headers=hd).json()
+    two = client.post("/v2/ads/accounts", json={"customer_id": "987-654-3210", "name": "Aquaman LSA", "kind": "lsa"}, headers=hd).json()
+    assert one["customer_id"] == "1835262013" and one["kind"] == "ads" and two["kind"] == "lsa"
+    assert [a["customer_id"] for a in client.get("/v2/ads/connection", headers=hd).json()["accounts"]] == ["1835262013", "9876543210"]
     monkeypatch.setattr(google_ads, "access_token", lambda db: "token")
     monkeypatch.setattr(google_ads, "list_accounts", lambda token: [{"id": "1835262013", "name": "Demo"}])
-    assert client.get("/v2/ads/accounts", headers=hd).json() == {"accounts": [{"id": "1835262013", "name": "Demo"}]}
-    monkeypatch.setattr(google_ads, "search", fake_search([]))
+    assert client.get("/v2/ads/available", headers=hd).json() == {"accounts": [{"id": "1835262013", "name": "Demo"}]}
+    monkeypatch.setattr(google_ads, "search", lambda token, customer, query: fake_search([])(token, customer, query) if customer == "1835262013" else [])
     pulled = client.post("/v2/ads/pull", headers=hd)
-    assert pulled.status_code == 200 and pulled.json()["rows"] == 2
+    assert pulled.status_code == 200 and pulled.json()["rows"] == 2 and len(pulled.json()["accounts"]) == 2
+    assert client.delete("/v2/ads/accounts/987-654-3210", headers=hd).json() == {"deleted": True}
+    assert client.delete("/v2/ads/accounts/987-654-3210", headers=hd).status_code == 404
 
     def refuse(token, customer, query):
         raise google_ads.GoogleAdsError("Google Ads has not been approved on the Google connection.")
@@ -134,4 +194,4 @@ def test_the_connection_can_be_read_chosen_and_pulled_by_an_admin(client, db, cl
     monkeypatch.setattr(google_ads, "search", refuse)
     failed = client.post("/v2/ads/pull", headers=hd)
     assert failed.status_code == 502 and "not been approved" in failed.json()["detail"]
-    assert "not been approved" in client.get("/v2/ads/connection", headers=hd).json()["last_error"]
+    assert "not been approved" in client.get("/v2/ads/connection", headers=hd).json()["accounts"][0]["last_error"]

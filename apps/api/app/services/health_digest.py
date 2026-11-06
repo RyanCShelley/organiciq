@@ -62,6 +62,7 @@ _LABELS = {
     "ga4": "Google Analytics",
     "se_ranking_ai": "SE Ranking AI",
     "site_crawl": "Site crawl",
+    "google_ads": "Google Ads",
 }
 _SITE = re.compile(r"/sites/([^/]+)/")
 
