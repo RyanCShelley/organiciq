@@ -57,3 +57,9 @@ def test_a_consulting_client_has_no_monthly_cap_on_its_plan(client, db, admin_us
         client.post("/v2/engine/tasks", json={"month": "2026-11", "kind": "suggestion", "rule_id": f"S-{i}", "search": "q", "page": f"https://clienta.example/p{i}", "title": "t", "steps": ["x"], "evidence": []}, headers=h)
     allowance = client.get("/v2/engine/tasks?month=2026-11", headers=h).json()["allowance"]
     assert allowance == {"monthly": None, "used": 3, "over": False}
+
+
+def test_a_client_cannot_take_an_address_the_web_app_uses(client, db, admin_user):
+    out = make(client, admin_user, client_name="Consulting").json()
+    assert out["slug"] == "consulting-2"
+    assert make(client, admin_user, client_name="Admin", domain="admin.example").json()["slug"] == "admin-2"

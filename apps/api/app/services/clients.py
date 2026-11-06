@@ -25,6 +25,10 @@ def slugify_client_name(value: str) -> str:
     return text_value or "client"
 
 
+#: Top-level addresses of the web app. A client slug is the first part of a client's address, so one of these would hide that client (or the page).
+RESERVED_SLUGS = frozenset({"consulting", "admin", "new-client", "login", "api"})
+
+
 def allocate_client_slug(
     db: Session,
     *,
@@ -38,7 +42,7 @@ def allocate_client_slug(
         query = db.query(Client).filter(Client.slug == candidate)
         if exclude_client_id is not None:
             query = query.filter(Client.id != exclude_client_id)
-        if query.one_or_none() is None:
+        if candidate not in RESERVED_SLUGS and query.one_or_none() is None:
             return candidate
         candidate = f"{base}-{n}"
         n += 1

@@ -39,7 +39,7 @@ export function AddSitesForm({ tiers }: { tiers: Tier[] }) {
         </Field>
         <Field label="How we work with them">
           <select value={mode} onChange={(e) => setMode(e.target.value as "execution" | "consulting")} className={inputClass}>
-            <option value="consulting">Consulting: we hand their team a report</option>
+            <option value="consulting">Consulting: advisory portal; their team does the work</option>
             <option value="execution">Execution: we do the work</option>
           </select>
         </Field>

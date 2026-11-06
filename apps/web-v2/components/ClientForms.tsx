@@ -87,7 +87,7 @@ function ServiceSelect({
 
 const MODES = [
   { value: "execution", label: "Execution: we do the work and track it here" },
-  { value: "consulting", label: "Consulting: we review the data and hand their team a report" },
+  { value: "consulting", label: "Consulting: advisory portal; their team does the work" },
 ] as const;
 
 function ModeSelect({ value, onChange }: { value: string; onChange: (v: "execution" | "consulting") => void }) {

@@ -77,7 +77,7 @@ class Client(Base):
     #: orders and revenue, a lead-gen client on leads; the dashboard and baseline read this.
     business_model: Mapped[str | None] = mapped_column(String(16), nullable=True)
     service_reporting: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    #: execution: we do the work and track it here. consulting: we review the data and hand the client's own team a report; they never log in.
+    #: execution: we do the work and track it here. consulting: we review the data and give the client's own team a portal of published findings and action plans, advisory only (we do not do the work).
     service_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="execution", server_default="execution")
     group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("client_groups.id", ondelete="SET NULL"), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/New_York")
