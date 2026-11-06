@@ -9,7 +9,7 @@ import { inputClass } from "@/components/ui/form";
 import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { AdsAccount, AdsConnection, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
+import type { AdsAccount, AdsConnection, AdsDiagnosis, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Tone = "ok" | "warn" | "bad" | "off";
@@ -204,6 +204,16 @@ export function ConnectionsPanel({
   const [adsError, setAdsError] = useState<string | null>(null);
   const [adsKind, setAdsKind] = useState<"ads" | "lsa">("ads");
   const [adsRemoving, startAdsRemove] = useTransition();
+  const [adsChecking, startAdsCheck] = useTransition();
+  const [adsReport, setAdsReport] = useState<AdsDiagnosis | null>(null);
+  const [adsReportError, setAdsReportError] = useState<string | null>(null);
+  const checkAds = () =>
+    startAdsCheck(async () => {
+      setAdsReportError(null);
+      const r = await act.diagnoseAdsAction(client.id);
+      if (r.ok) setAdsReport(r.data);
+      else setAdsReportError(r.error);
+    });
 
   const googleLinked = gsc?.connection_status === "connected" || ga4?.connection_status === "connected";
   const connectGoogle = () =>
@@ -431,6 +441,44 @@ export function ConnectionsPanel({
                     <Problem text={adsError} />
                   </div>
                 ) : <p className="text-sm text-[var(--text-secondary)]">Ask an admin to add the Google Ads accounts.</p>}
+                {isAdmin && accounts.length > 0 ? (
+                  <div className="space-y-2 border-t border-[var(--border)] pt-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button type="button" disabled={adsChecking} onClick={checkAds} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-white disabled:opacity-50">
+                        {adsChecking ? <><Spinner />Asking Google Ads…</> : "Check what works"}
+                      </button>
+                      <span className="text-xs text-[var(--text-tertiary)]">Asks Google Ads what each account returns for the last 30 days. Read-only; nothing is saved.</span>
+                    </div>
+                    <Problem text={adsReportError} />
+                    {adsReport ? (
+                      <div className="space-y-3 text-sm">
+                        <p className="text-xs text-[var(--text-tertiary)]">Checked {new Date(adsReport.checked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}, the last {adsReport.days} days.</p>
+                        {adsReport.accounts.map((a) => (
+                          <div key={a.customer_id} className="rounded-lg border border-[var(--border)] bg-white">
+                            <div className="border-b border-[var(--border)] px-3 py-2 font-semibold">{a.name || a.customer_id} <span className="font-normal text-[var(--text-tertiary)]">· {a.kind === "lsa" ? "Local Services Ads" : "Ads"} · {a.customer_id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3")}</span></div>
+                            <ul className="divide-y divide-[var(--border)]">
+                              {a.checks.map((c) => (
+                                <li key={c.name} className="flex gap-3 px-3 py-2">
+                                  <span className={`w-16 shrink-0 text-xs font-semibold ${c.status === "ok" ? "text-green-700" : c.status === "empty" ? "text-amber-700" : "text-red-700"}`}>{c.status === "ok" ? "Works" : c.status === "empty" ? "Empty" : "Refused"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-semibold">{c.name}</div>
+                                    <div className={c.status === "error" ? "text-red-800" : "text-[var(--text-secondary)]"}>{c.detail}</div>
+                                    {c.sample ? (
+                                      <details className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                                        <summary className="cursor-pointer font-semibold">First row Google sent</summary>
+                                        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-[var(--bg)] p-2">{c.sample}</pre>
+                                      </details>
+                                    ) : null}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             )}
           </Row>

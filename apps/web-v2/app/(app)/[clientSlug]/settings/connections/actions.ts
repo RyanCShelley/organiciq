@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { ConnectResult, OptionsResult } from "@/lib/connections";
+import type { AdsDiagnosis, ConnectResult, OptionsResult } from "@/lib/connections";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -205,4 +205,13 @@ export async function pullAdsAction(clientId: string, slug: string): Promise<Act
   const result = await save(slug, "/v2/ads/pull", clientId, undefined);
   revalidatePath(`/${slug}/ads`);
   return result;
+}
+
+/** Ask Google Ads, account by account, what it returns: what works, what is empty, what is refused. Read-only; nothing is stored. */
+export async function diagnoseAdsAction(clientId: string): Promise<{ ok: true; data: AdsDiagnosis } | { ok: false; error: string }> {
+  try {
+    return { ok: true, data: await apiFetch<AdsDiagnosis>("/v2/ads/diagnose", { method: "POST", clientId }) };
+  } catch (error) {
+    return { ok: false, error: message(error, DID_NOT_ANSWER) };
+  }
 }
