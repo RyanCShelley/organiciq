@@ -70,7 +70,7 @@ SYNCED = (
 SETUP = (
     "llm_responses", "llm_runs", "engine_tasks", "engine_actions", "client_focuses", "watchlist_keywords",
     "watchlist_buckets", "client_llm_prompts", "client_llm_settings", "client_feeds", "client_completion_patterns",
-    "client_conversion_pages", "conversion_definitions", "baseline_versions", "monthly_records", "decision_thresholds",
+    "client_conversion_pages", "conversion_definitions", "lead_exclusions", "baseline_versions", "monthly_records", "decision_thresholds",
     "constraint_overrides", "excluded_pages", "client_page_stages", "keyword_targets", "watch_targets",
     "decisions", "topics",
 )

@@ -13,6 +13,7 @@ from app.models.client import Client
 from app.models.config import ConversionDefinition
 from app.models.crawl import FactCrawlPageSchema, FactCrawlPageSnapshot
 from app.models.ga4 import FactGa4Event
+from app.services.lead_exclusions import excluded_leads_since, not_excluded
 
 #: How far back "a history of leads" looks, before the silent fortnight.
 PRIOR_WINDOW_DAYS = 90
@@ -74,6 +75,9 @@ def read_incident_signals(
     ]
     days_since_last_lead: int | None = None
     prior_leads = 0.0
+    excluded_count = 0.0
+    excluded_last: date | None = None
+    keep = not_excluded(db, client.id)
     if lead_events:
         last = (
             db.query(func.max(FactGa4Event.date))
@@ -82,8 +86,18 @@ def read_incident_signals(
                 FactGa4Event.event_name.in_(lead_events),
                 FactGa4Event.event_count > 0,
                 FactGa4Event.date <= today,
+                keep,
             )
             .scalar()
+        )
+        # Leads that exist but are excluded as test submissions, newer than
+        # the last real one: what the owner sees that the engine does not.
+        excluded_count, excluded_last = excluded_leads_since(
+            db,
+            client.id,
+            lead_events,
+            (last + timedelta(days=1)) if last is not None else today - timedelta(days=PRIOR_WINDOW_DAYS),
+            today,
         )
         if last is not None:
             days_since_last_lead = (today - last).days
@@ -94,6 +108,7 @@ def read_incident_signals(
                     FactGa4Event.event_name.in_(lead_events),
                     FactGa4Event.date >= last - timedelta(days=PRIOR_WINDOW_DAYS),
                     FactGa4Event.date <= last,
+                    keep,
                 )
                 .scalar()
                 or 0
@@ -153,6 +168,8 @@ def read_incident_signals(
 
     return IncidentSignals(
         days_since_last_lead=days_since_last_lead,
+        excluded_leads_since_last=excluded_count,
+        excluded_last_lead_date=excluded_last.isoformat() if excluded_last else None,
         leads_in_prior_window=prior_leads,
         indexable_now=indexable_now,
         indexable_before=indexable_before,

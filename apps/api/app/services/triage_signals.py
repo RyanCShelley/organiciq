@@ -23,6 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.decisions.triage import LeadSignals, TrafficSignals, VisibilitySignals
+from app.services.lead_exclusions import not_excluded
 from app.models.client import Client
 from app.models.config import ClientConversionPage, ConversionDefinition, OrganicChannel
 from app.models.crawl import FactCrawlInternalLink
@@ -443,6 +444,7 @@ def lead_signals(db: Session, client: Client, *, today: date) -> LeadSignals:
             .filter(
                 FactGa4Event.client_id == client.id,
                 FactGa4Event.event_name.in_(events),
+                not_excluded(db, client.id),
                 FactGa4Event.date >= month_start,
                 FactGa4Event.date <= today,
                 FactGa4Event.channel.in_(MANAGED_CHANNELS),

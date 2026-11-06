@@ -59,6 +59,10 @@ class IncidentSignals:
     #: Lead events in the 90 days before that, so a client who has never had
     #: one is not reported as having stopped.
     leads_in_prior_window: float = 0.0
+    #: Lead events after the last counted one that a lead exclusion rule
+    #: removed as test submissions, and the latest date of one.
+    excluded_leads_since_last: float = 0.0
+    excluded_last_lead_date: str | None = None
 
     indexable_now: int | None = None
     indexable_before: int | None = None
@@ -88,6 +92,19 @@ def check(signals: IncidentSignals, *, month: str, slug: str) -> list[Incident]:
         and signals.days_since_last_lead >= LEAD_SILENCE_DAYS
         and signals.leads_in_prior_window > 0
     ):
+        excluded_note = ""
+        evidence = (f"facts_ga4_events: last lead {signals.days_since_last_lead} days ago",)
+        if signals.excluded_leads_since_last > 0:
+            excluded_note = (
+                f" {signals.excluded_leads_since_last:.0f} more lead events exist since "
+                f"(latest {signals.excluded_last_lead_date}) but are excluded as test "
+                "submissions. If they are real, remove the exclusion; if they are "
+                "tests, the silence is real."
+            )
+            evidence += (
+                f"lead_exclusions: {signals.excluded_leads_since_last:.0f} excluded lead "
+                f"events since the last counted one",
+            )
         found.append(
             Incident(
                 uid=f"{slug}-{month}-leads-stopped",
@@ -100,10 +117,9 @@ def check(signals: IncidentSignals, *, month: str, slug: str) -> list[Incident]:
                     "stopped is usually a broken tag rather than a broken "
                     "offer — and until it is checked, every lead number on "
                     "this page is wrong."
+                    f"{excluded_note}"
                 ),
-                evidence=(
-                    f"facts_ga4_events: last lead {signals.days_since_last_lead} days ago",
-                ),
+                evidence=evidence,
             )
         )
 
