@@ -61,7 +61,7 @@ export type TopicSearch = { term: string; volume: number | null; difficulty: num
 export type TopicDetail = { topic: Topic; searches: TopicSearch[]; draft: Brief | null; calendar: CalendarStatus | null; can_edit: boolean; model_ready: boolean };
 export type TopicsResponse = { draft: TopicsDraft | null; dismissed: string[]; model_ready: boolean };
 
-export type RefreshLabel = "growing" | "steady" | "slipping" | "losing" | "quiet" | "new";
+export type RefreshLabel = "tracking" | "growing" | "steady" | "slipping" | "losing" | "quiet" | "new";
 export type RefreshPage = {
   url: string;
   title: string | null;
@@ -83,7 +83,17 @@ export type RefreshPage = {
   on_topic: boolean;
   in_focus: boolean;
   topics: { term: string; volume: number | null; focus: boolean }[];
+  /** On a target topic, related to one by meaning, or neither. */
+  tier: "topic" | "related" | "unrelated";
+  related: { term: string; topic: string | null; similarity: number } | null;
+  /** Analytics sessions fell but Search Console clicks held up with the site, so the visits may be unrecorded. */
+  tracking_gap: boolean;
+  /** Search Console, over the last three months against the same three a year earlier. */
+  search: { clicks: Change; impressions: Change };
+  /** Bing clicks, counted for the page Search Console shows for each search. Null when Bing has none for this page. */
+  bing: { clicks: Change } | null;
 };
+export type Change = { current: number; last_year: number; change_pct: number | null };
 export type WatchTerm = { term: string; position: number; change: number | null; slipping: boolean; striking: boolean; volume: number | null };
 export type Competing = { query: string; impressions: number; pages: { url: string; impressions: number; clicks: number; position: number }[] };
 export type SplitSearchPage = {
@@ -117,8 +127,11 @@ export type Refreshes = {
   has_last_year: boolean;
   /** False when the client has no watchlist yet, so pages are not split by topic. */
   topics_known: boolean;
-  site: { sessions: { current: number; previous: number }; three_months: { current: number; last_year: number; change_pct: number | null } };
-  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; watch: number; at_stake: number; off_topic: number };
+  site: { sessions: { current: number; previous: number }; three_months: Change; clicks: Change };
+  /** Whether Search Console has enough data for last year to judge a page's clicks against the site's trend. */
+  search_available: boolean;
+  bing_available: boolean;
+  counts: { pages: number; losing: number; quiet: number; slipping: number; stale: number; thin: number; watch: number; at_stake: number; off_topic: number; related: number; tracking_gap: number };
   ignored_total: number;
   pages: RefreshPage[];
   pages_total: number;
