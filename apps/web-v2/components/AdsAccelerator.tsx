@@ -137,6 +137,37 @@ export function AdsAccelerator({ client, month, months, data, error }: { client:
           <Section title="Devices"><GroupTable rows={data.devices} first="Device" total={t} /></Section>
         </div>
 
+        {data.lsa ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Kpi label="Local Services leads" value={num(data.lsa.leads)} note={change(data.lsa.leads, data.lsa.previous?.leads)} />
+              <Kpi label="Charged leads" value={num(data.lsa.charged)} note={change(data.lsa.charged, data.lsa.previous?.charged)} />
+              <Kpi label="Local Services cost" value={money(data.lsa.cost)} />
+              <Kpi label="Cost per charged lead" value={money(data.lsa.cost_per_charged_lead)} />
+            </div>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Section title="Local Services leads by status">
+                <table className="w-full text-sm">
+                  <thead><tr><th className={th}>Status</th><th className={`${th} text-right`}>Leads</th></tr></thead>
+                  <tbody>{data.lsa.by_status.map((r) => <tr key={r.name} className="border-t border-[var(--border)]"><td className="px-3 py-2">{r.name}</td><td className={`${td} text-right`}>{num(r.leads)}</td></tr>)}</tbody>
+                </table>
+              </Section>
+              <Section title="Local Services leads by type">
+                <table className="w-full text-sm">
+                  <thead><tr><th className={th}>Type</th><th className={`${th} text-right`}>Leads</th></tr></thead>
+                  <tbody>{data.lsa.by_type.map((r) => <tr key={r.name} className="border-t border-[var(--border)]"><td className="px-3 py-2">{r.name}</td><td className={`${td} text-right`}>{num(r.leads)}</td></tr>)}</tbody>
+                </table>
+              </Section>
+            </div>
+            <Section title="Local Services leads, week by week">
+              <table className="w-full text-sm">
+                <thead><tr><th className={th}>Week</th><th className={`${th} text-right`}>Leads</th><th className={`${th} text-right`}>Charged</th></tr></thead>
+                <tbody>{data.lsa.weekly.map((w) => <tr key={w.week} className="border-t border-[var(--border)]"><td className="px-3 py-2">{w.week}</td><td className={`${td} text-right`}>{num(w.leads)}</td><td className={`${td} text-right`}>{num(w.charged)}</td></tr>)}</tbody>
+              </table>
+            </Section>
+          </>
+        ) : null}
+
         {data.period.through ? <p className="text-xs text-[var(--text-tertiary)]">Data through {day(data.period.through)}.</p> : null}
       </>
     );

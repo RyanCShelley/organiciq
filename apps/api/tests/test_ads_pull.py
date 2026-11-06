@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import re
+
 import httpx
 import pytest
 
@@ -14,24 +16,30 @@ from tests.conftest import client_header
 TODAY = date(2026, 11, 5)
 
 
+def within(rows, query):
+    """Google answers a query only with the days it asks for: the pull asks in 30-day parts, so a row must come back once."""
+    span = re.search(r"BETWEEN '(\d{4}-\d{2}-\d{2})' AND '(\d{4}-\d{2}-\d{2})'", query)
+    return [r for r in rows if not span or span.group(1) <= r["segments"]["date"] <= span.group(2)]
+
+
 def fake_search(calls):
     """Google's answers in the shape the REST API sends them: camelCase, and 64-bit integers as strings."""
 
     def search(token, customer, query):
         calls.append((customer, query))
         if "FROM ad_group" in query:
-            return [
+            return within([
                 {"segments": {"date": "2026-11-03", "device": "MOBILE"}, "campaign": {"name": "Pool"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "100", "clicks": "5", "costMicros": "62500000", "conversions": 1.5, "searchImpressionShare": 0.25}},
                 {"segments": {"date": "2026-11-03", "device": "MOBILE"}, "campaign": {"name": "Pool"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "20", "clicks": "1", "costMicros": "10000000"}},
                 {"segments": {"date": "2026-11-04", "device": "DESKTOP"}, "campaign": {"name": "Pool"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "50", "clicks": "2", "costMicros": "24000000", "searchImpressionShare": 0.5}},
-            ]
+            ], query)
         if "search_term_view" in query:
-            return [{"segments": {"date": "2026-11-03"}, "searchTermView": {"searchTerm": "pool leak detection near me"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "9", "clicks": "3", "costMicros": "30000000"}}]
+            return within([{"segments": {"date": "2026-11-03"}, "searchTermView": {"searchTerm": "pool leak detection near me"}, "adGroup": {"name": "pool leak"}, "metrics": {"impressions": "9", "clicks": "3", "costMicros": "30000000"}}], query)
         if "geographic_view" in query:
-            return [
+            return within([
                 {"segments": {"date": "2026-11-03"}, "campaign": {"name": "Pool"}, "geographicView": {"countryCriterionId": "2840"}, "metrics": {"impressions": "100", "clicks": "5", "costMicros": "62500000"}},
                 {"segments": {"date": "2026-11-03"}, "campaign": {"name": "Pool"}, "geographicView": {"countryCriterionId": "2392"}, "metrics": {"impressions": "20", "clicks": "1", "costMicros": "10000000"}},
-            ]
+            ], query)
         if "geo_target_constant" in query:
             return [{"geoTargetConstant": {"id": "2392", "name": "Japan"}}]
         raise AssertionError(query)
@@ -67,7 +75,9 @@ def test_a_pull_turns_googles_rows_into_days_terms_and_markets_and_clears_the_de
     assert [(t.term, t.clicks) for t in db.query(AdsSearchTerm).filter(AdsSearchTerm.client_id == client.id)] == [("pool leak detection near me", 3)]
     account = db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id).one()
     assert account.last_pull_at is not None and account.last_error is None
-    assert all(c[0] == "1835262013" for c in calls) and len(calls) == 4, "the account is used as digits; Japan is looked up, the United States is known"
+    assert all(c[0] == "1835262013" for c in calls), "the account is used as digits"
+    asked = {name: [c for c in calls if marker in c[1]] for name, marker in (("daily", "FROM ad_group"), ("terms", "search_term_view"), ("markets", "geographic_view"), ("names", "geo_target_constant"))}
+    assert [len(v) for v in asked.values()] == [4, 4, 4, 1], "a 90-day window is asked for in 30-day parts; Japan is looked up once, the United States is known"
 
 
 def test_a_later_pull_reaches_back_two_weeks_and_replaces_the_window(db, ads_client):
@@ -86,8 +96,11 @@ def test_a_client_can_have_several_accounts_and_an_lsa_account_is_read_by_campai
     def search(token, customer, query):
         calls.append((customer, query))
         if customer == "9876543210":
+            if "local_services_lead" in query:
+                return [{"localServicesLead": {"id": "1", "leadType": "PHONE_CALL", "leadStatus": "BOOKED", "leadCharged": True, "categoryId": "xcat:service_area_business_plumber", "creationDateTime": "2026-11-03 14:22:10"}},
+                        {"localServicesLead": {"id": "2", "leadType": "PHONE_CALL", "leadStatus": "DECLINED", "leadCharged": False, "creationDateTime": "2026-11-04 09:01:00"}}]
             assert "LOCAL_SERVICES" in query
-            return [{"segments": {"date": "2026-11-03"}, "campaign": {"name": "Local Services"}, "metrics": {"impressions": "40", "clicks": "7", "costMicros": "140000000"}}]
+            return within([{"segments": {"date": "2026-11-03"}, "campaign": {"name": "Local Services"}, "metrics": {"impressions": "40", "clicks": "7", "costMicros": "140000000"}}], query)
         return fake_search([])(token, customer, query)
 
     monkeypatch.setattr(google_ads, "search", search)
@@ -96,6 +109,10 @@ def test_a_client_can_have_several_accounts_and_an_lsa_account_is_read_by_campai
     mine = {(r.account_id, r.ad_group): r for r in db.query(AdsDaily).filter(AdsDaily.client_id == client.id)}
     assert ("9876543210", "Local Services") in mine and mine[("9876543210", "Local Services")].cost == Decimal("140.00") and mine[("9876543210", "Local Services")].device == ""
     assert {r.account_id for r in db.query(AdsDaily).filter(AdsDaily.client_id == client.id)} == {"1835262013", "9876543210"}
+    from app.models.ads import AdsLsaLead
+
+    leads = {l.lead_id: l for l in db.query(AdsLsaLead).filter(AdsLsaLead.client_id == client.id)}
+    assert stats["leads"] == 2 and leads["1"].charged is True and leads["1"].lead_status == "BOOKED" and leads["1"].date == date(2026, 11, 3) and leads["2"].charged is False
     # one account failing is recorded on it, the other still pulls
     def half(token, customer, query):
         if customer == "9876543210":
@@ -104,7 +121,7 @@ def test_a_client_can_have_several_accounts_and_an_lsa_account_is_read_by_campai
 
     monkeypatch.setattr(google_ads, "search", half)
     again = ads_pull.pull(db, client, today=TODAY)
-    assert len(again["accounts"]) == 1 and "Aquaman LSA: PERMISSION_DENIED" in again["errors"][0]
+    assert len(again["accounts"]) == 1 and "Aquaman LSA: Local Services campaigns: PERMISSION_DENIED" in again["errors"][0]
     lsa = db.query(ClientAdsAccount).filter(ClientAdsAccount.customer_id == "9876543210").one()
     assert "not linked" in lsa.last_error
     assert db.query(AdsDaily).filter(AdsDaily.client_id == client.id, AdsDaily.account_id == "9876543210").count() == 1, "its earlier rows stay when its refresh fails"
@@ -270,3 +287,22 @@ def test_an_accounts_kind_and_name_can_be_changed_without_pulling(client, db, cl
     changed = client.post("/v2/ads/accounts", json={"customer_id": "658-959-6576", "name": "LSA - Aquaman Leak Detection", "kind": "lsa"}, headers=hd).json()
     assert changed["kind"] == "lsa" and changed["name"] == "LSA - Aquaman Leak Detection"
     assert len(client.get("/v2/ads/connection", headers=hd).json()["accounts"]) == 1, "the same account is changed, not added again"
+
+
+def test_one_report_failing_is_named_and_the_others_are_still_kept(db, ads_client, monkeypatch):
+    client, calls = ads_client
+    ads_pull.pull(db, client, today=TODAY)  # a first, complete pull
+    inner = fake_search(calls)
+
+    def search(token, customer, query):
+        if "search_term_view" in query:
+            raise google_ads.GoogleAdsError("DEADLINE_EXCEEDED: the report took too long")
+        return inner(token, customer, query)
+
+    monkeypatch.setattr(google_ads, "search", search)
+    out = ads_pull.pull(db, client, today=TODAY)
+    assert len(out["accounts"]) == 1 and out["errors"] == ["Aquaman · What people searched for: DEADLINE_EXCEEDED: the report took too long"]
+    account = db.query(ClientAdsAccount).filter(ClientAdsAccount.client_id == client.id).one()
+    assert account.last_error == "What people searched for: DEADLINE_EXCEEDED: the report took too long" and account.last_pull_at is not None
+    assert db.query(AdsDaily).filter(AdsDaily.client_id == client.id).count() == 2 and db.query(AdsMarketDaily).filter(AdsMarketDaily.client_id == client.id).count() == 2
+    assert [t.term for t in db.query(AdsSearchTerm).filter(AdsSearchTerm.client_id == client.id)] == ["pool leak detection near me"], "the searches from the last good pull are kept, not wiped"

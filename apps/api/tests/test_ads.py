@@ -62,3 +62,25 @@ def test_the_summary_is_the_month_beside_the_month_before(client, db, client_a, 
     seed(db, client_a)
     out = client.get("/v2/ads/summary", params={"month": "2026-10"}, headers=h(client_a, admin_user)).json()
     assert out["available"] and out["totals"]["clicks"] == 150 and out["previous"]["clicks"] == 20 and set(out) == {"enabled", "available", "month", "source", "totals", "previous"}
+
+
+def test_local_services_leads_are_counted_by_type_status_and_week_with_what_the_account_spent(client, db, client_a, admin_user):
+    from app.models.ads import AdsLsaLead, ClientAdsAccount
+
+    seed(db, client_a)
+    db.add(ClientAdsAccount(client_id=client_a.id, customer_id="6589596576", name="LSA - Aquaman", kind="lsa"))
+    for i in range(10):
+        db.add(AdsDaily(client_id=client_a.id, account_id="6589596576", date=date(2026, 10, 5) + timedelta(days=i), campaign="Local Services", ad_group="Local Services", impressions=40, clicks=7, cost=Decimal("50.00"), source="google_ads"))
+    leads = [("1", date(2026, 10, 2), "PHONE_CALL", "BOOKED", True), ("2", date(2026, 10, 3), "PHONE_CALL", "DECLINED", False), ("3", date(2026, 10, 9), "MESSAGE", "ACTIVE", True),
+             ("4", date(2026, 10, 20), "PHONE_CALL", "DECLINED", True), ("5", date(2026, 9, 28), "PHONE_CALL", "BOOKED", True)]
+    for lead_id, day, kind, status, charged in leads:
+        db.add(AdsLsaLead(client_id=client_a.id, account_id="6589596576", lead_id=lead_id, date=day, lead_type=kind, lead_status=status, charged=charged))
+    db.commit()
+    out = client.get("/v2/ads", params={"month": "2026-10"}, headers=h(client_a, admin_user)).json()
+    lsa = out["lsa"]
+    assert lsa["leads"] == 4 and lsa["charged"] == 3 and lsa["previous"] == {"leads": 1, "charged": 1}
+    assert lsa["cost"] == 500.0 and lsa["cost_per_charged_lead"] == round(500 / 3, 2) and lsa["clicks"] == 70 and lsa["impressions"] == 400
+    assert lsa["by_status"] == [{"name": "Declined", "leads": 2}, {"name": "Active", "leads": 1}, {"name": "Booked", "leads": 1}]
+    assert lsa["by_type"] == [{"name": "Phone call", "leads": 3}, {"name": "Message", "leads": 1}]
+    assert [w["leads"] for w in lsa["weekly"]] == [2, 1, 1] and lsa["weekly"][0]["week"] == "Oct 1–4"
+    assert lsa["leads"] + 0 == sum(s["leads"] for s in lsa["by_status"])

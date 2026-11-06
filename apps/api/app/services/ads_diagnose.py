@@ -23,12 +23,6 @@ SAMPLE_CHARS = 500
 
 ACCOUNT = "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.manager, customer.test_account FROM customer"
 CAMPAIGNS = "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign"
-LEADS = (
-    "SELECT local_services_lead.id, local_services_lead.lead_type, local_services_lead.lead_status, local_services_lead.lead_charged, local_services_lead.category_id, "
-    "local_services_lead.creation_date_time FROM local_services_lead WHERE local_services_lead.creation_date_time >= '{start} 00:00:00'"
-)
-
-
 def _money(x: float) -> str:
     return f"${x:,.2f}"
 
@@ -91,7 +85,7 @@ def diagnose_account(token: str, account: ClientAdsAccount, *, today: date) -> d
     has_lsa = account.kind == "lsa" or "LOCAL_SERVICES" in (campaigns.get("sample") or "")
     if has_lsa:
         checks.append(_check("Local Services campaigns", token, customer, ads_pull.LSA_DAILY.format(**span), _performance, f"No Local Services campaign had activity in the last {DAYS} days."))
-        checks.append(_check("Local Services leads", token, customer, LEADS.format(**span), _leads, f"No Local Services leads in the last {DAYS} days, or this account does not report them."))
+        checks.append(_check("Local Services leads", token, customer, ads_pull.LEADS.format(**span), _leads, f"No Local Services leads in the last {DAYS} days, or this account does not report them."))
     if account.kind != "lsa":
         checks.append(_check("Daily performance", token, customer, ads_pull.DAILY.format(**span), _performance, f"No ad group had impressions in the last {DAYS} days."))
         checks.append(_check("What people searched for", token, customer, ads_pull.TERMS.format(**span), _terms, f"Google listed no individual searches in the last {DAYS} days (searches made by only a few people are not shown)."))

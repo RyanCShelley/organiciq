@@ -27,7 +27,21 @@ export type AdsReport =
       terms: { term: string; ad_group: string; clicks: number; cost: number }[];
       markets: AdsGroup[];
       devices: AdsGroup[];
+      /** Local Services Ads, for a client with such an account: the month's leads and what the account spent. Null otherwise. */
+      lsa: AdsLsa | null;
     };
+export type AdsLsa = {
+  leads: number;
+  charged: number;
+  previous: { leads: number; charged: number } | null;
+  cost: number;
+  impressions: number;
+  clicks: number;
+  cost_per_charged_lead: number | null;
+  by_status: { name: string; leads: number }[];
+  by_type: { name: string; leads: number }[];
+  weekly: { week: string; leads: number; charged: number }[];
+};
 export type AdsSummary =
   | { enabled: false; month: string }
   | { enabled: true; available: false; month: string; reason: string }
