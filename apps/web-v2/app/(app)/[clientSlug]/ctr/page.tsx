@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { CtrOptimizer } from "@/components/CtrOptimizer";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets } from "@/lib/bi";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Ctr } from "@/lib/ctr";
 
 export const metadata = { title: "CTR optimizer" };
@@ -19,7 +19,7 @@ export default async function CtrPage({
 }) {
   const { clientSlug } = await params;
   const { from, to, q } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const ranges = presets();

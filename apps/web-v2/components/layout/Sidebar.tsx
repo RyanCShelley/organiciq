@@ -21,6 +21,7 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
   const { clientSlug } = useParams<{ clientSlug?: string }>();
   const pathname = usePathname();
   const isActive = (path: string) => pathname.startsWith(`/${clientSlug}${path}`);
+  const onAds = !!clients.find((c) => c.slug === clientSlug)?.service_reporting?.ad_accelerator;
   const [shut, setShut] = useState<string[]>([]);
 
   useEffect(() => {
@@ -73,7 +74,7 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
                   </button>
                   {isShut ? null : (
                     <ul className="mt-0.5 space-y-0.5">
-                      {group.items.map((item) => (
+                      {group.items.filter((item) => !item.ads || onAds).map((item) => (
                         <li key={item.label}>
                           <Link href={`/${clientSlug}${item.path}`} aria-current={isActive(item.path) ? "page" : undefined} className={`${link} pl-8 ${isActive(item.path) ? active : idle}`}>
                             {item.label}

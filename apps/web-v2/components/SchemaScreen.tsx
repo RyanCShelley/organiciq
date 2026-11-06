@@ -6,7 +6,7 @@ import { Fragment, useEffect, useState, useTransition } from "react";
 import { addIgnoreAction, approveConceptAction, pageAction, removeConceptAction, removeIgnoreAction, searchConceptsAction, startPageReportAction } from "@/app/(app)/[clientSlug]/schema/actions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { ScCandidate, ScCheck, ScConcept, ScData, ScDepth, ScIgnoreScope, ScItem, ScPage, ScReport, ScResponse, ScType } from "@/lib/schema";
+import type { ScCandidate, ScCategory, ScCheck, ScConcept, ScData, ScDepth, ScFinding, ScFindingGroup, ScIgnoreScope, ScItem, ScLayer, ScPage, ScReport, ScResponse, ScType } from "@/lib/schema";
 
 type Ignore = (scope: ScIgnoreScope, key: string, label: string) => void;
 
@@ -15,6 +15,105 @@ const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
 const day = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const tone = (score: number) => (score >= 85 ? "#0f766e" : score >= 70 ? "#b45309" : "#b91c1c");
 const DEPTH: Record<ScDepth, string> = { quick: "Quick (Sonnet 5.5)", deep: "Deep dive (Opus 5.5)", deepest: "Deepest (Fable 5.1)" };
+
+const CATEGORY: Record<ScCategory, { label: string; plural: string; chip: string; hint: string }> = {
+  error: { label: "Error", plural: "Errors", chip: "bg-[#fde8e4] text-[#b23a15]", hint: "Not real Schema.org. Fix." },
+  warning: { label: "Warning", plural: "Warnings", chip: "bg-[#fdf1d3] text-[#8a5a00]", hint: "Something the page needs is missing, or the markup conflicts. Fix." },
+  enhancement: { label: "Enhancement", plural: "Enhancements", chip: "bg-[#e7fedc] text-[#2f6b0d]", hint: "Would help. Nothing is wrong." },
+  informational: { label: "Informational", plural: "Informational", chip: "bg-[#eceef2] text-[#4a5468]", hint: "Good to know." },
+};
+const LAYER: Record<ScLayer, string> = { schemaorg: "Schema.org", graph: "Entities", google: "Google Search", baseline: "SMA baseline", recommendation: "Recommendation" };
+
+function Evidence({ value }: { value: unknown }) {
+  if (value == null) return null;
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-[var(--bg)] p-2 text-[0.7rem] leading-snug">{text}</pre>;
+}
+
+function Badges({ f }: { f: Pick<ScFinding, "category" | "layer" | "confidence" | "auto_fixable"> }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-wide">
+      <span className={`rounded-full px-2 py-0.5 ${CATEGORY[f.category].chip}`}>{CATEGORY[f.category].label}</span>
+      <span className="rounded-full bg-[var(--bg)] px-2 py-0.5 text-[var(--text-secondary)]">{LAYER[f.layer]}</span>
+      {f.confidence !== "high" ? <span className="rounded-full bg-[var(--bg)] px-2 py-0.5 text-[var(--text-tertiary)]">{f.confidence} confidence</span> : null}
+      {f.auto_fixable ? <span className="rounded-full bg-[var(--bg)] px-2 py-0.5 text-[var(--text-tertiary)]">fixable automatically</span> : null}
+    </span>
+  );
+}
+
+/** Everything the validator found, grouped by cause: the technical category first, then which layer found it, with the evidence from the markup. */
+function Findings({ data, onOpen, onIgnore }: { data: ScData; onOpen: (url: string) => void; onIgnore: Ignore }) {
+  const [category, setCategory] = useState<ScCategory>(data.finding_counts.error.groups ? "error" : data.finding_counts.warning.groups ? "warning" : "enhancement");
+  const [layer, setLayer] = useState<ScLayer | "all">("all");
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const inCategory = data.findings.filter((g) => g.category === category);
+  const shown = inCategory.filter((g) => layer === "all" || g.layer === layer);
+  const layers = (["schemaorg", "graph", "google", "baseline", "recommendation"] as ScLayer[]).filter((l) => inCategory.some((g) => g.layer === l));
+  return (
+    <section className={card}>
+      <h2 className="px-5 pt-4 text-lg font-bold">What the markup needs</h2>
+      <p className="px-5 text-xs text-[var(--text-tertiary)]">
+        Five checks: valid Schema.org (version {data.validator.schemaorg_version}), entities that agree, what Google Search features need (reviewed {data.validator.google_reviewed}), the SMA baseline, and what would add more.
+        A property Google does not use is never an error.
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 px-5 sm:grid-cols-4" role="tablist" aria-label="Category">
+        {(Object.keys(CATEGORY) as ScCategory[]).map((c) => {
+          const n = data.finding_counts[c];
+          return (
+            <button key={c} type="button" role="tab" aria-selected={category === c} onClick={() => { setCategory(c); setLayer("all"); }} title={CATEGORY[c].hint}
+              className={`rounded-xl border px-3 py-2 text-left ${category === c ? "border-[var(--brand-navy)] bg-white shadow-sm" : "border-[var(--border)] bg-[var(--bg)] hover:bg-white"}`}>
+              <div className="text-xs font-semibold text-[var(--text-secondary)]">{CATEGORY[c].plural}</div>
+              <div className="font-[family-name:var(--font-heading)] text-xl font-bold tabular-nums">{n.groups}</div>
+              <div className="text-[0.7rem] text-[var(--text-tertiary)]">issue{n.groups === 1 ? "" : "s"} on {n.pages} page{n.pages === 1 ? "" : "s"}</div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="px-5 pt-2 text-xs text-[var(--text-secondary)]">{CATEGORY[category].hint}</p>
+      {layers.length > 1 ? (
+        <div className="flex flex-wrap gap-2 px-5 pt-2" role="group" aria-label="Which check found it">
+          {(["all", ...layers] as (ScLayer | "all")[]).map((l) => (
+            <button key={l} type="button" aria-pressed={layer === l} onClick={() => setLayer(l)} className={`rounded-full border px-3 py-1 text-xs font-semibold ${layer === l ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)]"}`}>
+              {l === "all" ? "All" : LAYER[l]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {shown.length === 0 ? <p className="px-5 py-4 text-sm text-[var(--text-secondary)]">Nothing here.</p> : (
+        <ul className="mt-2 divide-y divide-[var(--border)] px-5 pb-2">
+          {shown.map((g) => (
+            <li key={g.template_key} className="py-3">
+              <div className="flex flex-wrap items-start gap-3">
+                <span className="w-20 shrink-0 font-bold tabular-nums">{g.pages} page{g.pages === 1 ? "" : "s"}</span>
+                <div className="min-w-0 flex-1">
+                  <button type="button" onClick={() => setOpenKey(openKey === g.template_key ? null : g.template_key)} aria-expanded={openKey === g.template_key} className="text-left text-sm font-semibold hover:underline">{g.title}</button>
+                  <div className="mt-1"><Badges f={g} /></div>
+                </div>
+                {g.category === "error" || g.category === "warning" ? (
+                  <button type="button" onClick={() => onIgnore("cleanup", g.title, g.title)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button>
+                ) : null}
+              </div>
+              {openKey === g.template_key ? (
+                <div className="mt-2 space-y-2 pl-[5.75rem] text-sm">
+                  <p>{g.explanation}</p>
+                  <p><strong>What to do:</strong> {g.recommendation}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">On {shortPage(g.example.url)}: {g.example.message}</p>
+                  <Evidence value={g.example.evidence} />
+                  <div className="flex flex-wrap items-center gap-3 text-xs">
+                    <a href={g.doc} target="_blank" rel="noreferrer" className="font-semibold text-[var(--brand-teal)] underline">Documentation</a>
+                    <span className="text-[var(--text-tertiary)]">Rule {g.rule_id}</span>
+                    {g.sample_urls.map((u) => <button key={u} type="button" onClick={() => onOpen(u)} className="font-semibold underline">{shortPage(u)}</button>)}
+                    {g.pages > g.sample_urls.length ? <span className="text-[var(--text-tertiary)]">and {g.pages - g.sample_urls.length} more</span> : null}
+                  </div>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function Bar({ score }: { score: number }) {
   return (
@@ -44,15 +143,32 @@ function Chip({ label, onIgnore }: { label: string; onIgnore: () => void }) {
   );
 }
 
+function PageList({ title, items, total, onOpen, onIgnore }: { title: string; items: ScItem[]; total: number; onOpen: (url: string) => void; onIgnore: Ignore }) {
+  if (total === 0) return null;
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold">{title} ({total})</div>
+      <ul className="mt-1 max-h-60 space-y-1.5 overflow-y-auto text-xs">
+        {items.map((i) => (
+          <li key={i.url} className="flex flex-wrap items-start gap-2">
+            <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
+            <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
+            <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
+          </li>
+        ))}
+        {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
+      </ul>
+    </div>
+  );
+}
+
 function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => void; onIgnore: Ignore }) {
-  const [open, setOpen] = useState<"fix" | "rec" | null>(null);
-  const items: ScItem[] = open === "rec" ? t.recommended_items : t.items;
-  const total = open === "rec" ? t.recommended_affected : t.affected;
-  const clean = t.affected === 0;
+  const [open, setOpen] = useState(false);
+  const clean = t.affected === 0 && t.recommended_affected === 0 && (t.score == null || t.score >= 100);
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[16rem] flex-1">
           <div className="font-semibold">{t.label} <span className="font-normal text-[var(--text-tertiary)]">· {t.pages} page{t.pages === 1 ? "" : "s"}</span></div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-[var(--text-secondary)]">
             {t.expects.length > 0 ? <span>Expected:</span> : <span>Nothing in particular is expected.</span>}
@@ -68,47 +184,88 @@ function TypeRow({ t, onOpen, onIgnore }: { t: ScType; onOpen: (url: string) => 
             <div className="w-12 text-right text-sm font-bold tabular-nums">{t.score}</div>
           </>
         ) : <div className="w-52" />}
-        <div className="flex w-52 justify-end gap-3 text-xs">
-          {clean ? <span className="font-semibold text-green-700">Clean</span> : <button type="button" onClick={() => setOpen(open === "fix" ? null : "fix")} className="font-semibold underline">{open === "fix" ? "Hide" : `Show ${t.affected} to fix`}</button>}
-          {t.recommended_affected > 0 ? <button type="button" onClick={() => setOpen(open === "rec" ? null : "rec")} className="text-[var(--text-secondary)] underline">{open === "rec" ? "Hide" : `${t.recommended_affected} could add more`}</button> : null}
+        <div className="flex w-64 justify-end text-xs">
+          {clean ? <span className="font-semibold text-green-700">Clean</span> : (
+            <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="text-right font-semibold underline">{open ? "Hide" : "See why it scored this way and how to fix it"}</button>
+          )}
         </div>
       </div>
       {open ? (
-        <ul className="mt-2 max-h-72 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
-          {items.map((i) => (
-            <li key={i.url} className="flex flex-wrap items-start gap-2">
-              <button type="button" onClick={() => onOpen(i.url)} className="break-all text-left font-semibold underline">{shortPage(i.url)}</button>
-              <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{i.text}</span>
-              <button type="button" onClick={() => onIgnore("page", i.url, `${shortPage(i.url)}: ignored`)} className="text-[var(--text-tertiary)] underline">Ignore</button>
-            </li>
-          ))}
-          {total > items.length ? <li className="text-[var(--text-tertiary)]">and {total - items.length} more</li> : null}
-        </ul>
+        <div className="mt-2 rounded-lg bg-[var(--bg)] p-4 text-sm">
+          <p className="font-semibold">{t.why.summary}</p>
+          {t.why.should_have ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{t.why.should_have}</p> : null}
+          {t.why.gaps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">Why it lost points</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+            </>
+          ) : null}
+          {t.why.steps.length > 0 ? (
+            <>
+              <div className="mt-3 text-xs font-semibold">What to do</div>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-[var(--text-secondary)]">{t.why.steps.map((g) => <li key={g}>{g}</li>)}</ol>
+              {t.why.gain > 0 ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Doing all of this would bring the score to 100.</p> : null}
+            </>
+          ) : null}
+          <PageList title="Pages to fix" items={t.items} total={t.affected} onOpen={onOpen} onIgnore={onIgnore} />
+          <PageList title="Pages that could add more markup" items={t.recommended_items} total={t.recommended_affected} onOpen={onOpen} onIgnore={onIgnore} />
+        </div>
       ) : null}
     </li>
   );
 }
 
-function CheckRow({ c, onIgnore }: { c: ScCheck; onIgnore: Ignore }) {
+/** One check. Every check opens: to what was found behind it and the pages that carry it, or, when nothing was found, to what to do about it. */
+function CheckRow({ c, open, onToggle, onIgnore, onOpen, extra }: { c: ScCheck; open: boolean; onToggle: () => void; onIgnore: Ignore; onOpen: (url: string) => void; extra?: React.ReactNode }) {
   const clean = c.status === "pass";
   const ignored = c.status === "ignored";
+  const optional = c.status === "optional";
   return (
-    <li className="flex flex-wrap items-start gap-3 py-3">
-      <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : "To fix"}</span>
-      <div className="min-w-0 flex-1">
-        <div className={`font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""}`}>{c.label}</div>
-        <div className="text-xs text-[var(--text-secondary)]">{c.detail}</div>
-        {c.fix ? <div className="mt-0.5 text-xs font-medium">{c.fix}</div> : null}
+    <li className="py-3">
+      <div className="flex flex-wrap items-start gap-3">
+        <span className={`mt-0.5 w-14 shrink-0 text-xs font-semibold ${clean ? "text-green-700" : ignored || optional ? "text-[var(--text-tertiary)]" : c.status === "warn" ? "text-amber-700" : "text-red-700"}`}>{clean ? "Clean" : ignored ? "Ignored" : optional ? "Optional" : "To fix"}</span>
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={onToggle} aria-expanded={open} className={`flex items-center gap-1.5 text-left font-semibold ${ignored ? "text-[var(--text-tertiary)]" : ""}`}>
+            <span aria-hidden className={`text-xs text-[var(--text-tertiary)] transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
+            {c.label}
+            <span className="text-xs font-normal text-[var(--text-secondary)] underline">{open ? "Hide" : clean ? "See what was found" : "See what to do"}</span>
+          </button>
+          <div className="text-xs text-[var(--text-secondary)]">{c.detail}</div>
+          {c.fix ? <div className="mt-0.5 text-xs font-medium">{c.fix}</div> : null}
+        </div>
+        {!clean && !ignored ? <button type="button" onClick={() => onIgnore("check", c.key, c.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button> : null}
       </div>
-      {!clean && !ignored ? <button type="button" onClick={() => onIgnore("check", c.key, c.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button> : null}
+      {open ? (
+        <div className="ml-[4.25rem] mt-2 space-y-3">
+          {c.items.length > 0 ? (
+            <ul className="max-h-80 space-y-1.5 overflow-y-auto rounded-lg bg-[var(--bg)] p-3 text-xs">
+              {c.items.map((i) => (
+                <li key={i.label} className="flex flex-wrap items-start gap-x-3 gap-y-0.5">
+                  <span className={`min-w-0 break-all font-semibold ${i.kind === "missing" ? "text-red-700" : i.kind === "other" ? "text-[var(--text-secondary)]" : ""}`}>{i.label}</span>
+                  {i.count > 1 ? <span className="text-[var(--text-tertiary)]">on {i.count} blocks</span> : null}
+                  <span className="flex flex-wrap gap-2">
+                    {i.pages.map((u) => <button key={u} type="button" onClick={() => onOpen(u)} className="break-all underline">{shortPage(u)}</button>)}
+                    {i.count > i.pages.length && i.pages.length > 0 ? <span className="text-[var(--text-tertiary)]">and more</span> : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : !extra ? (
+            <p className="rounded-lg bg-[var(--bg)] p-3 text-xs text-[var(--text-secondary)]">Nothing was found on any crawled page.</p>
+          ) : null}
+          {extra}
+        </div>
+      ) : null}
     </li>
   );
 }
 
 /** Find the brand's item on Wikidata and approve it, so generated markup can link to it. Only approved items are ever linked. */
-function Concepts({ client, data }: { client: Client; data: ScData }) {
+function Concepts({ client, data, flush = false }: { client: Client; data: ScData; flush?: boolean }) {
   const router = useRouter();
-  const [name, setName] = useState(data.entity.brand);
+  // Start with the first core topic that has no Wikidata item yet; the brand's own item is optional.
+  const firstOpen = data.entity.checks.find((c) => c.key === "topics")?.items.find((i) => i.kind === "missing")?.label.split(":")[0];
+  const [name, setName] = useState(firstOpen || data.entity.brand);
   const [found, setFound] = useState<Record<string, ScCandidate[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -135,7 +292,7 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
     });
   const options = found ? Object.values(found)[0] ?? [] : [];
   return (
-    <div className="space-y-3 px-5 pb-5 text-sm">
+    <div className={`space-y-3 text-sm ${flush ? "" : "px-5 pb-5"}`}>
       <p className="text-xs text-[var(--text-tertiary)]">
         A Wikidata item is how search engines and AI recognize something as one known entity. Search for the brand or a topic, approve the item that is right, and generated markup will link to it. The model never chooses these.
       </p>
@@ -153,7 +310,7 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
       ) : null}
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[14rem] flex-1 text-xs font-semibold">
-          Concept to look up
+          Concept to look up, or a Wikidata ID (Q…)
           <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" />
         </label>
         <button type="button" onClick={search} disabled={pending || name.trim().length < 2} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">
@@ -165,18 +322,65 @@ function Concepts({ client, data }: { client: Client; data: ScData }) {
         options.length === 0 ? (
           <p className="text-[var(--text-secondary)]">Wikidata has no item for “{name}”. If the brand is notable enough, creating one is the first step; until then the markup links to the brand&apos;s own profiles instead.</p>
         ) : (
-          <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-            {options.map((c) => (
-              <li key={c.qid} className="flex flex-wrap items-center gap-3 px-3 py-2">
-                <a href={c.url} target="_blank" rel="noreferrer" className="text-xs font-semibold underline">{c.qid}</a>
-                <span className="min-w-0 flex-1 text-xs"><strong>{c.label}</strong>{c.description ? `: ${c.description}` : ""}</span>
-                <button type="button" onClick={() => approve(c)} disabled={pending} className="rounded-lg bg-[var(--brand-dark)] px-3 py-1 text-xs font-semibold text-white disabled:opacity-50">Approve this one</button>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            {options.map((c) => <CandidateCard key={c.qid} c={c} pending={pending} onApprove={approve} />)}
+          </div>
         )
       ) : null}
     </div>
+  );
+}
+
+const VERDICT: Record<string, { text: string; cls: string }> = {
+  strong: { text: "Strong match", cls: "bg-green-100 text-green-800" },
+  possible: { text: "Possible match", cls: "bg-amber-100 text-amber-800" },
+  weak: { text: "Weak match", cls: "bg-amber-100 text-amber-800" },
+  unlikely: { text: "Not this one", cls: "bg-red-100 text-red-800" },
+};
+const STATUS: Record<string, { text: string; cls: string }> = {
+  match: { text: "Match", cls: "text-green-700" },
+  conflict: { text: "Conflict", cls: "text-red-700" },
+  missing: { text: "Not on the site", cls: "text-red-700" },
+  none: { text: "No evidence", cls: "text-[var(--text-tertiary)]" },
+  info: { text: "", cls: "" },
+};
+
+/** One Wikidata candidate. Closed until opened: the header says how well it fits, the body sets what Wikidata says beside what the site says. */
+function CandidateCard({ c, pending, onApprove }: { c: ScCandidate; pending: boolean; onApprove: (c: ScCandidate) => void }) {
+  const ev = c.evidence;
+  const v = ev ? VERDICT[ev.verdict] : null;
+  return (
+    <details className="group rounded-lg border border-[var(--border)] bg-white">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 px-3 py-2">
+        <span className="text-xs text-[var(--text-tertiary)] group-open:rotate-90" aria-hidden>▸</span>
+        <span className="min-w-0 flex-1 text-xs"><strong>{c.label}</strong> <span className="text-[var(--text-tertiary)]">{c.qid}</span>{c.description ? <span className="block text-[var(--text-secondary)]">{c.description}</span> : null}</span>
+        {v && ev ? <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${v.cls}`}>{v.text}{ev.matched + ev.conflicts > 0 ? ` · ${ev.matched} of ${ev.checked}` : " · nothing on the site to compare"}</span> : <span className="text-xs text-[var(--text-tertiary)]">No evidence fetched</span>}
+      </summary>
+      <div className="border-t border-[var(--border)] px-3 py-2 text-xs">
+        {ev ? (
+          <table className="w-full table-fixed border-collapse">
+            <thead><tr className="text-left text-[var(--text-tertiary)]"><th className="w-[24%] py-1 font-normal" /><th className="w-[32%] py-1 font-normal">Wikidata says</th><th className="w-[30%] py-1 font-normal">The site says</th><th className="w-[14%] py-1 font-normal" /></tr></thead>
+            <tbody>
+              {ev.rows.map((r) => (
+                <tr key={r.key} className="border-t border-[var(--border)] align-top">
+                  <th className="py-1.5 pr-2 text-left font-semibold">{r.label}</th>
+                  <td className="py-1.5 pr-2 break-words">{r.wikidata}</td>
+                  <td className="py-1.5 pr-2 break-words">{r.site}</td>
+                  <td className={`py-1.5 font-semibold ${STATUS[r.status]?.cls ?? ""}`}>{STATUS[r.status]?.text}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <p className="text-[var(--text-secondary)]">Wikidata could not be read for this item just now, so there is only its name and description to go on.</p>}
+        {ev && ev.profiles.length > 0 ? <p className="mt-2 text-[var(--text-secondary)]">Profiles listed on the item: {ev.profiles.join(", ")}</p> : null}
+        <div className="mt-3 flex items-center gap-3">
+          <button type="button" onClick={() => onApprove(c)} disabled={pending} className={`rounded-lg px-3 py-1 text-xs font-semibold disabled:opacity-50 ${ev?.verdict === "unlikely" || ev?.verdict === "weak" ? "border border-[var(--border)] bg-white" : "bg-[var(--brand-dark)] text-white"}`}>
+            {ev?.verdict === "unlikely" || ev?.verdict === "weak" ? "Approve anyway" : "Approve this one"}
+          </button>
+          <a href={c.url} target="_blank" rel="noreferrer" className="underline">Open on Wikidata</a>
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -236,10 +440,23 @@ function PagePane({ client, url, ready, depths, onClose, onApproved }: { client:
             <div className="mt-1"><strong>Markup it has:</strong> {page.present.length ? page.present.join(", ") : "none"}</div>
             {page.missing_required.length > 0 ? <div className="mt-1 text-red-700"><strong>Missing:</strong> {page.missing_required.join(", ")}</div> : <div className="mt-1 text-green-700"><strong>Clean:</strong> nothing required is missing</div>}
             {page.missing_recommended.length > 0 ? <div className="mt-1 text-[var(--text-secondary)]"><strong>Worth adding:</strong> {page.missing_recommended.join(", ")}</div> : null}
-            {page.corrections.length > 0 ? (
-              <ul className="mt-1 list-disc pl-4 text-[var(--text-secondary)]">{page.corrections.map((c, i) => <li key={i}>{c.detail}</li>)}</ul>
-            ) : null}
           </div>
+          {page.findings && page.findings.length > 0 ? (
+            <ul className="space-y-2 text-xs">
+              {page.findings.map((f, i) => (
+                <li key={i} className="rounded-lg border border-[var(--border)] p-2">
+                  <Badges f={f} />
+                  <div className="mt-1 font-semibold">{f.title}</div>
+                  <div className="text-[var(--text-secondary)]">{f.message}</div>
+                  <details className="mt-1"><summary className="cursor-pointer font-semibold">Why, and what to do</summary>
+                    <p className="mt-1">{f.explanation}</p><p className="mt-1"><strong>What to do:</strong> {f.recommendation}</p>
+                    <Evidence value={f.evidence} />
+                    <a href={f.doc} target="_blank" rel="noreferrer" className="mt-1 inline-block font-semibold text-[var(--brand-teal)] underline">Documentation</a> <span className="text-[var(--text-tertiary)]">Rule {f.rule_id}{f.entity_id ? ` · ${f.entity_id}` : ""}</span>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {page.existing.length > 0 ? (
             <details className="text-xs"><summary className="cursor-pointer font-semibold">The markup on the page now</summary><pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-[var(--bg)] p-3">{page.existing.join("\n\n")}</pre></details>
           ) : null}
@@ -326,6 +543,13 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+  const [openChecks, setOpenChecks] = useState<Set<string>>(new Set());
+  const toggleCheck = (key: string) =>
+    setOpenChecks((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   const [ignoreError, setIgnoreError] = useState<string | null>(null);
   const [, startIgnore] = useTransition();
   const ignore: Ignore = (scope, key, label) =>
@@ -342,7 +566,7 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
       if (r.ok) router.refresh();
       else setIgnoreError(r.error);
     });
-  const counted = data ? data.entity.checks.filter((c) => c.status !== "ignored") : [];
+  const counted = data ? data.entity.checks.filter((c) => c.status !== "ignored" && c.status !== "optional") : [];
   const passing = counted.filter((c) => c.status === "pass").length;
   return (
     <section className="max-w-6xl space-y-6">
@@ -357,41 +581,32 @@ export function SchemaScreen({ client, result, error }: { client: Client; result
       {data ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi label="Markup score" value={String(data.score)} note="how complete each page's markup is for its kind" />
+            <Kpi label="Markup score" value={String(data.score)} note="average of every page, out of 100" />
             <Kpi label="Pages with markup" value={`${data.with_markup} of ${data.pages}`} note="indexable pages with a JSON-LD block" />
-            <Kpi label="Cleanups found" value={String(data.cleanups)} note="invalid or misplaced properties in the markup now" />
+            <Kpi label="Errors and warnings" value={String(data.cleanups)} note="found across all pages" />
             <Kpi label="Brand entity checks" value={`${passing} of ${counted.length}`} note="clean" />
           </div>
 
+          <Findings data={data} onOpen={setOpen} onIgnore={ignore} />
+
           <section className={card}>
             <h2 className="px-5 pt-4 text-lg font-bold">By kind of page</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">The score is how complete the markup is for that kind of page. Open any page to audit it or write corrected markup. Worked out from the crawl of {day(data.crawl_date)}.</p>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">Each page starts at 100 and loses points for markup it is missing. A kind's score is the average of its pages. Green is 85 or more, amber 70 to 84, red under 70. Open any page to audit it or write corrected markup. From the crawl of {day(data.crawl_date)}.</p>
             <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.types.map((t) => <TypeRow key={t.page_type} t={t} onOpen={setOpen} onIgnore={ignore} />)}</ul>
           </section>
 
-          {data.fixes.length > 0 ? (
-            <section className={`${card} p-5`}>
-              <h2 className="text-lg font-bold">Fix once, clear many pages</h2>
-              <p className="text-xs text-[var(--text-tertiary)]">These repeat across pages, so they usually come from one template. Fixing the template clears them all.</p>
-              <ul className="mt-3 space-y-2 text-sm">
-                {data.fixes.map((f) => (
-                  <li key={f.text} className="flex flex-wrap items-center gap-3">
-                    <span className="w-24 shrink-0 font-bold tabular-nums">{f.pages} pages</span>
-                    <span className="min-w-0 flex-1">{f.text}</span>
-                    <button type="button" onClick={() => setOpen(f.example)} className="text-xs font-semibold underline">See an example</button>
-                    <button type="button" onClick={() => ignore(f.ignore.scope, f.ignore.key, f.ignore.label)} className="text-xs text-[var(--text-tertiary)] underline">Ignore</button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
           <section className={card}>
-            <h2 className="px-5 pt-4 text-lg font-bold">The brand as one entity</h2>
-            <p className="px-5 text-xs text-[var(--text-tertiary)]">Does the markup describe {data.entity.brand || "the brand"} as one organization, tied to the profiles and the Wikidata item that identify it?</p>
-            <ul className="divide-y divide-[var(--border)] px-5 pb-2">{data.entity.checks.map((c) => <CheckRow key={c.key} c={c} onIgnore={ignore} />)}</ul>
-            <h3 className="px-5 pt-2 font-semibold">Wikidata items</h3>
-            <Concepts client={client} data={data} />
+            <h2 className="px-5 pt-4 text-lg font-bold">Core topics and the brand</h2>
+            <p className="px-5 text-xs text-[var(--text-tertiary)]">Most brands have no Wikidata item of their own, so the markup links {data.entity.brand || "the brand"}&apos;s core topics to Wikidata items instead. Those are what search engines and AI recognize. The brand&apos;s own checks follow.</p>
+            <div className="flex justify-end gap-3 px-5 text-xs">
+              <button type="button" onClick={() => setOpenChecks(new Set(data.entity.checks.map((c) => c.key)))} className="underline">Expand all</button>
+              <button type="button" onClick={() => setOpenChecks(new Set())} className="underline">Collapse all</button>
+            </div>
+            <ul className="divide-y divide-[var(--border)] px-5 pb-2">
+              {data.entity.checks.map((c) => (
+                <CheckRow key={c.key} c={c} open={openChecks.has(c.key)} onToggle={() => toggleCheck(c.key)} onIgnore={ignore} onOpen={setOpen} extra={c.key === "topics" ? <Concepts client={client} data={data} flush /> : undefined} />
+              ))}
+            </ul>
           </section>
 
           {ignoreError ? <p role="alert" className="text-sm font-semibold text-red-700">{ignoreError}</p> : null}

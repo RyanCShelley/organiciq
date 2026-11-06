@@ -407,8 +407,9 @@ function LockLine({ review, clientId, slug, month }: { review: Review; clientId:
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const monthName = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long" });
   const rerun = () => {
-    if (!window.confirm("Work this month out again from the data held now? It replaces the review that was kept.")) return;
+    if (!window.confirm("Recalculate this month from the data held now? This replaces the saved review. The old numbers can't be brought back. Nothing is sent.")) return;
     start(async () => {
       setError(null);
       const r = await rerunReviewAction(clientId, slug, month);
@@ -420,15 +421,17 @@ function LockLine({ review, clientId, slug, month }: { review: Review; clientId:
     <p className="mt-1 text-xs text-[var(--text-secondary)]">
       {review.locked ? (
         <>
-          <span className="font-semibold text-green-800">Locked</span> on {review.locked_at ? new Date(review.locked_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "an earlier day"}
-          {review.data_through?.search_console ? `, from data through ${new Date(`${review.data_through.search_console}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}.{" "}
+          <span className="font-semibold text-green-800">Saved</span> {review.locked_at ? new Date(review.locked_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "on an earlier day"}
+          {review.locked_by ? ` by ${review.locked_by.split("@")[0]}` : ""}, when all of {monthName}&apos;s data was in
+          {review.data_through?.search_console ? ` (Search Console through ${new Date(`${review.data_through.search_console}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })})` : ""}.
+          {" "}The scorecards always show current numbers.{" "}
           <button type="button" onClick={rerun} disabled={pending} className="font-semibold underline disabled:opacity-50">
-            {pending ? <><Spinner />Working it out again…</> : "Work it out again"}
+            {pending ? <><Spinner />Recalculating…</> : "Recalculate from current data"}
           </button>
         </>
       ) : (
         <>
-          <span className="font-semibold text-amber-800">Not locked.</span> {review.lock_note}
+          <span className="font-semibold text-amber-800">Not saved yet.</span> {review.lock_note}
         </>
       )}
       {error ? <span role="alert" className="ml-2 text-red-700">{error}</span> : null}
@@ -548,6 +551,9 @@ export function ReviewScreen({
                         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
                           OrganicIQ channels (organic, AI, direct, referral): {num(review.services.rows[0].sessions.current)} sessions, {num(review.services.rows[0].lead_events.current)} conversion events.
                         </p>
+                      ) : null}
+                      {review.services.settings?.ad_accelerator ? (
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">Paid sessions come from Google Analytics. Ad spend and campaign data are not connected yet.</p>
                       ) : null}
                     </div>
                     <div className="rounded-2xl border border-[var(--border)] bg-white p-4">

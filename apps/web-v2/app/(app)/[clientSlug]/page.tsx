@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 
 /** A client's home is the monthly review. */
 export default async function ClientHomePage({
@@ -9,7 +9,7 @@ export default async function ClientHomePage({
   params: Promise<{ clientSlug: string }>;
 }) {
   const { clientSlug } = await params;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
   redirect(`/${client.slug}/review`);
 }

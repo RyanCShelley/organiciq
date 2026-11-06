@@ -335,3 +335,24 @@ def seed_required_sources(
         _watermark("se_ranking_ai")
 
     db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_teamwork_subtasks(monkeypatch, request):
+    """No test reaches Teamwork for a subtask; the tests of subtasks bring their own stand-in."""
+    if "real_subtasks" in request.keywords:
+        return
+    from app.integrations import teamwork
+
+    monkeypatch.setattr(teamwork, "create_subtask", lambda **kw: {"id": f"sub-{kw['name'][:12]}", "url": ""})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_result_caches():
+    """The CTR and Inlink screens keep results between requests; a test starts with none."""
+    from app.services import ctr_optimizer, inlinks
+
+    ctr_optimizer._MONTHLY.clear()
+    inlinks._RESULTS.clear()
+    inlinks._VECTORS.clear()
+    yield

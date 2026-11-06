@@ -215,7 +215,7 @@ def test_a_month_whose_data_is_not_complete_yet_is_not_locked_and_says_why(db, c
     _stub(monkeypatch, {"search_console": _date(2026, 10, 28), "ga4": _date(2026, 11, 1)}, built)
     out = mr.review_for(db, client_a, "2026-10")
     mr.review_for(db, client_a, "2026-10")
-    assert out["locked"] is False and "Search Console reaches Oct 28" in out["lock_note"] and "Not locked" not in out["lock_note"] and "Oct 31" in out["lock_note"]
+    assert out["locked"] is False and "Search Console reaches Oct 28" in out["lock_note"] and "Not saved" not in out["lock_note"] and "Oct 31" in out["lock_note"]
     assert built == ["2026-10", "2026-10"] and db.query(MonthlyReviewSnapshot).count() == 0
 
 

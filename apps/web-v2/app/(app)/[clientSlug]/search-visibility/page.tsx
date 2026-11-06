@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { SearchVisibility } from "@/components/SearchVisibility";
 import { ApiError, apiFetch } from "@/lib/api";
 import { presets } from "@/lib/bi";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Sv } from "@/lib/search-visibility";
 
 export const metadata = { title: "Search visibility" };
@@ -19,7 +19,7 @@ export default async function SearchVisibilityPage({
 }) {
   const { clientSlug } = await params;
   const { from, to, bucket } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   // Search Console runs about three days behind, so the default is the 90 days ending then.

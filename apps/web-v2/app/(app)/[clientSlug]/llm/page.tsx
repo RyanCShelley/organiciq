@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { LlmScreen } from "@/components/LlmScreen";
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { LlmOverview, LlmSettings } from "@/lib/llm";
 
 export const metadata = { title: "LLM visibility" };
@@ -16,7 +16,7 @@ export default async function LlmPage({
 }) {
   const { clientSlug } = await params;
   const { run } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   let overview: LlmOverview | null = null;

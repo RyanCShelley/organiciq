@@ -407,13 +407,13 @@ def lock_status(month: str, through: dict[str, date | None], today: date | None 
     today = today or date.today()
     last = _last_day(month)
     if last >= today:
-        return False, f"{month} is not over yet, so the review is worked out fresh each time. It locks once the month is over and the data is in."
+        return False, f"{last:%B} is not over, so this review is worked out fresh each time. It is saved once the month is over and all the data is in."
     behind = {"search_console": "Search Console", "ga4": "GA4"}
     waiting = [f"{behind[k]} reaches {v:%b} {v.day}" for k, v in through.items() if v is not None and v < last]
     missing = [behind[k] for k, v in through.items() if v is None]
     if waiting or len(missing) == len(through):
         what = "; ".join(waiting) if waiting else "no Search Console or GA4 data is held yet"
-        return False, f"{what[0].upper()}{what[1:]}. It locks by itself once the data reaches {last:%b} {last.day}."
+        return False, f"{what[0].upper()}{what[1:]}. It is saved by itself once the data reaches {last:%b} {last.day}."
     return True, None
 
 

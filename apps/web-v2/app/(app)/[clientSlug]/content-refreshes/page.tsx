@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { ContentRefreshes } from "@/components/ContentRefreshes";
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Refreshes } from "@/lib/content";
 
 export const metadata = { title: "Content refreshes" };
@@ -29,7 +29,7 @@ export default async function ContentRefreshesPage({
 }) {
   const { clientSlug } = await params;
   const { month: asked, q, ignored } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const months = lastMonths();

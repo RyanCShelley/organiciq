@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { SiteHealth } from "@/components/SiteHealth";
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { ShResponse } from "@/lib/site-health";
 
 export const metadata = { title: "Site health" };
@@ -16,7 +16,7 @@ export default async function SiteHealthPage({
 }) {
   const { clientSlug } = await params;
   const { month } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   let result: ShResponse | null = null;

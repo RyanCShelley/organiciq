@@ -84,9 +84,36 @@ def drop_placeholder_profiles(parsed: Any) -> list[str]:
 # ── concepts ──────────────────────────────────────────────────────────────────
 
 
-def search_concepts(names: list[str]) -> dict[str, list[dict[str, str]]]:
-    found = asyncio.run(wikidata.search_many(names))
-    return {name: [c.to_dict() for c in cands] for name, cands in found.items()}
+_RANK = {"strong": 0, "possible": 1, "weak": 2, "unlikely": 3}
+
+
+def search_concepts(names: list[str], facts: Any = None) -> dict[str, list[dict[str, Any]]]:
+    """Wikidata items for each name. With the site's facts, each carries the evidence for or against it, best match first.
+
+    A name that is itself a Wikidata ID (Q123) is looked up directly, so a person can check an item they found elsewhere. When the evidence
+    cannot be fetched the plain name matches are returned, so the search never fails for want of it.
+    """
+    from app.schema_tools.wikidata_evidence import QID, evidence_for
+
+    ids = [n for n in names if QID.match(n.strip())]
+    found = asyncio.run(wikidata.search_many([n for n in names if n not in ids]))
+    out: dict[str, list[dict[str, Any]]] = {name: [c.to_dict() for c in cands] for name, cands in found.items()}
+    wanted = sorted({c["qid"] for cs in out.values() for c in cs} | {n.strip() for n in ids})
+    detail: dict[str, dict[str, Any]] = {}
+    if facts is not None and wanted:
+        try:
+            detail = asyncio.run(evidence_for(wanted, facts))
+        except Exception:  # the lookup is help, not a requirement
+            logger.warning("wikidata.evidence_failed", exc_info=True)
+    for n in ids:
+        q = n.strip()
+        d = detail.get(q)
+        out[n] = [{"qid": q, "label": d["label"], "description": d["description"], "url": f"https://www.wikidata.org/wiki/{q}"}] if d else []
+    for cands in out.values():
+        for c in cands:
+            c["evidence"] = (detail.get(c["qid"]) or {}).get("evidence")
+        cands.sort(key=lambda c: (_RANK.get((c["evidence"] or {}).get("verdict", ""), 1), -((c["evidence"] or {}).get("matched", 0))))
+    return out
 
 
 def approve_concept(db: Session, client: Client, name: str, qid: str, label: str, description: str, who: str) -> ClientSchemaConcept:
@@ -114,8 +141,14 @@ def stored_page(db: Session, client: Client, url: str) -> dict[str, Any]:
     rows = db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.normalized_url == url).all()
     blocks = [r.raw for r in rows if r.syntax == "json_ld" and not r.parse_error and r.raw]
     micro = {r.schema_type for r in rows if r.syntax != "json_ld" and r.schema_type}
-    audit = schema_audit.audit_page(url, snap.title if snap else None, blocks, micro)
+    # The site's other pages decide whether a reference to an entity this page does not define is dangling or defined elsewhere.
+    everywhere: dict[str, list[Any]] = {}
+    for r in db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.syntax == "json_ld").all():
+        if not r.parse_error and r.raw:
+            everywhere.setdefault(r.normalized_url, []).append(r.raw)
+    audit = schema_audit.audit_page(url, snap.title if snap else None, blocks, micro, schema_audit.site_registry(everywhere))
     audit = schema_audit.apply_ignores(audit, schema_audit.load_ignores(db, client)) or {**audit, "ignored_page": True}
+    audit["findings"] = [f.as_dict() for f in audit.get("findings", [])]
     return {"snapshot_title": snap.title if snap else None, "blocks": blocks, "audit": audit}
 
 
