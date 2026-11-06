@@ -1,7 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, CandidateTopic, GrowthActionBundle, TaskDraft, TaskResult } from "@/lib/engine";
+import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, CandidateTopic, GrowthActionBundle, MonthWork, TaskDraft, TaskPlan, TaskResult } from "@/lib/engine";
 
 export async function diagnoseAction(
   clientId: string,
@@ -123,6 +123,14 @@ export async function buildGrowthActionAction(
     });
   } catch (error) {
     return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };
+  }
+}
+
+export async function workAction(clientId: string, month: string): Promise<MonthWork | null> {
+  try {
+    return (await apiFetch<TaskPlan>(`/v2/engine/tasks?month=${month}`, { clientId })).work ?? null;
+  } catch {
+    return null;
   }
 }
 

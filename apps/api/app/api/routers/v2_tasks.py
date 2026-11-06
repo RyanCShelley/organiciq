@@ -25,7 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import part_done, part_tools, task_results, task_verify, teamwork_subtasks, teamwork_sync
+from app.services import part_done, part_tools, month_work, task_results, task_verify, teamwork_subtasks, teamwork_sync
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -173,6 +173,7 @@ def list_tasks(
         "tasks": [_out(r) for r in rows],
         "allowance": _allowance(client, used),
         "teamwork": {"configured": teamwork.configured(), "tasklist_id": client.teamwork_tasklist_id},
+        "work": month_work.build(db, client, month),
     }
 
 

@@ -11,14 +11,14 @@ from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
-from app.services import monthly_review, review_scorecards
+from app.services import month_work, monthly_review, review_scorecards
 
 router = APIRouter(prefix="/v2/review", tags=["v2 review"])
 
 
 def _with_scorecards(db: Session, client: Client, review: dict) -> dict:
     """The three scorecards and the one line, worked out now: a month that locked before they existed gets them too."""
-    return {**review, "scorecards": review_scorecards.build(db, client, review)}
+    return {**review, "scorecards": review_scorecards.build(db, client, review), "work": month_work.build(db, client, review["month"])}
 
 
 @router.get("")

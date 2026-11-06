@@ -689,6 +689,7 @@ export function EngineScreen({
         tasks={tasks}
         allowance={allowance}
         teamwork={plan.teamwork}
+        work={plan.work ?? null}
         team={team}
         onTaskChange={upsertTask}
       />

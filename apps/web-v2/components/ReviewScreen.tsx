@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useState, useTransition } from "react";
 
@@ -501,6 +502,13 @@ export function ReviewScreen({
 
       <div className="space-y-6">
         {review?.scorecards ? <Band data={review.scorecards} lines={review.summary} /> : null}
+        {review?.work && review.work.parts > 0 ? (
+          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-5 py-3 text-sm">
+            <span className="font-semibold">Work approved for {monthLabel(review.work.month)}:</span> {review.work.done} of {review.work.parts} parts done
+            {review.work.seen_live ? `, ${review.work.seen_live} seen live on the page` : ""}.{" "}
+            <Link href={`/${client.slug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">See them measured in Annotations</Link>
+          </p>
+        ) : null}
 
         <FocusPanel key={planMonth} client={client} planMonth={planMonth} focus={focus} buckets={buckets} reach={reach} choice={choice} setChoice={setChoice} />
 
