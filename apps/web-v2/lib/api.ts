@@ -70,6 +70,10 @@ export type Client = {
   timezone: string;
   account_sheet_url?: string | null;
   service_reporting?: { organiciq: boolean; ad_accelerator: boolean } | null;
+  /** execution: we do the work. consulting: we advise and hand the client's own team a report. */
+  service_mode?: "execution" | "consulting";
+  group_name?: string | null;
+  group_slug?: string | null;
   status: "active" | "paused" | "onboarding" | "archived";
   start_date?: string | null;
   primary_market?: string | null;

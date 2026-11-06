@@ -37,6 +37,12 @@ def client_out(client: Client) -> ClientOut:
     to call, so the whole Decision Engine page failed for them.
     """
     out = ClientOut.model_validate(client)
+    if client.group is not None:
+        out.group_name, out.group_slug = client.group.name, client.group.slug
+    if client.service_mode == "consulting":
+        # No monthly plan to count against: the work is done by the client's own team.
+        out.plan_label = "Consulting"
+        return out
     if client.tier is not None:
         allowances = resolve_plan_allowances(client, client.tier)
         out.growth_action_allowance = allowances.growth_action_allowance

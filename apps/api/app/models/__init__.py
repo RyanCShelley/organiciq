@@ -4,7 +4,7 @@ from app.models.google_update import GoogleSearchUpdate
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, ContentItem, ContentModelRun, ContentState, CtrTitleDraft, InlinkState, SchemaPageReport
 from app.models.site_health import SiteHealthSnapshot
 from app.models.annotation import Annotation, AnnotationResult, AnnotationType
-from app.models.client import Client, ClientStatus, Tier
+from app.models.client import Client, ClientGroup, ClientStatus, Tier
 from app.models.copilot import CopilotConversation, CopilotMessage
 from app.models.config import ChannelRule, ConversionDefinition, LeadExclusion, OrganicChannel, Topic, TopicStatus
 from app.models.crawl import FactCrawlPageIssue, FactCrawlPageSnapshot, StagingSerAuditIssue, StagingSerAuditPage
@@ -58,6 +58,7 @@ __all__ = [
     "WatchlistKeyword",
     "Tier",
     "Client",
+    "ClientGroup",
     "ClientStatus",
     "Annotation",
     "AnnotationType",

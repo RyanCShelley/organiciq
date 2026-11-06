@@ -13,7 +13,7 @@ from app.ingestion.google_credentials import (
     upsert_google_credentials_for_client,
     workspace_google_refresh_token,
 )
-from app.models.client import Client
+from app.models.client import Client, ClientGroup, Tier
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.schemas import ClientCreate, ClientUpdate, IntegrationCreate, IntegrationUpdate
 from app.services.competitors import clean_competitor_domains
@@ -23,6 +23,10 @@ def slugify_client_name(value: str) -> str:
     text_value = re.sub(r"[^a-z0-9]+", "-", text_value)
     text_value = re.sub(r"-{2,}", "-", text_value).strip("-")
     return text_value or "client"
+
+
+#: Top-level addresses of the web app. A client slug is the first part of a client's address, so one of these would hide that client (or the page).
+RESERVED_SLUGS = frozenset({"consulting", "admin", "new-client", "login", "api"})
 
 
 def allocate_client_slug(
@@ -38,7 +42,7 @@ def allocate_client_slug(
         query = db.query(Client).filter(Client.slug == candidate)
         if exclude_client_id is not None:
             query = query.filter(Client.id != exclude_client_id)
-        if query.one_or_none() is None:
+        if candidate not in RESERVED_SLUGS and query.one_or_none() is None:
             return candidate
         candidate = f"{base}-{n}"
         n += 1
@@ -80,8 +84,43 @@ def clean_brand_aliases(values: list[str] | None) -> list[str]:
     return list(seen)
 
 
+CONSULTING_TIER = "Consulting"
+
+
+def consulting_tier(db: Session) -> Tier:
+    """The tier consulting clients sit on: no monthly growth actions, content or updates (the work is done by their own team), room to track the watchlist."""
+    tier = db.query(Tier).filter(Tier.tier_name == CONSULTING_TIER).one_or_none()
+    if tier is None:
+        tier = Tier(tier_name=CONSULTING_TIER, tracked_keyword_limit=100, tracked_prompt_limit=25, content_allowance=0, update_allowance=0, growth_action_allowance=0, conversion_limit=10, reporting_level="standard")
+        db.add(tier)
+        db.flush()
+    return tier
+
+
+def group_for(db: Session, name: str | None) -> ClientGroup | None:
+    """The group with this name (case aside), made when it is new. A blank name is no group."""
+    clean = " ".join((name or "").split())
+    if not clean:
+        return None
+    for g in db.query(ClientGroup).all():
+        if g.name.lower() == clean.lower():
+            return g
+    slug_base = "".join(c if c.isalnum() else "-" for c in clean.lower()).strip("-") or "group"
+    slug, n = slug_base, 2
+    while db.query(ClientGroup).filter(ClientGroup.slug == slug).first():
+        slug, n = f"{slug_base}-{n}", n + 1
+    group = ClientGroup(name=clean, slug=slug)
+    db.add(group)
+    db.flush()
+    return group
+
+
 def create_client(db: Session, payload: ClientCreate) -> Client:
     data = payload.model_dump()
+    group = group_for(db, data.pop("group_name", None))
+    data["group_id"] = group.id if group else None
+    if data.get("tier_id") is None:
+        data["tier_id"] = consulting_tier(db).id
     # Resolved from the tier when a client is read; there is no column for them.
     data.pop("growth_action_allowance", None)
     data.pop("plan_label", None)
@@ -168,6 +207,11 @@ def update_client(db: Session, client: Client, payload: ClientUpdate) -> Client:
         data["slug"] = allocate_client_slug(
             db, desired=str(data["slug"]), exclude_client_id=client.id
         )
+    if "group_name" in data:
+        group = group_for(db, data.pop("group_name"))
+        data["group_id"] = group.id if group else None
+    if data.get("service_mode") is None:
+        data.pop("service_mode", None)
     for key, value in data.items():
         setattr(client, key, value)
     db.commit()

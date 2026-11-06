@@ -107,6 +107,8 @@ def _pages_used(rows) -> int:
 
 
 def _allowance(client: Client, used: int) -> dict:
+    if client.service_mode == "consulting":
+        return {"monthly": None, "used": used, "over": False}  # no monthly plan: the client's own team does the work
     try:
         monthly = resolve_plan_allowances(client).growth_action_allowance
     except ValueError:  # no tier set

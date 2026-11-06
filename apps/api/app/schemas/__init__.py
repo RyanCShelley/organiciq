@@ -2,7 +2,7 @@ from typing import Literal
 from datetime import date as Date, datetime as DateTime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.urls import public_host_or_error
 
@@ -66,7 +66,11 @@ class ClientCreate(BaseModel):
     service_reporting: ServiceReportingConfig | None = None
     client_name: str
     domain: str
-    tier_id: UUID
+    #: Required for a client we execute for; a consulting client is given the Consulting tier when none is chosen.
+    tier_id: UUID | None = None
+    service_mode: Literal["execution", "consulting"] = "execution"
+    #: The group this client belongs to (a company with several sites). Made if it does not exist yet.
+    group_name: str | None = None
     slug: str | None = None
     start_date: Date | None = None
     primary_market: str | None = None
@@ -110,6 +114,12 @@ class ClientCreate(BaseModel):
     baseline_projection_json: dict | None = None
     status: ClientStatus = ClientStatus.ONBOARDING
 
+    @model_validator(mode="after")
+    def _a_tier_unless_consulting(self) -> "ClientCreate":
+        if self.tier_id is None and self.service_mode != "consulting":
+            raise ValueError("tier_id is needed for a client we execute for.")
+        return self
+
     @field_validator("domain", "sitemap_url", check_fields=False)
     @classmethod
     def _must_be_a_public_site(cls, value: str | None, info) -> str | None:
@@ -125,6 +135,9 @@ class ClientCreate(BaseModel):
 
 
 class ClientUpdate(BaseModel):
+    service_mode: Literal["execution", "consulting"] | None = None
+    #: A name moves the client into that group (made if new); an empty string takes it out.
+    group_name: str | None = None
     service_reporting: ServiceReportingConfig | None = None
     client_name: str | None = None
     slug: str | None = None
@@ -188,6 +201,9 @@ class ClientUpdate(BaseModel):
 
 class ClientOut(ORMModel):
     service_reporting: ServiceReportingConfig | None = None
+    service_mode: str = "execution"
+    group_name: str | None = None
+    group_slug: str | None = None
     id: UUID
     client_name: str
     slug: str

@@ -85,6 +85,19 @@ function ServiceSelect({
   );
 }
 
+const MODES = [
+  { value: "execution", label: "Execution: we do the work and track it here" },
+  { value: "consulting", label: "Consulting: advisory portal; their team does the work" },
+] as const;
+
+function ModeSelect({ value, onChange }: { value: string; onChange: (v: "execution" | "consulting") => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value as "execution" | "consulting")} className={inputClass}>
+      {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+    </select>
+  );
+}
+
 export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }) {
   const save = useSave();
   const [service, setService] = useState<ServiceValue | "">(serviceFromConfig(client.service_reporting));
@@ -95,6 +108,8 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
   const [model, setModel] = useState<string>(client.business_model ?? "");
   const [start, setStart] = useState(client.start_date ?? "");
   const [sheet, setSheet] = useState(client.account_sheet_url ?? "");
+  const [mode, setMode] = useState<"execution" | "consulting">(client.service_mode ?? "execution");
+  const [group, setGroup] = useState(client.group_name ?? "");
   const tier = tiers.find((t) => t.id === tierId);
 
   return (
@@ -108,6 +123,8 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
             client_name: name.trim(),
             domain: domain.trim(),
             tier_id: tierId,
+            service_mode: mode,
+            group_name: group.trim(),
             status,
             business_model: model || null,
             start_date: start || null,
@@ -130,6 +147,12 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
           </Field>
           <Field label="OrganicIQ tier">
             <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
+          </Field>
+          <Field label="How we work with this client">
+            <ModeSelect value={mode} onChange={setMode} />
+          </Field>
+          <Field label="Group (optional)" hint="Sites of one company share a group, such as Flint.">
+            <input value={group} onChange={(e) => setGroup(e.target.value)} className={inputClass} />
           </Field>
           <Field label="Status">
             <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
@@ -324,19 +347,24 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
   const [tierId, setTierId] = useState("");
   const [start, setStart] = useState("");
   const [model, setModel] = useState("");
+  const [mode, setMode] = useState<"execution" | "consulting">("execution");
+  const [group, setGroup] = useState("");
+  const consulting = mode === "consulting";
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        if (!service) return;
+        if (!consulting && !service) return;
         setError(null);
         startTransition(async () => {
           const result = await createClientAction({
-            service_reporting: configFromService(service),
+            service_reporting: configFromService(consulting ? "organiciq" : (service as ServiceValue)),
+            service_mode: mode,
+            group_name: group.trim() || null,
             client_name: name.trim(),
             domain: domain.trim(),
-            tier_id: tierId,
+            tier_id: consulting ? null : tierId,
             business_model: model || null,
             start_date: start || null,
           });
@@ -347,12 +375,22 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
     >
       <Card>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Agency services">
-            <ServiceSelect value={service} onChange={setService} />
+          <Field label="How we work with this client">
+            <ModeSelect value={mode} onChange={setMode} />
           </Field>
-          <Field label="OrganicIQ tier">
-            <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
+          <Field label="Group (optional)" hint="Sites of one company share a group, such as Flint.">
+            <input value={group} onChange={(e) => setGroup(e.target.value)} className={inputClass} />
           </Field>
+          {consulting ? null : (
+            <>
+              <Field label="Agency services">
+                <ServiceSelect value={service} onChange={setService} />
+              </Field>
+              <Field label="OrganicIQ tier">
+                <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
+              </Field>
+            </>
+          )}
           <Field label="Company name" hint="Used for branding and AI-search prompts.">
             <input value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} />
           </Field>
@@ -376,7 +414,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
         <div className="mt-6 flex items-center gap-3">
           <button
             type="submit"
-            disabled={pending || !service || !tierId}
+            disabled={pending || (!consulting && (!service || !tierId))}
             className="rounded-lg bg-[var(--brand-teal)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             Add client
