@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.ads import AdsDaily, AdsSearchTerm
+from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm
 from app.models.client import Client
 from app.services.monthly_review import parse_month, previous_month
 
@@ -32,7 +32,7 @@ def _totals(rows: list[Any]) -> dict[str, Any]:
     clk = sum(r.clicks for r in rows)
     cost = sum(_f(r.cost) for r in rows)
     conv = sum(_f(r.conversions) for r in rows)
-    eligible = sum(r.eligible_impressions for r in rows)
+    eligible = sum(getattr(r, "eligible_impressions", 0) for r in rows)
     return {
         "impressions": imp, "clicks": clk, "cost": round(cost, 2), "conversions": round(conv, 1),
         "ctr": round(100 * clk / imp, 2) if imp else None, "avg_cpc": round(cost / clk, 2) if clk else None,
@@ -45,6 +45,17 @@ def _by(rows: list[Any], key: str) -> list[dict[str, Any]]:
     groups: dict[str, list[Any]] = defaultdict(list)
     for r in rows:
         groups[getattr(r, key) or "Not split"].append(r)
+    out = [{"name": k, **_totals(v)} for k, v in groups.items()]
+    out.sort(key=lambda g: (-g["cost"], -g["clicks"], g["name"]))
+    return out
+
+
+def _markets(db: Session, client: Client, first: date, last: date) -> list[dict[str, Any]]:
+    """By market. Google reports markets apart from ad groups and devices, so they come from their own table; there is no impression share to show."""
+    rows = db.query(AdsMarketDaily).filter(AdsMarketDaily.client_id == client.id, AdsMarketDaily.date >= first, AdsMarketDaily.date <= last).all()
+    groups: dict[str, list[Any]] = defaultdict(list)
+    for r in rows:
+        groups[r.market or "Not split"].append(r)
     out = [{"name": k, **_totals(v)} for k, v in groups.items()]
     out.sort(key=lambda g: (-g["cost"], -g["clicks"], g["name"]))
     return out
@@ -91,7 +102,7 @@ def report(db: Session, client: Client, month: str) -> dict[str, Any]:
         "source": held[2], "reason": None if rows else "The ads did not run this month.",
         "totals": _totals(rows), "previous": _totals(prev_rows) if prev_rows else None, "weekly": _weekly(rows, first, last), "groups": _by(rows, "ad_group"),
         "terms": [{"term": t, "ad_group": g, "clicks": int(c or 0), "cost": round(_f(cost), 2)} for t, g, c, cost in terms[:TERMS_SHOWN]],
-        "markets": _by(rows, "market"), "devices": _by(rows, "device"),
+        "markets": _markets(db, client, first, last), "devices": _by(rows, "device"),
     }
 
 

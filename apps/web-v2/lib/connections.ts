@@ -31,3 +31,15 @@ export type Option = { value: string; label: string };
 
 export type OptionsResult = { ok: true; options: Option[] } | { ok: false; error: string };
 export type ConnectResult = { ok: true; url: string } | { ok: false; error: string };
+
+/** Where Google Ads stands for a client on Ads Accelerator. */
+export type AdsConnection = {
+  enabled: boolean;
+  /** The Google sign-in includes the Google Ads permission. */
+  permission: boolean;
+  /** The manager account is set on the server. */
+  manager_set: boolean;
+  customer_id: string | null;
+  last_pull_at: string | null;
+  last_error: string | null;
+};

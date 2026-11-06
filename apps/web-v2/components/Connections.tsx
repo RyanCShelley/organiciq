@@ -9,7 +9,7 @@ import { inputClass } from "@/components/ui/form";
 import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
+import type { AdsConnection, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Tone = "ok" | "warn" | "bad" | "off";
@@ -37,7 +37,7 @@ function Row({
   onToggle,
   children,
 }: {
-  logo: string;
+  logo: string | null;
   name: string;
   value: string | null;
   tone: Tone;
@@ -51,8 +51,12 @@ function Row({
   return (
     <li className="p-4">
       <div className="flex flex-wrap items-center gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`/logos/${logo}.png`} alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-lg border border-[var(--border)] bg-white object-contain p-1" />
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/logos/${logo}.png`} alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-lg border border-[var(--border)] bg-white object-contain p-1" />
+        ) : (
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-white text-xs font-bold text-[var(--text-secondary)]" aria-hidden>Ads</span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{name}</div>
           <div className="truncate text-sm text-[var(--text-secondary)]">{value ?? "Not chosen yet"}</div>
@@ -174,12 +178,14 @@ export function ConnectionsPanel({
   client,
   integrations,
   connections,
+  ads,
   isAdmin,
   oauth,
 }: {
   client: Client;
   integrations: IntegrationRow[];
   connections: Connections;
+  ads?: AdsConnection | null;
   isAdmin: boolean;
   oauth?: { status: string; message?: string };
 }) {
@@ -194,6 +200,8 @@ export function ConnectionsPanel({
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connecting, startConnect] = useTransition();
   const [bingPending, startBing] = useTransition();
+  const [adsPulling, startAdsPull] = useTransition();
+  const [adsError, setAdsError] = useState<string | null>(null);
 
   const googleLinked = gsc?.connection_status === "connected" || ga4?.connection_status === "connected";
   const connectGoogle = () =>
@@ -202,6 +210,23 @@ export function ConnectionsPanel({
       const result = await act.startGoogleConnectAction(client.id);
       if (result.ok) window.location.href = result.url;
       else setConnectError(result.error);
+    });
+
+  const adsId = ads?.customer_id?.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3") ?? null;
+  const adsTone: { tone: Tone; status: string } = !ads
+    ? { tone: "off", status: "Not set up" }
+    : !ads.permission
+      ? { tone: "warn", status: "Needs permission" }
+      : ads.last_error
+        ? { tone: "bad", status: "Problem" }
+        : ads.customer_id && ads.last_pull_at
+          ? { tone: "ok", status: "Connected" }
+          : { tone: "off", status: ads.customer_id ? "Not pulled yet" : "Not chosen" };
+  const pullAds = () =>
+    startAdsPull(async () => {
+      setAdsError(null);
+      const r = await act.pullAdsAction(client.id, client.slug);
+      if (!r.ok) setAdsError(r.error);
     });
 
   const bingTone: { tone: Tone; status: string } = !bing
@@ -341,6 +366,36 @@ export function ConnectionsPanel({
             <TypedValue placeholder="Project ID" initial={connections.teamwork_content_project_id ?? ""} save={(v) => updateClientAction(client.id, client.slug, { teamwork_content_project_id: v })} onSaved={close} />
           )}
         </Row>
+        {ads?.enabled ? (
+          <Row logo={null} name="Google Ads" value={adsId ? `${adsId}${ads.last_pull_at ? ` · pulled ${new Date(ads.last_pull_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}` : null} {...adsTone} error={ads.last_error} action={ads.customer_id ? "Change" : "Choose"} open={open === "ads"} onToggle={() => toggle("ads")}>
+            {!ads.permission ? (
+              <div className="space-y-2 text-sm">
+                <p>The shared Google sign-in does not include Google Ads yet. An admin needs to reconnect Google and approve the Google Ads permission.</p>
+                {isAdmin ? (
+                  <button type="button" disabled={connecting} onClick={connectGoogle} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                    {connecting ? <><Spinner />Opening Google…</> : "Reconnect Google"}
+                  </button>
+                ) : <p className="text-[var(--text-secondary)]">Ask an admin to do this.</p>}
+                <Problem text={connectError} />
+              </div>
+            ) : !ads.manager_set ? (
+              <p className="text-sm text-amber-800">Not configured on this install: GOOGLE_ADS_LOGIN_CUSTOMER_ID (the manager account, digits only) is missing.</p>
+            ) : isAdmin ? (
+              <div className="space-y-3">
+                <Picker label="Google Ads account" load={() => act.loadAdsAccountsAction()} save={(v) => act.saveAdsAccountAction(client.id, client.slug, v)} empty="The manager account has no client accounts this Google user can see." onSaved={close} />
+                {ads.customer_id ? (
+                  <div>
+                    <button type="button" disabled={adsPulling} onClick={pullAds} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-white disabled:opacity-50">
+                      {adsPulling ? <><Spinner />Pulling…</> : "Pull now"}
+                    </button>
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">The numbers also pull once a day. The first pull goes back 90 days.</p>
+                    <Problem text={adsError} />
+                  </div>
+                ) : null}
+              </div>
+            ) : <p className="text-sm text-[var(--text-secondary)]">Ask an admin to choose the Google Ads account.</p>}
+          </Row>
+        ) : null}
       </ul>
 
       {/* Keyed by what is connected, so choosing or changing a source reloads what there is to pull. */}

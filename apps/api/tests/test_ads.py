@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app.models.ads import AdsDaily, AdsSearchTerm
+from app.models.ads import AdsDaily, AdsMarketDaily, AdsSearchTerm
 from tests.conftest import client_header
 
 
@@ -22,6 +22,10 @@ def seed(db, client):
         day = date(2026, 10, 1) + timedelta(days=i)
         db.add(row(client, day, imp=100, clk=4, cost="20.00", eligible=400))
         db.add(row(client, day, group="slab leak", market="St Lucie", device="Mobile", imp=20, clk=1, cost="4.00", eligible=100, conv=1 if i == 3 else 0))
+    for i in range(30):  # markets are kept apart from ad groups and devices
+        day = date(2026, 10, 1) + timedelta(days=i)
+        db.add(AdsMarketDaily(client_id=client.id, date=day, campaign="Pool | 2026", market="Brevard County", impressions=90, clicks=4, cost=Decimal("20.00"), source="demo"))
+        db.add(AdsMarketDaily(client_id=client.id, date=day, campaign="Pool | 2026", market="St Lucie County", impressions=30, clicks=1, cost=Decimal("4.00"), source="demo"))
     for i in range(10):  # September, the month before
         db.add(row(client, date(2026, 9, 20) + timedelta(days=i), imp=50, clk=2, cost="10.00"))
     db.add(AdsSearchTerm(client_id=client.id, date=date(2026, 10, 5), term="pool leak detection near me", ad_group="pool leak", impressions=9, clicks=6, cost=Decimal("30.00")))
@@ -38,7 +42,8 @@ def test_the_report_is_the_numbers_in_the_order_of_the_page(client, db, client_a
     assert t["share"] == round(100 * t["impressions"] / (400 * 30 + 100 * 30), 1) and t["conversions"] == 1 and out["previous"]["clicks"] == 20
     assert out["weekly"][0]["week"] == "Oct 1–4" and out["weekly"][-1]["week"] == "Oct 26–31"
     assert [g["name"] for g in out["groups"]] == ["pool leak", "slab leak"] and out["groups"][0]["cost"] > out["groups"][1]["cost"]
-    assert {m["name"] for m in out["markets"]} == {"Brevard", "St Lucie"} and {d["name"] for d in out["devices"]} == {"Desktop", "Mobile"}
+    assert [m["name"] for m in out["markets"]] == ["Brevard County", "St Lucie County"] and out["markets"][0]["clicks"] == 120 and out["markets"][0]["share"] is None
+    assert {m["name"] for m in out["markets"]} == {"Brevard County", "St Lucie County"} and {d["name"] for d in out["devices"]} == {"Desktop", "Mobile"}
     assert [x["term"] for x in out["terms"]] == ["pool leak detection near me", "pool leak repair cost"]
     assert not {"summary", "notes", "split", "terms_note"} & set(out), "numbers only: no written commentary"
 
