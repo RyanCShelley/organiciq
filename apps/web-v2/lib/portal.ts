@@ -76,3 +76,44 @@ export const STATE_LABEL: Record<RecState, string> = { draft: "Draft", under_rev
 export const CATEGORY_LABEL = { visibility: "Visibility", traffic: "Traffic", leads: "Leads" } as const;
 export const FOCUS_LABEL = { seo: "Search", geo: "AI visibility", both: "Search and AI" } as const;
 export const IMPL_LABEL = { recommended: "Recommended", planned: "Planned", in_progress: "In progress", completed: "Completed", blocked: "Blocked" } as const;
+
+/** A published brief as its client sees it. */
+export type ClientRec = {
+  id: string;
+  title: string;
+  category: "visibility" | "traffic" | "leads";
+  focus: "seo" | "geo" | "both";
+  priority: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low";
+  finding: string | null;
+  explanation: string | null;
+  cause_kind: "hypothesis" | "confirmed";
+  cause_text: string | null;
+  action: string | null;
+  instructions: { text: string }[];
+  target_urls: { url: string; state: string; live_url: string | null }[];
+  expected_impact: string | null;
+  effort_min: number | null;
+  owner: string | null;
+  baseline: { metric: string; value: string; source?: string; period?: string }[];
+  success_metrics: { metric: string; baseline?: string; target?: string; window_days?: number }[];
+  measure_on: string | null;
+  evidence: { text: string; source?: string; as_of?: string }[];
+  impl_status: "recommended" | "planned" | "in_progress" | "completed" | "blocked";
+  implemented_on: string | null;
+  implemented_on_estimated: boolean;
+  client_notes: string | null;
+  evidence_links: string[];
+  verification: "unverified" | "verified" | "not_seen" | "unreadable";
+  verified_at: string | null;
+  published_at: string | null;
+  reported: boolean;
+  can_update?: boolean;
+};
+export type PortalOverview = {
+  total: number;
+  counts: Record<ClientRec["impl_status"], number>;
+  not_reported: number;
+  verified: number;
+  top: ClientRec[];
+};

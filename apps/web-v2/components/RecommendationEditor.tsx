@@ -133,7 +133,7 @@ export function RecommendationEditor({ client, rec: first, error: loadError }: {
             <div className="flex flex-wrap gap-2">
               {rec.next_states.map((s) => (
                 <button key={s} type="button" disabled={pending} onClick={() => move(s)} className={`rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-50 ${s === "published" ? "border-[var(--brand-dark)] bg-[var(--brand-dark)] text-white" : "border-[var(--border)] bg-white"}`}>
-                  {s === "published" ? "Publish to client" : s === "draft" ? "Back to draft" : s === "archived" ? "Archive" : s === "under_review" ? "Send for review" : s === "approved" ? "Approve" : STATE_LABEL[s]}
+                  {s === "published" ? "Publish to client" : s === "draft" ? "Back to draft" : s === "archived" ? "Archive" : s === "under_review" ? (rec.review_state === "approved" ? "Back to review" : "Send for review") : s === "approved" ? (rec.review_state === "published" ? "Unpublish (hide from the client)" : "Approve") : STATE_LABEL[s]}
                 </button>
               ))}
             </div>

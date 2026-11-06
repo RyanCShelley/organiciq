@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
 from app.core.db import get_db
-from app.core.portal import Portal, portal_clients, require_portal_access
+from app.core.portal import CLIENT_ROLES, Portal, portal_clients, require_portal_access
 from app.core.security import STAFF_ROLES, AuthUser, get_current_user, require_sma_staff
+from app.models.user import UserRole
 from app.models.client import Client
 from app.models.consulting import ConsultingProfile
 from app.services import consulting_recs
@@ -300,3 +301,71 @@ def follow_up_recommendation(
     """Note that the consultant followed up, even without a reply."""
     rec = _rec(db, client, rec_id)
     return _full(db, consulting_recs.record_follow_up(db, rec, user.email, payload.note))
+
+
+# ── the client's portal: published briefs only ───────────────────────────────
+
+
+@router.get("/portal/overview")
+def portal_overview(
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """The front page: how the published recommendations stand, and the most important ones still open."""
+    return consulting_recs.overview(db, ctx.client)
+
+
+@router.get("/portal/recommendations")
+def portal_recommendations(
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Every published recommendation, most urgent first. Nothing unpublished, and nothing internal, is in the reply."""
+    return {"recommendations": [consulting_recs.client_out(r) for r in consulting_recs.published(db, ctx.client)], "can_update": ctx.is_staff or ctx.user.role == UserRole.CLIENT_ADMIN}
+
+
+def _published(db: Session, client: Client, rec_id: UUID):
+    rec = consulting_recs.get(db, client, rec_id)
+    if rec is None or rec.review_state != "published":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That recommendation is not available.")
+    return rec
+
+
+@router.get("/portal/recommendations/{rec_id}")
+def portal_recommendation(
+    rec_id: UUID,
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    return {**consulting_recs.client_out(_published(db, ctx.client, rec_id)), "can_update": ctx.is_staff or ctx.user.role == UserRole.CLIENT_ADMIN}
+
+
+class ClientProgressIn(BaseModel):
+    """All a client can change: where they are with it, when it went live, a note, and links that show it."""
+
+    model_config = {"extra": "forbid"}
+
+    status: str | None = None
+    implemented_on: date | None = None
+    estimated: bool = False
+    notes: str | None = Field(default=None, max_length=4000)
+    links: list[str] | None = None
+
+
+@router.post("/portal/recommendations/{rec_id}/progress")
+def portal_progress(
+    rec_id: UUID,
+    payload: ClientProgressIn,
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Update where a recommendation stands. A client admin's update is recorded as the client's; a consultant's, made on their behalf, as the consultant's.
+
+    It never verifies anything: only evidence does that.
+    """
+    if not (ctx.is_staff or ctx.user.role == UserRole.CLIENT_ADMIN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your access is read-only.")
+    rec = _published(db, ctx.client, rec_id)
+    source = "consultant" if ctx.is_staff else "client"
+    done = _guard(lambda: consulting_recs.record_progress(db, rec, status=payload.status, source=source, who=ctx.user.email, implemented_on=payload.implemented_on, estimated=payload.estimated, notes=payload.notes, links=payload.links))
+    return {**consulting_recs.client_out(done), "can_update": True}

@@ -16,7 +16,8 @@ from tests.conftest import auth_header, client_header
 #: state token), and the portal itself (guarded by its own access rule, tested below).
 OPEN = {
     ("GET", "/health"), ("POST", "/auth/upsert"), ("GET", "/oauth/google/callback"),
-    ("GET", "/v2/consulting/clients"), ("GET", "/v2/consulting/portal"),
+    ("GET", "/v2/consulting/clients"), ("GET", "/v2/consulting/portal"), ("GET", "/v2/consulting/portal/overview"), ("GET", "/v2/consulting/portal/recommendations"),
+    ("GET", "/v2/consulting/portal/recommendations/{rec_id}"), ("POST", "/v2/consulting/portal/recommendations/{rec_id}/progress"),
 }
 
 

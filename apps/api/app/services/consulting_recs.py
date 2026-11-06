@@ -235,3 +235,42 @@ def staff_out(rec: ConsultingRecommendation) -> dict[str, Any]:
         d[c] = v.isoformat() if v else None
     d.update(id=str(rec.id), approved_by=rec.approved_by, published_by=rec.published_by, publish_gaps=publish_gaps(rec), next_states=list(TRANSITIONS[rec.review_state]))
     return d
+
+
+#: What a client may read of a brief. An allow-list, so a field added to the record later stays internal until it is listed here on purpose.
+CLIENT_FIELDS = (
+    "title", "category", "focus", "finding", "explanation", "cause_kind", "cause_text", "action", "instructions", "priority", "expected_impact", "confidence", "effort_min",
+    "owner", "baseline", "success_metrics", "evidence", "impl_status", "implemented_on_estimated", "client_notes", "evidence_links", "verification",
+)
+
+
+def client_out(rec: ConsultingRecommendation) -> dict[str, Any]:
+    """A published brief as its client sees it: no internal notes, no confidence reasons, no source, no authorship, no review trail."""
+    d = {c: getattr(rec, c) for c in CLIENT_FIELDS}
+    d["id"] = str(rec.id)
+    d["measure_on"] = rec.measure_on.isoformat() if rec.measure_on else None
+    d["implemented_on"] = rec.implemented_on.isoformat() if rec.implemented_on else None
+    d["published_at"] = rec.published_at.isoformat() if rec.published_at else None
+    d["verified_at"] = rec.verified_at.isoformat() if rec.verified_at else None
+    d["reported"] = rec.impl_updated_at is not None
+    # Each address with what we know of it; the check's own note is ours, so only the verdict and the live address are shown.
+    d["target_urls"] = [{"url": u["url"], "state": (u.get("check") or {}).get("state", "unchecked"), "live_url": (u.get("check") or {}).get("live_url")} for u in rec.target_urls or []]
+    return d
+
+
+def published(db: Session, client: Client) -> list[ConsultingRecommendation]:
+    """The briefs a client may see: published ones only, most urgent first."""
+    order = {"high": 0, "medium": 1, "low": 2}
+    rows = db.query(ConsultingRecommendation).filter(ConsultingRecommendation.client_id == client.id, ConsultingRecommendation.review_state == "published").all()
+    return sorted(rows, key=lambda r: (order.get(r.priority, 3), -(r.published_at.timestamp() if r.published_at else 0)))
+
+
+def overview(db: Session, client: Client) -> dict[str, Any]:
+    """The portal front page's numbers: how many briefs are in each state, and the most important ones still open."""
+    rows = published(db, client)
+    counts = {s: sum(1 for r in rows if r.impl_status == s) for s in IMPL_STATUSES}
+    open_rows = [r for r in rows if r.impl_status != "completed"]
+    return {
+        "total": len(rows), "counts": counts, "not_reported": sum(1 for r in rows if r.impl_updated_at is None), "verified": sum(1 for r in rows if r.verification == "verified"),
+        "top": [client_out(r) for r in open_rows[:5]],
+    }
