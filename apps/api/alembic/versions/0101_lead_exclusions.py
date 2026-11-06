@@ -1,15 +1,15 @@
 """Lead exclusions: slices of lead events that are test submissions.
 
-Revision ID: 0097_lead_exclusions
-Revises: 0096_content_project
+Revision ID: 0101_lead_exclusions
+Revises: 0100_google_ads_pull
 """
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0097_lead_exclusions"
-down_revision = "0096_content_project"
+revision = "0101_lead_exclusions"
+down_revision = "0100_google_ads_pull"
 branch_labels = None
 depends_on = None
 
