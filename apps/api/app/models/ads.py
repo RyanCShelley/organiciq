@@ -31,6 +31,8 @@ class AdsDaily(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
+    #: Which Google Ads account the row came from (a client can have several, for example search ads and Local Services Ads).
+    account_id: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
     campaign: Mapped[str] = mapped_column(Text, nullable=False)
     ad_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     #: Not used: a pulled day is split by device only, and markets are in `ads_market_daily`. Kept because migrations only add.
@@ -58,6 +60,7 @@ class AdsMarketDaily(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
+    account_id: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
     campaign: Mapped[str] = mapped_column(Text, nullable=False)
     market: Mapped[str] = mapped_column(Text, nullable=False)
     impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -79,6 +82,7 @@ class AdsSearchTerm(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
+    account_id: Mapped[str] = mapped_column(String(20), nullable=False, default="", server_default="")
     term: Mapped[str] = mapped_column(Text, nullable=False)
     ad_group: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     impressions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -86,3 +90,21 @@ class AdsSearchTerm(Base):
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     conversions: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="google_ads", server_default="google_ads")
+
+
+class ClientAdsAccount(Base):
+    """A Google Ads account a client is: search ads, Local Services Ads, and so on. A client can have several."""
+
+    __tablename__ = "client_ads_accounts"
+    __table_args__ = (UniqueConstraint("client_id", "customer_id", name="uq_client_ads_account"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    #: Digits only.
+    customer_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    #: "ads" (search and other campaigns) or "lsa" (Local Services Ads).
+    kind: Mapped[str] = mapped_column(String(8), nullable=False, default="ads", server_default="ads")
+    last_pull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

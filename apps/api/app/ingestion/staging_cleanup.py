@@ -59,6 +59,8 @@ _STAGING_BY_SOURCE: dict[str, tuple[type, ...]] = {
     "site_crawl": (),
     # One request, upserted straight into facts; no staging tables to purge.
     "bing_query_stats": (),
+    # Google Ads rows go straight into the ads tables; nothing is staged.
+    "google_ads": (),
     # Responses are written straight to llm_responses; nothing staged.
     "llm_visibility": (),
     # One request, merged in memory, upserted into facts.

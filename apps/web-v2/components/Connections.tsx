@@ -9,7 +9,7 @@ import { inputClass } from "@/components/ui/form";
 import { SearchList } from "@/components/ui/SearchList";
 import type { Client } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
-import type { AdsConnection, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
+import type { AdsAccount, AdsConnection, Connections, IntegrationRow, Option, OptionsResult } from "@/lib/connections";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Tone = "ok" | "warn" | "bad" | "off";
@@ -202,6 +202,8 @@ export function ConnectionsPanel({
   const [bingPending, startBing] = useTransition();
   const [adsPulling, startAdsPull] = useTransition();
   const [adsError, setAdsError] = useState<string | null>(null);
+  const [adsKind, setAdsKind] = useState<"ads" | "lsa">("ads");
+  const [adsRemoving, startAdsRemove] = useTransition();
 
   const googleLinked = gsc?.connection_status === "connected" || ga4?.connection_status === "connected";
   const connectGoogle = () =>
@@ -212,16 +214,17 @@ export function ConnectionsPanel({
       else setConnectError(result.error);
     });
 
-  const adsId = ads?.customer_id?.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3") ?? null;
+  const accounts: AdsAccount[] = ads?.accounts ?? [];
+  const adsValue = accounts.length ? accounts.map((a) => a.name || a.customer_id).join(", ") : null;
   const adsTone: { tone: Tone; status: string } = !ads
     ? { tone: "off", status: "Not set up" }
     : !ads.permission
       ? { tone: "warn", status: "Needs permission" }
-      : ads.last_error
+      : accounts.some((a) => a.last_error)
         ? { tone: "bad", status: "Problem" }
-        : ads.customer_id && ads.last_pull_at
+        : accounts.length && accounts.every((a) => a.last_pull_at)
           ? { tone: "ok", status: "Connected" }
-          : { tone: "off", status: ads.customer_id ? "Not pulled yet" : "Not chosen" };
+          : { tone: "off", status: accounts.length ? "Not pulled yet" : "Not chosen" };
   const pullAds = () =>
     startAdsPull(async () => {
       setAdsError(null);
@@ -367,7 +370,7 @@ export function ConnectionsPanel({
           )}
         </Row>
         {ads?.enabled ? (
-          <Row logo={null} name="Google Ads" value={adsId ? `${adsId}${ads.last_pull_at ? ` · pulled ${new Date(ads.last_pull_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}` : null} {...adsTone} error={ads.last_error} action={ads.customer_id ? "Change" : "Choose"} open={open === "ads"} onToggle={() => toggle("ads")}>
+          <Row logo="google-ads" name="Google Ads" value={adsValue} {...adsTone} action={accounts.length ? "Change" : "Choose"} open={open === "ads"} onToggle={() => toggle("ads")}>
             {!ads.permission ? (
               <div className="space-y-2 text-sm">
                 <p>The shared Google sign-in does not include Google Ads yet. An admin needs to reconnect Google and approve the Google Ads permission.</p>
@@ -380,20 +383,56 @@ export function ConnectionsPanel({
               </div>
             ) : !ads.manager_set ? (
               <p className="text-sm text-amber-800">Not configured on this install: GOOGLE_ADS_LOGIN_CUSTOMER_ID (the manager account, digits only) is missing.</p>
-            ) : isAdmin ? (
-              <div className="space-y-3">
-                <Picker label="Google Ads account" load={() => act.loadAdsAccountsAction()} save={(v) => act.saveAdsAccountAction(client.id, client.slug, v)} empty="The manager account has no client accounts this Google user can see." onSaved={close} />
-                {ads.customer_id ? (
-                  <div>
-                    <button type="button" disabled={adsPulling} onClick={pullAds} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-white disabled:opacity-50">
-                      {adsPulling ? <><Spinner />Pulling…</> : "Pull now"}
-                    </button>
-                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">The numbers also pull once a day. The first pull goes back 90 days.</p>
+            ) : (
+              <div className="space-y-4">
+                {accounts.length > 0 ? (
+                  <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-white text-sm">
+                    {accounts.map((a) => (
+                      <li key={a.customer_id} className="p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{a.name || a.customer_id}</span>
+                          <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">{a.kind === "lsa" ? "Local Services Ads" : "Ads"}</span>
+                          <span className="text-xs text-[var(--text-tertiary)]">{a.customer_id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3")}{a.last_pull_at ? ` · pulled ${new Date(a.last_pull_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}</span>
+                          {isAdmin ? (
+                            <button type="button" disabled={adsRemoving} onClick={() => startAdsRemove(async () => { const r = await act.removeAdsAccountAction(client.id, client.slug, a.customer_id); if (!r.ok) setAdsError(r.error); })} className="ml-auto text-xs underline disabled:opacity-50">Remove</button>
+                          ) : null}
+                        </div>
+                        {a.last_error ? <Problem text={a.last_error} /> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {isAdmin ? (
+                  <div className="space-y-3">
+                    <div className="text-sm font-semibold">Add an account</div>
+                    <label className="block text-xs font-semibold">
+                      What kind of account
+                      <select value={adsKind} onChange={(e) => setAdsKind(e.target.value as "ads" | "lsa")} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-2 text-sm font-normal">
+                        <option value="ads">Ads (search and other campaigns)</option>
+                        <option value="lsa">Local Services Ads</option>
+                      </select>
+                    </label>
+                    <Picker
+                      key={accounts.map((a) => a.customer_id).join(",")}
+                      label="Google Ads account"
+                      load={() => act.loadAdsAccountsAction(accounts.map((a) => a.customer_id))}
+                      save={(v, l) => act.addAdsAccountAction(client.id, client.slug, v, l.replace(/\s*\(\d{3}-\d{3}-\d{4}\)$/, ""), adsKind)}
+                      empty="The manager account has no more client accounts this Google user can see."
+                      onSaved={close}
+                    />
+                    {accounts.length > 0 ? (
+                      <div>
+                        <button type="button" disabled={adsPulling} onClick={pullAds} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold hover:bg-white disabled:opacity-50">
+                          {adsPulling ? <><Spinner />Pulling…</> : "Pull now"}
+                        </button>
+                        <p className="mt-1 text-xs text-[var(--text-tertiary)]">The numbers also pull once a day, and show under Pull data. The first pull goes back 90 days.</p>
+                      </div>
+                    ) : null}
                     <Problem text={adsError} />
                   </div>
-                ) : null}
+                ) : <p className="text-sm text-[var(--text-secondary)]">Ask an admin to add the Google Ads accounts.</p>}
               </div>
-            ) : <p className="text-sm text-[var(--text-secondary)]">Ask an admin to choose the Google Ads account.</p>}
+            )}
           </Row>
         ) : null}
       </ul>

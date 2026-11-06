@@ -32,6 +32,15 @@ export type Option = { value: string; label: string };
 export type OptionsResult = { ok: true; options: Option[] } | { ok: false; error: string };
 export type ConnectResult = { ok: true; url: string } | { ok: false; error: string };
 
+/** One Google Ads account a client has: search ads, Local Services Ads, and so on. */
+export type AdsAccount = {
+  customer_id: string;
+  name: string;
+  kind: "ads" | "lsa";
+  last_pull_at: string | null;
+  last_error: string | null;
+};
+
 /** Where Google Ads stands for a client on Ads Accelerator. */
 export type AdsConnection = {
   enabled: boolean;
@@ -39,7 +48,5 @@ export type AdsConnection = {
   permission: boolean;
   /** The manager account is set on the server. */
   manager_set: boolean;
-  customer_id: string | null;
-  last_pull_at: string | null;
-  last_error: string | null;
+  accounts: AdsAccount[];
 };
