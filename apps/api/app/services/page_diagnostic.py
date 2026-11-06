@@ -32,7 +32,8 @@ from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.provisional import suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
-from app.ingestion.crawler.parse import ParsedPage, parse_page
+from app.ingestion.crawler.fetch import challenge_reason
+from app.ingestion.crawler.parse import _NOINDEX, ParsedPage, parse_page
 from app.ingestion.crawler.safe_http import PublicOnlyTransport
 from app.services.page_eligibility import classify_page_url
 from app.services.target_signals import _declares_faq, _entity_properties, _has_faq_section
@@ -74,6 +75,11 @@ class Fetched:
     final_url: str
     headers: dict[str, str]
     body: str
+    #: What was asked for, who asked, when, and how much came back: the record of where every finding on the page comes from.
+    requested_url: str = ""
+    user_agent: str = ""
+    fetched_at: str = ""
+    size: int = 0
 
 
 def _host(value: str) -> str:
@@ -96,6 +102,10 @@ async def _fetch(url: str) -> Fetched:
             final_url=str(response.url),
             headers={k.lower(): v for k, v in response.headers.items()},
             body=raw.decode(response.encoding or "utf-8", errors="replace"),
+            requested_url=url,
+            user_agent=USER_AGENT,
+            fetched_at=datetime.now(timezone.utc).isoformat(),
+            size=len(raw),
         )
 
 
@@ -203,22 +213,78 @@ def _why_v4_did_not_fire(links: dict[str, Any]) -> str:
 # ── observations ─────────────────────────────────────────────────────────────
 
 
+def received(fetched: Fetched) -> str:
+    """One line saying exactly what our reader was served, for every finding to stand on."""
+    when = ""
+    if fetched.fetched_at:
+        try:
+            when = f" on {datetime.fromisoformat(fetched.fetched_at):%b %d, %Y at %H:%M} UTC"
+        except ValueError:
+            when = ""
+    who = f" by {fetched.user_agent}" if fetched.user_agent else ""
+    size = f", {fetched.size / 1024:.0f} KB" if fetched.size else ""
+    return f"{fetched.final_url} answered HTTP {fetched.status}{size}{when} when requested{who}"
+
+
+_CAVEAT = "This is the page as our reader was served it, which can differ from what Google or a visitor sees."
+
+
+def unreadable_reason(fetched: Fetched, parsed: ParsedPage) -> str | None:
+    """Why this response is not the page, when it is not: a host's bot check, or nothing readable at all.
+
+    A response like that says nothing about the page, so nothing is judged from it. Reading a bot check as a page is how a live home page was
+    reported as noindex with no title and no words.
+    """
+    who = challenge_reason(fetched.status, fetched.headers, fetched.body[:3000])
+    if who:
+        return f"The site answered our reader with {who} instead of the page."
+    if fetched.status < 400 and not parsed.title and not parsed.h1 and parsed.word_count == 0:
+        return f"The response had no title, no heading and no text ({fetched.size or len(fetched.body):,} bytes), so it is not a readable page."
+    return None
+
+
+def read_record(fetched: Fetched) -> dict[str, Any]:
+    """What came back, shown beside any finding that could not be made: status, the headers that matter, size, and the first words of the body."""
+    keep = ("server", "content-type", "x-robots-tag", "location", "sg-captcha", "cf-mitigated")
+    head = " ".join(fetched.body[:400].split())
+    return {
+        "requested_url": fetched.requested_url or None, "final_url": fetched.final_url, "status": fetched.status, "user_agent": fetched.user_agent or None, "fetched_at": fetched.fetched_at or None,
+        "bytes": fetched.size or len(fetched.body), "headers": {k: fetched.headers[k] for k in keep if k in fetched.headers}, "body_starts": head,
+    }
+
+
+def _blocked_notes(reason: str, fetched: Fetched) -> list[dict[str, str]]:
+    return [{
+        "level": "note",
+        "text": f"Could not read the page: {reason} Nothing about it is judged from this.",
+        "how": f"{received(fetched)}. The start of what came back is shown under “What we received”. Open the page in Search Console's URL Inspection to see what Google sees.",
+    }]
+
+
+def _robots_how(parsed: ParsedPage, fetched: Fetched) -> str:
+    found = "; ".join(f"the {r['source']} says “{r['value']}”" for r in parsed.robots_sources if _NOINDEX.search(r["value"])) or "a robots directive"
+    return f"From {found}. {received(fetched)}. {_CAVEAT}"
+
+
 def observations(search: str, parsed: ParsedPage, fetched: Fetched, row: dict[str, Any]) -> list[dict[str, str]]:
     """Facts about the page. Problems first; none of them is a prescription."""
     found: list[dict[str, str]] = []
+    blocked = unreadable_reason(fetched, parsed)
+    if blocked:
+        return _blocked_notes(blocked, fetched)
 
-    def add(level: str, text: str) -> None:
-        found.append({"level": level, "text": text})
+    def add(level: str, text: str, how: str = "") -> None:
+        found.append({"level": level, "text": text, "how": how or f"Read from the page's HTML. {received(fetched)}."})
 
     if fetched.status >= 400:
-        add("problem", f"The page answers with an error ({fetched.status}).")
+        add("problem", f"The page answers with an error ({fetched.status}).", f"{received(fetched)}.")
     if parsed.meta_noindex:
-        add("problem", "The page is marked noindex, so Google is told not to show it.")
+        add("problem", "The page is marked noindex, so Google is told not to show it.", _robots_how(parsed, fetched))
     if parsed.says_not_found:
-        add("problem", "The page says it is not found while returning a normal response.")
+        add("problem", "The page says it is not found while returning a normal response.", f"From the page's title “{parsed.title}” and main heading “{parsed.h1}”. {received(fetched)}.")
     canonical = parsed.canonical_url
     if canonical and urlsplit(canonical).path.rstrip("/") != urlsplit(fetched.final_url).path.rstrip("/"):
-        add("problem", f"The page's canonical points elsewhere ({canonical}), so Google may rank that address instead.")
+        add("problem", f"The page's canonical points elsewhere ({canonical}), so Google may rank that address instead.", f"From the page's canonical link tag: {parsed.canonical_raw}. {received(fetched)}.")
 
     where = [
         name
@@ -287,8 +353,18 @@ def diagnose(
         result["read"]["error"] = str(exc)
         return result
 
-    result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url)
+    result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
     parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+    blocked = unreadable_reason(fetched, parsed)
+    if blocked:
+        result["read"]["blocked"] = blocked
+        result["observations"] = _blocked_notes(blocked, fetched)
+        result["not_judged"] = [
+            {"action_id": _NOT_JUDGED[a.__name__][0], "name": _NOT_JUDGED[a.__name__][1], "reason": "The page could not be read, so it was not judged."}
+            for a in VISIBILITY_ACTIONS
+            if a.__name__ in _NOT_JUDGED
+        ]
+        return result
     crawl_links = (evidence or {}).get("crawl")
     facts = facts_from(url, parsed, crawl_links)
     scored = _scored(search, url, float(row["position"]), float(row.get("expected_extra_clicks") or 0), facts.page_type)
@@ -365,21 +441,27 @@ def diagnose_page(
         result["read"]["error"] = str(exc)
         return result
 
-    result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url)
+    result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
     parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+    blocked = unreadable_reason(fetched, parsed)
+    if blocked:
+        result["read"]["blocked"] = blocked
+        result["observations"] = _blocked_notes(blocked, fetched)
+        return result
 
     notes: list[dict[str, str]] = []
+    html = f"Read from the page's HTML. {received(fetched)}."
     if fetched.status >= 400:
-        notes.append({"level": "problem", "text": f"The page answers with an error ({fetched.status})."})
+        notes.append({"level": "problem", "text": f"The page answers with an error ({fetched.status}).", "how": f"{received(fetched)}."})
     if parsed.meta_noindex:
-        notes.append({"level": "problem", "text": "The page is marked noindex, so Google is told not to show it."})
+        notes.append({"level": "problem", "text": "The page is marked noindex, so Google is told not to show it.", "how": _robots_how(parsed, fetched)})
     canonical = parsed.canonical_url
     if canonical and urlsplit(canonical).path.rstrip("/") != urlsplit(fetched.final_url).path.rstrip("/"):
-        notes.append({"level": "problem", "text": f"The page's canonical points elsewhere ({canonical}), so Google may rank that address instead."})
+        notes.append({"level": "problem", "text": f"The page's canonical points elsewhere ({canonical}), so Google may rank that address instead.", "how": f"From the page's canonical link tag: {parsed.canonical_raw}. {received(fetched)}."})
     if parsed.says_not_found:
-        notes.append({"level": "problem", "text": "The page says it is not found while returning a normal response."})
-    notes.append({"level": "note", "text": f"Title: “{parsed.title}”. Main heading: “{parsed.h1}”."})
-    notes.append({"level": "note", "text": f"{parsed.word_count:,} words, {len(parsed.sections)} headed sections, {parsed.conversion_elements} conversion elements."})
+        notes.append({"level": "problem", "text": "The page says it is not found while returning a normal response.", "how": f"From the page's title “{parsed.title}” and main heading “{parsed.h1}”. {received(fetched)}."})
+    notes.append({"level": "note", "text": f"Title: “{parsed.title}”. Main heading: “{parsed.h1}”.", "how": html})
+    notes.append({"level": "note", "text": f"{parsed.word_count:,} words, {len(parsed.sections)} headed sections, {parsed.conversion_elements} conversion elements.", "how": f"Counted in the page's HTML after scripts and styles are removed. {received(fetched)}."})
     result["observations"] = notes
 
     if fetched.status < 400:

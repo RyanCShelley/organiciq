@@ -155,3 +155,40 @@ def test_no_more_than_five_pages_at_a_time(client, db, client_a, admin_user):
     picks = [{"search": f"s{i}", "page": f"https://{client_a.domain}/{i}"} for i in range(6)]
     response = client.post("/v2/engine/diagnose", json={"selections": picks}, headers=client_header(client_a.id, admin_user.email))
     assert response.status_code == 422
+
+
+def served(*, status=200, headers=None, html="", size=None):
+    async def fetch(url):
+        return pd.Fetched(status=status, final_url=URL, headers=headers or {}, body=html, requested_url=url, user_agent="OrganicIQ-page-diagnostic/1.0", fetched_at="2026-11-06T14:30:00+00:00", size=size or len(html))
+
+    return fetch
+
+
+def test_every_flag_says_where_it_came_from():
+    """A finding is only as good as what it was read from, so each one names the tag or header, the address, the status, the time and who asked."""
+    meta = run(served(html="<html><head><title>Tanning Oil</title><meta name='robots' content='noindex, follow'></head><body><h1>Platinum Tanning Oil</h1><p>words</p></body></html>"))
+    flag = next(o for o in meta["observations"] if "noindex" in o["text"])
+    assert flag["level"] == "problem" and "the meta robots tag says “noindex, follow”" in flag["how"]
+    assert URL in flag["how"] and "HTTP 200" in flag["how"] and "Nov 06, 2026 at 14:30 UTC" in flag["how"] and "OrganicIQ-page-diagnostic/1.0" in flag["how"] and "can differ from what Google" in flag["how"]
+    header = run(served(headers={"x-robots-tag": "noindex"}, html="<html><head><title>Tanning Oil</title></head><body><h1>Platinum Tanning Oil</h1><p>words</p></body></html>"))
+    assert "the X-Robots-Tag response header says “noindex”" in next(o for o in header["observations"] if "noindex" in o["text"])["how"]
+    assert all(o.get("how") for o in meta["observations"] if o["level"] in ("problem", "ok")), "no finding is left without its source"
+    assert meta["read"]["received"]["status"] == 200 and meta["read"]["received"]["bytes"] > 0
+
+
+def test_a_host_bot_check_is_not_read_as_a_page_with_no_title_and_noindex():
+    """Live home pages were reported as noindex with no title and no words when the host sent our reader a captcha or an empty shell."""
+    captcha = served(status=202, headers={"sg-captcha": "challenge"}, html="<html><head><meta name='robots' content='noindex'><meta http-equiv='refresh' content='0;/.well-known/sgcaptcha/?r=%2F'></head></html>")
+    out = run(captcha)
+    assert out["read"]["blocked"] == "The site answered our reader with SiteGround's captcha instead of the page."
+    assert [o["level"] for o in out["observations"]] == ["note"] and "noindex" not in out["observations"][0]["text"] and "Nothing about it is judged" in out["observations"][0]["text"]
+    assert "HTTP 202" in out["observations"][0]["how"] and out["read"]["received"]["headers"]["sg-captcha"] == "challenge" and "sgcaptcha" in out["read"]["received"]["body_starts"]
+    assert out["prescriptions"] == [] and all("could not be read" in n["reason"] for n in out["not_judged"])
+
+    empty = run(served(html="<html><head><meta name='robots' content='noindex'></head><body></body></html>"))
+    assert empty["read"]["blocked"].startswith("The response had no title, no heading and no text")
+    assert not any("noindex" in o["text"] for o in empty["observations"]), "an empty response says nothing about the page"
+    assert empty["read"]["received"]["body_starts"].startswith("<html><head><meta name='robots'")
+
+    traffic = pd.diagnose_page(focus="traffic", url=URL, client_domain="shop.example", fetch=captcha, evidence={"lost": []})
+    assert traffic["read"]["blocked"] and traffic["suggestions"] == [] and "noindex" not in traffic["observations"][0]["text"]

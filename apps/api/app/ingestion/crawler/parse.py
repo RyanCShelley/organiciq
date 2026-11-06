@@ -150,6 +150,8 @@ class ParsedPage:
     robots: str | None
     meta_noindex: bool
     meta_nofollow: bool
+    #: Where each robots directive came from and what it said, so a flag can be traced: `[{"source": "meta robots tag" | "X-Robots-Tag response header", "value": ...}]`.
+    robots_sources: list[dict[str, str]] = field(default_factory=list)
     internal_links: list[PageLink] = field(default_factory=list)
     schema_blocks: list[SchemaBlock] = field(default_factory=list)
     #: Scripts and stylesheets the page loads, absolute. Rendering depends on
@@ -552,14 +554,17 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
             break
 
     robots_values: list[str] = []
+    robots_sources: list[dict[str, str]] = []
     for node in doc.xpath('//meta[translate(@name,"ROBTS","robots")="robots"]'):
         content = (node.get("content") or "").strip()
         if content:
             robots_values.append(content)
+            robots_sources.append({"source": "meta robots tag", "value": content})
     # X-Robots-Tag carries the same directives and is just as binding.
     header_robots = (headers or {}).get("x-robots-tag", "").strip()
     if header_robots:
         robots_values.append(header_robots)
+        robots_sources.append({"source": "X-Robots-Tag response header", "value": header_robots})
     robots = ", ".join(robots_values) or None
 
     host = urlsplit(url).hostname or ""
@@ -651,6 +656,7 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         robots=robots,
         meta_noindex=bool(robots and _NOINDEX.search(robots)),
         meta_nofollow=bool(robots and _NOFOLLOW.search(robots)),
+        robots_sources=robots_sources,
         internal_links=list(internal.values()),
         schema_blocks=schema_blocks,
         sections=sections,
