@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ApiError, apiFetch } from "@/lib/api";
 import type { Profile } from "@/lib/portal";
 
-export async function saveProfileAction(clientId: string, slug: string, fields: Partial<Profile>): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function saveProfileAction(clientId: string, slug: string, fields: Partial<Profile> | Record<string, unknown>): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     await apiFetch("/v2/consulting/profile", { method: "PUT", clientId, body: fields });
     revalidatePath(`/${slug}/consulting`);

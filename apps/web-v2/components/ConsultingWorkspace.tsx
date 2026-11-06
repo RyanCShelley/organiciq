@@ -23,12 +23,13 @@ const FIELDS: { key: keyof Profile; label: string; hint: string; internal?: bool
 /** The consultant's workspace for one client: Understand, written once and kept current. Later steps (Measure to Follow through) join it here. */
 export function ConsultingWorkspace({ client, profile, error }: { client: Client; profile: Profile | null; error: string | null }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(FIELDS.map((f) => [f.key, (profile?.[f.key] as string | null) ?? ""])));
+  const [aiFocus, setAiFocus] = useState(!!profile?.ai_visibility_focus);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const save = () =>
     start(async () => {
-      const r = await saveProfileAction(client.id, client.slug, values);
+      const r = await saveProfileAction(client.id, client.slug, { ...values, ai_visibility_focus: aiFocus } as Record<string, unknown>);
       if (r.ok) { setSaved(true); setProblem(null); } else setProblem(r.error);
     });
   return (
@@ -38,11 +39,15 @@ export function ConsultingWorkspace({ client, profile, error }: { client: Client
           <h1 className="text-2xl font-bold">Consulting workspace</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">{client.client_name}{client.group_name ? ` · ${client.group_name}` : ""}. Start with what you know about the business. The rest of the consulting steps join this page as they are built.</p>
         </div>
-        <Link href={`/consulting/${client.slug}`} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)] hover:underline">Preview as client</Link>
+        <div className="flex gap-2"><Link href={`/${client.slug}/consulting/recommendations`} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white">Recommendations</Link><Link href={`/consulting/${client.slug}`} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)] hover:underline">Preview as client</Link></div>
       </header>
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
         <h2 className="text-lg font-bold">1. Understand</h2>
+        <label className="flex items-start gap-2 text-sm font-semibold">
+          <input type="checkbox" checked={aiFocus} onChange={(e) => { setAiFocus(e.target.checked); setSaved(false); }} className="mt-1" />
+          <span>AI visibility is a focus for this client<span className="block text-xs font-normal text-[var(--text-secondary)]">Major AI-readiness (GEO) findings from site health are then put first when drafting recommendations.</span></span>
+        </label>
         {FIELDS.map((f) => (
           <label key={f.key} className="block text-sm font-semibold">
             {f.label}{f.internal ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-900">Internal</span> : null}
