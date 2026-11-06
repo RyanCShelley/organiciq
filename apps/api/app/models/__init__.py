@@ -1,3 +1,4 @@
+from app.models.ads import AdsDaily, AdsSearchTerm
 from app.models.ask_data import AskDataLog
 from app.models.google_update import GoogleSearchUpdate
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore, ContentItem, ContentModelRun, ContentState, CtrTitleDraft, InlinkState, SchemaPageReport
