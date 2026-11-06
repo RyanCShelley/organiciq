@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { markPartAction, sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
+import { checkLiveAction, markPartAction, sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { monthLabel } from "@/lib/focus";
 import type { Allowance, EngineTask, TaskPart, TaskPlan } from "@/lib/engine";
 import { Spinner } from "@/components/ui/Spinner";
@@ -71,6 +71,16 @@ function Parts({ task, clientId, onChange }: { task: EngineTask; clientId: strin
       const r = await markPartAction(clientId, task.id, index, done);
       if (r.ok) { setError(null); onChange(r.value); } else setError(r.error);
     });
+  const [message, setMessage] = useState<string | null>(null);
+  const check = () =>
+    start(async () => {
+      const r = await checkLiveAction(clientId, task.id);
+      if (!r.ok) { setError(r.error); return; }
+      setError(null);
+      onChange(r.value.task);
+      const c = r.value.check;
+      setMessage(c.unreadable ? `Could not read the page, so nothing was judged: ${c.unreadable}` : c.live ? `${c.live} part${c.live === 1 ? "" : "s"} seen live and marked done.` : "Nothing new is live on the page yet.");
+    });
   const parts = task.parts ?? [];
   if (parts.length === 0) return null;
   return (
@@ -91,6 +101,11 @@ function Parts({ task, clientId, onChange }: { task: EngineTask; clientId: strin
               ) : (
                 <span className="text-xs text-[var(--text-tertiary)]">No tool for this one yet: it is a step to do by hand</span>
               )}
+              {part.verified_how ? (
+                <details className="basis-full text-xs text-green-800"><summary className="cursor-pointer font-semibold">✓ Seen live on the page</summary><p className="mt-1 text-[var(--text-secondary)]">{part.verified_how}</p></details>
+              ) : part.status !== "done" && part.last_check ? (
+                <p className={`basis-full text-xs ${part.last_check.result === "unreadable" ? "text-amber-800" : "text-[var(--text-secondary)]"}`}>{part.last_check.result === "not_live" ? "Not live yet. " : ""}{part.last_check.note}</p>
+              ) : null}
               {part.status === "done" ? (
                 <button type="button" disabled={pending} onClick={() => mark(i, false)} className="text-xs font-semibold underline disabled:opacity-50">Not done</button>
               ) : (
@@ -101,7 +116,11 @@ function Parts({ task, clientId, onChange }: { task: EngineTask; clientId: strin
         })}
       </ul>
       {error ? <p role="alert" className="mt-2 text-xs text-red-800">{error}</p> : null}
-      <p className="mt-2 text-xs text-[var(--text-tertiary)]">Marking a part done adds it to <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Completed work</Link> and starts measuring it. The action ships itself when every part is done.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <button type="button" disabled={pending} onClick={check} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50">{pending ? <><Spinner />Reading the page…</> : "Check what is live"}</button>
+        {message ? <span className="text-xs text-[var(--text-secondary)]">{message}</span> : null}
+      </div>
+      <p className="mt-2 text-xs text-[var(--text-tertiary)]">Marking a part done adds it to <Link href={`/${clientSlug}/annotations`} className="font-semibold text-[var(--brand-teal)] hover:underline">Completed work</Link> and starts measuring it. The page is also read once a day: when it shows a part&apos;s change, that part is marked done for you and says how it was known. The action ships itself when every part is done.</p>
     </Detail>
   );
 }

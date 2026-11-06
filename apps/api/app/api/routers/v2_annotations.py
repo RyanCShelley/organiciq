@@ -40,7 +40,7 @@ def _out(row: Annotation) -> dict:
     kind = row.annotation_type.value
     return {
         "id": str(row.id), "date": row.date.isoformat(), "type": kind, "type_label": TYPE_LABELS.get(kind, kind), "description": row.description, "page": row.page_url,
-        "from_plan": _from_plan(row), "how": "Marked done on the plan" if row.engine_uid else "Added by hand", "notes": row.notes, "result": row.result.value,
+        "from_plan": _from_plan(row), "how": "Seen live on the page" if row.verified_how else "Marked done on the plan" if row.engine_uid else "Added by hand", "verified_how": row.verified_how, "notes": row.notes, "result": row.result.value,
         "measure_from": row.measurement_start_date.isoformat() if row.measurement_start_date else None,
         "measure_to": row.measurement_end_date.isoformat() if row.measurement_end_date else None,
         "baseline": summary.get("baseline") or {}, "after": summary.get("post") or {}, "changes": summary.get("deltas") or {}, "waiting": summary.get("measurement_note"),

@@ -62,6 +62,7 @@ function Row({ client, e }: { client: Client; e: Entry }) {
           </select>
         </label>
       </div>
+      {e.verified_how ? <p className="rounded-lg bg-green-50 p-2 text-xs text-green-900">{e.verified_how}</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <input value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== (e.notes ?? "") && save({ notes })} placeholder="Add a note" aria-label="Note" className="min-w-[16rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs" />
         {!e.from_plan ? <button type="button" onClick={remove} disabled={pending} className="text-xs font-semibold text-red-700 underline">Remove</button> : null}

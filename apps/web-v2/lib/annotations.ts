@@ -9,6 +9,7 @@ export type Entry = {
   page: string | null;
   from_plan: { task_id: string; part: number } | null;
   how: string;
+  verified_how: string | null;
   notes: string | null;
   result: "improved" | "no_meaningful_change" | "declined" | "not_enough_data" | "not_yet_measured";
   measure_from: string | null;

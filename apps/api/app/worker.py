@@ -141,6 +141,19 @@ def _maybe_send_health_digest() -> None:
         db.close()
 
 
+def _maybe_check_live() -> None:
+    from app.services.task_verify import maybe_check_open
+
+    db = SessionLocal()
+    try:
+        maybe_check_open(db)
+    except Exception:  # noqa: BLE001 — scheduler must not stop the worker
+        db.rollback()
+        logger.exception("Live check scheduler failed")
+    finally:
+        db.close()
+
+
 def _maybe_pull_ads() -> None:
     from app.services.ads_pull import maybe_pull_ads
 
@@ -217,6 +230,7 @@ def main() -> None:
         _maybe_check_results()
         _maybe_send_health_digest()
         _maybe_pull_ads()
+        _maybe_check_live()
         _maybe_pull_serp_features()
         _maybe_run_month()
         worked = run_once()

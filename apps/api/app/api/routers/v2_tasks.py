@@ -25,7 +25,7 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import part_done, part_tools, task_results, teamwork_subtasks
+from app.services import part_done, part_tools, task_results, task_verify, teamwork_subtasks
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
@@ -213,6 +213,7 @@ def confirm_task(
         task.done_when, task.metric, task.effort_min = payload.done_when, payload.metric, payload.effort_min
         task.evidence = list(payload.evidence)
         task.parts = [{"id": p.id, "name": p.name, "status": "open"} for p in payload.parts] or [{**p, "status": "open"} for p in part_tools.from_steps(task.steps)]
+        task_verify.capture_before(db, client, task)  # the page as the crawl last saw it, to compare the live page with later
     db.commit()
     db.refresh(task)
     used = _pages_used(db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month).all())
@@ -273,6 +274,20 @@ def mark_part(
     except IndexError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _out(task)
+
+
+@router.post("/{task_id}/check")
+def check_live(
+    task_id: UUID,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Read the live page now and mark done every part the page shows. A part marked not done by a person is checked too, since this was asked for."""
+    task = _get(db, client, task_id)
+    result = task_verify.check_task(db, client, task, force=True)
+    db.refresh(task)
+    return {"task": _out(task), "check": result}
 
 
 def _description(task: EngineTask, client: Client) -> tuple[str, str]:
