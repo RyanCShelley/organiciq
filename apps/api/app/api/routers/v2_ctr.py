@@ -16,6 +16,7 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.models.client import Client
 from app.core.settings import get_settings
+from app.core.urls import normalize_url
 from app.services import ctr_optimizer, ctr_titles, model_spend
 
 router = APIRouter(prefix="/v2/ctr", tags=["v2 ctr optimizer"])
@@ -51,6 +52,7 @@ def ctr_optimizer_page(
     end: Annotated[date, Query(alias="to")],
 ) -> dict:
     _range(start, end)
+    url = normalize_url(url) or url  # a link from the plan may carry www., a query or a trailing slash
     return {**ctr_optimizer.page_detail(db, client, url, start, end), "title_draft": ctr_titles.latest(db, client, url), "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 

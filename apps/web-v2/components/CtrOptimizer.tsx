@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { ctrPageAction, ctrTitleAction } from "@/app/(app)/[clientSlug]/ctr/actions";
@@ -190,7 +190,7 @@ export function CtrOptimizer({ client, from, to, q, data, error }: { client: Cli
   const router = useRouter();
   const [custom, setCustom] = useState({ from, to });
   const [filter, setFilter] = useState<"below" | "all">("below");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(useSearchParams().get("page"));
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);

@@ -1,11 +1,13 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { sendTaskAction, taskTextAction, updateTaskAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { monthLabel } from "@/lib/focus";
-import type { Allowance, EngineTask, TaskPlan } from "@/lib/engine";
+import type { Allowance, EngineTask, TaskPart, TaskPlan } from "@/lib/engine";
 import { Spinner } from "@/components/ui/Spinner";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -52,6 +54,44 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
+/** Where a part opens its tool: on the page itself, or on the topic for a new page. */
+function toolHref(slug: string, part: TaskPart, task: EngineTask): string | null {
+  if (!part.tool_path || !part.tool_param) return null;
+  const value = part.tool_param === "term" ? task.search : task.page;
+  return `/${slug}${part.tool_path}?${part.tool_param}=${encodeURIComponent(value)}${part.tool_kind ? `&kind=${part.tool_kind}` : ""}&from=plan`;
+}
+
+/** Each part of the action and the tool that carries it out; a part no tool covers is a plain step. */
+function Parts({ task }: { task: EngineTask }) {
+  const { clientSlug } = useParams<{ clientSlug: string }>();
+  const parts = task.parts ?? [];
+  if (parts.length === 0) return null;
+  return (
+    <Detail label="Do it in">
+      <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+        {parts.map((part, i) => {
+          const href = toolHref(clientSlug, part, task);
+          return (
+            <li key={`${part.id}-${i}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              <span className="font-medium text-[var(--text-primary)]">{i + 1}. {part.name}</span>
+              {href ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--text-tertiary)]">{part.tool_label}</span>
+                  <Link href={href} className="rounded-lg border border-[var(--border)] bg-white px-3 py-1 text-xs font-semibold text-[var(--brand-teal)] hover:underline">
+                    {part.tool_verb}
+                  </Link>
+                </span>
+              ) : (
+                <span className="text-xs text-[var(--text-tertiary)]">No tool for this one yet: it is a step to do by hand</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Detail>
+  );
+}
+
 /** What was confirmed, in full: the same words that go to Teamwork, readable here at any time, before or after it is sent. */
 function TaskDetails({ task }: { task: EngineTask }) {
   const measured = [task.metric ? `Measured on ${task.metric}` : null, task.check_on ? `checked ${task.check_on}` : null].filter(Boolean).join(", ");
@@ -63,6 +103,7 @@ function TaskDetails({ task }: { task: EngineTask }) {
         </a>
       </Detail>
       {task.why ? <Detail label="Why this page">{task.why}</Detail> : null}
+      {task.kind === "growth_action" ? <Parts task={task} /> : null}
       {task.steps.length > 0 ? (
         <Detail label={task.kind === "growth_action" ? "The parts, and what to do in each" : "Steps"}>
           <Steps steps={task.steps} grouped={task.kind === "growth_action"} />

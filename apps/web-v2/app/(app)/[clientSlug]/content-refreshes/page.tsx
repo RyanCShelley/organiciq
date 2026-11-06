@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { PlanBanner } from "@/components/PlanBanner";
 import { ContentRefreshes } from "@/components/ContentRefreshes";
 import { ApiError, apiFetch } from "@/lib/api";
 import { findClient } from "@/lib/clients";
@@ -46,6 +47,7 @@ export default async function ContentRefreshesPage({
   }
   return (
     <>
+      <PlanBanner doing="Plan the refresh for this page." />
       <ContentRefreshes client={client} month={month} months={months.includes(month) ? months : [month, ...months]} q={q?.trim() ?? ""} ignored={!!ignored} data={data} error={error} />
     </>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { draftAction, refreshPageAction, setAsideAction, splitSearchAction } from "@/app/(app)/[clientSlug]/content-gaps/actions";
@@ -294,7 +294,7 @@ function PagePane({ client, page, month, ready, canEdit, onCalendar, onRefresh, 
 export function ContentRefreshes({ client, month, months, q, ignored, data, error }: { client: Client; month: string; months: string[]; q: string; ignored: boolean; data: Refreshes | null; error: string | null }) {
   const router = useRouter();
   const [search, setSearch] = useState(q);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(useSearchParams().get("page"));
   const [openSearch, setOpenSearch] = useState<string | null>(null);
   useEffect(() => {
     if (!open && !openSearch) return;

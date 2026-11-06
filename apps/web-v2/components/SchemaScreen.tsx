@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState, useTransition } from "react";
 
 import { addIgnoreAction, approveConceptAction, pageAction, removeConceptAction, removeIgnoreAction, searchConceptsAction, startPageReportAction } from "@/app/(app)/[clientSlug]/schema/actions";
@@ -536,7 +536,7 @@ function PagePane({ client, url, ready, depths, onClose, onApproved }: { client:
 export function SchemaScreen({ client, result, error }: { client: Client; result: ScResponse | null; error: string | null }) {
   const router = useRouter();
   const data = result?.data ?? null;
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(useSearchParams().get("page"));
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);

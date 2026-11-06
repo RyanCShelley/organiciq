@@ -80,6 +80,12 @@ class Fetched:
     user_agent: str = ""
     fetched_at: str = ""
     size: int = 0
+    #: "live" for a page our reader fetched; "crawl" when the host blocked our reader and this is what the site crawl last saw. A person is always told which.
+    source: str = "live"
+    source_note: str = ""
+    #: Counts the crawl measured over the whole page, which the short rebuilt page cannot show.
+    word_count: int | None = None
+    conversion_elements: int | None = None
 
 
 def _host(value: str) -> str:
@@ -126,6 +132,16 @@ def read_page(url: str, client_domain: str, fetch: Callable[[str], Awaitable[Fet
     if _host(found.final_url) != _host(client_domain):
         raise PageUnreadable("The page redirects off this client's website, so it is not read.")
     return found
+
+
+def parse_fetched(fetched: Fetched) -> ParsedPage:
+    """The page parsed. A page rebuilt from the crawl keeps the counts the crawl measured over the whole page."""
+    parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+    if fetched.word_count is not None:
+        parsed.word_count = fetched.word_count
+    if fetched.conversion_elements is not None:
+        parsed.conversion_elements = fetched.conversion_elements
+    return parsed
 
 
 # ── facts ────────────────────────────────────────────────────────────────────
@@ -215,6 +231,8 @@ def _why_v4_did_not_fire(links: dict[str, Any]) -> str:
 
 def received(fetched: Fetched) -> str:
     """One line saying exactly what our reader was served, for every finding to stand on."""
+    if fetched.source != "live":
+        return fetched.source_note
     when = ""
     if fetched.fetched_at:
         try:
@@ -249,7 +267,7 @@ def read_record(fetched: Fetched) -> dict[str, Any]:
     head = " ".join(fetched.body[:400].split())
     return {
         "requested_url": fetched.requested_url or None, "final_url": fetched.final_url, "status": fetched.status, "user_agent": fetched.user_agent or None, "fetched_at": fetched.fetched_at or None,
-        "bytes": fetched.size or len(fetched.body), "headers": {k: fetched.headers[k] for k in keep if k in fetched.headers}, "body_starts": head,
+        "source": fetched.source, "bytes": fetched.size or len(fetched.body), "headers": {k: fetched.headers[k] for k in keep if k in fetched.headers}, "body_starts": head,
     }
 
 
@@ -354,7 +372,9 @@ def diagnose(
         return result
 
     result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
-    parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+    if fetched.source != "live":
+        result["read"]["source"], result["read"]["source_note"] = fetched.source, fetched.source_note
+    parsed = parse_fetched(fetched)
     blocked = unreadable_reason(fetched, parsed)
     if blocked:
         result["read"]["blocked"] = blocked
@@ -442,7 +462,9 @@ def diagnose_page(
         return result
 
     result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
-    parsed = parse_page(url=fetched.final_url, body=fetched.body, headers=fetched.headers)
+    if fetched.source != "live":
+        result["read"]["source"], result["read"]["source_note"] = fetched.source, fetched.source_note
+    parsed = parse_fetched(fetched)
     blocked = unreadable_reason(fetched, parsed)
     if blocked:
         result["read"]["blocked"] = blocked

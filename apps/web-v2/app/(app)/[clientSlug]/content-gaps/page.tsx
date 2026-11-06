@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { PlanBanner } from "@/components/PlanBanner";
 import { ContentGaps } from "@/components/ContentGaps";
 import { ApiError, apiFetch } from "@/lib/api";
 import { findClient } from "@/lib/clients";
@@ -31,6 +32,7 @@ export default async function ContentGapsPage({
   }
   return (
     <>
+      <PlanBanner doing="Plan the new page for this topic." />
       <ContentGaps client={client} q={q?.trim() ?? ""} ignored={!!ignored} data={data} error={error} />
     </>
   );

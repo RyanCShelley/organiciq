@@ -25,12 +25,17 @@ from app.integrations import teamwork
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services.monthly_review import parse_month
-from app.services import task_results, teamwork_subtasks
+from app.services import part_tools, task_results, teamwork_subtasks
 from app.services.plan_allowances import resolve_plan_allowances
 
 router = APIRouter(prefix="/v2/engine/tasks", tags=["v2 engine tasks"])
 
 COUNTED = ("confirmed", "sent", "shipped")
+
+
+class PartIn(BaseModel):
+    id: str = Field(default="", max_length=16)
+    name: str = Field(min_length=1, max_length=200)
 
 
 class TaskIn(BaseModel):
@@ -46,6 +51,8 @@ class TaskIn(BaseModel):
     metric: str | None = None
     effort_min: int | None = Field(default=None, ge=0, le=100000)
     evidence: list[str] = []
+    #: The parts of a growth action, in the order of the checklist, so each can point at its tool. Read from the steps when not sent.
+    parts: list[PartIn] = []
 
 
 class TaskUpdate(BaseModel):
@@ -72,6 +79,7 @@ def _out(task: EngineTask) -> dict:
         "metric": task.metric,
         "effort_min": task.effort_min,
         "evidence": task.evidence or [],
+        "parts": part_tools.describe(task.parts or part_tools.from_steps(task.steps or [])),
         "status": task.status,
         "confirmed_by": task.confirmed_by,
         "confirmed_at": task.confirmed_at.isoformat() if task.confirmed_at else None,
@@ -204,6 +212,7 @@ def confirm_task(
         task.title, task.why, task.steps = payload.title, payload.why, list(payload.steps)
         task.done_when, task.metric, task.effort_min = payload.done_when, payload.metric, payload.effort_min
         task.evidence = list(payload.evidence)
+        task.parts = [{"id": p.id, "name": p.name, "status": "open"} for p in payload.parts] or [{**p, "status": "open"} for p in part_tools.from_steps(task.steps)]
     db.commit()
     db.refresh(task)
     used = _pages_used(db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month).all())

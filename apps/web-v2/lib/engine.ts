@@ -75,6 +75,9 @@ export type Diagnosis = {
     final_url?: string;
     /** Set when the response was not the page (a host's bot check, or nothing readable): nothing is judged from it. */
     blocked?: string;
+    /** "crawl" when the host blocked our reader and the page was read from the site crawl instead; the note says which crawl and what that means. */
+    source?: string;
+    source_note?: string;
     /** What our reader was served, kept so any finding can be traced to it. */
     received?: {
       requested_url: string | null;
@@ -117,6 +120,21 @@ export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; e
 
 export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped";
 
+/** One part of a growth action, with the tool that carries it out (none for a plain step). */
+export type TaskPart = {
+  id: string;
+  name: string;
+  tool: string | null;
+  tool_label: string | null;
+  tool_path: string | null;
+  tool_param: string | null;
+  tool_verb: string | null;
+  tool_kind?: string | null;
+  status: "open" | "done";
+  done_at: string | null;
+  done_by: string | null;
+};
+
 export type EngineTask = {
   id: string;
   month: string;
@@ -138,6 +156,7 @@ export type EngineTask = {
   teamwork_task_id: string | null;
   teamwork_task_url: string | null;
   teamwork_subtasks?: number;
+  parts?: TaskPart[];
   shipped_at?: string | null;
   check_on?: string | null;
 };
@@ -170,6 +189,7 @@ export type TaskDraft = {
   metric: string | null;
   effort_min: number | null;
   evidence: string[];
+  parts?: { id: string; name: string }[];
 };
 
 export type TaskResult<T = EngineTask> = { ok: true; value: T; allowance?: Allowance } | { ok: false; error: string };

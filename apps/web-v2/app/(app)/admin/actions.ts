@@ -124,3 +124,11 @@ export async function restorePeopleAction(userIds: string[]): Promise<Result<{ r
     return failure(error, "They could not be restored: the API did not answer.");
   }
 }
+
+export async function outboundIpAction(): Promise<Result<{ address: string; asked: string; user_agent: string }>> {
+  try {
+    return { ok: true, value: await apiFetch<{ address: string; asked: string; user_agent: string }>("/v2/admin/outbound-ip") };
+  } catch (error) {
+    return failure(error, "The address could not be looked up: the API did not answer.");
+  }
+}

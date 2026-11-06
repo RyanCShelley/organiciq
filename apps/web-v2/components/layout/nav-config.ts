@@ -39,6 +39,7 @@ export const GROUPS: NavGroup[] = [
     items: [
       { label: "Content gaps", path: "/content-gaps" },
       { label: "Content refreshes", path: "/content-refreshes" },
+      { label: "Content optimizer", path: "/content-optimizer" },
       { label: "Content calendar", path: "/content-calendar" },
     ],
   },
@@ -70,6 +71,7 @@ export const SUGGESTIONS: Record<string, string[]> = {
   "/llm": ["Where do AI platforms name the brand?", "Which competitors are named instead of us?", "What would get us cited more?"],
   "/site-health": ["What should we fix first?", "Which issues affect the most pages?", "Explain these issues for the client"],
   "/schema": ["Which pages are missing structured data?", "What should we add first?", "Explain this for the client"],
+  "/content-optimizer": ["Which pages need only a small change instead of a refresh?", "What questions should this page's FAQ answer?"],
   "/ctr": ["Which page has the most to gain from a better title?", "Why is this page's click-through low?"],
   "/inlinks": ["Which page needs links most?", "Where should we link to the top page from?"],
   "/content-gaps": ["Which gap should we write first?", "Why is this a gap?", "What topics are we missing?"],

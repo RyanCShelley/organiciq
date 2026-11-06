@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { AdminOutboundIp } from "@/components/AdminOutboundIp";
 import { AdminClients } from "@/components/AdminClients";
 import { AdminTeamAccess } from "@/components/AdminTeamAccess";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -52,7 +53,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       ) : team && access ? (
         <AdminTeamAccess data={access} />
       ) : (
-        <AdminClients clients={clients} />
+        <>
+          <AdminClients clients={clients} />
+          <AdminOutboundIp />
+        </>
       )}
     </section>
   );
