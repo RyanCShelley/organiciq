@@ -157,6 +157,7 @@ class FactGscQueryPage(Base):
         ),
         CheckConstraint("length(trim(query)) > 0", name="ck_facts_gsc_query_pages_query_nonblank"),
         Index("ix_facts_gsc_query_pages_client_date", "client_id", "date"),
+        Index("ix_facts_gsc_query_pages_client_url_date", "client_id", "normalized_url", "date"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

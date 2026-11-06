@@ -61,25 +61,6 @@ jobs:
       # migration is invisible to every other test and broke a sync for weeks.
       - run: python -m pytest -q
 
-  web:
-    name: Web checks
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-
   web-v2:
     name: Web v2 checks
     runs-on: ubuntu-latest
@@ -116,10 +97,6 @@ jobs:
         with:
           python-version: "3.13"
       - name: npm audit (production dependencies)
-        working-directory: apps/web
-        run: npm audit --omit=dev
-      - name: npm audit, web v2 (production dependencies)
-        if: always()
         working-directory: apps/web-v2
         run: npm audit --omit=dev
       - name: pip-audit

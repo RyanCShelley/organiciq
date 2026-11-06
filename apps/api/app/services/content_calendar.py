@@ -16,7 +16,7 @@ from app.core.settings import get_settings
 from app.integrations import teamwork
 from app.models.client import Client
 from app.models.schema_tools import ContentItem
-from app.services import content_briefs
+from app.services import content_briefs, content_prompts, teamwork_subtasks
 
 KINDS = ("new_page", "refresh")
 SOURCES = ("gap", "refresh", "topic", "manual")
@@ -28,7 +28,7 @@ def out(item: ContentItem) -> dict[str, Any]:
     return {
         "id": str(item.id), "kind": item.kind, "title": item.title, "target": item.target, "source_area": item.source_area, "source_key": item.source_key,
         "status": item.status, "due": item.due.isoformat() if item.due else None, "assignee_email": item.assignee_email, "notes": item.notes,
-        "teamwork_task_id": item.teamwork_task_id, "teamwork_task_url": item.teamwork_task_url,
+        "teamwork_task_id": item.teamwork_task_id, "teamwork_task_url": item.teamwork_task_url, "teamwork_subtasks": len(item.teamwork_subtasks or {}),
         "published_at": item.published_at.isoformat() if item.published_at else None, "created_by": item.created_by,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
@@ -130,32 +130,30 @@ def list_name(item: ContentItem, client: Client) -> str:
     return f"{client.client_name} · Publish Date {when} {item.title}".strip()
 
 
-def send(db: Session, client: Client, item: ContentItem) -> ContentItem:
-    """Make this item's own list in the client's content project, with one task in it. Raises teamwork.TeamworkError when it cannot.
+def send(db: Session, client: Client, item: ContentItem) -> int:
+    """Make this item's own list in the client's content project, with one task and a subtask for each piece of the page.
+    Raises teamwork.TeamworkError when the task cannot be made. Returns how many subtasks are still to send (0 when all are there).
 
-    A second press leaves the first task. If the list was made and the task was not, the list is kept and only the task is retried.
+    A second press leaves the first task and makes only the subtasks that are missing. If the list was made and the task was not, the list is
+    kept and only the task is retried.
     """
-    if item.teamwork_task_id:
-        return item
-    if not client.teamwork_content_project_id:
-        raise teamwork.TeamworkError("This client has no Teamwork project for content yet. Choose one in Client settings, under Connections.")
-    if not item.due:
-        raise teamwork.TeamworkError("Set a publish date (the due date) first: it goes in the list's name.")
-    name, text = description(item, client)
-    if not item.teamwork_tasklist_id:
-        item.teamwork_tasklist_id = teamwork.create_tasklist(project_id=client.teamwork_content_project_id, name=list_name(item, client), description=(item.notes or text)[:8000])
+    assignee = teamwork_subtasks.assignee_id(item.assignee_email)
+    if not item.teamwork_task_id:
+        if not client.teamwork_content_project_id:
+            raise teamwork.TeamworkError("This client has no Teamwork project for content yet. Choose one in Client settings, under Connections.")
+        if not item.due:
+            raise teamwork.TeamworkError("Set a publish date (the due date) first: it goes in the list's name.")
+        name, text = description(item, client)
+        if not item.teamwork_tasklist_id:
+            item.teamwork_tasklist_id = teamwork.create_tasklist(project_id=client.teamwork_content_project_id, name=list_name(item, client), description=(item.notes or text)[:8000])
+            db.commit()
+        created = teamwork.create_task(tasklist_id=item.teamwork_tasklist_id, name=name, description=text, due=item.due.isoformat(), assignee_teamwork_id=assignee)
+        item.teamwork_task_id, item.teamwork_task_url = str(created["id"]), created["url"]
         db.commit()
-    assignee = None
-    if item.assignee_email:
-        try:
-            assignee = teamwork.person_id_for(item.assignee_email, teamwork.list_people())
-        except teamwork.TeamworkError:
-            assignee = None  # sent unassigned rather than not sent
-    created = teamwork.create_task(tasklist_id=item.teamwork_tasklist_id, name=name, description=text, due=item.due.isoformat(), assignee_teamwork_id=assignee)
-    item.teamwork_task_id, item.teamwork_task_url = str(created["id"]), created["url"]
-    db.commit()
-    db.refresh(item)
-    return item
+    return teamwork_subtasks.send(
+        db, item, item.teamwork_task_id, content_prompts.subtasks(item, client),
+        due=item.due.isoformat() if item.due else None, assignee=assignee,
+    )
 
 
 def set_status(item: ContentItem, status: str) -> None:

@@ -181,41 +181,6 @@ def test_the_route_refuses_a_bad_month(client, db, client_a, admin_user):
     assert response.status_code == 400
 
 
-def test_the_summary_is_also_laid_out_in_sections_to_skim():
-    review = mr.assemble(
-        _dash(sessions=6407, leads=218, organic_sessions=574, goal=192, progress=113.5),
-        _dash(sessions=9723, leads=116, organic_sessions=748),
-        month="2026-09", model="ecommerce", revenue=None,
-    )
-    by_title = {s["title"]: {r["label"]: r for r in s["rows"]} for s in review["summary_sections"]}
-    orders = by_title["Results"]["Orders"]
-    assert orders["value"] == "218" and orders["change"]["text"] == "up 88%" and orders["change"]["tone"] == "good"
-    assert orders["detail"] == "114% of this period's goal of 192"
-    sessions = by_title["Traffic"]["Sessions"]
-    assert sessions["change"] == {"text": "down 34%", "tone": "bad", "against": "on 2026-08 (9,723)"}
-    assert "No data for this month" in by_title["Traffic"]["Search Console"]["detail"]
-
-
-def test_the_visibility_section_names_each_ai_platform_and_the_brand_check():
-    pair = lambda cur, prev=None, delta=None: {"current": cur, "previous": prev, "delta": delta}
-    review = mr.assemble(_dash(sessions=100, leads=5), _dash(sessions=100, leads=5), month="2026-10", model=None, revenue=None)
-    review["visibility"] = {
-        "summary": {"terms": 18, "showing_in_google": 6, "on_page_one": 2, "showing_in_bing": 1, "google_impressions": 2699, "google_clicks": 3, "prompts": 12},
-        "bing": {"has_data": True},
-        "llm": {
-            "run_date": "2026-11-02", "in_month": False,
-            "summary": {"mentions": pair(0), "citations": pair(0), "visibility_rate": pair(0.0, 0.1, -0.1), "responses": 20},
-            "platforms": [{"platform": "openai", "visibility_rate": pair(0.0)}, {"platform": "anthropic", "visibility_rate": pair(0.25)}],
-            "brand_check": [{"platform": "openai", "answers": 6, "site_cited": 2}, {"platform": "gemini", "answers": 6, "site_cited": 1}],
-        },
-    }
-    rows = {r["label"]: r for s in mr.sections(review) if s["title"] == "Visibility" for r in s["rows"]}
-    assert rows["Google"]["value"] == "6 of 18 terms" and "2 averaging page one" in rows["Google"]["detail"]
-    assert rows["AI platforms"]["change"]["text"] == "down 10 points" and "after 2026-10" in rows["AI platforms"]["detail"]
-    assert rows["By platform"]["value"] == "ChatGPT 0% · Claude 25%"
-    assert rows["Brand check"]["value"] == "3 of 12 answers"
-
-
 # ---- a finished month is worked out once and kept ----------------------------------------------------------
 
 from datetime import date as _date  # noqa: E402
@@ -228,7 +193,7 @@ def _stub(monkeypatch, through, built):
 
     def build(db, client, month):
         built.append(month)
-        return {"month": month, "summary": [f"built {len(built)} times"], "summary_sections": []}
+        return {"month": month, "summary": [f"built {len(built)} times"]}
 
     monkeypatch.setattr(mr, "build_review", build)
 
@@ -250,7 +215,7 @@ def test_a_month_whose_data_is_not_complete_yet_is_not_locked_and_says_why(db, c
     _stub(monkeypatch, {"search_console": _date(2026, 10, 28), "ga4": _date(2026, 11, 1)}, built)
     out = mr.review_for(db, client_a, "2026-10")
     mr.review_for(db, client_a, "2026-10")
-    assert out["locked"] is False and "Search Console reaches Oct 28" in out["lock_note"] and "Not locked" not in out["lock_note"] and "Oct 31" in out["lock_note"]
+    assert out["locked"] is False and "Search Console reaches Oct 28" in out["lock_note"] and "Not saved" not in out["lock_note"] and "Oct 31" in out["lock_note"]
     assert built == ["2026-10", "2026-10"] and db.query(MonthlyReviewSnapshot).count() == 0
 
 

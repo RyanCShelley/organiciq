@@ -131,14 +131,49 @@ def create_task(
         raise TeamworkError(
             "This client has no Teamwork tasklist yet, so there is nowhere to send it."
         )
+    return _post_task(
+        f"{config.base_url}/projects/api/v3/tasklists/{tasklist_id}/tasks.json",
+        config, name, description, due, assignee_teamwork_id, client,
+    )
 
-    payload: dict = {"task": {"name": name, "description": description}}
+
+def create_subtask(
+    *,
+    parent_task_id: str,
+    name: str,
+    description: str,
+    due: str | None = None,
+    assignee_teamwork_id: str | None = None,
+    config: TeamworkConfig | None = None,
+    client: httpx.Client | None = None,
+) -> dict:
+    """Create one subtask under a task and return `{id, url}`."""
+    config = config or load_config()
+    if config is None:
+        raise TeamworkError("Teamwork is not configured. Set TEAMWORK_SITE and TEAMWORK_API_TOKEN.")
+    if not parent_task_id:
+        raise TeamworkError("There is no parent task to put the subtask under.")
+    return _post_task(
+        f"{config.base_url}/projects/api/v3/tasks/{parent_task_id}/subtasks.json",
+        config, name, description, due, assignee_teamwork_id, client,
+    )
+
+
+def _post_task(
+    url: str,
+    config: TeamworkConfig,
+    name: str,
+    description: str,
+    due: str | None,
+    assignee_teamwork_id: str | None,
+    client: httpx.Client | None,
+) -> dict:
+    payload: dict = {"task": {"name": name[:MAX_NAME], "description": description}}
     if due:
         payload["task"]["dueAt"] = due
     if assignee_teamwork_id:
         payload["task"]["assignees"] = {"userIds": [int(assignee_teamwork_id)]}
 
-    url = f"{config.base_url}/projects/api/v3/tasklists/{tasklist_id}/tasks.json"
     headers = {
         "Authorization": config.auth_header,
         "Content-Type": "application/json",

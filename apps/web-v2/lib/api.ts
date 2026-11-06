@@ -5,6 +5,8 @@ import { auth, ensureApiAccessToken } from "@/lib/auth";
 // Same API as the current tool. v2 adds routes to it; it does not have its own.
 const API_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+const SLOW_API_MS = 800;
+
 export class ApiError extends Error {
   status: number;
 
@@ -36,12 +38,16 @@ export async function apiFetch<T>(
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   if (options.clientId) headers["X-OrganicIQ-Client-Id"] = options.clientId;
 
+  const started = Date.now();
   const res = await fetch(`${API_URL}${path}`, {
     method: options.method ?? "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
   });
+  // The wait a screen sees is the API's own time (its Server-Timing) plus the network; a slow one is named so the two can be told apart.
+  const took = Date.now() - started;
+  if (took >= SLOW_API_MS) console.warn(`Slow API call: ${options.method ?? "GET"} ${path.split("?")[0]} took ${took}ms (api ${res.headers.get("server-timing") ?? "unreported"})`);
 
   if (!res.ok) {
     const text = await res.text();

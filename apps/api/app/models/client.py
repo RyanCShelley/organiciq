@@ -94,6 +94,10 @@ class Client(Base):
         JSONB, nullable=False, default=dict, server_default="{}"
     )
     account_sheet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The client's Google Ads account (digits only), and how the last pull of it went.
+    google_ads_customer_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    google_ads_last_pull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    google_ads_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Other names people search this brand by — "acc technical services" for
     #: ACCTek. The name and the domain are not enough: a query that names the
     #: business is navigation whatever it is spelled as, and no rewrite or

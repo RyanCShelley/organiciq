@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import type { Watchlist } from "@/lib/watchlist";
 
 export const metadata = { title: "Watchlist" };
@@ -13,15 +13,15 @@ export default async function WatchlistPage({
   params: Promise<{ clientSlug: string }>;
 }) {
   const { clientSlug } = await params;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const watchlist = await apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id });
 
   return (
-    <section className="max-w-5xl space-y-8">
+    <section className="space-y-6">
       <header>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">Watchlist</h1>
+        <h2 className="font-[family-name:var(--font-display)] text-lg font-bold">Watchlist</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           {client.client_name} · {watchlist.buckets.length} buckets · {watchlist.keyword_count}{" "}
           keywords

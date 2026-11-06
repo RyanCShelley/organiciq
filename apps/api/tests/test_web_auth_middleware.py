@@ -18,14 +18,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-WEB = Path(__file__).resolve().parents[2] / "web"
+WEB = Path(__file__).resolve().parents[2] / "web-v2"
 
 
 def test_the_auth_middleware_is_present():
     # Next 16 renamed the convention from middleware.ts to proxy.ts.
     present = [name for name in ("proxy.ts", "middleware.ts") if (WEB / name).is_file()]
     assert present, (
-        "apps/web/proxy.ts is missing. If it was moved aside to preview a "
+        "apps/web-v2/proxy.ts is missing. If it was moved aside to preview a "
         "page locally, move it back before committing."
     )
     source = (WEB / present[0]).read_text(encoding="utf-8")

@@ -1,6 +1,8 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
+import { revalidatePath } from "next/cache";
+
 import type { DeletePreview, PullStatus } from "@/lib/admin";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -66,5 +68,59 @@ export async function setGscLeanAllAction(): Promise<Result<{ switched: number }
     return { ok: true, value: await apiFetch("/v2/admin/clients/gsc-lean-all", { method: "POST" }) };
   } catch (error) {
     return failure(error, "The clients could not be switched: the API did not answer.");
+  }
+}
+
+export async function teamAssignAction(userIds: string[], clientIds: string[]): Promise<Result<{ added: number; already: number; admins_skipped: number }>> {
+  try {
+    const value = await apiFetch<{ added: number; already: number; admins_skipped: number }>("/v2/admin/team-access/assign", { method: "POST", body: { user_ids: userIds, client_ids: clientIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "Access could not be given: the API did not answer.");
+  }
+}
+
+export async function teamRemoveAction(userIds: string[], clientIds: string[]): Promise<Result<{ removed: number; admins_skipped: number }>> {
+  try {
+    const value = await apiFetch<{ removed: number; admins_skipped: number }>("/v2/admin/team-access/remove", { method: "POST", body: { user_ids: userIds, client_ids: clientIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "Access could not be removed: the API did not answer.");
+  }
+}
+
+export async function addPersonAction(
+  email: string,
+  name: string,
+  role: "sma_team" | "sma_admin",
+): Promise<Result<{ outcome: "added" | "restored"; id: string; email: string; emailed: boolean }>> {
+  try {
+    const value = await apiFetch<{ outcome: "added" | "restored"; id: string; email: string; emailed: boolean }>("/v2/admin/team-access/people", { method: "POST", body: { email, name: name.trim() || null, role } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "That person could not be added.");
+  }
+}
+
+export async function removePeopleAction(userIds: string[]): Promise<Result<{ removed: number }>> {
+  try {
+    const value = await apiFetch<{ removed: number }>("/v2/admin/team-access/people/remove", { method: "POST", body: { user_ids: userIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "They could not be removed: the API did not answer.");
+  }
+}
+
+export async function restorePeopleAction(userIds: string[]): Promise<Result<{ restored: number }>> {
+  try {
+    const value = await apiFetch<{ restored: number }>("/v2/admin/team-access/people/restore", { method: "POST", body: { user_ids: userIds } });
+    revalidatePath("/admin");
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "They could not be restored: the API did not answer.");
   }
 }

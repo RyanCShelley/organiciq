@@ -30,6 +30,7 @@ from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlInternalLink, Fa
 from app.models.gsc import FactGscQueryPage
 from app.models.schema_tools import InlinkState
 from app.services import keyword_matcher
+from app.services.memo import Memo
 from app.services.page_diagnostic import read_page
 from app.services.site_health import is_pagination
 
@@ -49,7 +50,10 @@ TOP_QUERIES = 4
 
 _UTILITY = re.compile(r"(^|/)(cart|checkout|account|login|log-in|register|search|wishlist|password|thank-?you|order-status|404|sitemap|privacy|terms|policy|policies|shipping|returns?|refunds?)(/|$|-)", re.I)
 
-_VECTORS: dict[tuple, Any] = {}
+#: Page vectors, kept for the life of the process: one store per client and crawl, filled in as pages are needed.
+_VECTORS: dict[tuple, dict[str, Any]] = {}
+#: Whole results, kept until new Search Console data, a new crawl, or a change to what is ignored or confirmed.
+_RESULTS = Memo(size=64, ttl=600.0)
 
 
 def is_utility(url: str) -> bool:
@@ -57,14 +61,23 @@ def is_utility(url: str) -> bool:
 
 
 def _vectors(db: Session, client: Client, pages: list[FactCrawlPageSnapshot]) -> dict[str, Any]:
-    """Text vectors for the pages, kept for the life of the process per client and crawl (the pages change only when the site is crawled again)."""
-    key = (str(client.id), max(p.snapshot_date for p in pages), len(pages))
-    if key not in _VECTORS:
-        if len(_VECTORS) > 4:
-            _VECTORS.clear()
-        matrix = keyword_matcher.embed_pages(pages)
-        _VECTORS[key] = {p.normalized_url: matrix[i] for i, p in enumerate(pages)}
-    return _VECTORS[key]
+    """Text vectors for the pages, kept per client and crawl (the pages change only when the site is crawled again).
+
+    Only the pages not yet held are worked out, so a different search or ignore list does not start from nothing.
+    """
+    if not pages:
+        return {}
+    key = (str(client.id), max(p.snapshot_date for p in pages))
+    store = _VECTORS.get(key)
+    if store is None:
+        if len(_VECTORS) >= 8:
+            _VECTORS.pop(next(iter(_VECTORS)))
+        store = _VECTORS[key] = {}
+    missing = [p for p in pages if p.normalized_url not in store]
+    if missing:
+        matrix = keyword_matcher.embed_pages(missing)
+        store.update({p.normalized_url: matrix[i] for i, p in enumerate(missing)})
+    return {p.normalized_url: store[p.normalized_url] for p in pages}
 
 
 def _gsc(db: Session, client: Client, brand: list[str]) -> tuple[dict[str, dict[str, float]], dict[str, list[tuple[str, float]]]]:
@@ -139,16 +152,31 @@ def states(db: Session, client: Client) -> dict[str, Any]:
 
 
 def build(db: Session, client: Client, q: str | None = None) -> dict[str, Any] | None:
+    """The suggestions, kept until the data they come from changes: a new crawl, newer Search Console data, or a link ignored or confirmed."""
+    st = states(db, client)
+    newest_crawl = db.query(func.max(FactCrawlPageSnapshot.snapshot_date)).filter(FactCrawlPageSnapshot.client_id == client.id).scalar()
+    newest_gsc = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
+    key = (
+        str(client.id), " ".join((q or "").lower().split()), newest_crawl, newest_gsc, tuple(vc.brand_keys(client)),
+        hash(frozenset(st["pairs"])), hash(frozenset(st["targets"])), hash(frozenset(st["live"])),
+    )
+    return _RESULTS.get(key, lambda: _build(db, client, q, st))
+
+
+def _build(db: Session, client: Client, q: str | None, st: dict[str, Any]) -> dict[str, Any] | None:
     pages = [p for p in keyword_matcher.crawled_pages(db, client) if p.status_code == 200 and not is_utility(p.normalized_url) and not is_pagination(p.normalized_url)]
     if len(pages) < 3:
         return None
     # A page whose canonical address is another page (Shopify's /collections/x/products/y is /products/y) is a duplicate: it is neither a
     # source nor a target, and a link to it counts as a link to the real page.
     canon: dict[str, str] = {}
+    by_normal: dict[str, str] = {}
+    for p in pages:
+        by_normal.setdefault(_normalize(p.normalized_url), p.normalized_url)
     for p in pages:
         c = (p.canonical_url or "").strip()
         if c and _normalize(c) != _normalize(p.normalized_url):
-            canon[p.normalized_url] = next((q.normalized_url for q in pages if _normalize(q.normalized_url) == _normalize(c)), "")
+            canon[p.normalized_url] = by_normal.get(_normalize(c), "")
     duplicates = {u for u, c in canon.items() if c}
     pages = [p for p in pages if p.normalized_url not in duplicates]
     by_url = {p.normalized_url: p for p in pages}
@@ -170,7 +198,6 @@ def build(db: Session, client: Client, q: str | None = None) -> dict[str, Any] |
         if not template:
             editorial_in[b].add(a)
 
-    st = states(db, client)
     max_clicks = max((g["clicks"] for g in gsc.values()), default=0.0)
 
     # Targets: pages that deserve more links, most worth fixing first.

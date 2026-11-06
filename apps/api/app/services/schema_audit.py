@@ -20,7 +20,10 @@ from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSchema, Fact
 from app.models.schema_tools import ClientSchemaConcept, ClientSchemaIgnore
 from app.schema_tools.expected import expected_for, find_missing_recommended, find_missing_required
 from app.schema_tools.page_type import detect_page_type
-from app.schema_tools.transforms import run_pipeline
+from app.schema_validation import findings as F
+from app.schema_validation.engine import defined_ids, validate_page
+from app.schema_validation.recommendation_rules import missing_types
+from app.schema_validation.vocabulary import load as load_vocabulary
 from app.services.competitors import bare_domain
 from app.services.site_health import is_pagination
 
@@ -134,27 +137,198 @@ def apply_ignores(a: dict[str, Any], ign: dict[str, set[str]]) -> dict[str, Any]
     pt = a["page_type"]
     a["missing_required"] = [t for t in a["missing_required"] if f"{pt}:{t}" not in ign["expect"]]
     a["missing_recommended"] = [t for t in a["missing_recommended"] if f"{pt}:{t}" not in ign["expect"]]
-    a["corrections"] = [c for c in a["corrections"] if _normal(c["detail"]) not in ign["cleanup"]]
+    a["findings"] = [
+        f for f in a["findings"]
+        if f.title not in ign["cleanup"] and _normal(f.message) not in ign["cleanup"]
+        and not (f.rule_id.startswith("recommendation.missing_type") and f"{pt}:{f.type}" in ign["expect"])
+    ]
+    a["corrections"] = _corrections(a["findings"])
     a["score"] = score(a["has_markup"], a["missing_required"], a["missing_recommended"], len(a["corrections"]))
     return a
 
 
-def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str]) -> dict[str, Any]:
+def _corrections(findings: list[F.Finding]) -> list[dict[str, str]]:
+    """What counts against a page's score and is listed as a fix: errors, and warnings. Enhancements and informational notices do not."""
+    # A missing type is already scored by `score` (40 or 10 points), so it is not counted a second time here.
+    return [{"transform": f.rule_id, "node_id": f.entity_id or "?", "detail": f.title} for f in findings if f.category in (F.ERROR, F.WARNING) and not f.rule_id.startswith("recommendation.missing_type")]
+
+
+def site_registry(blocks: dict[str, list[Any]]) -> dict[str, int]:
+    """Every identifier the site's pages define, and on how many pages."""
+    registry: Counter[str] = Counter()
+    for u, bl in blocks.items():
+        registry.update(defined_ids(u, bl))
+    return dict(registry)
+
+
+def audit_page(url: str, title: str | None, blocks: list[Any], micro: set[str], site_ids: dict[str, int] | None = None) -> dict[str, Any]:
     present = sorted(set(collect_types(blocks)) | _component_types(blocks) | micro)
     page_type = detect_page_type(url, present, title)
     missing_required = find_missing_required(page_type, present)
     missing_recommended = find_missing_recommended(page_type, present)
-    corrections = run_pipeline(merged_graph(blocks))[1] if blocks else []
+    spec = expected_for(page_type)
+    findings = validate_page(url, blocks, page_type=page_type, site_ids=site_ids) if blocks else []
+    vocab = load_vocabulary()
+    findings += missing_types(vocab, page_type, present, {"required": missing_required, "recommended": missing_recommended, "accepts": spec.get("accepts", [])}, url)
+    findings.sort(key=lambda f: (F.RANK[f.category], f.layer, f.rule_id, f.entity_id or ""))
+    corrections = _corrections(findings)
     return {
         "url": url, "page_type": page_type, "present": present, "present_jsonld": collect_types(blocks), "has_jsonld": bool(blocks), "has_markup": bool(blocks) or bool(micro),
-        "missing_required": missing_required, "missing_recommended": missing_recommended, "corrections": corrections,
+        "missing_required": missing_required, "missing_recommended": missing_recommended, "corrections": corrections, "findings": findings,
         "score": score(bool(blocks) or bool(micro), missing_required, missing_recommended, len(corrections)),
     }
+
+
+def google_reviewed() -> str:
+    from app.schema_validation.google_rules import REVIEWED
+
+    return REVIEWED
+
+
+_CONFIDENCE = {"high": 3, "medium": 2, "low": 1}
+SAMPLE_URLS = 5
+GROUPS_LISTED = 300
+
+
+def group_findings(audits: list[dict[str, Any]], extra: list[F.Finding] | None = None) -> list[dict[str, Any]]:
+    """Findings grouped by what causes them (rule, type, property), so one underlying problem on 2,000 pages is one row with an honest page count.
+
+    A page is counted once per group however many times the finding occurs on it; `occurrences` is the raw count. The example is the first page's own
+    evidence, so the row can be checked against a real page. The group's confidence is the lowest of its findings'.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    pairs = [(a["url"], f) for a in audits for f in a.get("findings", [])] + [(f.url, f) for f in (extra or [])]
+    for url, f in pairs:
+        g = groups.get(f.template_key)
+        if g is None:
+            g = groups[f.template_key] = {
+                "template_key": f.template_key, "rule_id": f.rule_id, "layer": f.layer, "category": f.category, "title": f.title, "explanation": f.explanation, "recommendation": f.recommendation,
+                "doc": f.doc, "type": f.type, "property": f.property, "auto_fixable": f.auto_fixable, "confidence": f.confidence, "pages": 0, "occurrences": 0, "sample_urls": [],
+                "example": {"url": url, "entity_id": f.entity_id, "message": f.message, "evidence": f.evidence}, "_urls": set(),
+            }
+        g["occurrences"] += 1
+        if url not in g["_urls"]:
+            g["_urls"].add(url)
+            g["pages"] += 1
+            if len(g["sample_urls"]) < SAMPLE_URLS:
+                g["sample_urls"].append(url)
+        if _CONFIDENCE[f.confidence] < _CONFIDENCE[g["confidence"]]:
+            g["confidence"] = f.confidence
+        g["auto_fixable"] = g["auto_fixable"] and f.auto_fixable
+    out = sorted(groups.values(), key=lambda g: (F.RANK[g["category"]], -g["pages"], g["rule_id"]))
+    for g in out:
+        del g["_urls"]
+    return out[:GROUPS_LISTED]
+
+
+def finding_counts(audits: list[dict[str, Any]], site: list[F.Finding] | None = None) -> dict[str, dict[str, int]]:
+    """Per category: how many distinct problems (groups), how many pages are affected, and how many findings in all.
+
+    `site` is what only shows across pages; the list a tile opens includes it, so the tile counts it too.
+    """
+    out = {c: {"groups": 0, "pages": 0, "occurrences": 0} for c in F.CATEGORIES}
+    seen_groups: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
+    pages: dict[str, set[str]] = {c: set() for c in F.CATEGORIES}
+    for a in audits:
+        for f in a.get("findings", []):
+            out[f.category]["occurrences"] += 1
+            seen_groups[f.category].add(f.template_key)
+            pages[f.category].add(a["url"])
+    for f in site or []:
+        out[f.category]["occurrences"] += 1
+        seen_groups[f.category].add(f.template_key)
+        pages[f.category].add(f.url)
+    for c in F.CATEGORIES:
+        out[c]["groups"], out[c]["pages"] = len(seen_groups[c]), len(pages[c])
+    return out
+
+
+def _site_findings(blocks: dict[str, list[Any]], audited: list[str]) -> list[F.Finding]:
+    """What only shows across pages: the same organization (by name) carrying different @id values on different pages."""
+    from app.schema_validation import graph as graph_mod
+
+    vocab = load_vocabulary()
+    ids_by_name: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for url in audited:
+        for node in graph_mod.build(url, blocks.get(url, [])).nodes:
+            name = node.data.get("name")
+            if node.id and isinstance(name, str) and name.strip() and any(vocab.is_a(vocab.type_name(t) or "", "Organization") for t in node.types) and not node.parent_property:
+                ids_by_name[_norm(name)][node.id].add(url)
+    out: list[F.Finding] = []
+    out += _glossary_finding(blocks, audited, vocab)
+    for name, by_id in ids_by_name.items():
+        if len(by_id) < 2:
+            continue
+        for ident, urls in by_id.items():
+            for url in sorted(urls):
+                out.append(F.Finding(
+                    url=url, layer="graph", rule_id="graph.inconsistent_entity_ids", category=F.WARNING, type="Organization", entity_id=ident,
+                    title="The same organization carries different @id values across the site",
+                    message=f"An organization named '{name}' is defined with {len(by_id)} different @id values across the site: " + ", ".join(sorted(by_id)[:3]),
+                    explanation="Search engines treat each @id as its own entity, so one business described under several identifiers is read as several businesses and its markup does not add up.",
+                    recommendation="Pick one identifier for the organization (for example https://example.com/#organization) and use it on every page.", doc=F.SCHEMA_DOCS,
+                    evidence=sorted(by_id)[:4], confidence="medium",
+                ))
+    return out
+
+
+def _glossary_finding(blocks: dict[str, list[Any]], audited: list[str], vocab: Any) -> list[F.Finding]:
+    """The baseline asks for one DefinedTermSet per site, on the glossary hub. A site that has none is told once, on its home page."""
+    from app.schema_validation import graph as graph_mod
+    from app.schema_validation.baseline_rules import VERSION
+
+    if not audited or not any(blocks.get(u) for u in audited):
+        return []
+    for url in audited:
+        if any(vocab.is_a(vocab.type_name(t) or "", "DefinedTermSet") for n in graph_mod.build(url, blocks.get(url, [])).nodes for t in n.types):
+            return []
+    home = min(audited, key=lambda u: (len(u), u))
+    return [F.Finding(
+        url=home, layer="baseline", rule_id="baseline.glossary_missing", category=F.ENHANCEMENT, type="DefinedTermSet",
+        title="The site has no glossary markup (DefinedTermSet)", message="No page of the site carries a DefinedTermSet",
+        explanation="The baseline declares the company's official vocabulary as one DefinedTermSet on a glossary hub, with a DefinedTerm for each core term linked to Wikipedia and Wikidata. "
+        f"A term with no glossary page is also a content gap. This is part of the {VERSION}, not a requirement of Schema.org or Google.",
+        recommendation="Build a glossary hub page with a DefinedTermSet and a DefinedTerm for each core term (name, definition, inDefinedTermSet, sameAs).", doc=F.schema_doc("DefinedTermSet"), confidence="medium")]
 
 
 def _scored(a: dict[str, Any]) -> bool:
     """A page nothing is expected of (an unclassified page with no markup) is not marked down for having none."""
     return not (a["page_type"] == "generic" and not a["has_markup"])
+
+
+def _pages(n: int) -> str:
+    return f"{n} page" + ("" if n == 1 else "s")
+
+
+def explain_kind(label: str, score: int | None, expects: list[str], recommended: list[str], group: list[dict[str, Any]]) -> dict[str, Any]:
+    """Why a kind of page scored what it did and what to do about it, in plain sentences built from what the audit found on its pages."""
+    scored = [a for a in group if _scored(a)]
+    if score is None or not scored:
+        return {"summary": f"Nothing on the {label.lower()} is expected to carry markup.", "should_have": "", "gaps": [], "steps": []}
+    many = len(scored) > 1
+    summary = f"{label} scored {score} out of 100." + (f" That is the average of {len(scored)} pages. Each page starts at 100 and loses points for markup it is missing." if many else "")
+    should = "Markup is the hidden code that tells search engines and AI what a page is. For this kind of page it should say it is " + " and ".join([", ".join(expects)] if expects else ["a page"]) + (f", and it is stronger with {', '.join(recommended)}." if recommended else ".")
+    required: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_required"])
+    helpful: Counter[str] = Counter(t for a in scored if a["has_markup"] for t in a["missing_recommended"])
+    bare = sum(1 for a in scored if not a["has_markup"])
+    fixes: Counter[str] = Counter(_normal(c["detail"]) for a in scored for c in a["corrections"])
+    gaps: list[str] = []
+    steps: list[str] = []
+    if bare:
+        gaps.append(f"{_pages(bare)} {'has' if bare == 1 else 'have'} no markup at all, so {'it scores' if bare == 1 else 'they score'} 0.")
+        steps.append("Add markup to the pages that have none. Open a page here and choose to write corrected markup.")
+    for t, k in required.most_common():
+        gaps.append(f"{t} markup is missing on {_pages(k)}. A page without it loses 40 points.")
+        steps.append(f"Add {t} markup to {'the page' if k == 1 else f'the {k} pages'} that {'misses' if k == 1 else 'miss'} it.")
+    for text, k in fixes.most_common(3):
+        gaps.append(f"{_pages(k)} {'has' if k == 1 else 'have'} a problem in the markup: {text}. Each one loses 5 points.")
+        steps.append(f"Fix: {text}.")
+    for t, k in helpful.most_common(3):
+        gaps.append(f"{t} markup would help on {_pages(k)}. Without it a page loses 10 points. Nothing is wrong.")
+        steps.append(f"Optional: add {t} markup to the {_pages(k)} that {'lacks' if k == 1 else 'lack'} it.")
+    if not gaps:
+        summary += " Every page has all the markup it needs."
+    return {"summary": summary, "should_have": should, "gaps": gaps, "steps": steps, "gain": 100 - score if steps else 0}
 
 
 def _average(group: list[dict[str, Any]]) -> int | None:
@@ -176,8 +350,10 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             micro[r.normalized_url].add(r.schema_type)
 
     ign = load_ignores(db, client)
+    # Which identifiers the site defines, and on how many pages, so a reference to an entity another page defines is told from one nothing defines.
+    site_ids = site_registry(blocks)
     audits = [
-        a for a in (apply_ignores(audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set())), ign) for s in pages) if a is not None
+        a for a in (apply_ignores(audit_page(s.normalized_url, s.title, blocks.get(s.normalized_url, []), micro.get(s.normalized_url, set()), site_ids), ign) for s in pages) if a is not None
     ]
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for a in audits:
@@ -205,6 +381,7 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
             {
                 "page_type": key, "label": label, "pages": len(group), "expects": expects, "recommended": [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]],
                 "score": _average([a for a in group if _scored(a)]),
+                "why": explain_kind(label, _average([a for a in group if _scored(a)]), expects, [t for t in spec["recommended"] if f"{key}:{t}" not in ign["expect"]], group),
                 "affected": len(fix), "items": fix[:LISTED],
                 "recommended_affected": len(recommended), "recommended_items": recommended[:LISTED],
             }
@@ -235,12 +412,15 @@ def audit(db: Session, client: Client) -> dict[str, Any] | None:
     invalid = [{"url": r.normalized_url, "error": (r.parse_error or "")[:200]} for r in rows if r.parse_error][:LISTED]
     with_markup = sum(1 for a in audits if a["has_jsonld"])
     entity = _entity(db, client, blocks, micro, ign["check"])
+    site_findings = _site_findings(blocks, [a["url"] for a in audits])
     return {
         "crawl_date": max(s.snapshot_date for s in snaps).isoformat(),
         "pages": len(pages), "with_markup": with_markup,
         "score": _average([a for a in audits if _scored(a)]) or 0,
         "cleanups": sum(len(a["corrections"]) for a in audits),
         "types": types, "fixes": fixes, "present": [{"type": t, "pages": n} for t, n in present.most_common()],
+        "findings": group_findings(audits, site_findings), "finding_counts": finding_counts(audits, site_findings),
+        "validator": {"schemaorg_version": load_vocabulary().version, "google_reviewed": google_reviewed()},
         "invalid": invalid, "entity": entity,
         "ignored": [{"id": str(i.id), "scope": i.scope, "key": i.key, "label": i.label or i.key} for i in db.query(ClientSchemaIgnore).filter(ClientSchemaIgnore.client_id == client.id).order_by(ClientSchemaIgnore.created_at)],
         "concepts": [_concept_out(c) for c in db.query(ClientSchemaConcept).filter(ClientSchemaConcept.client_id == client.id).order_by(ClientSchemaConcept.name)],
@@ -288,65 +468,217 @@ def _has(node: dict[str, Any], prop: str) -> bool:
     return node.get(prop) not in (None, "", [], {})
 
 
+class _Tally:
+    """What was found, how many times, and on which pages: the rows behind a check, so each can be opened and traced to the markup."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict[str, Any]] = {}
+
+    def add(self, label: str, url: str, kind: str = "found") -> None:
+        r = self.rows.setdefault(label, {"label": label, "count": 0, "pages": [], "kind": kind})
+        r["count"] += 1
+        if url not in r["pages"] and len(r["pages"]) < 6:
+            r["pages"].append(url)
+
+    def out(self, limit: int = 40) -> list[dict[str, Any]]:
+        return sorted(self.rows.values(), key=lambda r: (-r["count"], r["label"]))[:limit]
+
+
+def _host(url: str) -> str:
+    return urlsplit(url if "//" in url else "//" + url).netloc.lower().removeprefix("www.")
+
+
+def _text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return _text(value.get("url") or value.get("contentUrl") or value.get("name") or value.get("@id") or "")
+    if isinstance(value, list):
+        return ", ".join(t for t in (_text(v) for v in value[:2]) if t)
+    return ""
+
+
+def _address(value: Any) -> str:
+    a = value[0] if isinstance(value, list) and value else value
+    if isinstance(a, dict):
+        return ", ".join(str(a[k]).strip() for k in ("streetAddress", "addressLocality", "addressRegion", "postalCode") if isinstance(a.get(k), str) and a[k].strip())
+    return _text(a)
+
+
 def _entity(db: Session, client: Client, blocks: dict[str, list[Any]], micro: dict[str, set[str]], ignored_checks: set[str] | None = None) -> dict[str, Any]:
-    """Does the markup describe the brand as one organization, tied to the profiles and the Wikidata item that identify it?"""
+    """Does the markup describe the brand as one organization, tied to the profiles and the Wikidata item that identify it?
+
+    Only the brand's own organization is judged. A page can name other organizations (a client in a case study, a company an article is about, a
+    publisher), and those are listed apart: they are not the brand under a different name, and their profiles are not the brand's.
+    """
     from app.models.llm_visibility import ClientLlmSettings
     from app.schema_tools.transforms import extract_graph
 
     saved = db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar()
     brand = (saved or client.client_name or "").strip()
-    standalone: list[dict[str, Any]] = []
-    every: list[dict[str, Any]] = []
-    for ents in blocks.values():
-        standalone += [n for b in ents for n in extract_graph(b) if _types(n) & _ORG_TYPES]
-        every += [n for n in _nodes(ents) if _types(n) & _ORG_TYPES]
-    names: Counter[str] = Counter(n["name"].strip() for n in every if isinstance(n.get("name"), str) and n["name"].strip())
+    site_host = _host(client.domain or "")
+
+    def own(n: dict[str, Any]) -> bool:
+        u = n.get("url") if isinstance(n.get("url"), str) else None
+        nm = n.get("name") if isinstance(n.get("name"), str) else ""
+        if u and site_host and _host(u) == site_host:
+            return True
+        return bool(nm and brand and (_norm(brand) in _norm(nm) or _norm(nm) in _norm(brand)))
+
+    standalone: list[tuple[str, dict[str, Any]]] = []
+    every: list[tuple[str, dict[str, Any]]] = []
+    for url, ents in blocks.items():
+        standalone += [(url, n) for b in ents for n in extract_graph(b) if _types(n) & _ORG_TYPES]
+        every += [(url, n) for n in _nodes(ents) if _types(n) & _ORG_TYPES]
+    mine = [(u, n) for u, n in every if own(n)]
+    others = [(u, n) for u, n in every if not own(n)]
+    own_standalone = [(u, n) for u, n in standalone if own(n)]
+    names = _Tally()
+    for u, n in mine:
+        if isinstance(n.get("name"), str) and n["name"].strip():
+            names.add(n["name"].strip(), u)
+    other_names = _Tally()
+    for u, n in others:
+        if isinstance(n.get("name"), str) and n["name"].strip():
+            other_names.add(n["name"].strip(), u, "other")
     micro_pages = sum(1 for ts in micro.values() if "Organization" in ts)
-    best = max(standalone, key=lambda o: sum(_has(o, p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")), default=None)
-    same_as = sorted({x for n in every for x in ([n["sameAs"]] if isinstance(n.get("sameAs"), str) else [v for v in (n.get("sameAs") or []) if isinstance(v, str)])})
+    best_u, best = max(own_standalone, key=lambda un: sum(_has(un[1], p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")), default=("", None))
+    links = _Tally()
+    for u, n in mine:
+        raw = n.get("sameAs")
+        for x in [raw] if isinstance(raw, str) else (raw or []):
+            if isinstance(x, str):
+                links.add(x, u)
+    same_as = sorted(links.rows)
     approved = db.query(ClientSchemaConcept).filter(ClientSchemaConcept.client_id == client.id).all()
     brand_concept = next((c for c in approved if _norm(c.name) == _norm(brand)), None)
 
-    def check(key: str, label: str, status: str, detail: str, fix: str | None = None) -> dict[str, Any]:
-        return {"key": key, "label": label, "status": status, "detail": detail, "fix": fix}
+    def check(key: str, label: str, status: str, detail: str, fix: str | None = None, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return {"key": key, "label": label, "status": status, "detail": detail, "fix": fix, "items": items or []}
 
     checks = []
-    if standalone:
-        checks.append(check("org", "Organization markup (JSON-LD)", "pass", f"Found on {len({id(n) for n in standalone})} blocks."))
+    org_pages = _Tally()
+    for u, _n in own_standalone:
+        org_pages.add(u, u)
+    org_items = [{"label": r["label"], "count": r["count"], "pages": [r["label"]], "kind": "found"} for r in org_pages.out(12)]
+    if own_standalone:
+        checks.append(check("org", "Organization markup (JSON-LD)", "pass", f"Found on {len({u for u, _ in own_standalone})} pages ({len(own_standalone)} blocks).", items=org_items))
     elif every:
-        checks.append(check("org", "Organization markup (JSON-LD)", "warn", "The organization only appears inside other markup (as an article's publisher), never as its own block describing the business.", "Generate the homepage markup below: it adds an Organization block."))
+        checks.append(check("org", "Organization markup (JSON-LD)", "warn", "The organization only appears inside other markup (as an article's publisher), never as its own block describing the business.", "Generate the homepage markup below: it adds an Organization block.",
+                            items=[{"label": f"Inside other markup: {r['label']}", "count": r["count"], "pages": r["pages"], "kind": "other"} for r in (names.out(5) or other_names.out(5))]))
     elif micro_pages:
         checks.append(check("org", "Organization markup (JSON-LD)", "warn", f"Only as microdata on {micro_pages} pages. Search engines read it, but JSON-LD is the form they and AI crawlers prefer.", "Generate the homepage markup below: it adds an Organization block."))
     else:
         checks.append(check("org", "Organization markup (JSON-LD)", "fail", "No Organization markup found on any crawled page.", "Generate the homepage markup below."))
-    distinct = {_norm(n) for n in names}
+    name_items = names.out() + [{**r, "label": f"Another organization: {r['label']}"} for r in other_names.out(15)]
+    distinct = {_norm(n) for n in names.rows}
+    others_note = f" {len(other_names.rows)} other organizations are named too (clients, mentions, publishers); they are not judged." if other_names.rows else ""
     if len(distinct) > 1:
-        checks.append(check("names", "One name everywhere", "fail", "The markup names the organization differently: " + ", ".join(f"“{n}” on {c}" for n, c in names.most_common()) + ".", "Use one exact name in every block."))
-    elif names:
-        only = next(iter(names))
+        checks.append(check("names", "One name everywhere", "fail", "The brand's own markup names it differently: " + ", ".join(f"“{n}” on {r['count']}" for n, r in sorted(names.rows.items(), key=lambda kv: -kv[1]["count"])) + "." + others_note, "Use one exact name in every block that describes the brand.", name_items))
+    elif names.rows:
+        only = next(iter(names.rows))
         ok = not brand or _norm(brand) in _norm(only) or _norm(only) in _norm(brand)
-        checks.append(check("names", "One name everywhere", "pass" if ok else "warn", f"Every block says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.", None if ok else "Make the markup and the brand name match."))
+        checks.append(check("names", "One name everywhere", "pass" if ok else "warn", (f"Every block that describes the brand says “{only}”." if ok else f"The markup says “{only}” but the brand is set as “{brand}”.") + others_note, None if ok else "Make the markup and the brand name match.", name_items))
     else:
-        checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare."))
-    wikidata_linked = any("wikidata.org" in x for x in same_as)
-    checks.append(check("wikidata", "Linked to its Wikidata item", "pass" if (wikidata_linked or brand_concept) else "fail",
-                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else ("The markup links to Wikidata." if wikidata_linked else "The brand is not tied to a Wikidata item. That item is how search engines and AI recognize the brand as one known entity."),
-                        None if (wikidata_linked or brand_concept) else "Find the brand's Wikidata item below and approve it. If it has none, creating one is the first step."))
+        checks.append(check("names", "One name everywhere", "warn", "No organization name was found to compare." + others_note, items=name_items))
+    checks.insert(0, _topics_check(db, client, blocks, approved, brand_concept, check))
+    wd_links = [x for x in same_as if "wikidata.org" in x]
+    wikidata_linked = bool(wd_links)
+    wd_items = [r for r in links.out() if "wikidata.org" in r["label"]]
+    if brand_concept:
+        wd_items = [{"label": f"Approved: {brand_concept.qid} {brand_concept.label or brand_concept.name}", "count": 1, "pages": [], "kind": "found"}] + wd_items
+    checks.append(check("wikidata", "Brand linked to its own Wikidata item (optional)", "pass" if (wikidata_linked or brand_concept) else "optional",
+                        f"Wikidata item {brand_concept.qid} approved for “{brand_concept.name}”." if brand_concept else (f"The brand's markup links to Wikidata ({len(wd_links)} link)." if wikidata_linked else "The brand has no Wikidata item. Most brands do not, and one is hard to get approved, so this is optional. The core topics above matter more."),
+                        None, wd_items))
     checks.append(check("same_as", "Links to the brand's other profiles (sameAs)", "pass" if same_as else "fail",
-                        f"{len(same_as)} linked: " + ", ".join(urlsplit(x).netloc.removeprefix("www.") for x in same_as[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
-                        None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block."))
+                        f"{len(same_as)} linked: " + ", ".join(sorted({_host(x) for x in same_as})[:6]) + "." if same_as else "No sameAs links. These tell search engines and AI that the social, directory and profile pages belong to this brand.",
+                        None if same_as else "Add the brand's real profile URLs (LinkedIn, Facebook, Instagram, Google Business Profile) to the Organization block.", links.out()))
+    shown = {"logo": ("logo", _text), "contactPoint": ("contact", _text), "telephone": ("contact", _text), "address": ("contact", _address), "url": ("url", _text)}
     for key, label, props in (("logo", "Logo", ("logo",)), ("contact", "Contact details", ("contactPoint", "telephone", "address")), ("url", "Website address", ("url",))):
         present = best is not None and any(_has(best, p) for p in props)
-        checks.append(check(key, label, "pass" if present else "fail" if best is not None else "warn", f"{label} is in the Organization block." if present else (f"{label} is missing from the Organization block." if best is not None else "There is no standalone Organization block to read."), None if present else f"Add {' or '.join(props)} to the Organization block."))
+        items = []
+        if best is not None:
+            for p in props:
+                if _has(best, p):
+                    fmt = shown[p][1]
+                    items.append({"label": f"{p}: {fmt(best[p]) or '(set)'}", "count": 1, "pages": [best_u], "kind": "found"})
+                else:
+                    items.append({"label": f"{p}: missing", "count": 0, "pages": [best_u], "kind": "missing"})
+        checks.append(check(key, label, "pass" if present else "fail" if best is not None else "warn", f"{label} is in the Organization block." if present else (f"{label} is missing from the Organization block." if best is not None else "There is no standalone Organization block to read."), None if present else f"Add {' or '.join(props)} to the Organization block.", items))
     products = [u for u, ents in blocks.items() if any("Product" in _types(n) for n in extract_graph_all(ents))]
     branded = [u for u in products if any(_has(n, "brand") for n in extract_graph_all(blocks[u]) if "Product" in _types(n))]
     if products:
         good = len(branded) >= 0.8 * len(products)
-        checks.append(check("brand", "Products name their brand", "pass" if good else "warn", f"{len(branded)} of {len(products)} products carry a brand.", None if good else "Add the brand to each Product block so products tie back to the organization."))
+        unbranded = [u for u in products if u not in set(branded)]
+        checks.append(check("brand", "Products name their brand", "pass" if good else "warn", f"{len(branded)} of {len(products)} products carry a brand.", None if good else "Add the brand to each Product block so products tie back to the organization.",
+                            [{"label": u, "count": 1, "pages": [u], "kind": "missing"} for u in unbranded[:20]]))
     for c in checks:
         if c["key"] in (ignored_checks or set()):
             c["status"], c["fix"] = "ignored", None
-    return {"brand": brand, "names": [{"name": n, "blocks": c} for n, c in names.most_common()], "same_as": same_as, "checks": checks}
+    return {"brand": brand, "names": [{"name": r["label"], "blocks": r["count"]} for r in names.out()], "same_as": same_as, "checks": checks}
+
+
+_WIKIDATA_ID = re.compile(r"wikidata\.org/(?:wiki|entity)/(Q\d+)")
+
+
+def _topics_check(db: Session, client: Client, blocks: dict[str, list[Any]], approved: list[Any], brand_concept: Any, check: Any) -> dict[str, Any]:
+    """The brand's core topics, each tied to a Wikidata item and linked from the markup.
+
+    Most small brands have no Wikidata item of their own, so what search engines and AI can recognize is the topics the brand is about.
+    The topics are the watchlist's buckets and any other approved concept (a product line, a topic); the brand's own item is not one.
+    """
+    import json
+
+    from app.models.watchlist import WatchlistBucket
+
+    by_name = {_norm(c.name): c for c in approved if c is not brand_concept}
+    names: list[str] = []
+    for n in [b.name for b in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order, WatchlistBucket.name)] + [c.name for c in by_name.values()]:
+        if _norm(n) and _norm(n) not in {_norm(x) for x in names}:
+            names.append(n)
+    on_site: Counter[str] = Counter()
+    for ents in blocks.values():
+        on_site.update(set(_WIKIDATA_ID.findall(json.dumps(ents, default=str))))
+    items, with_id, linked = [], 0, 0
+    for name in names:
+        c = by_name.get(_norm(name))
+        if c is None:
+            items.append({"label": f"{name}: no Wikidata item approved yet", "count": 0, "pages": [], "kind": "missing"})
+        elif on_site.get(c.qid):
+            with_id += 1
+            linked += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + f", on {on_site[c.qid]} page{'' if on_site[c.qid] == 1 else 's'}", "count": on_site[c.qid], "pages": [], "kind": "found"})
+        else:
+            with_id += 1
+            items.append({"label": f"{name}: {c.qid} {c.label or ''}".strip() + ", approved but not in the site's markup yet", "count": 0, "pages": [], "kind": "other"})
+    label = "Core topics linked to Wikidata IDs"
+    if not names:
+        return check("topics", label, "warn", "No core topics are set yet. They come from the watchlist's topic groups.", "Add topics on the watchlist, then link each one to its Wikidata item below.", [])
+    detail = f"{linked} of {len(names)} topics are linked from the site's markup" + (f"; {with_id - linked} more are approved but not on the site yet." if with_id > linked else ".")
+    if linked == len(names):
+        return check("topics", label, "pass", detail, None, items)
+    fix = "Find each topic's Wikidata item below and approve it. Then add it to the pages that cover that topic (as what the page is about, with a sameAs link to the item). A topic with no Wikidata item can stay as plain text."
+    return check("topics", label, "warn" if with_id else "fail", detail, fix, items)
+
+
+def brand_facts(db: Session, client: Client) -> Any:
+    """What the crawled markup says about the organization, for comparing a Wikidata candidate against it."""
+    from app.schema_tools.transforms import extract_graph
+    from app.schema_tools.wikidata_evidence import Facts
+
+    rows = db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id, FactCrawlPageSchema.syntax == "json_ld").all()
+    orgs = [n for r in rows if r.raw and not r.parse_error for n in extract_graph(r.raw) if _types(n) & _ORG_TYPES]
+    if not orgs:
+        return Facts()
+    best = max(orgs, key=lambda o: sum(_has(o, p) for p in ("name", "url", "logo", "sameAs", "contactPoint", "address", "telephone")))
+    places: list[str] = []
+    for a in (best.get("address") if isinstance(best.get("address"), list) else [best.get("address")]):
+        if isinstance(a, dict):
+            places += [str(a[k]).strip() for k in ("addressLocality", "addressRegion") if isinstance(a.get(k), str) and a[k].strip()]
+    raw = best.get("sameAs")
+    same_as = sorted({x for x in ([raw] if isinstance(raw, str) else raw or []) if isinstance(x, str)} | {x for n in orgs for x in ([n["sameAs"]] if isinstance(n.get("sameAs"), str) else n.get("sameAs") or []) if isinstance(x, str)})
+    url = best.get("url") if isinstance(best.get("url"), str) else None
+    return Facts(url=url, types=sorted(_types(best)), places=places, same_as=same_as)
 
 
 def extract_graph_all(blocks: list[Any]) -> list[dict[str, Any]]:

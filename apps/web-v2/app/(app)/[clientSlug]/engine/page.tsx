@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { EngineScreen } from "@/components/EngineScreen";
 import { ApiError, apiFetch } from "@/lib/api";
-import { getClients } from "@/lib/clients";
+import { findClient } from "@/lib/clients";
 import {
   EMPTY_OVERVIEW,
   EMPTY_PLAN,
@@ -28,7 +28,7 @@ export default async function EnginePage({
 }) {
   const { clientSlug } = await params;
   const { bucket: requestedBucket, show } = await searchParams;
-  const client = (await getClients()).find((c) => c.slug === clientSlug);
+  const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const month = lastCompleteMonth();

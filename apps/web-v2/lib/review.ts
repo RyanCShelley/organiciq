@@ -52,13 +52,54 @@ export type Visibility = {
   llm: VisibilityAi | null;
 };
 
-export type SummaryRow = {
-  label: string;
-  value: string;
-  change: { text: string; tone: "good" | "bad" | "flat"; against: string } | null;
-  detail: string | null;
+export type RankCheck = {
+  checked_on: string;
+  tracked: number;
+  ranked: number;
+  top10: number;
+  best: { keyword: string; position: number } | null;
+  biggest_drop: { keyword: string; from: number; to: number } | null;
 };
-export type SummarySection = { title: string; rows: SummaryRow[] };
+export type Scorecards = {
+  reads?: { visibility: string | null; traffic: string | null; conversions: string | null };
+  month: string;
+  previous_month: string;
+  headline: string;
+  visibility: {
+    available: boolean;
+    headline: number | null;
+    of: number | null;
+    verdict: "up" | "down" | "flat";
+    page_one: number | null;
+    bing: number | null;
+    has_bing: boolean;
+    impressions: { current: number | null; previous: number | null; change_pct: number | null };
+    ai_mentions: number | null;
+    ai_links: number | null;
+    ai_runs: number | null;
+    rank_check: RankCheck | null;
+  };
+  traffic: {
+    headline: number | null;
+    previous: number | null;
+    change_pct: number | null;
+    verdict: "up" | "down" | "flat";
+    organic_change_pct: number | null;
+    channels: { key: string; label: string; sessions: number; previous: number; change_pct: number | null }[];
+  };
+  conversions: {
+    noun: string;
+    headline: number | null;
+    previous: number | null;
+    change_pct: number | null;
+    verdict: "up" | "down" | "flat";
+    goal: number | null;
+    goal_progress_pct: number | null;
+    top: { label: string; count: number; previous: number; change_pct: number | null }[];
+    revenue: Pair | null;
+    conversion_rate: Pair | null;
+  };
+};
 
 export type Review = {
   /** True once the month is over and its data complete: the review was worked out once and is read back. */
@@ -98,7 +139,7 @@ export type Review = {
   revenue: RevenueBlock | null;
   visibility: Visibility | null;
   summary: string[];
-  summary_sections: SummarySection[];
+  scorecards?: Scorecards;
 };
 
 export function nextMonth(month: string): string {

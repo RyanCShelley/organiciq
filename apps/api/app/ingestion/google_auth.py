@@ -5,7 +5,12 @@ from google.oauth2.credentials import Credentials
 
 GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
+ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
+#: What the sync's credentials are built with. Google Ads is left out on purpose: a refresh that asks for a scope the grant lacks fails, and
+#: Analytics and Search Console must keep working for a grant made before Google Ads was added.
 DATA_OAUTH_SCOPES = [GSC_SCOPE, GA4_SCOPE]
+#: What the connect screen asks for.
+CONNECT_SCOPES = [*DATA_OAUTH_SCOPES, ADS_SCOPE]
 
 
 def credentials_from_tokens(

@@ -12,10 +12,12 @@ superseded is history, not a problem.
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
+from urllib.parse import unquote
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -53,26 +55,72 @@ _SYNC_SOURCES = {
 }
 
 
+#: What a person reads for each job source, in place of the internal key.
+_LABELS = {
+    "gsc_pages": "Search Console",
+    "gsc_queries": "Search Console",
+    "ga4": "Google Analytics",
+    "se_ranking_ai": "SE Ranking AI",
+    "site_crawl": "Site crawl",
+}
+_SITE = re.compile(r"/sites/([^/]+)/")
+
+
+def label(source: str) -> str:
+    return _LABELS.get(source, source.replace("_", " ").capitalize())
+
+
 @dataclass
 class Problem:
     client: str
-    what: str
-    detail: str = ""
+    source: str  # a person's name for the data, e.g. "Search Console"
+    state: str  # failing, stalled or stuck
+    what: str  # what is wrong, in a sentence
+    fix: str = ""  # what to do about it, when that is known
+    history: str = ""  # "Never synced successfully." / "Last success 2026-11-01."
 
 
 @dataclass
 class Digest:
-    failures: list[Problem] = field(default_factory=list)
-    stale: list[Problem] = field(default_factory=list)
-    stuck: list[Problem] = field(default_factory=list)
+    problems: list[Problem] = field(default_factory=list)
 
     @property
     def healthy(self) -> bool:
-        return not (self.failures or self.stale or self.stuck)
+        return not self.problems
 
     @property
     def count(self) -> int:
-        return len(self.failures) + len(self.stale) + len(self.stuck)
+        return len(self.problems)
+
+
+def explain(source: str, message: str | None) -> tuple[str, str] | None:
+    """A raw job error as (what is wrong, what to do). None when the job only says a source was never set up: that is a setup task, not a fault."""
+    text = (message or "").strip()
+    lower = text.lower()
+    if "no se ranking ai engines configured" in lower or "not configured" in lower:
+        return None
+    name = label(source)
+    site = ""
+    m = _SITE.search(text)
+    if m:
+        site = unquote(m.group(1)).replace("https://", "").replace("http://", "").strip("/")
+    if "403" in text and name == "Search Console":
+        return (
+            f"Search Console has no access to {site or 'the property'}.",
+            "Add the connected Google account as a user on that property in Search Console, or correct the property address in Integrations.",
+        )
+    if "404" in text and name == "Search Console":
+        return (f"Search Console does not know the property {site or 'on file'}.", "Correct the property address in Integrations, or add the site in Search Console.")
+    if "401" in text or "invalid_grant" in lower or "token has been expired" in lower:
+        return (f"The {name} sign-in has expired.", "Reconnect the Google account in Integrations.")
+    if "403" in text:
+        return (f"{name} refused access.", "Check the connection and permissions in Integrations.")
+    if "429" in text or "quota" in lower or "rate limit" in lower:
+        return (f"{name} is rate limiting the sync.", "Nothing to do; it retries on the next run. If it repeats for days, look at the quota.")
+    if re.search(r"\b5\d\d\b", text):
+        return (f"{name} had a server error.", "Nothing to do unless it repeats for days.")
+    first = text.splitlines()[0][:200] if text else "no message"
+    return (f"{name} failed: {first}", "")
 
 
 def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
@@ -82,6 +130,9 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
     if not clients:
         return digest
 
+    # One problem per client and kind of data, whichever job or check found it.
+    found: dict[tuple, Problem] = {}
+
     # Latest outcome per client+source, so a failure followed by a success
     # (someone re-ran it, or the next day's job passed) is not reported.
     recent = (
@@ -89,9 +140,7 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
         .filter(
             SyncJob.client_id.in_(list(clients)),
             SyncJob.created_at > now - timedelta(days=LOOKBACK_DAYS),
-            SyncJob.status.in_(
-                [SyncJobStatus.FAILED, SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL]
-            ),
+            SyncJob.status.in_([SyncJobStatus.FAILED, SyncJobStatus.SUCCESSFUL, SyncJobStatus.PARTIAL]),
         )
         .order_by(SyncJob.created_at.desc())
         .all()
@@ -102,14 +151,13 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
         if key in seen:
             continue
         seen.add(key)
-        if job.status == SyncJobStatus.FAILED:
-            digest.failures.append(
-                Problem(
-                    clients[job.client_id].client_name,
-                    f"{job.source} failed",
-                    (job.error_message or "no message")[:240],
-                )
-            )
+        if job.status != SyncJobStatus.FAILED:
+            continue
+        said = explain(job.source, job.error_message)
+        if said is None:
+            continue
+        name = clients[job.client_id].client_name
+        found.setdefault((job.client_id, label(job.source)), Problem(name, label(job.source), "failing", said[0], said[1]))
 
     # Stale: a connected source with no successful sync lately. Connected
     # means a property is mapped; an unmapped client is a setup task, not a
@@ -125,9 +173,7 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
     )
     last_ok = {
         (client_id, source): finished
-        for client_id, source, finished in db.query(
-            SyncJob.client_id, SyncJob.source, func.max(SyncJob.completed_at)
-        )
+        for client_id, source, finished in db.query(SyncJob.client_id, SyncJob.source, func.max(SyncJob.completed_at))
         .filter(
             SyncJob.client_id.in_(list(clients)),
             SyncJob.source.in_(list(_SYNC_SOURCES.values())),
@@ -138,13 +184,16 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
     for integration in mapped:
         source = _SYNC_SOURCES[integration.provider]
         finished = last_ok.get((integration.client_id, source))
-        if finished is None or finished < now - timedelta(days=STALE_AFTER_DAYS):
-            digest.stale.append(
-                Problem(
-                    clients[integration.client_id].client_name,
-                    f"{source} has no successful sync in {STALE_AFTER_DAYS}+ days",
-                    f"last success {finished:%Y-%m-%d}" if finished else "never succeeded",
-                )
+        if finished is not None and finished >= now - timedelta(days=STALE_AFTER_DAYS):
+            continue
+        history = f"Last success {finished:%Y-%m-%d}." if finished else "Never synced successfully."
+        key = (integration.client_id, label(source))
+        if key in found:
+            found[key].history = history  # the same fault, told once
+        else:
+            found[key] = Problem(
+                clients[integration.client_id].client_name, label(source), "stalled",
+                f"{label(source)} has not synced in {STALE_AFTER_DAYS}+ days.", "Run a sync from the client's page, and check the connection if it fails.", history,
             )
 
     for job in db.query(SyncJob).filter(
@@ -152,16 +201,13 @@ def build_digest(db: Session, *, now: datetime | None = None) -> Digest:
         SyncJob.created_at < now - timedelta(hours=STUCK_AFTER_HOURS),
         SyncJob.client_id.in_(list(clients)),
     ):
-        digest.stuck.append(
-            Problem(
-                clients[job.client_id].client_name,
-                f"{job.source} stuck in {job.status.value}",
-                f"since {job.created_at:%Y-%m-%d %H:%M} UTC",
-            )
+        found.setdefault(
+            (job.client_id, label(job.source), "stuck"),
+            Problem(clients[job.client_id].client_name, label(job.source), "stuck",
+                    f"{label(job.source)} has been working since {job.created_at:%Y-%m-%d %H:%M} UTC.", "A deploy or crash probably lost it. Run it again."),
         )
 
-    for group in (digest.failures, digest.stale, digest.stuck):
-        group.sort(key=lambda p: (p.client.lower(), p.what))
+    digest.problems = sorted(found.values(), key=lambda p: (p.client.lower(), p.source.lower()))
     return digest
 
 
@@ -171,26 +217,28 @@ def render(digest: Digest, *, today: date) -> tuple[str, str]:
             f"OrganicIQ health {today:%b %d}: all clear",
             "Every worked client's syncs are current and nothing is failing or stuck.",
         )
-    lines = [f"{digest.count} thing(s) need a look.", ""]
-    for title, group in (
-        ("Failed and not yet recovered", digest.failures),
-        ("Gone stale", digest.stale),
-        ("Stuck", digest.stuck),
-    ):
-        if not group:
-            continue
-        lines.append(f"{title} ({len(group)})")
-        for problem in group:
-            tail = f" — {problem.detail}" if problem.detail else ""
-            lines.append(f"  • {problem.client}: {problem.what}{tail}")
+    n = digest.count
+    lines = [f"{n} {'thing needs' if n == 1 else 'things need'} a look.", ""]
+    by_client: dict[str, list[Problem]] = {}
+    for problem in digest.problems:
+        by_client.setdefault(problem.client, []).append(problem)
+    for client, problems in by_client.items():
+        lines.append(client)
+        for p in problems:
+            lines.append(f"  • {p.what}" + (f" {p.history}" if p.history else ""))
+            if p.fix:
+                lines.append(f"    To fix: {p.fix}")
         lines.append("")
-    return (f"OrganicIQ health {today:%b %d}: {digest.count} to look at", "\n".join(lines).rstrip())
+    return (f"OrganicIQ health {today:%b %d}: {n} to look at", "\n".join(lines).rstrip())
 
 
-def send_email(subject: str, body: str) -> bool:
-    """Send through the configured SMTP account. False when not configured."""
+def send_email(subject: str, body: str, to: list[str] | None = None) -> bool:
+    """Send through the configured SMTP account. False when not configured.
+
+    With no `to` it goes to the health digest recipients.
+    """
     settings = get_settings()
-    recipients = [a.strip() for a in settings.health_digest_to.split(",") if a.strip()]
+    recipients = to if to is not None else [a.strip() for a in settings.health_digest_to.split(",") if a.strip()]
     if not (recipients and settings.smtp_host):
         return False
     message = EmailMessage()

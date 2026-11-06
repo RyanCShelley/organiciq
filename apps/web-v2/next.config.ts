@@ -14,6 +14,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Next 16 blocks the dev server's scripts and hot reload when the page is opened at 127.0.0.1 (the address sign-in is set up for).
+  allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
   poweredByHeader: false,
   async headers() {

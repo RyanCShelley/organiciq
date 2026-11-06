@@ -7,29 +7,186 @@ the client's exact name, with a preview of what goes first. Only an SMA admin ca
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import reset_client_data
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_admin
+from app.core.settings import get_settings
 from app.models.baseline import BaselineVersion
 from app.models.client import Client
 from app.models.client_bing_site import ClientBingSite
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscDaily
 from app.models.integration import Integration
-from app.models.user import UserClient
-from app.services import data_pull
+from app.models.user import User, UserClient, UserRole
+from app.services import data_pull, welcome_email
 from app.models.watchlist import WatchlistKeyword
 
 logger = logging.getLogger("organiciq.admin")
 router = APIRouter(prefix="/v2/admin", tags=["v2 admin"])
+
+
+class TeamBulkIn(BaseModel):
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+    client_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+@router.get("/team-access")
+def team_access(
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Everyone who can sign in and the clients each can see, for assigning people to clients in bulk.
+
+    An admin sees every client without an assignment, so an admin's list is marked rather than filled in.
+    """
+    links: dict[UUID, list[str]] = {}
+    for user_id, client_id in db.query(UserClient.user_id, UserClient.client_id):
+        links.setdefault(user_id, []).append(str(client_id))
+    users = [
+        {"id": str(u.id), "email": u.email, "name": u.name, "role": u.role.value, "is_active": u.is_active, "sees_all": u.role == UserRole.SMA_ADMIN, "client_ids": links.get(u.id, [])}
+        for u in db.query(User).filter(User.role.in_((UserRole.SMA_ADMIN, UserRole.SMA_TEAM, UserRole.SEO_LEAD, UserRole.CONTENT_MANAGER))).order_by(User.email)
+    ]
+    clients = [{"id": str(c.id), "name": c.client_name, "slug": c.slug, "domain": c.domain, "status": c.status.value if hasattr(c.status, "value") else c.status} for c in db.query(Client).order_by(Client.client_name)]
+    return {"users": users, "clients": clients}
+
+
+def _bulk_targets(db: Session, payload: TeamBulkIn) -> tuple[list[User], list[Client]]:
+    user_ids, client_ids = set(payload.user_ids), set(payload.client_ids)
+    users = db.query(User).filter(User.id.in_(user_ids)).all()
+    clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+    if len(users) != len(user_ids) or len(clients) != len(client_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One of those people or clients no longer exists. Reload the page.")
+    return users, clients
+
+
+@router.post("/team-access/assign")
+def team_assign(
+    payload: TeamBulkIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Give each person access to each client. People who already have it are left as they are, and admins need nothing (they see every client)."""
+    users, clients = _bulk_targets(db, payload)
+    held = {(u, c) for u, c in db.query(UserClient.user_id, UserClient.client_id).filter(UserClient.user_id.in_([u.id for u in users]), UserClient.client_id.in_([c.id for c in clients]))}
+    added = already = 0
+    admins = [u for u in users if u.role == UserRole.SMA_ADMIN]
+    for user in users:
+        if user.role == UserRole.SMA_ADMIN:
+            continue
+        for client in clients:
+            if (user.id, client.id) in held:
+                already += 1
+            else:
+                db.add(UserClient(user_id=user.id, client_id=client.id, role=UserRole.SMA_TEAM))
+                added += 1
+    db.commit()
+    return {"added": added, "already": already, "admins_skipped": len(admins)}
+
+
+@router.post("/team-access/remove")
+def team_remove(
+    payload: TeamBulkIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Take each person's access to each client away. An admin's access is by role, so it is not removed here."""
+    users, clients = _bulk_targets(db, payload)
+    removable = [u.id for u in users if u.role != UserRole.SMA_ADMIN]
+    removed = db.query(UserClient).filter(UserClient.user_id.in_(removable), UserClient.client_id.in_([c.id for c in clients])).delete(synchronize_session=False) if removable else 0
+    db.commit()
+    return {"removed": removed, "admins_skipped": len(users) - len(removable)}
+
+
+class PersonIn(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    role: Literal["sma_team", "sma_admin"] = "sma_team"
+
+
+@router.post("/team-access/people")
+def add_person(
+    payload: PersonIn,
+    admin: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Add someone before they have signed in, so they can be given clients now. They sign in with their own Google account and are matched on the address.
+
+    Only a workspace address is accepted (the same rule sign-in applies). Someone already here is not changed; someone who was removed is let back in.
+    """
+    email = payload.email.strip().lower()
+    if "@" not in email or not get_settings().is_workspace_email(email):
+        domains = ", ".join(sorted(get_settings().hosted_domains))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Use a work address ({domains}): that is what they sign in with.")
+    user = db.query(User).filter(User.email == email).one_or_none()
+    outcome = "added"
+    if user is None:
+        user = User(email=email, name=(payload.name or "").strip() or None, role=UserRole(payload.role), is_active=True)
+        db.add(user)
+    elif user.is_active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{email} is already on the team.")
+    else:
+        user.is_active = True
+        outcome = "restored"
+    db.commit()
+    db.refresh(user)
+    emailed = welcome_email.send(name=user.name, email=user.email, added_by=admin.name or admin.email, restored=outcome == "restored")
+    return {"outcome": outcome, "id": str(user.id), "email": user.email, "name": user.name, "role": user.role.value, "emailed": emailed}
+
+
+class PeopleIn(BaseModel):
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+@router.post("/team-access/people/remove")
+def remove_people(
+    payload: PeopleIn,
+    admin: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Take people out of the tool: they can no longer sign in and lose every client assignment. Their account is kept (inactive), so work they
+    did stays attributed and Restore brings them back. Not yourself, and not the last active admin."""
+    ids = set(payload.user_ids)
+    users = db.query(User).filter(User.id.in_(ids)).all()
+    if len(users) != len(ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One of those people no longer exists. Reload the page.")
+    if admin.id in ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You can't remove yourself. Ask another admin.")
+    staying = db.query(User).filter(User.role == UserRole.SMA_ADMIN, User.is_active.is_(True), User.id.notin_(ids)).count()
+    if staying == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That would leave no active admin. Keep at least one.")
+    removed = 0
+    for user in users:
+        if user.is_active:
+            user.is_active = False
+            removed += 1
+    db.query(UserClient).filter(UserClient.user_id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"removed": removed}
+
+
+@router.post("/team-access/people/restore")
+def restore_people(
+    payload: PeopleIn,
+    _: Annotated[AuthUser, Depends(require_sma_admin)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Let people sign in again. Their client assignments are not brought back: give those again."""
+    users = db.query(User).filter(User.id.in_(set(payload.user_ids))).all()
+    restored = 0
+    for user in users:
+        if not user.is_active:
+            user.is_active = True
+            restored += 1
+    db.commit()
+    return {"restored": restored}
 
 
 class DeleteIn(BaseModel):

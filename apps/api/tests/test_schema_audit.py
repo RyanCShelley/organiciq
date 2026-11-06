@@ -46,11 +46,13 @@ def test_pages_are_grouped_by_kind_and_checked_against_the_markup_that_kind_need
     out = get(client, client_a, admin_user).json()["data"]
     assert out["pages"] == 6, "numbered list pages (/page/2) are not audited"
     by = {t["page_type"]: t for t in out["types"]}
-    assert by["product"]["pages"] == 3 and by["product"]["expects"] == ["Product", "Offer"]
+    assert by["product"]["pages"] == 3 and by["product"]["expects"] == ["Product", "Offer", "WebPage"]
     texts = {i["url"]: i["text"] for i in by["product"]["items"]}
     assert "Missing Offer" in texts[BASE + "/products/b"] and BASE + "/products/c" in texts, "a product with no markup, and one with no offer, both need work"
-    assert BASE + "/products/a" in texts and "cleanup" in texts[BASE + "/products/a"], "the bare logo string is a cleanup the Topic Hub rules find"
-    assert by["editorial"]["affected"] == 0 and by["category"]["affected"] == 0
+    assert "cleanup" not in texts[BASE + "/products/a"], "a bare logo address is valid Schema.org (logo takes a URL), so it is no longer a cleanup"
+    assert "Missing WebPage" in texts[BASE + "/products/a"], "the baseline expects every page to be a WebPage in the site's graph"
+    assert "cleanup" in texts[BASE + "/products/b"] and "needs 'review|aggregateRating|offers'" in texts[BASE + "/products/b"], "a Product with no offer, rating or review is not eligible for Google's product snippet"
+    assert by["editorial"]["affected"] == 1 and by["category"]["affected"] == 0, "the article has no WebPage"
     assert by["homepage"]["items"][0]["text"].startswith("Missing Organization, WebSite")
     assert 0 <= out["score"] <= 100 and out["with_markup"] == 4 and out["cleanups"] >= 1
 
@@ -65,7 +67,7 @@ def test_the_brand_is_checked_as_an_entity_and_a_wikidata_item_can_be_approved(c
     seed(db, client_a)
     checks = {c["key"]: c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"]}
     assert checks["org"]["status"] == "warn", "the organization only appears as an article's publisher"
-    assert checks["wikidata"]["status"] == "fail" and checks["same_as"]["status"] == "fail"
+    assert checks["wikidata"]["status"] == "optional" and checks["same_as"]["status"] == "fail", "most brands have no Wikidata item, so the brand's own is optional"
 
     async def fake(names, **kw):
         return {n: [wikidata.QIDCandidate(qid="Q42", label=n, description="a brand", url="https://www.wikidata.org/wiki/Q42")] for n in names}
@@ -80,6 +82,28 @@ def test_the_brand_is_checked_as_an_entity_and_a_wikidata_item_can_be_approved(c
     after = get(client, client_a, admin_user).json()["data"]
     assert next(c for c in after["entity"]["checks"] if c["key"] == "wikidata")["status"] == "pass" and len(after["concepts"]) == 1
     assert client.delete(f"/v2/schema/concepts/{approved.json()['id']}", headers=h).status_code == 200
+
+
+def test_core_topics_are_checked_for_wikidata_ids_and_for_being_linked_from_the_markup(client, db, client_a, admin_user):
+    from app.models.watchlist import WatchlistBucket
+
+    seed(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+
+    def topics():
+        return next(c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"] if c["key"] == "topics")
+
+    assert topics()["status"] == "warn" and "No core topics" in topics()["detail"]
+    db.add(WatchlistBucket(client_id=client_a.id, name="Sunscreen", name_key="sunscreen", sort_order=0))
+    db.commit()
+    assert topics()["status"] == "fail" and topics()["items"][0]["kind"] == "missing"
+    client.post("/v2/schema/concepts", json={"name": "Sunscreen", "qid": "Q10", "label": "sunscreen", "description": "lotion"}, headers=h)
+    t = topics()
+    assert t["status"] == "warn" and t["items"][0]["kind"] == "other" and "approved but not in the site's markup yet" in t["items"][0]["label"]
+    ld(db, client_a, "/collections/x", {"@context": "https://schema.org", "@type": "CollectionPage", "name": "X", "about": {"@type": "Thing", "name": "Sunscreen", "sameAs": "https://www.wikidata.org/wiki/Q10"}})
+    db.commit()
+    t = topics()
+    assert t["status"] == "pass" and t["detail"].startswith("1 of 1 topics are linked") and t["items"][0]["kind"] == "found"
 
 
 def fetched(body="<html><body><nav>menu</nav><main><h1>Spf</h1><p>Natural sunscreen for daily use.</p></main></body></html>"):
@@ -201,9 +225,39 @@ def test_a_recurring_cleanup_can_be_ignored_everywhere(client, db, client_a, adm
     seed(db, client_a)
     first = get(client, client_a, admin_user).json()["data"]
     cleanup = next(t for t in next(x for x in first["types"] if x["page_type"] == "product")["items"] if "cleanup" in t["text"])
-    assert cleanup["url"] == BASE + "/products/a"
-    detail = "Converted bare logo string to ImageObject: <address>"
+    assert cleanup["url"] == BASE + "/products/b"
+    detail = "Google's Product snippet result needs 'review|aggregateRating|offers' on Product"
     ignore(client, client_a, admin_user, "cleanup", detail)
     after = get(client, client_a, admin_user).json()["data"]
     assert after["cleanups"] == first["cleanups"] - 1
-    assert BASE + "/products/a" not in [i["url"] for i in next(x for x in after["types"] if x["page_type"] == "product")["items"] if "cleanup" in i["text"]]
+    assert BASE + "/products/b" not in [i["url"] for i in next(x for x in after["types"] if x["page_type"] == "product")["items"] if "cleanup" in i["text"]]
+
+
+def test_only_the_brands_own_organization_is_judged_and_other_organizations_are_listed_apart(client, db, client_a, admin_user):
+    """A page that names a client, a partner or a publisher is not the brand under another name, and their profiles are not the brand's."""
+    client_a.domain, brand = "shop.example", client_a.client_name
+    db.commit()
+    seed(db, client_a)
+    ld(db, client_a, "/", {"@context": "https://schema.org", "@type": "Organization", "name": brand, "url": BASE, "sameAs": ["https://www.facebook.com/shop"], "logo": "https://shop.example/l.png", "telephone": "555"})
+    ld(db, client_a, "/blogs/news/post", {"@context": "https://schema.org", "@type": "Article", "headline": "H", "about": {"@type": "Organization", "name": "OpenAI", "url": "https://openai.com", "sameAs": ["https://openai.com/about"]}})
+    db.commit()
+    entity = get(client, client_a, admin_user).json()["data"]["entity"]
+    checks = {c["key"]: c for c in entity["checks"]}
+    assert checks["names"]["status"] == "pass", "OpenAI is another organization, not a second name for the brand"
+    assert [r["label"] for r in checks["names"]["items"] if r["kind"] == "found"] == [brand]
+    assert any(r["label"] == "Another organization: OpenAI" for r in checks["names"]["items"])
+    assert entity["same_as"] == ["https://www.facebook.com/shop"], "the other organization's profile is not the brand's"
+    assert checks["same_as"]["items"][0]["pages"] == [BASE + "/"], "each link says which pages carry it"
+    assert checks["logo"]["items"][0]["label"].startswith("logo: https://shop.example/l.png")
+
+
+def test_a_brand_named_two_ways_lists_each_name_with_its_pages(client, db, client_a, admin_user):
+    client_a.domain, brand = "shop.example", client_a.client_name
+    db.commit()
+    seed(db, client_a)
+    ld(db, client_a, "/", {"@context": "https://schema.org", "@type": "Organization", "name": brand, "url": BASE})
+    ld(db, client_a, "/products/a", {"@context": "https://schema.org", "@type": "Organization", "name": "Shop Ex.", "url": BASE})
+    db.commit()
+    names = next(c for c in get(client, client_a, admin_user).json()["data"]["entity"]["checks"] if c["key"] == "names")
+    assert names["status"] == "fail"
+    assert {r["label"]: r["pages"] for r in names["items"] if r["kind"] == "found"} == {brand: [BASE + "/"], "Shop Ex.": [BASE + "/products/a"]}

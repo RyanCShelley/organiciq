@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     worker_poll_interval_seconds: float = 2.0
     google_data_oauth_client_id: str = ""
     google_data_oauth_client_secret: str = ""
+    #: The manager (MCC) account the Google Ads calls go through; digits only, no dashes.
+    google_ads_login_customer_id: str = ""
+    #: Google no longer requires a developer token; when one is set it is still sent.
+    google_ads_developer_token: str = ""
+    google_ads_api_version: str = "v26"
+    #: The daily Google Ads pull runs once, after this UTC hour.
+    ads_pull_hour_utc: int = 12
     google_data_oauth_redirect_uri: str = "http://127.0.0.1:8000/oauth/google/callback"
     web_app_url: str = "http://127.0.0.1:3000"
     #: Where the Google connect flow returns to when v2 started it.
@@ -105,16 +112,6 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
-    #: The copilot's model, behind any OpenAI-compatible /chat/completions
-    #: endpoint (vLLM, Together, Fireworks, Modal, Ollama). Empty base URL
-    #: means the copilot is off and /copilot/chat answers 503. Swapping stock
-    #: Qwen for a fine-tuned LoRA is a change to LLM_MODEL, nothing else.
-    llm_base_url: str = ""
-    llm_api_key: str = ""
-    llm_model: str = "Qwen/Qwen3.5-9B"
-    llm_timeout_seconds: float = 120.0
-    #: Model -> tool -> model round trips allowed for one question.
-    copilot_max_tool_rounds: int = 6
 
     def model_post_init(self, __context) -> None:
         object.__setattr__(self, "database_url", normalize_database_url(self.database_url))
