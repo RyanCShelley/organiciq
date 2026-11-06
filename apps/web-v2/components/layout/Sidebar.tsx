@@ -56,10 +56,15 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
         </Link>
       </div>
       <ClientPicker clients={clients} />
+      {consulting && clientSlug ? (
+        <Link href={`/consulting/${clientSlug}`} className="mx-3 mt-2 block rounded-lg border border-[var(--brand-navy-line)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-teal-soft)] hover:border-[var(--brand-teal-soft)] hover:text-white">
+          Preview the client portal ↗
+        </Link>
+      ) : null}
 
       <div className="mt-3 flex-1 space-y-1 overflow-y-auto px-2 pb-3">
         {clientSlug
-          ? GROUPS.map((group) => {
+          ? GROUPS.filter((group) => !group.consulting || consulting).map((group) => {
               const isShut = shut.includes(group.title);
               const Icon = group.icon;
               return (

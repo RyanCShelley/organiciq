@@ -45,6 +45,7 @@ def _norm(url: str) -> str:
 @router.get("", response_model=ConnectionsOut)
 def get_connections(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ConnectionsOut:
     settings = get_settings()

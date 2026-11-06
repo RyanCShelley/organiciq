@@ -1,4 +1,4 @@
-import { BarChart3, Eye, FileText, Target, type LucideIcon } from "lucide-react";
+import { BarChart3, Briefcase, Eye, FileText, Target, type LucideIcon } from "lucide-react";
 
 export type NavItem = {
   label: string;
@@ -8,10 +8,16 @@ export type NavItem = {
   /** Left out for consulting clients: the work it plans is done by their own team. */
   execution?: boolean;
 };
-export type NavGroup = { title: string; icon: LucideIcon; items: NavItem[] };
+export type NavGroup = { title: string; icon: LucideIcon; items: NavItem[]; /** Shown only for consulting clients. */ consulting?: boolean };
 
 /** The order Ryan set: what each group answers. */
 export const GROUPS: NavGroup[] = [
+  {
+    title: "Consulting",
+    icon: Briefcase,
+    consulting: true,
+    items: [{ label: "Workspace", path: "/consulting" }],
+  },
   {
     title: "Analytics",
     icon: BarChart3,

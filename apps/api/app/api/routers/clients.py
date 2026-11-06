@@ -317,5 +317,6 @@ def get_baseline_version(
 @router.get("/current/context", response_model=ClientOut)
 def current_client_context(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
 ) -> ClientOut:
     return client_out(client)

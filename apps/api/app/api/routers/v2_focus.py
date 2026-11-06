@@ -49,6 +49,7 @@ def _bucket_name(db: Session, bucket_id) -> str | None:
 @router.get("", response_model=list[ClientFocusOut])
 def list_focuses(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[ClientFocusOut]:
     """Every month this client has a focus, newest first."""
@@ -66,6 +67,7 @@ def list_focuses(
 def get_focus(
     month: str,
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ClientFocusOut | None:
     row = (

@@ -41,6 +41,7 @@ def _out(feed: ClientFeed) -> ClientFeedOut:
 @router.get("", response_model=list[ClientFeedOut])
 def list_feeds(
     client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> list[ClientFeedOut]:
     rows = (
