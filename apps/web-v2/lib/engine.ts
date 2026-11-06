@@ -130,6 +130,7 @@ export type TaskPart = {
   tool_param: string | null;
   tool_verb: string | null;
   tool_kind?: string | null;
+  done_how?: string | null;
   verified_at?: string | null;
   verified_how?: string | null;
   last_check?: { at: string; result: "live" | "not_live" | "unreadable" | "cannot"; note: string } | null;

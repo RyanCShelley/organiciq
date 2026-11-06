@@ -135,7 +135,7 @@ export async function markPartAction(clientId: string, id: string, index: number
   }
 }
 
-export async function checkLiveAction(clientId: string, id: string): Promise<{ ok: true; value: { task: EngineTask; check: { checked: number; live: number; unreadable: string | null } } } | { ok: false; error: string }> {
+export async function checkLiveAction(clientId: string, id: string): Promise<{ ok: true; value: { task: EngineTask; check: { checked: number; live: number; unreadable: string | null; teamwork?: { checked: number; marked: number; error: string | null } } } } | { ok: false; error: string }> {
   try {
     return { ok: true, value: await apiFetch(`/v2/engine/tasks/${id}/check`, { method: "POST", clientId }) };
   } catch (error) {

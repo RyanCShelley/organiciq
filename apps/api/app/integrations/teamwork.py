@@ -1,10 +1,10 @@
 """Pushing a prescribed action into Teamwork as a task.
 
-One direction only. Teamwork owns the task once it exists — its status, its
-comments, its reassignment — and OrganicIQ keeps the id so the slot card can
-link to it. Reading status back is a second job needing a webhook or a poll,
-and pretending to do it with a one-shot create would put a stale status beside
-a live one.
+Teamwork owns the task once it exists — its status, its comments, its
+reassignment — and OrganicIQ keeps the id so the slot card can link to it.
+Nothing is written back to Teamwork. One thing is read: whether a subtask has
+been completed (`task_status`), asked of Teamwork each time it is needed, never
+kept as a copy that could go stale.
 
 Configuration is per install, not per client, except the tasklist: one
 Teamwork site, one API token, and a tasklist id mapped to each client. Until
@@ -496,3 +496,58 @@ def person_id_for(email: str | None, people: list[Person]) -> str | None:
     if not target:
         return None
     return next((p.id for p in people if email_key(p.email) == target), None)
+
+
+@dataclass(frozen=True)
+class TaskStatus:
+    done: bool
+    completed_at: str | None
+    completed_by: str | None
+
+
+def parse_task_status(body: dict) -> TaskStatus:
+    """Whether a task is completed, from a v3 `tasks/{id}.json` response, and by whom when Teamwork says."""
+    task = body.get("task") if isinstance(body.get("task"), dict) else {}
+    state = str(task.get("status") or "").lower()
+    at = _as_text(task.get("completedAt")) or _as_text(task.get("dateCompleted"))
+    done = state == "completed" or task.get("completed") is True or bool(at and state != "reopened")
+    who = task.get("completedBy") or task.get("completedByUserId")
+    if isinstance(who, dict):
+        who = who.get("id")
+    name = None
+    users = (body.get("included") or {}).get("users") if isinstance(body.get("included"), dict) else None
+    if who is not None and isinstance(users, dict):
+        person = users.get(str(who)) or {}
+        name = " ".join(p for p in (_as_text(person.get("firstName")), _as_text(person.get("lastName"))) if p) or None
+    return TaskStatus(done=done, completed_at=at, completed_by=name or (_as_text(who) and f"Teamwork user {who}") or None)
+
+
+def task_status(
+    task_id: str,
+    *,
+    config: TeamworkConfig | None = None,
+    client: httpx.Client | None = None,
+) -> TaskStatus:
+    """Ask Teamwork whether a task (here, a subtask) is completed."""
+    config = config or load_config()
+    if config is None:
+        raise TeamworkError("Teamwork is not configured. Set TEAMWORK_SITE and TEAMWORK_API_TOKEN.")
+    owns_client = client is None
+    client = client or httpx.Client(timeout=TIMEOUT_SECONDS)
+    try:
+        response = client.get(f"{config.base_url}/projects/api/v3/tasks/{task_id}.json", headers={"Authorization": config.auth_header})
+    except httpx.HTTPError as exc:
+        raise TeamworkError(f"Teamwork did not answer: {exc}") from exc
+    finally:
+        if owns_client:
+            client.close()
+    if response.status_code in (401, 403):
+        raise TeamworkError("Teamwork rejected the credentials.")
+    if response.status_code == 404:
+        raise TeamworkError("Teamwork no longer has that task.")
+    if response.status_code >= 400:
+        raise TeamworkError(f"Teamwork refused the request ({response.status_code}): {response.text[:200]}")
+    try:
+        return parse_task_status(response.json())
+    except ValueError as exc:
+        raise TeamworkError("Teamwork returned something that was not JSON.") from exc
