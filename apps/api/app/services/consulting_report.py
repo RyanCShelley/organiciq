@@ -26,7 +26,9 @@ class ReportConflict(ReportError):
     pass
 
 
+KINDS = ("monthly", "executive")
 LISTS = ("going_well", "to_watch", "gaps")
+MAX_NOTE_CHARS = 1500
 MAX_POINTS, MAX_POINT_CHARS = 8, 700
 
 
@@ -139,17 +141,36 @@ def headline(db: Session, client: Client, month: str) -> dict[str, Any]:
     })
 
 
-def get(db: Session, client: Client, month: str) -> ConsultingReport | None:
-    return db.query(ConsultingReport).filter(ConsultingReport.client_id == client.id, ConsultingReport.period_month == month).one_or_none()
+def check_kind(kind: str) -> str:
+    if kind not in KINDS:
+        raise ReportError("A report is either monthly or an executive summary.")
+    return kind
 
 
-def save(db: Session, client: Client, month: str, *, analysis: str | None, title: str | None, revision: int | None, who: str, highlights: dict[str, Any] | None = None) -> ConsultingReport:
+def clean_notes(raw: dict[str, Any] | None) -> dict[str, str]:
+    out = {}
+    for key, value in (raw or {}).items():
+        text = " ".join(str(value).split()) if value else ""
+        if len(text) > MAX_NOTE_CHARS:
+            raise ReportError(f"Keep each note under {MAX_NOTE_CHARS} characters.")
+        if text:
+            out[str(key)[:40]] = text
+    return out
+
+
+def get(db: Session, client: Client, month: str, kind: str = "monthly") -> ConsultingReport | None:
+    return db.query(ConsultingReport).filter(ConsultingReport.client_id == client.id, ConsultingReport.period_month == month, ConsultingReport.kind == kind).one_or_none()
+
+
+def save(db: Session, client: Client, month: str, *, analysis: str | None, title: str | None, revision: int | None, who: str, highlights: dict[str, Any] | None = None, notes: dict[str, Any] | None = None, kind: str = "monthly") -> ConsultingReport:
     """Write the consultant's analysis. A saved report is edited with the revision it was opened at; a stale one is refused."""
     monthly_review.parse_month(month)
+    check_kind(kind)
     cleaned = clean_highlights(highlights) if highlights is not None else None  # checked before anything is changed
-    rep = get(db, client, month)
+    cleaned_notes = clean_notes(notes) if notes is not None else None
+    rep = get(db, client, month, kind)
     if rep is None:
-        rep = ConsultingReport(client_id=client.id, period_month=month, revision=1)
+        rep = ConsultingReport(client_id=client.id, period_month=month, kind=kind, revision=1)
         db.add(rep)
     else:
         if revision != rep.revision:
@@ -159,6 +180,8 @@ def save(db: Session, client: Client, month: str, *, analysis: str | None, title
     rep.title = (title or "").strip() or None
     if cleaned is not None:
         rep.highlights = cleaned
+    if cleaned_notes is not None:
+        rep.notes = cleaned_notes
     rep.updated_by = who
     db.commit()
     db.refresh(rep)
@@ -169,7 +192,12 @@ def publish(db: Session, client: Client, rep: ConsultingReport, who: str) -> Con
     """Show the report to the client, with the numbers as they stand now."""
     if not rep.analysis and not any((rep.highlights or {}).get(k) for k in LISTS):
         raise ReportError("Write your analysis before publishing: the client reads the numbers alongside your words.")
-    rep.metrics_snapshot = headline(db, client, rep.period_month)  # already plain JSON
+    if rep.kind == "executive":
+        from app.services import consulting_exec
+
+        rep.metrics_snapshot = consulting_exec.build(db, client, rep.period_month)
+    else:
+        rep.metrics_snapshot = headline(db, client, rep.period_month)  # already plain JSON
     rep.review_state, rep.published_at, rep.published_by = "published", datetime.now(timezone.utc), who
     rep.revision += 1
     db.commit()
@@ -185,13 +213,13 @@ def unpublish(db: Session, rep: ConsultingReport) -> ConsultingReport:
     return rep
 
 
-def latest_published(db: Session, client: Client) -> ConsultingReport | None:
-    return db.query(ConsultingReport).filter(ConsultingReport.client_id == client.id, ConsultingReport.review_state == "published").order_by(ConsultingReport.period_month.desc()).first()
+def latest_published(db: Session, client: Client, kind: str = "monthly") -> ConsultingReport | None:
+    return db.query(ConsultingReport).filter(ConsultingReport.client_id == client.id, ConsultingReport.kind == kind, ConsultingReport.review_state == "published").order_by(ConsultingReport.period_month.desc()).first()
 
 
 def staff_out(rep: ConsultingReport | None, month: str) -> dict[str, Any]:
     return {
-        "month": month, "title": rep.title if rep else None, "analysis": rep.analysis if rep else None, "highlights": {**{k: [] for k in LISTS}, **((rep.highlights or {}) if rep else {})}, "review_state": rep.review_state if rep else "draft",
+        "month": month, "kind": rep.kind if rep else None, "notes": (rep.notes or {}) if rep else {}, "title": rep.title if rep else None, "analysis": rep.analysis if rep else None, "highlights": {**{k: [] for k in LISTS}, **((rep.highlights or {}) if rep else {})}, "review_state": rep.review_state if rep else "draft",
         "revision": rep.revision if rep else 0, "exists": rep is not None, "published_at": rep.published_at.isoformat() if rep and rep.published_at else None,
         "published_by": rep.published_by if rep else None, "updated_by": rep.updated_by if rep else None,
     }
@@ -199,4 +227,4 @@ def staff_out(rep: ConsultingReport | None, month: str) -> dict[str, Any]:
 
 def client_out(rep: ConsultingReport) -> dict[str, Any]:
     """What the client reads: the title, the analysis, the numbers as published. Nothing about who wrote or edited it."""
-    return {"month": rep.period_month, "title": rep.title, "analysis": rep.analysis, "highlights": {**{k: [] for k in LISTS}, **(rep.highlights or {})}, "published_at": rep.published_at.isoformat() if rep.published_at else None, "data": rep.metrics_snapshot}
+    return {"month": rep.period_month, "kind": rep.kind, "notes": rep.notes or {}, "title": rep.title, "analysis": rep.analysis, "highlights": {**{k: [] for k in LISTS}, **(rep.highlights or {})}, "published_at": rep.published_at.isoformat() if rep.published_at else None, "data": rep.metrics_snapshot}

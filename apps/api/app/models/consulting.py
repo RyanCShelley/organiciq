@@ -137,11 +137,15 @@ class ConsultingReport(Base):
     """
 
     __tablename__ = "consulting_reports"
-    __table_args__ = (UniqueConstraint("client_id", "period_month", name="uq_consulting_report_month"),)
+    __table_args__ = (UniqueConstraint("client_id", "kind", "period_month", name="uq_consulting_report_kind_month"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     period_month: Mapped[str] = mapped_column(String(7), nullable=False)
+    #: monthly (the performance report) | executive (the leadership summary).
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, default="monthly", server_default="monthly")
+    #: `{"topics": "...", "rankings": "..."}`: a short note from the consultant under a section, for context the numbers cannot give.
+    notes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: `{"going_well": [...], "to_watch": [...], "gaps": [...]}`: short points, one per line as the consultant writes them.

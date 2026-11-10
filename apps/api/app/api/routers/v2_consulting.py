@@ -22,7 +22,7 @@ from app.core.security import STAFF_ROLES, AuthUser, get_current_user, require_s
 from app.models.user import UserRole
 from app.models.client import Client
 from app.models.consulting import ConsultingProfile
-from app.services import consulting_recs, consulting_report, monthly_review
+from app.services import consulting_exec, consulting_recs, consulting_report, monthly_review
 
 router = APIRouter(prefix="/v2/consulting", tags=["v2-consulting"])
 
@@ -393,11 +393,14 @@ def get_report(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     month: Annotated[str | None, Query()] = None,
+    kind: Annotated[str, Query()] = "monthly",
 ) -> dict:
     """One month's report as the consultant works on it: their analysis so far, and the headline numbers as they stand now."""
     m = _month(month)
-    rep = _report_guard(lambda: consulting_report.get(db, client, m))
-    return {"report": consulting_report.staff_out(rep, m), "data": _report_guard(lambda: consulting_report.headline(db, client, m))}
+    _report_guard(lambda: consulting_report.check_kind(kind))
+    rep = _report_guard(lambda: consulting_report.get(db, client, m, kind))
+    live = _report_guard(lambda: consulting_exec.build(db, client, m) if kind == "executive" else consulting_report.headline(db, client, m))
+    return {"report": consulting_report.staff_out(rep, m), "data": live, "kind": kind}
 
 
 class Highlights(BaseModel):
@@ -408,6 +411,8 @@ class Highlights(BaseModel):
 
 class ReportIn(BaseModel):
     month: str
+    kind: str = "monthly"
+    notes: dict[str, str] | None = None
     analysis: str | None = Field(default=None, max_length=20000)
     highlights: Highlights | None = None
     title: str | None = Field(default=None, max_length=300)
@@ -421,13 +426,14 @@ def save_report(
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    rep = _report_guard(lambda: consulting_report.save(db, client, payload.month, analysis=payload.analysis, title=payload.title, revision=payload.revision, who=user.email, highlights=payload.highlights.model_dump() if payload.highlights is not None else None))
+    rep = _report_guard(lambda: consulting_report.save(db, client, payload.month, analysis=payload.analysis, title=payload.title, revision=payload.revision, who=user.email, highlights=payload.highlights.model_dump() if payload.highlights is not None else None, notes=payload.notes, kind=payload.kind))
     return consulting_report.staff_out(rep, payload.month)
 
 
 class ReportState(BaseModel):
     month: str
     to: str
+    kind: str = "monthly"
 
 
 @router.post("/report/state")
@@ -438,7 +444,8 @@ def move_report(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     """Publish the report to the client (freezing its numbers) or take it back to a draft."""
-    rep = consulting_report.get(db, client, payload.month)
+    _report_guard(lambda: consulting_report.check_kind(payload.kind))
+    rep = consulting_report.get(db, client, payload.month, payload.kind)
     if rep is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Write and save your analysis first.")
     if payload.to == "published":
@@ -454,7 +461,18 @@ def move_report(
 def portal_report(
     ctx: Annotated[Portal, Depends(require_portal_access)],
     db: Annotated[Session, Depends(get_db)],
+    kind: Annotated[str, Query()] = "monthly",
 ) -> dict:
-    """The latest published report: the numbers as they were when it was published, and the consultant's analysis. None until one is published."""
-    rep = consulting_report.latest_published(db, ctx.client)
+    """The latest published report of a kind: the numbers as they were when it was published, and the consultant's analysis. None until one is published."""
+    _report_guard(lambda: consulting_report.check_kind(kind))
+    rep = consulting_report.latest_published(db, ctx.client, kind)
     return {"report": consulting_report.client_out(rep) if rep else None}
+
+
+@router.get("/portal/reports")
+def portal_reports(
+    ctx: Annotated[Portal, Depends(require_portal_access)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Both reports, each the latest published of its kind (or None), for the tabs across the top of the portal."""
+    return {k: (consulting_report.client_out(r) if (r := consulting_report.latest_published(db, ctx.client, k)) else None) for k in consulting_report.KINDS}
