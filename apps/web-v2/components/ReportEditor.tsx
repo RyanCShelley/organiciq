@@ -6,18 +6,23 @@ import { useState, useTransition } from "react";
 
 import { moveReportAction, saveReportAction } from "@/app/(app)/[clientSlug]/consulting/report/actions";
 import { card } from "@/components/content/parts";
+import { ExecutiveSummary } from "@/components/portal/ExecutiveSummary";
 import { ReportDataView } from "@/components/portal/ReportData";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
-import type { Highlights, ReportData, StaffReport } from "@/lib/portal";
+import type { ExecData, Highlights, Notes, ReportData, ReportKind, StaffReport } from "@/lib/portal";
 
 /** The consultant's side of the report: the numbers as they stand, then the analysis in their own words, then publish. */
-export function ReportEditor({ client, month, loaded, error }: { client: Client; month: string; loaded: { report: StaffReport; data: ReportData } | null; error: string | null }) {
+const NOTE_SECTIONS = [["short_version", "The short version"], ["clicks", "Clicks from Google"], ["topics", "Visibility by topic"], ["competitors", "Against competitors"], ["share_of_voice", "AI share of voice"], ["priorities", "Priorities"]] as const;
+
+export function ReportEditor({ client, month, kind, loaded, error }: { client: Client; month: string; kind: ReportKind; loaded: { report: StaffReport; data: ReportData | ExecData } | null; error: string | null }) {
+  const executive = kind === "executive";
   const router = useRouter();
   const [report, setReport] = useState<StaffReport | null>(loaded?.report ?? null);
   const [title, setTitle] = useState(loaded?.report.title ?? "");
   const [analysis, setAnalysis] = useState(loaded?.report.analysis ?? "");
   const lines = (v: string) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+  const [notes, setNotes] = useState<Notes>(loaded?.report.notes ?? {});
   const [lists, setLists] = useState<Record<keyof Highlights, string>>({
     going_well: (loaded?.report.highlights?.going_well ?? []).join("\n"),
     to_watch: (loaded?.report.highlights?.to_watch ?? []).join("\n"),
@@ -30,22 +35,28 @@ export function ReportEditor({ client, month, loaded, error }: { client: Client;
   const [problem, setProblem] = useState<string | null>(error);
   const published = report?.review_state === "published";
   const apply = (r: { ok: true; value: StaffReport } | { ok: false; error: string }) => { if (r.ok) { setReport(r.value); setProblem(null); setSaved(true); } else setProblem(r.error); };
-  const save = () => start(async () => apply(await saveReportAction(client.id, client.slug, month, { analysis, title, highlights: highlights(), revision: report?.exists ? report.revision : null })));
+  const body = () => ({ analysis, title, highlights: highlights(), notes: executive ? notes : undefined, kind });
+  const save = () => start(async () => apply(await saveReportAction(client.id, client.slug, month, { ...body(), revision: report?.exists ? report.revision : null })));
   const publish = () => start(async () => {
-    const s = await saveReportAction(client.id, client.slug, month, { analysis, title, highlights: highlights(), revision: report?.exists ? report.revision : null });
+    const s = await saveReportAction(client.id, client.slug, month, { ...body(), revision: report?.exists ? report.revision : null });
     if (!s.ok) return apply(s);
-    apply(await moveReportAction(client.id, client.slug, month, "published"));
+    apply(await moveReportAction(client.id, client.slug, month, "published", kind));
   });
-  const unpublish = () => start(async () => apply(await moveReportAction(client.id, client.slug, month, "draft")));
+  const unpublish = () => start(async () => apply(await moveReportAction(client.id, client.slug, month, "draft", kind)));
   return (
     <section className="max-w-5xl space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Consulting report</h1>
+          <h1 className="text-2xl font-bold">{executive ? "Executive summary" : "Monthly performance report"}</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">{client.client_name}. The numbers, then your analysis in your own words. The client sees them together, above the action plan.</p>
         </div>
         <div className="flex items-center gap-2">
-          <input type="month" value={month} onChange={(e) => e.target.value && router.push(`/${client.slug}/consulting/report?month=${e.target.value}`)} aria-label="Month" className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm" />
+          <div role="tablist" aria-label="Report type" className="flex rounded-lg border border-[var(--border)] bg-white p-0.5 text-sm font-semibold">
+            {([["executive", "Executive summary"], ["monthly", "Monthly performance"]] as const).map(([k, l]) => (
+              <button key={k} type="button" role="tab" aria-selected={kind === k} onClick={() => router.push(`/${client.slug}/consulting/report?month=${month}&kind=${k}`)} className={`rounded-md px-3 py-1.5 ${kind === k ? "bg-[var(--brand-navy)] text-white" : "text-[var(--text-secondary)]"}`}>{l}</button>
+            ))}
+          </div>
+          <input type="month" value={month} onChange={(e) => e.target.value && router.push(`/${client.slug}/consulting/report?month=${e.target.value}&kind=${kind}`)} aria-label="Month" className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm" />
           <Link href={`/consulting/${client.slug}`} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--brand-teal)] hover:underline">Preview as client</Link>
         </div>
       </header>
@@ -54,7 +65,7 @@ export function ReportEditor({ client, month, loaded, error }: { client: Client;
       <section>
         <h2 className="mb-1 text-lg font-bold">1. The data</h2>
         <p className="mb-3 text-xs text-[var(--text-secondary)]">{published ? "Frozen as it was when you published. Unpublish and publish again to refresh it." : "Live from the monthly review. These freeze when you publish."}</p>
-        {loaded ? <ReportDataView data={loaded.data} /> : null}
+        {loaded ? (executive ? <ExecutiveSummary report={{ kind: "executive", month, title: title || null, analysis: analysis || null, highlights: highlights(), notes, published_at: report?.published_at ?? null, data: loaded.data as ExecData }} /> : <ReportDataView data={loaded.data as ReportData} />) : null}
       </section>
 
       <section className={`${card} space-y-3 p-5`}>
@@ -78,6 +89,18 @@ export function ReportEditor({ client, month, loaded, error }: { client: Client;
             </label>
           ))}
         </div>
+        {executive ? (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">A line of context under each part <span className="font-normal text-[var(--text-secondary)]">(optional)</span></h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {NOTE_SECTIONS.map(([key, label]) => (
+                <label key={key} className="block text-xs font-semibold">{label}
+                  <textarea value={notes[key] ?? ""} onChange={(e) => { setNotes({ ...notes, [key]: e.target.value }); setSaved(false); }} rows={2} maxLength={1500} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white p-2.5 text-sm font-normal leading-6" />
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={save} disabled={pending} className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50">{pending ? <><Spinner />Saving…</> : "Save draft"}</button>
           {published ? (

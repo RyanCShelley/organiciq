@@ -215,7 +215,7 @@ def build(db: Session, client: Client, month: str) -> dict[str, Any]:
             "Topics: the keywords tracked for this site, grouped as set up in Organic IQ. Clicks are from those tracked terms with brand queries left out.",
             "Google top-10 share of demand: the share of a topic's monthly searches where a tracked keyword ranks in Google's top 10 on the last rank check of the month. It covers tracked keywords, not all demand.",
             f"AI share of voice: the share of AI answers to the questions asked on each topic that name or link to each vendor, sampled from {len(run_dates)} check{'s' if len(run_dates) != 1 else ''}{f' (latest {run_dates[-1]})' if run_dates else ''}. Figures do not add up to 100% because an answer can name several vendors.",
-            "Competitor visibility: SE Ranking's visibility score for each tracked competitor, three months apart. These are estimates, not analytics.",
+            "Visibility: SE Ranking's visibility score for this site (three-month change) and the latest score for each tracked competitor. Competitor history is not kept, so only their current level is shown. These are estimates, not analytics.",
         ],
         "sources": ["Search Console", "SE Ranking", "AI platform checks"],
     }

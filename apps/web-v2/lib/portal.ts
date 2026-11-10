@@ -138,7 +138,29 @@ export type ReportData = {
   performance?: Performance;
 };
 export type Highlights = { going_well: string[]; to_watch: string[]; gaps: string[] };
-export type StaffReport = { month: string; title: string | null; analysis: string | null; highlights: Highlights; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
+export type ExecKpi = { label: string; value: number | string | null; unit: string; sub: string; tone: "good" | "bad" | "neutral" };
+export type ExecTopic = {
+  name: string; keywords: number; searches_per_month: number | null;
+  google_top10_pct: number | null; google_heat: "green" | "amber" | "red" | null;
+  ai_share_pct: number | null; ai_heat: "green" | "amber" | "red" | null;
+  ai_leader: { name: string; share_pct: number; is_self: boolean } | null;
+  ai_overview_pct: number | null;
+  clicks: { value: number | null; last_year: number | null; change: number | null };
+  read_out: string;
+};
+export type ExecCompetitor = { name: string; is_self: boolean; visibility: number; change_pct: number | null; ai_share_pct: number | null };
+export type ExecData = {
+  month: string; brand: string; kpis: ExecKpi[];
+  clicks_by_month: { month: string; value: number | null }[]; clicks_year_ago_month: string;
+  competitors: ExecCompetitor[]; topics: ExecTopic[];
+  ai_vendors: { name: string; share_pct: number; is_self: boolean }[]; ai_runs: number; ai_run_dates: string[];
+  priorities: { title: string; action: string }[]; about: string[]; sources: string[];
+};
+export type ReportKind = "monthly" | "executive";
+export type Notes = Record<string, string>;
+export type ExecReport = { kind: "executive"; month: string; title: string | null; analysis: string | null; highlights: Highlights; notes: Notes; published_at: string | null; data: ExecData };
+export type PortalReports = { monthly: ClientReport | null; executive: ExecReport | null };
+export type StaffReport = { month: string; title: string | null; analysis: string | null; highlights: Highlights; kind?: ReportKind; notes?: Notes; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
 export type ClientReport = { month: string; title: string | null; analysis: string | null; highlights: Highlights; published_at: string | null; data: ReportData };
 
 export type PromptRow = {
