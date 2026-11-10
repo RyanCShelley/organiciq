@@ -119,7 +119,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
         if (!service) return;
         save.run(() =>
           updateClientAction(client.id, client.slug, {
-            service_reporting: configFromService(service),
+            service_reporting: service ? configFromService(service) : client.service_reporting,
             client_name: name.trim(),
             domain: domain.trim(),
             tier_id: tierId,
@@ -207,7 +207,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
             month, watchlist checked {tier.watchlist_cadence.replace("_", "-")}.
           </p>
         ) : null}
-        <SaveBar pending={save.pending} saved={save.saved} error={save.error} disabled={!service} />
+        <SaveBar pending={save.pending} saved={save.saved} error={save.error} disabled={!service && mode === "execution"} why="Choose the agency services first." />
       </Card>
     </form>
   );

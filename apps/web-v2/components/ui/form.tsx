@@ -37,6 +37,7 @@ export function SaveBar({
   disabled,
   label = "Save changes",
   savedLabel = "Saved.",
+  why,
 }: {
   pending: boolean;
   saved: boolean;
@@ -44,6 +45,8 @@ export function SaveBar({
   disabled?: boolean;
   label?: string;
   savedLabel?: string;
+  /** Said beside the button while it is disabled, so a greyed-out Save is never a mystery. */
+  why?: string;
 }) {
   return (
     <div className="mt-6">
@@ -55,6 +58,7 @@ export function SaveBar({
         >
           {label}
         </button>
+        {disabled && why ? <span className="text-sm text-[var(--text-secondary)]">{why}</span> : null}
         {saved ? <span className="text-sm text-[var(--text-secondary)]">{savedLabel}</span> : null}
       </div>
       {error ? (
