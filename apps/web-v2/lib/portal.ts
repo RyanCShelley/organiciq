@@ -134,6 +134,8 @@ export type ReportData = {
   insights?: { keywords: import("@/lib/bi").Bi["keywords"] | null; ai: import("@/lib/bi").Bi["ai"]; key_events: string[] };
   /** How each AI prompt did on each platform over the month's runs. */
   visibility_detail?: { prompts: PromptRow[]; runs: number; run_dates: string[]; in_month: boolean } | null;
+  /** The monthly performance layout's figures: outcomes with year-over-year and a three-month run, and a table per topic. */
+  performance?: Performance;
 };
 export type StaffReport = { month: string; title: string | null; analysis: string | null; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
 export type ClientReport = { month: string; title: string | null; analysis: string | null; published_at: string | null; data: ReportData };
@@ -149,4 +151,22 @@ export type PromptRow = {
   change: number | null;
   avg_brand_rank: number | null;
   top_competitors: { name: string; count: number }[];
+};
+
+export type Compare = { value: number | null; change_pct: number | null };
+export type OutcomeCard = { label: string; caption: string; value: number | null; unit: string; lower_is_better: boolean; vs_previous: Compare; vs_last_year: Compare; run: { month: string; value: number | null }[]; facts?: string[] };
+export type Performance = {
+  month: string;
+  site: string;
+  previous_month: string;
+  last_year: string;
+  outcomes: { conversions: OutcomeCard | null; visibility: OutcomeCard | null; traffic: OutcomeCard | null };
+  google_clicks: { value: number | null; vs_previous: number | null; vs_last_year: number | null };
+  key_actions: { rows: { label: string; count: number; previous: number; change_pct: number | null; last_year: number | null }[]; total: { count: number; previous: number; change_pct: number | null } | null; has_definitions: boolean };
+  rankings: { checked_from: string | null; checked_to: string | null; coverage: { tracked: number } | null; rows: { keyword: string; volume: number | null; start: number | null; end: number | null; change: number | null; state: string }[] };
+  channels: { key: string; label: string; sessions: number; share_pct: number | null; previous: number; change_pct: number | null }[];
+  all_visits: number | null;
+  landing_pages: { page: string; sessions: number; previous: number | null; change_pct: number | null; key_actions: number }[];
+  ai_assistants: { label: string; sessions: number; previous: number; change_pct: number | null; key_actions: number | null }[];
+  sources: string[];
 };

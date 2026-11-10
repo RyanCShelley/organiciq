@@ -51,7 +51,7 @@ export function ReportEditor({ client, month, loaded, error }: { client: Client;
 
       <section className={`${card} space-y-3 p-5`}>
         <h2 className="text-lg font-bold">2. Your analysis</h2>
-        <label className="block text-sm font-semibold">Title <span className="font-normal text-[var(--text-secondary)]">(optional)</span>
+        <label className="block text-sm font-semibold">Headline <span className="font-normal text-[var(--text-secondary)]">(optional)</span><span className="block text-xs font-normal text-[var(--text-secondary)]">State the finding: “October 2026: demo requests up 37% while SD-WAN terms dropped out of the top 100”.</span>
           <input value={title} onChange={(e) => { setTitle(e.target.value); setSaved(false); }} placeholder={`${new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })} report`} className="mt-1 block w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm font-normal" />
         </label>
         <label className="block text-sm font-semibold">What happened, why it matters, and where to focus

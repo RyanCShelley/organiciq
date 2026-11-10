@@ -1,3 +1,4 @@
+import { PerformanceView } from "@/components/portal/Performance";
 import { ShowingUp } from "@/components/portal/ShowingUp";
 import { VisibilityDetail } from "@/components/portal/VisibilityDetail";
 import { card } from "@/components/portal/BriefParts";
@@ -16,6 +17,7 @@ function Change({ m }: { m: ReportMetric }) {
 
 /** The headline numbers: this month against last, where each comes from, and what is missing. Shared by the consultant's page and the client's portal. */
 export function ReportDataView({ data }: { data: ReportData }) {
+  if (data.performance) return <PerformanceView data={data} />;
   if (data.review && data.cards) return <ReviewData data={data} />;
   return <SimpleData data={data} />;
 }

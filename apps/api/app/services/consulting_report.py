@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.consulting import ConsultingReport
-from app.services import bi, monthly_review, review_scorecards, review_visibility
+from app.services import bi, consulting_performance, monthly_review, review_scorecards, review_visibility
 
 
 class ReportError(ValueError):
@@ -117,7 +117,7 @@ def headline(db: Session, client: Client, month: str) -> dict[str, Any]:
     insights = bi.build(db, client, first, last)
     return jsonable_encoder({
         **shape(review, cards), "as_of": review.get("data_through"), "locked": bool(review.get("locked")),
-        "review": client_review(review), "cards": cards, "visibility_detail": review_visibility.llm_prompts(db, client, month),
+        "review": client_review(review), "cards": cards, "visibility_detail": review_visibility.llm_prompts(db, client, month), "performance": consulting_performance.build(db, client, month),
         "insights": {"keywords": insights.get("keywords"), "ai": insights.get("ai"), "key_events": [e.get("name") or e.get("event") for e in insights.get("key_events") or []]},
     })
 

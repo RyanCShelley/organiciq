@@ -30,7 +30,7 @@ export default async function PortalDashboard({ params }: { params: Promise<{ cl
     }
   }
   return (
-    <section className="space-y-8">
+    <section className="mx-auto max-w-3xl space-y-12">
       <div>
         <h1 className="text-2xl font-bold">{report ? (report.title || `${monthName(report.month)} report`) : `Welcome${site ? `, ${site.name}` : ""}`}</h1>
         <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">{report ? `Prepared by your consultant · published ${report.published_at?.slice(0, 10)}` : "Where your consultant shares what changed in your search and AI visibility, traffic and leads, why it matters, and what your team can do next."}</p>
