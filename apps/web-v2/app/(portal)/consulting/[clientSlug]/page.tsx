@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ActionPlan } from "@/components/portal/ActionPlan";
+import { Analysis } from "@/components/portal/Analysis";
 import { card } from "@/components/portal/BriefParts";
 import { ReportDataView } from "@/components/portal/ReportData";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -43,10 +44,10 @@ export default async function PortalDashboard({ params }: { params: Promise<{ cl
             <h2 className="mb-3 text-lg font-bold">1. The data</h2>
             <ReportDataView data={report.data} />
           </section>
-          {report.analysis ? (
+          {report.analysis || Object.values(report.highlights ?? {}).some((l) => l.length) ? (
             <section>
               <h2 className="mb-3 text-lg font-bold">2. What it means</h2>
-              <div className={`${card} p-6`}><p className="max-w-3xl whitespace-pre-line text-[0.95rem] leading-7">{report.analysis}</p></div>
+              <Analysis intro={report.analysis} highlights={report.highlights ?? { going_well: [], to_watch: [], gaps: [] }} />
             </section>
           ) : null}
         </>

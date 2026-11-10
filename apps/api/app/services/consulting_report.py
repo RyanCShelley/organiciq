@@ -26,6 +26,23 @@ class ReportConflict(ReportError):
     pass
 
 
+LISTS = ("going_well", "to_watch", "gaps")
+MAX_POINTS, MAX_POINT_CHARS = 8, 700
+
+
+def clean_highlights(raw: dict[str, Any] | None) -> dict[str, list[str]]:
+    """The three lists as short plain points: whitespace tidied, blanks dropped, a bounded number of bounded points."""
+    out: dict[str, list[str]] = {}
+    for key in LISTS:
+        items = [" ".join(str(i).split()) for i in ((raw or {}).get(key) or []) if str(i).strip()]
+        if len(items) > MAX_POINTS:
+            raise ReportError(f"At most {MAX_POINTS} points under each heading.")
+        if any(len(i) > MAX_POINT_CHARS for i in items):
+            raise ReportError(f"Keep each point under {MAX_POINT_CHARS} characters.")
+        out[key] = items
+    return out
+
+
 def _m(label: str, cur: Any, prev: Any, pct: Any, *, source: str, unit: str = "", lower_is_better: bool = False, note: str | None = None) -> dict[str, Any]:
     return {"label": label, "current": cur, "previous": prev, "change_pct": pct, "unit": unit, "source": source, "lower_is_better": lower_is_better, "note": note}
 
@@ -126,9 +143,10 @@ def get(db: Session, client: Client, month: str) -> ConsultingReport | None:
     return db.query(ConsultingReport).filter(ConsultingReport.client_id == client.id, ConsultingReport.period_month == month).one_or_none()
 
 
-def save(db: Session, client: Client, month: str, *, analysis: str | None, title: str | None, revision: int | None, who: str) -> ConsultingReport:
+def save(db: Session, client: Client, month: str, *, analysis: str | None, title: str | None, revision: int | None, who: str, highlights: dict[str, Any] | None = None) -> ConsultingReport:
     """Write the consultant's analysis. A saved report is edited with the revision it was opened at; a stale one is refused."""
     monthly_review.parse_month(month)
+    cleaned = clean_highlights(highlights) if highlights is not None else None  # checked before anything is changed
     rep = get(db, client, month)
     if rep is None:
         rep = ConsultingReport(client_id=client.id, period_month=month, revision=1)
@@ -139,6 +157,8 @@ def save(db: Session, client: Client, month: str, *, analysis: str | None, title
         rep.revision += 1
     rep.analysis = (analysis or "").strip() or None
     rep.title = (title or "").strip() or None
+    if cleaned is not None:
+        rep.highlights = cleaned
     rep.updated_by = who
     db.commit()
     db.refresh(rep)
@@ -147,7 +167,7 @@ def save(db: Session, client: Client, month: str, *, analysis: str | None, title
 
 def publish(db: Session, client: Client, rep: ConsultingReport, who: str) -> ConsultingReport:
     """Show the report to the client, with the numbers as they stand now."""
-    if not rep.analysis:
+    if not rep.analysis and not any((rep.highlights or {}).get(k) for k in LISTS):
         raise ReportError("Write your analysis before publishing: the client reads the numbers alongside your words.")
     rep.metrics_snapshot = headline(db, client, rep.period_month)  # already plain JSON
     rep.review_state, rep.published_at, rep.published_by = "published", datetime.now(timezone.utc), who
@@ -171,7 +191,7 @@ def latest_published(db: Session, client: Client) -> ConsultingReport | None:
 
 def staff_out(rep: ConsultingReport | None, month: str) -> dict[str, Any]:
     return {
-        "month": month, "title": rep.title if rep else None, "analysis": rep.analysis if rep else None, "review_state": rep.review_state if rep else "draft",
+        "month": month, "title": rep.title if rep else None, "analysis": rep.analysis if rep else None, "highlights": {**{k: [] for k in LISTS}, **((rep.highlights or {}) if rep else {})}, "review_state": rep.review_state if rep else "draft",
         "revision": rep.revision if rep else 0, "exists": rep is not None, "published_at": rep.published_at.isoformat() if rep and rep.published_at else None,
         "published_by": rep.published_by if rep else None, "updated_by": rep.updated_by if rep else None,
     }
@@ -179,4 +199,4 @@ def staff_out(rep: ConsultingReport | None, month: str) -> dict[str, Any]:
 
 def client_out(rep: ConsultingReport) -> dict[str, Any]:
     """What the client reads: the title, the analysis, the numbers as published. Nothing about who wrote or edited it."""
-    return {"month": rep.period_month, "title": rep.title, "analysis": rep.analysis, "published_at": rep.published_at.isoformat() if rep.published_at else None, "data": rep.metrics_snapshot}
+    return {"month": rep.period_month, "title": rep.title, "analysis": rep.analysis, "highlights": {**{k: [] for k in LISTS}, **(rep.highlights or {})}, "published_at": rep.published_at.isoformat() if rep.published_at else None, "data": rep.metrics_snapshot}

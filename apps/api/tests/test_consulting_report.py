@@ -132,3 +132,32 @@ def test_the_published_report_carries_the_review_sections_and_insights_and_no_in
     assert {"review", "cards", "insights", "sections", "visibility_detail"} <= set(data) and set(data["insights"]) == {"keywords", "ai", "key_events"}
     for internal in ("locked_by", "locked_at", "lock_note", "work", "model"):
         assert internal not in data["review"]
+
+
+def test_the_analysis_is_an_intro_and_three_short_lists_cleaned_and_bounded(client, db, client_a, admin_user):
+    consult(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    saved = put(client, h, analysis="Short intro.", highlights={"going_well": [" Demo requests up 37%. ", "", "AI visits up 14%"], "to_watch": ["SD-WAN terms fell out of the top 100"], "gaps": []}).json()
+    assert saved["highlights"] == {"going_well": ["Demo requests up 37%.", "AI visits up 14%"], "to_watch": ["SD-WAN terms fell out of the top 100"], "gaps": []}
+    too_many = put(client, h, highlights={"gaps": [f"gap {i}" for i in range(9)]}, revision=1)
+    assert too_many.status_code == 400 and "At most 8 points" in too_many.json()["detail"]
+    too_long = put(client, h, highlights={"to_watch": ["x" * 701]}, revision=1)
+    assert too_long.status_code == 400 and "under 700 characters" in too_long.json()["detail"]
+    assert client.get("/v2/consulting/report?month=2026-10", headers=h).json()["report"]["highlights"]["going_well"][0] == "Demo requests up 37%."
+
+
+def test_a_report_with_only_the_lists_can_be_published_and_the_client_reads_the_lists(client, db, client_a, admin_user):
+    consult(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    viewer(db, client_a, "viewer@cato.example")
+    put(client, h, highlights={"going_well": ["Visits up."], "to_watch": [], "gaps": ["No AI visibility."]})
+    assert client.post("/v2/consulting/report/state", json={"month": "2026-10", "to": "published"}, headers=h).status_code == 200
+    seen = client.get("/v2/consulting/portal/report", headers=client_header(client_a.id, "viewer@cato.example")).json()["report"]
+    assert seen["highlights"] == {"going_well": ["Visits up."], "to_watch": [], "gaps": ["No AI visibility."]} and seen["analysis"] is None
+
+
+def test_an_empty_report_still_cannot_be_published(client, db, client_a, admin_user):
+    consult(db, client_a)
+    h = client_header(client_a.id, admin_user.email)
+    put(client, h, analysis=None, highlights={"going_well": [], "to_watch": [], "gaps": []})
+    assert client.post("/v2/consulting/report/state", json={"month": "2026-10", "to": "published"}, headers=h).status_code == 400

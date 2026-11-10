@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { StaffReport } from "@/lib/portal";
+import type { Highlights, StaffReport } from "@/lib/portal";
 
 type R = { ok: true; value: StaffReport } | { ok: false; error: string };
 const fail = (e: unknown, fallback: string): { ok: false; error: string } => ({ ok: false, error: e instanceof ApiError ? e.message : fallback });
 
-export async function saveReportAction(clientId: string, slug: string, month: string, body: { analysis: string; title: string; revision: number | null }): Promise<R> {
+export async function saveReportAction(clientId: string, slug: string, month: string, body: { analysis: string; title: string; highlights: Highlights; revision: number | null }): Promise<R> {
   try {
     const value = await apiFetch<StaffReport>("/v2/consulting/report", { method: "PUT", clientId, body: { month, ...body } });
     revalidatePath(`/${slug}/consulting/report`);

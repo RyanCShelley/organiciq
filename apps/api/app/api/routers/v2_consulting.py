@@ -400,9 +400,16 @@ def get_report(
     return {"report": consulting_report.staff_out(rep, m), "data": _report_guard(lambda: consulting_report.headline(db, client, m))}
 
 
+class Highlights(BaseModel):
+    going_well: list[str] = []
+    to_watch: list[str] = []
+    gaps: list[str] = []
+
+
 class ReportIn(BaseModel):
     month: str
     analysis: str | None = Field(default=None, max_length=20000)
+    highlights: Highlights | None = None
     title: str | None = Field(default=None, max_length=300)
     revision: int | None = None
 
@@ -414,7 +421,7 @@ def save_report(
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    rep = _report_guard(lambda: consulting_report.save(db, client, payload.month, analysis=payload.analysis, title=payload.title, revision=payload.revision, who=user.email))
+    rep = _report_guard(lambda: consulting_report.save(db, client, payload.month, analysis=payload.analysis, title=payload.title, revision=payload.revision, who=user.email, highlights=payload.highlights.model_dump() if payload.highlights is not None else None))
     return consulting_report.staff_out(rep, payload.month)
 
 

@@ -137,8 +137,9 @@ export type ReportData = {
   /** The monthly performance layout's figures: outcomes with year-over-year and a three-month run, and a table per topic. */
   performance?: Performance;
 };
-export type StaffReport = { month: string; title: string | null; analysis: string | null; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
-export type ClientReport = { month: string; title: string | null; analysis: string | null; published_at: string | null; data: ReportData };
+export type Highlights = { going_well: string[]; to_watch: string[]; gaps: string[] };
+export type StaffReport = { month: string; title: string | null; analysis: string | null; highlights: Highlights; review_state: "draft" | "published"; revision: number; exists: boolean; published_at: string | null; published_by: string | null; updated_by: string | null };
+export type ClientReport = { month: string; title: string | null; analysis: string | null; highlights: Highlights; published_at: string | null; data: ReportData };
 
 export type PromptRow = {
   query: string;

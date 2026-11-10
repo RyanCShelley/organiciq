@@ -144,6 +144,8 @@ class ConsultingReport(Base):
     period_month: Mapped[str] = mapped_column(String(7), nullable=False)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `{"going_well": [...], "to_watch": [...], "gaps": [...]}`: short points, one per line as the consultant writes them.
+    highlights: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     #: draft | published.
     review_state: Mapped[str] = mapped_column(String(12), nullable=False, default="draft", server_default="draft")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
