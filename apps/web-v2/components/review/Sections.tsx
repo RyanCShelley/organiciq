@@ -88,21 +88,23 @@ export function StatCard({ label, source, value, unit, change, changeNote, bar, 
 const ICONS = { visibility: Eye, traffic: BarChart3, leads: Target } as const;
 
 /** A section's title, one line on what its numbers say, and the button that makes it next month's focus. */
-export function SectionHead({ kind, title, read, active, onFocus }: { kind: keyof typeof ICONS; title: string; read: string | null | undefined; active: boolean; onFocus: () => void }) {
+export function SectionHead({ kind, title, read, active = false, onFocus }: { kind: keyof typeof ICONS; title: string; read: string | null | undefined; active?: boolean; onFocus?: () => void }) {
   const Icon = ICONS[kind];
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
       <Icon size={18} className="text-[var(--text-tertiary)]" aria-hidden />
       <h2 className="font-[family-name:var(--font-heading)] text-base font-bold">{title}</h2>
       {read ? <p className="min-w-[14rem] flex-1 text-sm text-[var(--text-secondary)]">{read}</p> : <span className="flex-1" />}
-      <button
-        type="button"
-        onClick={onFocus}
-        aria-pressed={active}
-        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold ${active ? "border-[var(--brand-navy)] bg-[var(--brand-navy)] text-white" : "border-[var(--border)] bg-white hover:bg-[var(--background)]"}`}
-      >
-        Focus here {active ? <Check size={12} aria-hidden /> : null}
-      </button>
+      {onFocus ? (
+        <button
+          type="button"
+          onClick={onFocus}
+          aria-pressed={active}
+          className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold ${active ? "border-[var(--brand-navy)] bg-[var(--brand-navy)] text-white" : "border-[var(--border)] bg-white hover:bg-[var(--background)]"}`}
+        >
+          Focus here {active ? <Check size={12} aria-hidden /> : null}
+        </button>
+      ) : null}
     </div>
   );
 }

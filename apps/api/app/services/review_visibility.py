@@ -281,3 +281,13 @@ def build_visibility(db: Session, client: Client, month: str) -> dict | None:
         "ai_prompts": "The prompt shown is the one paired with the term; its answers come from the LLM visibility run.",
         "llm": ({k: v for k, v in llm.items() if not k.startswith("_")} if llm else None),
     }
+
+
+def llm_prompts(db: Session, client: Client, month: str) -> dict[str, Any] | None:
+    """How each AI prompt did on each platform over the month's runs, against the month before: one row per prompt."""
+    from app.llm_visibility import report
+
+    llm = _llm(db, client, month)
+    if llm is None:
+        return None
+    return {"prompts": report.query_summary(llm["_rows"], llm["_prev"]), "runs": llm["runs"], "run_dates": llm["run_dates"], "in_month": llm["in_month"]}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /** The portal's own menu. Pages are added here as they are built; a client sees only what is published on them. */
-const ITEMS = [{ label: "Dashboard", path: "" }];
+const ITEMS = [{ label: "Dashboard", path: "" }, { label: "Action plan", path: "/action-plan" }];
 
 export function PortalNav({ slug }: { slug: string }) {
   const pathname = usePathname();
