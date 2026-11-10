@@ -13,7 +13,7 @@ import type { Client } from "@/lib/api";
 import type { ExecData, Highlights, Notes, ReportData, ReportKind, StaffReport } from "@/lib/portal";
 
 /** The consultant's side of the report: the numbers as they stand, then the analysis in their own words, then publish. */
-const NOTE_SECTIONS = [["short_version", "The short version"], ["clicks", "Clicks from Google"], ["topics", "Visibility by topic"], ["competitors", "Against competitors"], ["share_of_voice", "AI share of voice"], ["priorities", "Priorities"]] as const;
+const NOTE_SECTIONS = [["short_version", "The short version"], ["clicks", "Clicks from Google"], ["topics", "Visibility by topic"], ["competitors", "Against competitors"], ["site_health", "Site health"], ["share_of_voice", "AI share of voice"], ["priorities", "Priorities"]] as const;
 
 export function ReportEditor({ client, month, kind, loaded, error }: { client: Client; month: string; kind: ReportKind; loaded: { report: StaffReport; data: ReportData | ExecData } | null; error: string | null }) {
   const executive = kind === "executive";
