@@ -7,7 +7,6 @@ from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.models.seranking import (
-    FactSerAiTrackerStats,
     FactSerCompetitor,
     FactSerKeyword,
     FactSerSiteSummary,
@@ -191,7 +190,6 @@ def test_dashboard_aggregates_validated_facts(db, client, client_a, admin_user):
     _watermark(db, client_a.id, "ga4", end)
     _watermark(db, client_a.id, "gsc_pages", end)
     _watermark(db, client_a.id, "se_ranking_search", end)
-    _watermark(db, client_a.id, "se_ranking_ai", end)
 
     db.add(
         ConversionDefinition(
@@ -327,18 +325,8 @@ def test_dashboard_aggregates_validated_facts(db, client, client_a, admin_user):
             checked_at=end,
         )
     )
-    db.add(
-        FactSerAiTrackerStats(
-            id=uuid4(),
-            client_id=client_a.id,
-            metric_date=end,
-            prompts_count=40,
-            mention_presence_pct=Decimal("2.5"),
-            link_presence_pct=Decimal("5"),
-            mention_top3_pct=Decimal("2.5"),
-            link_top3_pct=Decimal("5"),
-        )
-    )
+    # Four answers to two prompts: one names the brand, one also links the site.
+    _llm_run(db, client_a.id, end, [("openai", "p1", "Cited + Mentioned", True, False), ("gemini", "p1", "Not visible", False, False), ("openai", "p2", "Not visible", False, False), ("gemini", "p2", "Not visible", False, False)])
     db.commit()
 
     payload = build_dashboard(db, client_a, start, end)
@@ -349,12 +337,10 @@ def test_dashboard_aggregates_validated_facts(db, client, client_a, admin_user):
     assert payload["traffic"]["gsc_clicks"]["current"] == 40.0
     assert payload["traffic"]["ga4_sessions"]["current"] == 100.0
     assert payload["visibility"]["search"]["gsc_impressions"]["current"] == 1000.0
-    assert payload["visibility"]["ai"]["mention_presence"]["current"] == 2.5
-    assert payload["visibility"]["ai"]["link_presence"]["current"] == 5.0
-    assert payload["visibility"]["ai"]["mention_top3_presence"]["current"] == 2.5
-    assert payload["visibility"]["ai"]["link_top3_presence"]["current"] == 5.0
-    assert payload["visibility"]["ai"]["tracked_prompt_source"] == "airt_statistics"
-    assert payload["visibility"]["ai"]["prompt_count"] == 40
+    assert payload["visibility"]["ai"]["mention_presence"]["current"] == 25.0
+    assert payload["visibility"]["ai"]["link_presence"]["current"] == 25.0
+    assert payload["visibility"]["ai"]["tracked_prompt_source"] == "llm_tracker"
+    assert payload["visibility"]["ai"]["prompt_count"] == 2
 
 
 def test_dashboard_respects_watermark_cutoff(db, client, client_a, admin_user):
@@ -448,37 +434,24 @@ def test_search_sov_from_competitor_visibility(db, client_a):
     assert payload["visibility"]["search"]["search_sov_source"] == "competitor_visibility"
 
 
-def test_ai_tracker_presence_from_facts(db, client_a):
+def test_ai_presence_comes_from_the_llm_trackers_newest_run(db, client_a, client_b):
     end = date.today()
-    start = end
-    _watermark(db, client_a.id, "se_ranking_ai", end)
-    db.add(
-        FactSerAiTrackerStats(
-            id=uuid4(),
-            client_id=client_a.id,
-            metric_date=end,
-            prompts_count=40,
-            mention_presence_pct=Decimal("3"),
-            link_presence_pct=Decimal("5"),
-            mention_top3_pct=Decimal("3"),
-            link_top3_pct=Decimal("5"),
-        )
-    )
+    _llm_run(db, client_a.id, end - timedelta(days=3), [("openai", "p1", "Not visible", False, False)])
+    _llm_run(db, client_a.id, end, [("openai", "p1", "Mentioned", False, False), ("gemini", "p1", "Cited + Mentioned", True, False), ("openai", "p2", "Not visible", False, False), ("gemini", "p2", "Not visible", False, True)])
+    _llm_run(db, client_b.id, end, [("openai", "p1", "Mentioned", True, False)])
     db.commit()
 
-    metrics = _ai_tracker_metrics(db, client_a.id, (start, end))
-    assert metrics["mention_presence"] == 3.0
-    assert metrics["link_presence"] == 5.0
-    assert metrics["mention_top3"] == 3.0
-    assert metrics["link_top3"] == 5.0
-    assert metrics["prompt_count"] == 40
+    metrics = _ai_tracker_metrics(db, client_a.id, (end - timedelta(days=6), end))
+    # The answer to the prompt that names the brand is left out: 2 of the other 3 answers name the brand, 1 links the site.
+    assert metrics["mention_presence"] == 66.7
+    assert metrics["link_presence"] == 33.3
+    assert metrics["prompt_count"] == 2
+    assert metrics["mention_top3"] is None  # the tracker does not measure a top-three share
+    assert _ai_tracker_metrics(db, client_a.id, None)["mention_presence"] is None
 
-    payload = build_dashboard(db, client_a, start, end)
-    assert payload["visibility"]["ai"]["mention_presence"]["current"] == 3.0
-    assert payload["visibility"]["ai"]["link_presence"]["current"] == 5.0
-    assert payload["visibility"]["ai"]["mention_top3_presence"]["current"] == 3.0
-    assert payload["visibility"]["ai"]["link_top3_presence"]["current"] == 5.0
-    assert payload["visibility"]["ai"]["tracked_prompt_source"] == "airt_statistics"
+    payload = build_dashboard(db, client_a, end, end)
+    assert payload["visibility"]["ai"]["mention_presence"]["current"] == 66.7
+    assert payload["visibility"]["ai"]["tracked_prompt_source"] == "llm_tracker"
 
 
 def test_traffic_by_channel_includes_conversions_and_bounce(db, client_a):
@@ -692,9 +665,7 @@ def test_ai_chart_does_not_invent_observations(db, client_a):
     from app.services.dashboard import _daily_ai_presence_series
 
     day = date(2026, 9, 1)
-    db.add(FactSerAiTrackerStats(client_id=client_a.id, metric_date=day,
-                                mention_presence_pct=0))
-    db.flush()
+    _llm_run(db, client_a.id, day, [("openai", "p1", "Not visible", False, False)])
     assert _daily_ai_presence_series(db, client_a.id, (day, day))["mention_presence"] == [0]
     assert _daily_ai_presence_series(db, client_a.id, (day, day + timedelta(days=1)))["mention_presence"] == []
 
@@ -763,3 +734,17 @@ def test_service_reporting_channel_path_loads_coverage_helper(db, client_a, monk
     assert traffic is Ga4NativeChannelObservation
     assert events is Ga4NativeChannelObservation
     assert len(filters) == 1
+
+
+def _llm_run(db, client_id, day, answers):
+    """A completed LLM-tracker run on `day`; answers are (platform, query, visibility_type, url_cited, asked_by_name)."""
+    from datetime import datetime, timezone
+    from app.models.llm_visibility import LlmResponse, LlmRun
+
+    run = LlmRun(id=uuid4(), client_id=client_id, status="completed", platforms=["openai", "gemini"], started_at=datetime(day.year, day.month, day.day, 9, tzinfo=timezone.utc))
+    db.add(run)
+    db.flush()
+    for platform, query, vis, cited, named in answers:
+        db.add(LlmResponse(run_id=run.id, client_id=client_id, query_text=query, platform=platform, visibility_type=vis, brand_mentioned=vis in ("Mentioned", "Cited + Mentioned"), url_cited=cited, asked_by_name=named, competitors_mentioned=[]))
+    db.flush()
+    return run

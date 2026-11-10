@@ -1,5 +1,5 @@
 from datetime import date
-from app.models.seranking import FactSerKeyword, FactSerRanking, FactSerAiCheck
+from app.models.seranking import FactSerKeyword, FactSerRanking
 from app.services.dashboard_exploration import visibility_detail, prompt_detail
 
 
@@ -23,13 +23,15 @@ def test_visibility_matches_dated_cohort_and_preserves_unknown(db, client_a, cli
     assert rows['new']['previous'] is None
 
 
-def test_prompt_details_use_only_period_observations(db,client_a,client_b):
-    for owner,day,mentioned in [(client_a,date(2026,8,31),True),(client_a,date(2026,9,20),None),(client_a,date(2026,10,1),False),(client_b,date(2026,9,25),True)]:
-        db.add(FactSerAiCheck(client_id=owner.id,date=day,llm_id='chatgpt',prompt_id='p1',prompt='Who can help?',brand_mentioned=mentioned,brand_cited=False))
-    db.flush()
-    rows=prompt_detail(db,client_a.id,(date(2026,9,1),date(2026,9,30)))
-    assert len(rows)==1
-    assert rows[0]['observed_on']=='2026-09-20'
-    assert rows[0]['mentioned'] is None
-    assert rows[0]['cited'] is False
-    assert prompt_detail(db,client_a.id,None)==[]
+def test_prompt_details_use_only_period_observations(db, client_a, client_b):
+    from tests.test_dashboard_phase6 import _llm_run
+
+    _llm_run(db, client_a.id, date(2026, 8, 31), [("openai", "Who can help?", "Mentioned", False, False)])
+    _llm_run(db, client_a.id, date(2026, 9, 20), [("openai", "Who can help?", "Not visible", False, False)])
+    _llm_run(db, client_a.id, date(2026, 10, 1), [("openai", "Who can help?", "Mentioned", True, False)])
+    _llm_run(db, client_b.id, date(2026, 9, 25), [("openai", "Who can help?", "Mentioned", True, False)])
+    rows = prompt_detail(db, client_a.id, (date(2026, 9, 1), date(2026, 9, 30)))
+    assert len(rows) == 1
+    assert rows[0]['observed_on'] == '2026-09-20' and rows[0]['provider'] == 'openai'
+    assert rows[0]['mentioned'] is False and rows[0]['cited'] is False
+    assert prompt_detail(db, client_a.id, None) == []

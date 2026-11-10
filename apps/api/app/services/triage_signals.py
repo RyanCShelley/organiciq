@@ -31,8 +31,6 @@ from app.models.decision import KeywordTarget
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily
 from app.models.seranking import (
-    FactSerAiCheck,
-    FactSerAiTrackerStats,
     FactSerKeyword,
     FactSerSiteSummary,
 )
@@ -190,25 +188,12 @@ def visibility_signals(
     prior_end = recent_start - timedelta(days=1)
     prior_start = prior_end - timedelta(days=TREND_DAYS - 1)
 
-    # V5 — the AI tracker's own presence figure, and share of voice over time.
-    stats = (
-        db.query(FactSerAiTrackerStats)
-        .filter(FactSerAiTrackerStats.client_id == client.id, FactSerAiTrackerStats.metric_date <= today)
-        .order_by(FactSerAiTrackerStats.metric_date.desc())
-        .first()
-    )
-    prompts = 0
-    if ai_period is not None:
-        prompts = (
-            db.query(func.count(func.distinct(FactSerAiCheck.prompt_id)))
-            .filter(
-                FactSerAiCheck.client_id == client.id,
-                FactSerAiCheck.date >= ai_period[0],
-                FactSerAiCheck.date <= ai_period[1],
-            )
-            .scalar()
-            or 0
-        )
+    # V5 — AI presence from the LLM tracker's newest run: the share of answers that name or cite the brand.
+    from app.llm_visibility import readings as llm_readings
+
+    ai = llm_readings.presence(db, client.id, None, today)
+    prompts = ai["prompts"] if ai else 0
+    stats = ai
 
     from app.services.decision_measurements import monthly_keyword_trend
     return VisibilitySignals(
@@ -233,9 +218,7 @@ def visibility_signals(
         page_reach_missing=("no target or conversion pages declared" if not declared_pages
                             else "declared pages have no Watch List keyword mappings" if not assessed_pages else None),
         ai_mention_pct=(
-            float(stats.mention_presence_pct)
-            if stats and stats.mention_presence_pct is not None
-            else None
+            float(stats["mention_pct"]) if stats else None
         ),
         tracked_prompts=int(prompts),
     )

@@ -9,7 +9,7 @@ from sqlalchemy import func
 
 from app.models.config import ConversionDefinition
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
-from app.models.seranking import FactSerKeyword, FactSerRanking, FactSerAiPrompt, FactSerAiCheck
+from app.models.seranking import FactSerKeyword, FactSerRanking
 from app.services.lead_goals import current_lead_goal
 from app.services.watchlist import automatic_focus as read
 from app.models.decision import DecisionThreshold
@@ -86,16 +86,10 @@ def monthly_keyword_trend(db, client, end):
 
 
 def prompt_readings(db, client_id, end):
-    """Newest dated prompt observation on or before the assessment date."""
-    engines = {r.llm_id: r.engine or r.llm_id for r in db.query(FactSerAiPrompt).filter_by(client_id=client_id)}
-    readings = {}
-    for r in db.query(FactSerAiCheck).filter(FactSerAiCheck.client_id == client_id,
-            FactSerAiCheck.date <= end).order_by(FactSerAiCheck.date.desc()):
-        key = (engines.get(r.llm_id, r.llm_id), r.prompt.strip().lower())
-        readings.setdefault(key, {"observed_on": r.date.isoformat(),
-            "brand_mentioned": r.brand_mentioned, "brand_cited": r.brand_cited,
-            "source": "SE Ranking dated prompt observation", "llm_id": r.llm_id})
-    return readings
+    """Newest dated LLM-tracker answer for each (platform, prompt) on or before the assessment date."""
+    from app.llm_visibility import readings
+
+    return readings.prompt_readings(db, client_id, end)
 
 
 def measure(db, client, *, end: date):
