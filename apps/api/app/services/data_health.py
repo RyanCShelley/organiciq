@@ -15,7 +15,6 @@ WATERMARK_SOURCES = (
     "gsc_queries",
     "ga4",
     "se_ranking_search",
-    "se_ranking_ai",
     "site_crawl",
 )
 
@@ -27,7 +26,6 @@ PROVIDER_FOR_SOURCE = {
     "gsc_queries": "gsc",
     "ga4": "ga4",
     "se_ranking_search": "se_ranking",
-    "se_ranking_ai": "se_ranking",
     "site_crawl": None,
 }
 

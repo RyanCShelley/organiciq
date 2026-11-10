@@ -36,7 +36,7 @@ from app.models.config import ConversionDefinition
 from app.models.decision import EngineAction, MonthlyRecord
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
-from app.models.seranking import FactSerAiPresence, FactSerRanking
+from app.models.seranking import FactSerRanking
 from app.services.triage_signals import MANAGED_CHANNELS
 
 logger = logging.getLogger("organiciq.results")
@@ -313,25 +313,18 @@ def _page_lead_rate(
 
 
 def _ai_presence(db: Session, client_id: UUID, as_of: date) -> Measurement:
-    """Client-wide, because that is the grain SE Ranking reports it at.
+    """Client-wide: the share of the LLM tracker's answers (newest run on or before the date) that name or cite the brand.
 
     An AI-citation action is judged on the site's presence rather than the
     page's, and the row says so — claiming a per-page number here would be
     inventing one.
     """
-    row = (
-        db.query(FactSerAiPresence.overall_presence_pct)
-        .filter(
-            FactSerAiPresence.client_id == client_id,
-            FactSerAiPresence.metric_date <= as_of,
-            FactSerAiPresence.overall_presence_pct.isnot(None),
-        )
-        .order_by(FactSerAiPresence.metric_date.desc())
-        .first()
-    )
-    if row is None:
-        return Measurement(None, f"no AI presence reading on or before {as_of}")
-    return Measurement(float(row[0]))
+    from app.llm_visibility import readings
+
+    found = readings.presence(db, client_id, None, as_of)
+    if found is None:
+        return Measurement(None, f"no LLM tracker run on or before {as_of}")
+    return Measurement(found["mention_pct"])
 
 
 def measure(

@@ -18,7 +18,6 @@ from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
 from app.services.lead_goals import current_lead_goal, schedule_payload
 from app.models.seranking import (
-    FactSerAiTrackerStats,
     FactSerCompetitor,
     FactSerKeyword,
     FactSerSiteSummary,
@@ -44,7 +43,6 @@ DASHBOARD_WATERMARK_SOURCES = (
     "gsc_pages",
     "gsc_queries",
     "se_ranking_search",
-    "se_ranking_ai",
 )
 
 
@@ -573,50 +571,22 @@ def _daily_ai_presence_series(
     client_id: UUID,
     period: tuple[date, date] | None,
 ) -> dict[str, list[float]]:
-    empty = {
-        "mention_presence": [],
-        "link_presence": [],
-        "mention_top3": [],
-        "link_top3": [],
-    }
+    """AI presence by day from the LLM tracker's runs. The tracker runs now and then, not daily, so the chart shows only a fully observed period."""
+    empty = {"mention_presence": [], "link_presence": [], "mention_top3": [], "link_top3": []}
     if period is None:
         return empty
+    from app.llm_visibility import readings
+
     start, end = period
-    rows = (
-        db.query(FactSerAiTrackerStats)
-        .filter(
-            FactSerAiTrackerStats.client_id == client_id,
-            FactSerAiTrackerStats.metric_date >= start,
-            FactSerAiTrackerStats.metric_date <= end,
-        )
-        .order_by(FactSerAiTrackerStats.metric_date.asc())
-        .all()
-    )
-    mention: dict[date, float] = {}
-    link: dict[date, float] = {}
-    mention_top3: dict[date, float] = {}
-    link_top3: dict[date, float] = {}
-    for row in rows:
-        day = row.metric_date
-        if row.mention_presence_pct is not None:
-            mention[day] = float(row.mention_presence_pct)
-        if row.link_presence_pct is not None:
-            link[day] = float(row.link_presence_pct)
-        if row.mention_top3_pct is not None:
-            mention_top3[day] = float(row.mention_top3_pct)
-        if row.link_top3_pct is not None:
-            link_top3[day] = float(row.link_top3_pct)
-    # A missing observation is not zero visibility. The compact chart cannot
-    # represent gaps, so show it only for a completely observed period.
+    found = readings.daily_presence(db, client_id, start, end)
     days = (end - start).days + 1
+    mention = {d: v["mention_pct"] for d, v in found.items()}
+    link = {d: v["cited_pct"] for d, v in found.items()}
     return {
-        key: _fill_daily(period, readings) if len(readings) == days else []
-        for key, readings in {
-            "mention_presence": mention,
-            "link_presence": link,
-            "mention_top3": mention_top3,
-            "link_top3": link_top3,
-        }.items()
+        "mention_presence": _fill_daily(period, mention) if len(mention) == days else [],
+        "link_presence": _fill_daily(period, link) if len(link) == days else [],
+        "mention_top3": [],
+        "link_top3": [],
     }
 
 
@@ -936,49 +906,21 @@ def _keyword_distribution(
     return buckets
 
 
-def _latest_ai_tracker_stats_row(
-    db: Session,
-    client_id: UUID,
-    period: tuple[date, date] | None,
-) -> FactSerAiTrackerStats | None:
-    if period is None:
-        return None
-    start, end = period
-    return (
-        db.query(FactSerAiTrackerStats)
-        .filter(
-            FactSerAiTrackerStats.client_id == client_id,
-            FactSerAiTrackerStats.metric_date >= start,
-            FactSerAiTrackerStats.metric_date <= end,
-        )
-        .order_by(FactSerAiTrackerStats.metric_date.desc())
-        .first()
-    )
-
-
 def _ai_tracker_metrics(
     db: Session,
     client_id: UUID,
     period: tuple[date, date] | None,
 ) -> dict[str, float | int | None]:
-    empty: dict[str, float | int | None] = {
-        "prompt_count": None,
-        "mention_presence": None,
-        "link_presence": None,
-        "mention_top3": None,
-        "link_top3": None,
-    }
-    row = _latest_ai_tracker_stats_row(db, client_id, period)
-    if row is None:
+    """AI presence from the LLM tracker's newest run in the period. It does not track a top-three share, so those are left empty."""
+    empty: dict[str, float | int | None] = {"prompt_count": None, "mention_presence": None, "link_presence": None, "mention_top3": None, "link_top3": None}
+    if period is None:
         return empty
+    from app.llm_visibility import readings
 
-    return {
-        "prompt_count": row.prompts_count,
-        "mention_presence": float(row.mention_presence_pct) if row.mention_presence_pct is not None else None,
-        "link_presence": float(row.link_presence_pct) if row.link_presence_pct is not None else None,
-        "mention_top3": float(row.mention_top3_pct) if row.mention_top3_pct is not None else None,
-        "link_top3": float(row.link_top3_pct) if row.link_top3_pct is not None else None,
-    }
+    found = readings.presence(db, client_id, period[0], period[1])
+    if found is None:
+        return empty
+    return {"prompt_count": found["prompts"], "mention_presence": found["mention_pct"], "link_presence": found["cited_pct"], "mention_top3": None, "link_top3": None}
 
 
 def _ga4_views(
@@ -1231,8 +1173,14 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     gsc_previous = _comparison_range(from_date, to_date, gsc_current, watermarks.get("gsc_pages"))
     ser_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_search"))
     ser_previous = _comparison_range(from_date, to_date, ser_current, watermarks.get("se_ranking_search"))
-    ai_current = _effective_range(from_date, to_date, watermarks.get("se_ranking_ai"))
-    ai_previous = _comparison_range(from_date, to_date, ai_current, watermarks.get("se_ranking_ai"))
+    from app.llm_visibility import readings as llm_readings
+
+    # The LLM tracker runs now and then and has no watermark: its window is the picked period up to its newest run,
+    # compared with the same length before it, when it ran then too.
+    llm_through = llm_readings.latest_run_date(db, client.id, to_date)
+    ai_current = (from_date, min(to_date, llm_through)) if llm_through and llm_through >= from_date else None
+    prior_through = llm_readings.latest_run_date(db, client.id, prev_to)
+    ai_previous = (prev_from, prev_to) if ai_current and prior_through and prior_through >= prev_from else None
 
     lead_events = _lead_event_names(db, client.id)
     conversions_configured = len(lead_events) > 0
@@ -1433,7 +1381,7 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
                     ai_series["link_top3"],
                 ),
                 "prompt_count": ai_current_metrics["prompt_count"],
-                "tracked_prompt_source": "airt_statistics",
+                "tracked_prompt_source": "llm_tracker",
             },
         },
         "traffic": {

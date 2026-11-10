@@ -45,7 +45,8 @@ _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
     # client per day for a crawl SE Ranking refreshes far less often. The job
     # stays registered and runnable on demand — it is how we would catch our own
     # crawler regressing.
-    IntegrationProvider.SE_RANKING: ("se_ranking_search", "se_ranking_ai"),
+    # SE Ranking's AI tracker is not pulled: AI visibility is the LLM tracker's, so what is shown is what is scored.
+    IntegrationProvider.SE_RANKING: ("se_ranking_search",),
 }
 
 

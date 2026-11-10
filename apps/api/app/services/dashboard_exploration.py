@@ -1,5 +1,5 @@
 """Dated, source-backed dashboard drill-downs; no inferred history."""
-from app.models.seranking import FactSerAiCheck, FactSerAiPrompt, FactSerKeyword
+from app.models.seranking import FactSerKeyword
 from app.services.decision_measurements import keyword_readings
 
 
@@ -20,12 +20,11 @@ def visibility_detail(db, client_id, current, previous):
 
 
 def prompt_detail(db, client_id, period):
+    """The newest LLM-tracker answer to each prompt on each platform inside the period."""
     if not period:
         return []
-    engines = {r.llm_id: r.engine or r.llm_id for r in db.query(FactSerAiPrompt).filter_by(client_id=client_id)}
-    latest = {}
-    for row in db.query(FactSerAiCheck).filter(FactSerAiCheck.client_id == client_id,
-            FactSerAiCheck.date >= period[0], FactSerAiCheck.date <= period[1]).order_by(FactSerAiCheck.date.desc()):
-        latest.setdefault((row.llm_id, row.prompt_id), {'prompt_id': str(row.prompt_id), 'prompt': row.prompt, 'provider': engines.get(row.llm_id, row.llm_id),
-            'observed_on': row.date.isoformat(), 'mentioned': row.brand_mentioned, 'cited': row.brand_cited})
-    return list(latest.values())
+    from app.llm_visibility import readings
+
+    return [{'prompt_id': f"{platform}:{key}", 'prompt': row['prompt'], 'provider': platform, 'observed_on': row['observed_on'],
+             'mentioned': row['brand_mentioned'], 'cited': row['brand_cited']}
+            for (platform, key), row in sorted(readings.prompt_readings(db, client_id, period[1], period[0]).items())]

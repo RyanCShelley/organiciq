@@ -48,15 +48,15 @@ def test_keyword_visibility_uses_dated_observations_without_future_leakage(db, c
 
 
 def test_prompt_history_is_used_for_past_assessments_without_future_or_client_leakage(db, client_a, client_b):
-    from app.models.seranking import FactSerAiPrompt, FactSerAiCheck
-    for c in (client_a,client_b):
-        db.add(FactSerAiPrompt(client_id=c.id,llm_id='engine',prompt_id='p',engine='chatgpt',prompt='Which service?',checked_at=date(2026,10,18),brand_mentioned=False,brand_cited=False))
-    for c,day,mentioned,cited in [(client_a,date(2026,9,30),True,True),(client_a,date(2026,10,18),False,False),(client_b,date(2026,9,30),False,False)]:
-        db.add(FactSerAiCheck(client_id=c.id,llm_id='engine',prompt_id='p',prompt='Which service?',date=day,brand_mentioned=mentioned,brand_cited=cited))
+    from tests.test_dashboard_phase6 import _llm_run
+
+    _llm_run(db, client_a.id, date(2026, 9, 30), [("openai", "Which service?", "Cited + Mentioned", True, False)])
+    _llm_run(db, client_a.id, date(2026, 10, 18), [("openai", "Which service?", "Not visible", False, False)])
+    _llm_run(db, client_b.id, date(2026, 9, 30), [("openai", "Which service?", "Not visible", False, False)])
     db.commit()
-    row=measure(db,client_a,end=date(2026,9,30))['visibility']['prompts'][0]
-    assert row['observed_on']=='2026-09-30' and row['mentioned'] is True and row['cited'] is True
-    row=measure(db,client_a,end=date(2026,8,31))['visibility']['prompts'][0]
+    row = measure(db, client_a, end=date(2026, 9, 30))['visibility']['prompts'][0]
+    assert row['observed_on'] == '2026-09-30' and row['mentioned'] is True and row['cited'] is True and row['provider'] == 'openai'
+    row = measure(db, client_a, end=date(2026, 8, 31))['visibility']['prompts'][0]
     assert row['observed_on'] is None and row['mentioned'] is None and row['cited'] is None
 
 

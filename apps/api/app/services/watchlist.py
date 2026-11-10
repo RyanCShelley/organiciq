@@ -1,7 +1,7 @@
 from hashlib import sha256
 
 from app.models.decision import KeywordTarget
-from app.models.seranking import FactSerKeyword, FactSerAiPrompt
+from app.models.seranking import FactSerKeyword
 from app.models.watch_target import WatchTarget
 
 
@@ -22,14 +22,19 @@ def read(db, client):
             state="existing" if mapped and mapped.target_url and mapped.source in ("confirmed", "auto") else "unmapped",
             target_url=mapped.target_url if mapped and mapped.source in ("confirmed", "auto") else None, priority=bool(mapped and mapped.priority),
             note=mapped.note if mapped else None, observation={})
-    for prompt in db.query(FactSerAiPrompt).filter(FactSerAiPrompt.client_id == client.id):
-        provider = prompt.engine or prompt.llm_id
-        key = item_key("prompt", prompt.prompt, provider)
-        rows[("prompt", key)] = dict(kind="prompt", item_key=key, text=prompt.prompt, provider=provider,
+    from datetime import date
+
+    from app.llm_visibility import readings as llm_readings
+
+    # The prompts are the LLM tracker's own: each platform's newest answer to each prompt it asks.
+    for (platform, _), seen in sorted(llm_readings.prompt_readings(db, client.id, date.today()).items()):
+        if seen["asked_by_name"]:
+            continue  # a prompt that names the brand is a brand check, not a discovery prompt to act on
+        key = item_key("prompt", seen["prompt"], platform)
+        rows[("prompt", key)] = dict(kind="prompt", item_key=key, text=seen["prompt"], provider=platform,
             state="unmapped", target_url=None, priority=False, note=None,
-            observation={k: v for k, v in {"observed_on": str(prompt.checked_at) if prompt.checked_at else None,
-                         "brand_mentioned": prompt.brand_mentioned, "brand_cited": prompt.brand_cited,
-                         "citation_url": prompt.citation_url, "source": "SE Ranking"}.items() if v is not None})
+            observation={"observed_on": seen["observed_on"], "brand_mentioned": seen["brand_mentioned"],
+                         "brand_cited": seen["brand_cited"], "source": llm_readings.SOURCE})
     for target in db.query(WatchTarget).filter(WatchTarget.client_id == client.id):
         previous = rows.get((target.kind, target.item_key), {})
         rows[(target.kind, target.item_key)] = {field: getattr(target, field) for field in (

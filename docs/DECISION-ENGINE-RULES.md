@@ -32,7 +32,7 @@ Managed channels for GA4 = organic search, AI referral, direct/unattributed, ref
 | **V2** | Is SE Ranking visibility falling? | % lost over 90 days | ≤ 15% | `facts_ser_site_summary.visibility_percent` now vs ~90 days ago | no history |
 | **V3** | Are impressions falling? | % lost, last 28 days vs the 28 before | ≤ 15% | `facts_gsc_daily.impressions` | not enough GSC history |
 | **V4** | Can target pages be found? | declared pages **that have a term mapped** and no mapped term in the top 20 | = 0 | declared = priority targets' pages + `client_conversion_pages`; reach = any confirmed mapping to that page ranking ≤ 20 | no declared pages, or none has a term mapped *(fixed in PR 24; before, an empty map failed this)* |
-| **V5** | Does the brand appear in AI answers? | % of tracked prompts mentioning the brand | ≥ 20% | `facts_ser_ai_tracker_stats`, `facts_ser_ai_checks` | no tracked prompts |
+| **V5** | Does the brand appear in AI answers? | % of tracked prompts mentioning the brand | ≥ 20% | the LLM tracker's newest completed run (`llm_responses`) | no tracked prompts |
 | **V5b** | AI share of voice falling? | % lost over 90 days | ≤ 25% | AI tracker stats | only runs if data exists |
 | **T1** | Are rankings earning the clicks they should? | clicks missed ÷ clicks earned | ≤ 20% | `facts_gsc_pages` last 30 days, per page: expected = CTR-curve(avg position) × impressions; missed = max(0, expected − actual), summed over **all pages** | no clicks |
 | **T2** | Impressions up, visits not? | impressions change − sessions change, only if impressions +10% and sessions ≤ 0 | 0 | GSC daily vs GA4 managed sessions, 28 vs prior 28 | no comparison data |
