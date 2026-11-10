@@ -136,8 +136,16 @@ export type ReportData = {
   visibility_detail?: { prompts: PromptRow[]; runs: number; run_dates: string[]; in_month: boolean } | null;
   /** The monthly performance layout's figures: outcomes with year-over-year and a three-month run, and a table per topic. */
   performance?: Performance;
+  /** The two Site health scores for the month, from the site crawl. Absent when the site had no crawl that month. */
+  site_health?: SiteHealthSummary | null;
 };
 export type Highlights = { going_well: string[]; to_watch: string[]; gaps: string[] };
+export type SiteHealthSummary = {
+  month: string; crawl_date: string | null; pages: number | null; hit_limit: boolean; previous_month: string | null;
+  seo: { score: number; grade: string; previous: number | null; change: number | null; checks: { label: string; score: number; affected: number; total: number }[] };
+  geo: { score: number; grade: string; previous: number | null; change: number | null; partial: boolean; signals: { label: string; score: number | null; summary: string | null }[] };
+  new_issues: number | null; fixed_issues: number | null; source: string;
+};
 export type ExecKpi = { label: string; value: number | string | null; unit: string; sub: string; tone: "good" | "bad" | "neutral" };
 export type ExecTopic = {
   name: string; keywords: number; searches_per_month: number | null;
@@ -154,7 +162,7 @@ export type ExecData = {
   clicks_by_month: { month: string; value: number | null }[]; clicks_year_ago_month: string;
   competitors: ExecCompetitor[]; topics: ExecTopic[];
   ai_vendors: { name: string; share_pct: number; is_self: boolean }[]; ai_runs: number; ai_run_dates: string[];
-  priorities: { title: string; action: string }[]; about: string[]; sources: string[];
+  site_health?: SiteHealthSummary | null; priorities: { title: string; action: string }[]; about: string[]; sources: string[];
 };
 export type ReportKind = "monthly" | "executive";
 export type Notes = Record<string, string>;

@@ -22,9 +22,9 @@ export const GROUPS: NavGroup[] = [
     title: "Analytics",
     icon: BarChart3,
     items: [
-      { label: "Monthly review", path: "/review" },
       { label: "OrganicIQ insights", path: "/bi" },
       { label: "Ads Accelerator", path: "/ads", ads: true },
+      { label: "Monthly review", path: "/review" },
       { label: "Decision engine", path: "/engine" },
       { label: "Annotations", path: "/annotations" },
     ],

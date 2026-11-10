@@ -1,4 +1,5 @@
 import { PerformanceView } from "@/components/portal/Performance";
+import { SiteHealthView } from "@/components/portal/SiteHealth";
 import { ShowingUp } from "@/components/portal/ShowingUp";
 import { VisibilityDetail } from "@/components/portal/VisibilityDetail";
 import { card } from "@/components/portal/BriefParts";
@@ -17,7 +18,13 @@ function Change({ m }: { m: ReportMetric }) {
 
 /** The headline numbers: this month against last, where each comes from, and what is missing. Shared by the consultant's page and the client's portal. */
 export function ReportDataView({ data }: { data: ReportData }) {
-  if (data.performance) return <PerformanceView data={data} />;
+  if (data.performance)
+    return (
+      <div className="space-y-10">
+        <PerformanceView data={data} />
+        {data.site_health ? <section><h2 className="mb-3 text-base font-bold text-[var(--text-primary)]">Site health</h2><SiteHealthView data={data.site_health} /></section> : null}
+      </div>
+    );
   if (data.review && data.cards) return <ReviewData data={data} />;
   return <SimpleData data={data} />;
 }

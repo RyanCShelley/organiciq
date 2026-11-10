@@ -1,6 +1,7 @@
 import type { ExecCompetitor, ExecData, ExecReport, ExecTopic } from "@/lib/portal";
 
 import { card } from "./BriefParts";
+import { SiteHealthView } from "./SiteHealth";
 
 const monthShort = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-US", { month: "short" });
 const monthLong = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -164,6 +165,14 @@ export function ExecutiveSummary({ report }: { report: ExecReport }) {
           <H sub="Organic IQ's SE Ranking data. Competitors show their latest level only.">Against competitors</H>
           <Competitors rows={d.competitors} brand={d.brand} />
           <Note text={n.competitors} />
+        </section>
+      ) : null}
+
+      {d.site_health ? (
+        <section>
+          <H sub="How sound the site is for search, and how ready it is to be read and cited by AI answers.">Site health</H>
+          <SiteHealthView data={d.site_health} />
+          <Note text={n.site_health} />
         </section>
       ) : null}
 
