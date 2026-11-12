@@ -33,6 +33,8 @@ from app.services import llm_evidence
 FIT_WEIGHT = 1.5
 #: How many pages of a topic are listed (the highest scoring), plus the page the person came from.
 PAGES_SHOWN = 50
+#: Statuses that say the host would not serve our crawler, not that the page is missing or broken.
+_TURNED_AWAY = frozenset({401, 403, 429, 503})
 #: Parts that join the bundle when the page read produces them, in the order they are listed.
 CORE = ("A-1", "S-1", "S-2", "V-7")
 EXTRAS = ("P-1", "S-5", "S-4")
@@ -104,6 +106,10 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str, include: 
 
     Brand searches are left out: no page work moves them. A page scores its impressions, times 1.5
     when its title already says the topic. The reasons are returned so a person can overrule it.
+
+    A page the crawl was turned away from (no status, or a 401, 403, 429 or 503, and no title kept)
+    has no title to judge. It is counted as if its title fits and marked `title_read: False`: a
+    page the host would not show us must not lose the choice for a title nobody saw.
     """
     kw = _key(keyword)
     year, mon = int(month[:4]), int(month[5:7])
@@ -123,18 +129,25 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str, include: 
         if n["impressions"] > p["top"][1]:
             p["top"] = (text, n["impressions"])
 
-    titles = {
-        url: title
-        for url, title in db.query(FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.title).filter(
+    titles: dict[str, str] = {}
+    turned_away: set[str] = set()
+    for url, title, status in (
+        db.query(FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.title, FactCrawlPageSnapshot.status_code).filter(
             FactCrawlPageSnapshot.client_id == client.id,
             FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY,
             FactCrawlPageSnapshot.normalized_url.in_(list(pages)),
         )
-    }
+        .order_by(FactCrawlPageSnapshot.snapshot_date)
+    ):
+        titles[url] = title
+        turned_away.discard(url)
+        if not title and (status is None or status in _TURNED_AWAY):
+            turned_away.add(url)
     wanted = _tokens(kw)
     out = []
     for url, p in pages.items():
         title = titles.get(url) or ""
+        title_read = url not in turned_away
         fit = bool(wanted) and wanted <= _tokens(title)
         impressions = p["impressions"]
         out.append(
@@ -147,7 +160,8 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str, include: 
                 "top_search": p["top"][0],
                 "title": title,
                 "title_says_topic": fit,
-                "score": round(impressions * (FIT_WEIGHT if fit else 1.0), 1),
+                "title_read": title_read,
+                "score": round(impressions * (FIT_WEIGHT if fit or not title_read else 1.0), 1),
             }
         )
     out.sort(key=lambda r: -r["score"])
@@ -161,7 +175,7 @@ def topic_pages(db: Session, client: Client, month: str, keyword: str, include: 
         "recommended": out[0]["url"] if out else None,
         "pages": shown,
         "total_pages": len(out),
-        "rule": f"Impressions for searches containing “{kw}” over three months, counted {FIT_WEIGHT:g}× when the page's title already says the topic. Brand searches are left out.",
+        "rule": f"Impressions for searches containing “{kw}” over three months, counted {FIT_WEIGHT:g}× when the page's title already says the topic, or when the site turned our crawler away from the page so its title is not known. Brand searches are left out.",
     }
 
 

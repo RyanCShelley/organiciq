@@ -433,6 +433,12 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
                     f"had {indexable_before}"
                 )
                 if throttled_short
+                else (
+                    f"{client.domain} refused the crawler (HTTP 401 or 403) under its own "
+                    f"name and as a browser. Ask the host to allow it "
+                    f"({USER_AGENT.split(' ')[0]}, from this service's address)"
+                )
+                if result.refused_pages
                 else "no page could be fetched"
             )
             db.query(FactCrawlPageIssue).filter(

@@ -295,6 +295,8 @@ export type TopicPage = {
   top_search: string;
   title: string;
   title_says_topic: boolean;
+  /** False when the site turned our crawler away from the page, so its title is not known. */
+  title_read?: boolean;
   score: number;
 };
 
