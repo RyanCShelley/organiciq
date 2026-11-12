@@ -60,13 +60,6 @@ class Throttle:
         #: refuses the next three as well; only the refused worker used to wait, so the others
         #: carried on, were refused in turn, and each paid its own minute.
         self._paused_until = 0.0
-        #: Pages this host has served in this crawl. A refusal from a host that was serving us a
-        #: moment ago is about our pace, not about who we are.
-        self.served = 0
-        #: Times the crawl stood still for a refusal and was refused again afterwards. Past
-        #: `MAX_UNHELPED_REFUSALS` the refusals are taken at their word: those pages are
-        #: refused, and waiting on each would hold the crawl open for hours.
-        self.unhelped_refusals = 0
 
     def pause(self, seconds: float) -> None:
         """Ask every worker to stand still for `seconds` (never shortening a pause already set)."""
@@ -158,13 +151,6 @@ BROWSER_USER_AGENT = (
 )
 #: A host saying "not you". Unlike 404 or 500 these describe who asked, not the page.
 REFUSAL_STATUSES = frozenset({401, 403})
-#: How long the whole crawl stands still when a host that was serving us starts refusing, one
-#: entry per attempt. nashvillehomeorganizers.com answers 200 to our name at one request every
-#: three seconds and 403 to everything, under any name, once requests arrive 0.4 seconds apart.
-#: Limiters of that kind refuse for a fixed period and restart it on every request made
-#: meanwhile, so asking again at once keeps the refusal alive. Standing still lets it lapse.
-REFUSAL_PAUSES = (15.0, 30.0, 60.0)
-MAX_UNHELPED_REFUSALS = 2
 
 DEFAULT_PAGE_LIMIT = 500
 #: Ceiling no per-client setting may exceed. A faceted site is effectively
@@ -943,9 +929,6 @@ async def _fetch_page(
 ) -> CrawledPage:
     """Fetch one page, asking a second time as a browser when the host refuses our name.
 
-    A refusal from a host that has already served pages in this crawl is treated as "slow
-    down" first: see `REFUSAL_PAUSES`.
-
     `expected` says the page should exist: it is the home page or the sitemap
     lists it. A refusal of such a page under both names is recorded as us being
     turned away, with no status, exactly as a rate limit is. Stored as a 403 it
@@ -954,31 +937,10 @@ async def _fetch_page(
     keeps its status: /wp-admin answering 401 is the site working.
     """
     leading_as_browser = identity is not None and identity.browser
-    name = BROWSER_USER_AGENT if leading_as_browser else None
-    page = await _fetch_page_once(client, url, robots, throttle, name)
-
-    # A host that has been serving this name and now refuses it is refusing the pace. Slow the
-    # whole crawl, let the refusal lapse, and ask again under the same name.
-    if (
-        page.refused_status is not None
-        and throttle is not None
-        and throttle.served > 0
-        and throttle.unhelped_refusals < MAX_UNHELPED_REFUSALS
-    ):
-        throttle.back_off()
-        for wait in REFUSAL_PAUSES:
-            throttle.pause(wait)
-            await asyncio.sleep(wait)
-            page = await _fetch_page_once(client, url, robots, throttle, name)
-            if page.refused_status is None:
-                logger.info("%s refused at our pace and answered after a %ds pause", url, int(wait))
-                break
-        else:
-            throttle.unhelped_refusals += 1
-
+    page = await _fetch_page_once(
+        client, url, robots, throttle, BROWSER_USER_AGENT if leading_as_browser else None
+    )
     if page.refused_status is None:
-        if throttle is not None and page.status_code is not None and 200 <= page.status_code < 300:
-            throttle.served += 1
         page.read_as_browser = leading_as_browser and page.parsed is not None
         return page
 
@@ -990,8 +952,6 @@ async def _fetch_page(
             )
             if identity is not None:
                 identity.browser = True
-            if throttle is not None:
-                throttle.served += 1
             again.read_as_browser = True
             return again
 
