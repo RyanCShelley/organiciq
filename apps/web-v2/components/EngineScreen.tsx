@@ -617,7 +617,8 @@ export function EngineScreen({
                     <>
                       {d.read.source === "crawl" ? <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900"><span className="font-semibold">Read from the site crawl, not the live page.</span> {d.read.source_note}.</p> : null}
                       <ul className="mt-3 space-y-1 text-sm">
-                        {d.observations.map((o) => (
+                        {/* Only what stops work on the page: a real problem, or why it could not be read. The routine notes (phrase in the title, click-through, word counts) sat apart from the action and are no longer listed. */}
+                        {d.observations.filter((o) => o.level === "problem" || Boolean(d.read.blocked)).map((o) => (
                           <li
                             key={o.text}
                             className={o.level === "problem" ? "text-red-800" : o.level === "ok" ? "text-green-800" : "text-[var(--text-secondary)]"}

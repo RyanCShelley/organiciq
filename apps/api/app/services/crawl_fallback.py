@@ -32,7 +32,7 @@ def snapshot_for(db: Session, client: Client, url: str) -> FactCrawlPageSnapshot
     )
 
 
-def rebuild(db: Session, client: Client, snap: FactCrawlPageSnapshot, url: str, blocked: str) -> Fetched:
+def rebuild(db: Session, client: Client, snap: FactCrawlPageSnapshot, url: str, blocked: str, live_outcome: str = "other") -> Fetched:
     """The page as the crawl held it, as HTML the usual parser reads."""
     head = [f"<title>{html.escape(snap.title or '')}</title>"]
     if snap.description:
@@ -57,6 +57,7 @@ def rebuild(db: Session, client: Client, snap: FactCrawlPageSnapshot, url: str, 
         status=snap.status_code or 200, final_url=url, headers={}, body=f"<html><head>{''.join(head)}</head><body>{''.join(body)}</body></html>",
         requested_url=url, user_agent="", fetched_at=datetime.now(timezone.utc).isoformat(), size=0, source="crawl", source_note=note,
         word_count=snap.word_count, conversion_elements=snap.conversion_elements,
+        live_outcome=live_outcome, crawl_date=snap.snapshot_date.isoformat(),
     )
 
 
@@ -70,13 +71,14 @@ def with_crawl(db: Session, client: Client, fetch: Callable[[str], Awaitable[Fet
             snap = snapshot_for(db, client, url)
             if snap is None or not (snap.title or snap.sections):
                 raise
-            return rebuild(db, client, snap, url, f"The page could not be fetched ({type(exc).__name__})")
-        reason = unreadable_reason(live, parse_page(url=live.final_url, body=live.body, headers=live.headers))
+            return rebuild(db, client, snap, url, f"The page could not be fetched ({type(exc).__name__})", "network")
+        parsed = parse_page(url=live.final_url, body=live.body, headers=live.headers)
+        reason = unreadable_reason(live, parsed)
         if reason is None:
             return live
         snap = snapshot_for(db, client, url)
         if snap is None or not (snap.title or snap.sections):
             return live
-        return rebuild(db, client, snap, url, reason)
+        return rebuild(db, client, snap, url, reason, page_diagnostic.outcome_of(live, parsed)["outcome"])
 
     return read

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { buildGrowthActionAction, confirmTaskAction, topicForAction } from "@/app/(app)/[clientSlug]/engine/actions";
-import type { CandidateTopic, EngineTask, GrowthActionBundle, GrowthPart, TaskDraft } from "@/lib/engine";
+import type { ActionContext, CandidateTopic, Winners, EngineTask, GrowthActionBundle, GrowthPart, TaskDraft } from "@/lib/engine";
 import { Spinner } from "@/components/ui/Spinner";
 
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
@@ -19,14 +19,147 @@ function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: Grow
     steps.push(`# ${i + 1}. ${p.name}`);
     steps.push(...choices[p.id].text.split("\n").map((l) => l.trim()).filter(Boolean));
   });
-  const evidence = [bundle.draft.evidence[0], ...chosen.flatMap((p) => p.evidence.map((e) => `${p.name}: ${e}`))].filter(Boolean);
+  // The draft's own lines about a part that was unticked are dropped; the lines about the search, the page and the read are kept.
+  const dropped = parts.filter((p) => !choices[p.id]?.on).map((p) => `${p.name}: `);
+  const added = chosen.filter((p) => !bundle.parts.some((b) => b.id === p.id)).flatMap((p) => p.evidence.map((e) => `${p.name}: ${e}`));
+  const evidence = [...bundle.draft.evidence.filter((e) => !dropped.some((d) => e.startsWith(d))), ...added].filter(Boolean);
+  // A rerouted action or an investigation says why in its own words, which the usual sentence would contradict.
+  const special = bundle.context?.rerouted || bundle.parts.some((p) => p.id === "TI-1");
   return {
     ...bundle.draft,
-    why: `This page gets the most impressions for “${bundle.keyword}” (${bundle.chosen.impressions.toLocaleString()} over three months). The work is ${chosen.length} part${chosen.length === 1 ? "" : "s"}, done together on this one page: ${chosen.map((p) => p.name.toLowerCase()).join(", ")}.`,
+    why: special
+      ? bundle.draft.why
+      : `This page gets the most impressions for “${bundle.keyword}” (${bundle.chosen.impressions.toLocaleString()} over three months). The work is ${chosen.length} part${chosen.length === 1 ? "" : "s"}, done together on this one page: ${chosen.map((p) => p.name.toLowerCase()).join(", ")}.`,
     steps,
     evidence,
     parts: chosen.map((p) => ({ id: p.id, name: p.name })),
   };
+}
+
+const FIT_WORDS: Record<string, string> = { high: "suits the search", medium: "partly suits the search", low: "does not suit the search", unverified: "fit not judged" };
+const STATE_MARK: Record<string, string> = { pass: "✓", unverified: "?", fail: "✕" };
+
+const host = (url: string) => url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+
+/** Who is winning for the term, in search and in the AI platforms, and whether this is the page to win it with. */
+function WinnersView({ winners }: { winners: Winners }) {
+  const { search, llm, comparison } = winners;
+  const unread = [...search.pages, ...llm.pages].filter((p) => !p.read);
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer font-semibold">
+        Who is winning
+        {comparison.best_page ? ` · this page is ${comparison.best_page.verdict === "yes" ? "the right one" : comparison.best_page.verdict === "partly" ? "partly right" : "not the right one"}` : ""}
+      </summary>
+      <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+        {comparison.best_page ? <p><strong>Is this the best page?</strong> {comparison.best_page.why}</p> : null}
+        {!comparison.ok ? <p>{comparison.reason}</p> : null}
+        {search.ranked.length > 0 ? (
+          <div>
+            <strong>In search.</strong>
+            {search.client_ranks.length > 0 ? ` This site ranks at ${search.client_ranks.map((r) => `#${r.rank}`).join(", ")}.` : " This site is not in the top results."}
+            <ol className="mt-1 space-y-0.5">
+              {search.ranked.map((r) => (
+                <li key={r.url}>
+                  {r.rank}. <span className="font-medium">{r.domain}</span> · {[r.content_type, r.content_style].filter(Boolean).join(", ") || "type not read"} · <span className="text-[var(--text-tertiary)]">{r.title}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
+        {llm.ok && llm.platforms ? (
+          <div>
+            <strong>In the AI platforms</strong> (prompt “{llm.prompt}”, run of {llm.run_date}).
+            <ul className="mt-1 space-y-0.5">
+              {llm.platforms.map((p) => (
+                <li key={p.platform}>
+                  <span className="font-medium">{p.platform}</span>: {p.client_cited ? "cites this site" : "does not cite this site"}, {p.brand_mentioned ? `names the brand${p.brand_rank ? ` (${p.brand_rank} of ${p.total_brands})` : ""}` : "does not name the brand"}
+                  {p.brands.length > 0 ? ` · brands named: ${p.brands.join(", ")}` : ""}
+                </li>
+              ))}
+            </ul>
+            {llm.cited_pages && llm.cited_pages.length > 0 ? <p className="mt-1">Pages cited: {llm.cited_pages.slice(0, 6).map((c) => `${c.domain}${c.own ? " (this site)" : ""}`).join(", ")}.</p> : null}
+          </div>
+        ) : (
+          <p><strong>In the AI platforms.</strong> {llm.reason ?? "No data."}</p>
+        )}
+        <p>
+          <strong>Winning pages read:</strong> {[...search.pages, ...llm.pages].filter((p) => p.read).map((p) => host(p.url)).join(", ") || "none"}.
+          {unread.length > 0 ? ` Not read: ${unread.map((p) => `${host(p.url)} (${p.reason})`).join(" ")}` : ""}
+        </p>
+      </div>
+    </details>
+  );
+}
+
+/** What the action was judged on: one line always, the detail on request. */
+function ContextSummary({ context }: { context: ActionContext }) {
+  const { intent, page_type, fit, evidence, validation, template, winners } = context;
+  const tone = validation.verdict === "publish" ? "bg-green-50 text-green-900" : validation.verdict === "reject" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-900";
+  return (
+    <div className="mt-3 rounded-lg bg-[var(--bg)] p-3 text-xs">
+      <p className="text-[var(--text-secondary)]">
+        Search intent: <strong>{intent.name}</strong>
+        {intent.read ? ` (${intent.secondary ? `secondary ${intent.secondary}, ` : ""}${intent.confidence} confidence)` : ""} · Page type: <strong>{page_type.name}</strong> ·{" "}
+        <strong>{FIT_WORDS[fit.level]}</strong> · Crawl status: <strong>{evidence.crawl_status_name}</strong> · Evidence confidence: <strong>{evidence.confidence}</strong>
+      </p>
+      <p className={`mt-2 rounded px-2 py-1 ${tone}`}>{validation.summary}</p>
+      {winners ? <WinnersView winners={winners} /> : null}
+      {evidence.unverified.length > 0 ? (
+        <ul className="mt-2 list-disc pl-5 text-[var(--text-secondary)]">
+          {evidence.unverified.map((u) => (
+            <li key={u}>Unverified: {u}</li>
+          ))}
+        </ul>
+      ) : null}
+      <details className="mt-2">
+        <summary className="cursor-pointer font-semibold">How this was judged</summary>
+        <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+          <p>
+            <strong>What the searcher wants.</strong> {intent.searcher_goal ?? "Not read."}
+          </p>
+          <p>
+            <strong>What the results page shows{intent.serp_date ? ` (${intent.serp_date})` : ""}.</strong>{" "}
+            {intent.evidence.length > 0 ? intent.evidence.join(". ") + "." : intent.uncertainty ?? "Nothing was read."}
+            {Object.keys(intent.content_types).length > 0 ? ` Ranking types: ${Object.entries(intent.content_types).map(([t, n]) => `${n} ${t}`).join(", ")}.` : ""}
+            {Object.keys(intent.content_styles).length > 0 ? ` Styles: ${Object.entries(intent.content_styles).map(([t, n]) => `${n} ${t}`).join(", ")}.` : ""}
+            {intent.features.length > 0 ? ` Features: ${intent.features.map((f) => f.replaceAll("_", " ")).join(", ")}.` : ""}
+            {intent.read && intent.uncertainty ? ` Unclear: ${intent.uncertainty}` : ""}
+          </p>
+          {intent.labels.length > 0 ? (
+            <p>
+              <strong>Keyword-tool labels (reference only).</strong> {intent.labels.join(", ")}. {intent.label_disagreement ?? ""}
+            </p>
+          ) : null}
+          {intent.consumer_need ? (
+            <p>
+              <strong>Consumer need ({intent.consumer_need.basis}).</strong> {intent.consumer_need.name}. {intent.consumer_need.evidence}
+            </p>
+          ) : null}
+          <p>
+            <strong>Page type.</strong> {page_type.name}
+            {page_type.basis.length > 0 ? `, from ${page_type.basis.join(" and ")}` : ""}. {page_type.note ?? `It is there to ${page_type.purpose}.`}
+          </p>
+          <p>
+            <strong>Fit.</strong> {fit.why}
+          </p>
+          <p>
+            <strong>Template.</strong> {template.note}
+          </p>
+          <p>
+            <strong>Evidence.</strong> {evidence.summary}
+          </p>
+          <ul className="space-y-0.5">
+            {validation.checks.map((c) => (
+              <li key={c.key}>
+                {STATE_MARK[c.state]} {c.question} <span className="text-[var(--text-tertiary)]">{c.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
+    </div>
+  );
 }
 
 /**
@@ -67,7 +200,8 @@ export function GrowthActionPlanner({
       if (!live) return;
       if (r.ok) {
         setTopic(r.value);
-        setChosen(r.value.pages?.recommended ?? null);
+        // The page the person selected is the page worked on. A better one is offered, never switched to.
+        setChosen(page);
       } else setError(r.error);
     });
     return () => {
@@ -82,7 +216,7 @@ export function GrowthActionPlanner({
     setBuilding(true);
     setBundle(null);
     setError(null);
-    buildGrowthActionAction(clientId, topic.keyword, chosen, focus, page).then((r) => {
+    buildGrowthActionAction(clientId, topic.keyword, chosen, focus, page, topic.search ?? null).then((r) => {
       if (!live) return;
       setBuilding(false);
       setBundle(r);
@@ -99,7 +233,9 @@ export function GrowthActionPlanner({
   }, [clientId, topic, chosen, focus, page]);
 
   const inPlan = (url: string) => tasks.find((t) => t.kind === "growth_action" && t.page === url && t.status !== "dropped");
-  const pages = topic?.pages;
+  // Once the action is built its page list carries the fit read from the term's own results page.
+  const pages = (bundle && bundle.ok && bundle.topic) || topic?.pages;
+  const better = bundle && bundle.ok ? bundle.better_page : null;
   const all = useMemo(() => (bundle && bundle.ok ? [...bundle.parts, ...bundle.optional] : []), [bundle]);
   const kept = all.filter((p) => choices[p.id]?.on).length;
 
@@ -132,7 +268,13 @@ export function GrowthActionPlanner({
             </button>
           ) : null}
         </div>
+        {p.action_type || p.scope ? (
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+            {[p.action_type, p.scope, p.benefit ? `for ${p.benefit}` : null].filter(Boolean).join(" · ")}
+          </p>
+        ) : null}
         {p.why ? <p className="mt-1 text-[var(--text-secondary)]">{p.why}</p> : null}
+        {p.note && (p.scope !== "page-specific" || /template/i.test(p.note)) ? <p className="mt-1 text-xs text-[var(--text-secondary)]">Where: {p.note}</p> : null}
         {c.editing ? (
           <textarea
             value={c.text}
@@ -164,17 +306,31 @@ export function GrowthActionPlanner({
   return (
     <div className="mt-4 rounded-lg border border-[var(--brand-teal)] p-4 text-sm">
       <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--brand-teal)]">Growth action</h4>
-      {!topic && !error ? <p className="mt-2 text-[var(--text-secondary)]">Finding the best page for this topic…</p> : null}
+      {!topic && !error ? <p className="mt-2 text-[var(--text-secondary)]">Loading the search and the page…</p> : null}
       {topic && !topic.keyword ? <p className="mt-2 text-[var(--text-secondary)]">{topic.source}, so there is no topic to plan around.</p> : null}
 
       {topic?.keyword && pages ? (
         <div className="mt-2 text-[var(--text-secondary)]">
-          Topic: <strong>{topic.keyword}</strong> <span className="text-xs text-[var(--text-tertiary)]">({topic.source})</span>.{" "}
-          {pages.recommended === page
-            ? "This page is the best one for the topic."
-            : pages.recommended
-              ? `The best page for it is ${shortPage(pages.recommended)}, not this one.`
-              : "No page shows for it."}{" "}
+          {topic.search ? (
+            <>
+              Search: <strong>{topic.search}</strong> <span className="text-xs text-[var(--text-tertiary)]">(the search you selected, under the watchlist keyword “{topic.keyword}”)</span>.
+            </>
+          ) : (
+            <>
+              Watchlist keyword: <strong>{topic.keyword}</strong> <span className="text-xs text-[var(--text-tertiary)]">({topic.source})</span>.
+              {bundle && bundle.ok ? <> Search used: <strong>{bundle.search}</strong> <span className="text-xs text-[var(--text-tertiary)]">({bundle.search_source})</span>.</> : null}
+            </>
+          )}{" "}
+          Page: <strong>{shortPage(chosen ?? page)}</strong>
+          {chosen && chosen !== page ? <span className="text-xs text-[var(--text-tertiary)]"> (you switched from {shortPage(page)})</span> : null}.{" "}
+          {better ? (
+            <span className="mt-1 block rounded bg-amber-50 px-2 py-1 text-amber-900">
+              Another page may serve this search better: <strong>{shortPage(better.url)}</strong>. {better.why}{" "}
+              <button type="button" onClick={() => setChosen(better.url)} className="font-semibold underline">
+                Work on that page instead
+              </button>
+            </span>
+          ) : null}
           {pages.pages.length > 1 ? (
             <button type="button" onClick={() => setShowPages((v) => !v)} className="text-xs font-semibold underline">
               {showPages ? "Hide the pages" : `Choose a different page (${pages.pages.length})`}
@@ -188,12 +344,14 @@ export function GrowthActionPlanner({
                   <li key={p.url} className="flex flex-wrap items-center gap-3 py-1.5">
                     <input type="radio" name={`pick-${search}-${page}`} checked={chosen === p.url} onChange={() => setChosen(p.url)} aria-label={`Work on ${shortPage(p.url)}`} />
                     <span className="min-w-0 flex-1 break-all font-medium">{shortPage(p.url)}</span>
-                    {p.url === pages.recommended ? <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800">best page</span> : null}
-                    {p.url === page ? <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold">this candidate</span> : null}
+                    {p.fit === "high" ? <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800" title={p.fit_why}>suits the search</span> : null}
+                    {p.url === page ? <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold">the page you selected</span> : null}
                     {inPlan(p.url) ? <span className="text-xs font-semibold text-green-800">✓ in the plan</span> : null}
                     <span className="text-xs tabular-nums">
                       {num(p.impressions)} impressions · position {p.position ?? "–"} · {p.title_read === false ? "title not read (the site turned our crawler away)" : `title ${p.title_says_topic ? "says" : "does not say"} the topic`}
+                      {p.page_type_name && p.page_type !== "unknown" ? ` · ${p.page_type_name.toLowerCase()}` : ""}
                     </span>
+                    {p.fit === "low" ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-900" title={p.fit_why}>does not suit the search</span> : null}
                   </li>
                 ))}
               </ul>
@@ -209,10 +367,12 @@ export function GrowthActionPlanner({
 
       {building ? <p className="mt-3 text-[var(--text-secondary)]">Reading {chosen ? shortPage(chosen) : "the page"}…</p> : null}
       {error ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-red-800">{error}</p> : null}
+      {bundle && !bundle.ok && bundle.context ? <ContextSummary context={bundle.context} /> : null}
 
       {bundle && bundle.ok ? (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           <h5 className="font-semibold">{bundle.draft.title}</h5>
+          {bundle.context ? <ContextSummary context={bundle.context} /> : null}
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">Check what to keep, edit a part's steps if you want it said differently, then confirm. Each thing appears here once.</p>
           <ul className="mt-3 space-y-3">
             {bundle.parts.map((p) => renderPart(p, choices[p.id]?.on ? ++number : null))}

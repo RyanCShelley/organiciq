@@ -80,6 +80,8 @@ class SerpFeatures:
     #: Domains holding each feature, where DataForSEO named one, so "the
     #: client does not hold it" is read rather than assumed.
     holders: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: The top organic results, in order: `{rank, url, domain, title, snippet}`. What ranks is what says what a search is for.
+    organic: tuple[dict, ...] = ()
 
     def holds(self, feature: str, domain: str) -> bool:
         target = domain.strip().lower().removeprefix("www.")
@@ -116,18 +118,31 @@ def _domains(item: dict) -> list[str]:
     return out
 
 
+#: How many organic results are kept from a pull.
+ORGANIC_KEPT = 10
+
+
 def parse(result: dict) -> SerpFeatures:
     """One SERP's features, from DataForSEO's own `item_types`."""
     item_types = tuple(
         t for t in (result.get("item_types") or []) if isinstance(t, str)
     )
     holders: dict[str, list[str]] = {}
+    organic: list[dict] = []
     for item in result.get("items") or []:
         if not isinstance(item, dict):
             continue
         kind = item.get("type")
         if not isinstance(kind, str):
             continue
+        if kind == "organic" and len(organic) < ORGANIC_KEPT and item.get("url"):
+            organic.append({
+                "rank": item.get("rank_group") or len(organic) + 1,
+                "url": str(item.get("url")),
+                "domain": str(item.get("domain") or "").lower().removeprefix("www."),
+                "title": " ".join(str(item.get("title") or "").split())[:300],
+                "snippet": " ".join(str(item.get("description") or "").split())[:400],
+            })
         found = _domains(item)
         if found:
             holders.setdefault(kind, []).extend(found)
@@ -135,6 +150,7 @@ def parse(result: dict) -> SerpFeatures:
         keyword=result.get("keyword") or "",
         item_types=item_types,
         holders={k: tuple(sorted(set(v))) for k, v in holders.items()},
+        organic=tuple(organic),
     )
 
 

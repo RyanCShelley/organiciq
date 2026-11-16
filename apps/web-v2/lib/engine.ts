@@ -298,6 +298,31 @@ export type TopicPage = {
   /** False when the site turned our crawler away from the page, so its title is not known. */
   title_read?: boolean;
   score: number;
+  page_type?: string;
+  page_type_name?: string;
+  /** Whether this kind of page suits the search's intent: high, medium, low or unverified. */
+  fit?: "high" | "medium" | "low" | "unverified";
+  fit_why?: string;
+};
+
+export type ActionContext = {
+  /** The search's intent as read from its results page. `read` is false when there was no page, or it did not settle the intent. */
+  intent: {
+    intent: string; name: string; primary: string | null; secondary: string | null; confidence: string; read: boolean;
+    searcher_goal: string | null; evidence: string[]; uncertainty: string | null;
+    content_types: Record<string, number>; content_styles: Record<string, number>; features: string[];
+    label_disagreement: string | null; labels: string[]; serp_date: string | null; content_to_match: string | null;
+    consumer_need: { need: string; name: string; basis: "observed" | "inferred"; evidence: string } | null;
+  };
+  page_type: { type: string; name: string; confidence: string; basis: string[]; purpose: string; note: string | null };
+  fit: { level: "high" | "medium" | "low" | "unverified"; why: string };
+  template: { shared: boolean | null; peers: number; pattern: string | null; basis: string; note: string };
+  evidence: { crawl_status: string; crawl_status_name: string; source: "live" | "crawl" | "none"; crawl_date: string | null; confidence: string; sufficient: boolean; unverified: string[]; summary: string };
+  validation: { verdict: "publish" | "needs_verification" | "reject"; summary: string; checks: { key: string; question: string; state: "pass" | "unverified" | "fail"; detail: string; critical: string }[] };
+  rerouted: boolean;
+  winners?: Winners | null;
+  action_types: string[];
+  benefits: string[];
 };
 
 export type TopicPages = {
@@ -318,10 +343,16 @@ export type GrowthPart = {
   evidence: string[];
   core: boolean;
   confirmed_by_rule: boolean;
+  action_type?: string;
+  benefit?: string;
+  benefit_why?: string;
+  /** Where the change lands: page-specific, template-wide, sitewide or new supporting content. */
+  scope?: string;
+  note?: string;
 };
 
 export type GrowthActionBundle =
-  | { ok: false; error: string }
+  | { ok: false; error: string; context?: ActionContext }
   | {
       ok: true;
       keyword: string;
@@ -332,9 +363,32 @@ export type GrowthActionBundle =
       left_out: { id: string; name: string; reason: string }[];
       optional: GrowthPart[];
       draft: TaskDraft;
+      context?: ActionContext;
+      /** How the search was arrived at: the one selected, or the page's top search when none was. */
+      search_source?: string;
+      topic?: TopicPages;
+      /** Another page of the site that suits the term better. Offered, never switched to. */
+      better_page?: { url: string; fit: string; impressions: number; why: string } | null;
     };
 
-export type CandidateTopic = { keyword: string | null; source: string; pages: TopicPages | null };
+export type CandidateTopic = { keyword: string | null; source: string; search?: string | null; pages: TopicPages | null };
+
+export type WinnerPage = { url: string; read: boolean; reason?: string | null; title?: string | null; word_count?: number | null; schema_types?: string[] | null };
+/** Who is winning for the term: the ranking pages, the AI platforms' answers, and what the winners do that the page does not. */
+export type Winners = {
+  search: {
+    ranked: { rank: number; url: string; domain: string; title: string; content_type: string | null; content_style: string | null }[];
+    client_ranks: { rank: number; url: string }[];
+    pages: WinnerPage[];
+  };
+  llm: {
+    ok: boolean; reason?: string; prompt?: string; run_date?: string;
+    platforms?: { platform: string; brands: string[]; brand_mentioned: boolean; brand_rank: number | null; total_brands: number | null; client_cited: boolean; sources: number }[];
+    cited_pages?: { url: string; domain: string; platforms: string[]; own: boolean; page_type: string }[];
+    pages: WinnerPage[];
+  };
+  comparison: { ok: boolean; reason?: string; best_page: { verdict: "yes" | "partly" | "no"; why: string } | null; gaps: unknown[] };
+};
 
 export type GscNumbers = { clicks: number; impressions: number; position: number | null };
 export type AiNumbers = { run_date: string; cited: number; platforms: number } | null;
