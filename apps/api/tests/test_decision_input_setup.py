@@ -203,6 +203,9 @@ def test_map_editor_uses_intent_qualified_owner_not_highest_impression_article(d
     today=date.today()
     owner=page(db,client_a,'managed-it','Managed IT Services')
     wrong=page(db,client_a,'what-are-managed-it-services','What Are Managed IT Services?')
+    # The session does not flush before a query here, so the two pages are written first. Without this the loop
+    # found nothing, the pages kept the fixture's fixed date, and the test failed once that date was 45 days old.
+    db.flush()
     for p in db.query(FactCrawlPageSnapshot).filter_by(client_id=client_a.id):p.snapshot_date=today
     keyword(db,client_a,'managed it services',url=wrong)
     for offset in (0,4,8):
