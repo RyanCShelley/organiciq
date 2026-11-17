@@ -28,10 +28,9 @@ def main() -> None:
     result = asyncio.run(crawl_site(domain, page_limit=limit))
     for page in result.pages:
         what = page.parsed.title if page.parsed else page.fetch_error
-        print(page.status_code, f"as_browser={page.read_as_browser}", what, page.normalized_url)
+        print(page.status_code, what, page.normalized_url)
     print(
-        f"pages: {len(result.pages)} | read as browser: {result.read_as_browser_pages}"
-        f" | refused under both names: {result.refused_pages} | slowed: {result.throttled}"
+        f"pages: {len(result.pages)} | refused: {result.refused_pages} | slowed: {result.throttled}"
         f" | took {time.monotonic() - started:.0f}s"
     )
 

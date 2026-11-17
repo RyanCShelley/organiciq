@@ -140,15 +140,6 @@ class RobotsUnreachable(Exception):
 USER_AGENT = "OrganicIQBot/1.0 (+https://smamarketing.com/organiciq; SEO monitoring)"
 #: The short name a host would allow, and the one people are told about.
 BOT_NAME = USER_AGENT.split(" ")[0]
-#: What a page is asked for as when the host refused our own name. Some hosts
-#: answer 403 to any name they do not know and serve the same page to a
-#: browser: nashvillehomeorganizers.com refused OrganicIQBot on every page and
-#: answered 200 to this. Only ever sent to the client's own site, only after a
-#: plain refusal, and never to get past a captcha or a rule in robots.txt.
-BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
 #: A host saying "not you". Unlike 404 or 500 these describe who asked, not the page.
 REFUSAL_STATUSES = frozenset({401, 403})
 
@@ -246,25 +237,12 @@ _CHALLENGE_BODY_MARKERS = (
 
 
 def refused_by_name(status_code: int, headers, body_start: str = "") -> bool:
-    """A plain 401 or 403 with no vendor's challenge behind it: worth one more ask as a browser.
+    """A plain 401 or 403 with no vendor's challenge behind it: the host turning our reader away.
 
-    A recognised challenge is not retried. That is a host that looked and
-    decided, and the crawler does not try to get past a captcha.
+    The crawler asks under one name only, its own. A refusal is recorded as
+    a refusal and the page is not asked for again under any other name.
     """
     return status_code in REFUSAL_STATUSES and challenge_reason(status_code, headers, body_start) is None
-
-
-class Identity:
-    """Which name this crawl leads with.
-
-    Every page is asked for under our own name until a host refuses it and
-    then serves the page to a browser. From there the crawl leads with the
-    browser's name, so a site that refuses the bot costs one wasted request
-    and not one per page.
-    """
-
-    def __init__(self) -> None:
-        self.browser = False
 
 
 def challenge_reason(status_code: int, headers, body_start: str = "") -> str | None:
@@ -318,11 +296,8 @@ class CrawledPage:
     #: this is us being turned away, not the page being broken, and it must not
     #: be stored as a status code or counted as a page the site has.
     challenged_by: str | None = None
-    #: The host answered a plain 401 or 403. Set whenever that happened, so the
-    #: caller can ask again as a browser.
+    #: The host answered a plain 401 or 403: it turned our reader away.
     refused_status: int | None = None
-    #: The host refused our own name and served the page to a browser's.
-    read_as_browser: bool = False
 
     @property
     def indexable(self) -> bool:
@@ -374,10 +349,8 @@ class CrawlResult:
     challenged_pages: int = 0
     challenged_by: str | None = None
     #: Pages we expected (the home page, or a page the sitemap lists) that the
-    #: host refused under both names. Us being turned away, not broken pages.
+    #: host refused. Us being turned away, not broken pages.
     refused_pages: int = 0
-    #: Pages the host refused under our own name and served to a browser's.
-    read_as_browser_pages: int = 0
     #: Whether the site asked us to slow down at any point.
     throttled: bool = False
     #: `Crawl-delay` from robots.txt, when the site declares one.
@@ -447,26 +420,8 @@ class ResponseTooLarge(httpx.TransportError):
 
 
 async def _get_capped(client: httpx.AsyncClient, url: str, cap: int) -> tuple[int, dict, bytes]:
-    """GET robots.txt or a sitemap, asking again as a browser when the host refuses our name.
-
-    A host that refuses the bot refuses it these files too. Left at that, a
-    refused robots.txt reads as "no rules, crawl freely" and a refused sitemap
-    as "this site has no sitemap", and neither is true.
-    """
-    status_code, headers, body = await _get_capped_as(client, url, cap, None)
-    if refused_by_name(status_code, headers, body[:3000].decode("utf-8", errors="replace")):
-        again = await _get_capped_as(client, url, cap, BROWSER_USER_AGENT)
-        if again[0] not in REFUSAL_STATUSES:
-            return again
-    return status_code, headers, body
-
-
-async def _get_capped_as(
-    client: httpx.AsyncClient, url: str, cap: int, user_agent: str | None
-) -> tuple[int, dict, bytes]:
     """GET, reading no more than `cap` bytes (after any transfer decoding)."""
-    asking = {"headers": {"User-Agent": user_agent}} if user_agent else {}
-    async with client.stream("GET", url, follow_redirects=True, **asking) as response:
+    async with client.stream("GET", url, follow_redirects=True) as response:
         chunks: list[bytes] = []
         total = 0
         async for chunk in response.aiter_bytes():
@@ -736,7 +691,6 @@ async def crawl_site(
         edges: dict[tuple[str, str], InternalLink] = {}
         pages: dict[str, CrawledPage] = {}
         semaphore = asyncio.Semaphore(concurrency)
-        identity = Identity()
         # The pages something vouches for: the roots and what the sitemaps list.
         expected_urls = set(queued)
 
@@ -747,7 +701,6 @@ async def crawl_site(
                     url,
                     robots if respect_robots else None,
                     throttle,
-                    identity,
                     normalize_url(url) in expected_urls,
                 )
 
@@ -863,12 +816,8 @@ async def crawl_site(
         result.refused_pages = sum(
             1 for p in result.pages if p.refused_status is not None and p.status_code is None
         )
-        result.read_as_browser_pages = sum(1 for p in result.pages if p.read_as_browser)
-        if result.read_as_browser_pages or result.refused_pages:
-            logger.warning(
-                "%s refused %s: %d pages read as a browser, %d refused under both names",
-                host, BOT_NAME, result.read_as_browser_pages, result.refused_pages,
-            )
+        if result.refused_pages:
+            logger.warning("%s refused %s on %d expected pages", host, BOT_NAME, result.refused_pages)
         result.throttled = throttle.throttled
         if result.rate_limited_pages:
             logger.warning(
@@ -924,36 +873,20 @@ async def _fetch_page(
     url: str,
     robots: robotparser.RobotFileParser | None,
     throttle: Throttle | None = None,
-    identity: Identity | None = None,
     expected: bool = False,
 ) -> CrawledPage:
-    """Fetch one page, asking a second time as a browser when the host refuses our name.
+    """Fetch one page, under our own name only.
 
     `expected` says the page should exist: it is the home page or the sitemap
-    lists it. A refusal of such a page under both names is recorded as us being
-    turned away, with no status, exactly as a rate limit is. Stored as a 403 it
-    becomes "this page is broken", which is how a live services page was
-    reviewed as a three-word error page. A refused page nothing vouches for
-    keeps its status: /wp-admin answering 401 is the site working.
+    lists it. A refusal of such a page is recorded as us being turned away,
+    with no status, exactly as a rate limit is. Stored as a 403 it becomes
+    "this page is broken", which is how a live services page was reviewed as a
+    three-word error page. A refused page nothing vouches for keeps its
+    status: /wp-admin answering 401 is the site working.
     """
-    leading_as_browser = identity is not None and identity.browser
-    page = await _fetch_page_once(
-        client, url, robots, throttle, BROWSER_USER_AGENT if leading_as_browser else None
-    )
+    page = await _fetch_page_once(client, url, robots, throttle)
     if page.refused_status is None:
-        page.read_as_browser = leading_as_browser and page.parsed is not None
         return page
-
-    if not leading_as_browser:
-        again = await _fetch_page_once(client, url, robots, throttle, BROWSER_USER_AGENT)
-        if again.refused_status is None and again.fetch_error is None:
-            logger.info(
-                "%s refused %s (HTTP %s) and answered a browser", url, BOT_NAME, page.refused_status
-            )
-            if identity is not None:
-                identity.browser = True
-            again.read_as_browser = True
-            return again
 
     if expected:
         return CrawledPage(
@@ -975,12 +908,8 @@ async def _fetch_page_once(
     url: str,
     robots: robotparser.RobotFileParser | None,
     throttle: Throttle | None,
-    user_agent: str | None,
 ) -> CrawledPage:
     normalized = normalize_url(url)
-    # robots.txt is read under our own name whichever name asks: a rule written
-    # for OrganicIQBot is obeyed by the retry too.
-    asking = {"headers": {"User-Agent": user_agent}} if user_agent else {}
 
     if robots is not None and not robots.can_fetch(USER_AGENT, url):
         return CrawledPage(
@@ -1008,7 +937,7 @@ async def _fetch_page_once(
         while True:
             if throttle is not None:
                 await throttle.wait()
-            response = await client.get(current, **asking)
+            response = await client.get(current)
 
             # "Not now" is not "not here". Wait as long as the server asks,
             # or back off on our own, and come back to the same URL — and

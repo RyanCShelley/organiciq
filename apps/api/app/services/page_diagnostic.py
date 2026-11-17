@@ -33,7 +33,7 @@ from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.provisional import _tokens, suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
-from app.ingestion.crawler.fetch import BOT_NAME, BROWSER_USER_AGENT, REFUSAL_STATUSES, challenge_reason, refused_by_name
+from app.ingestion.crawler.fetch import BOT_NAME, REFUSAL_STATUSES, challenge_reason
 from app.ingestion.crawler.fetch import USER_AGENT as CRAWLER_USER_AGENT
 from app.ingestion.crawler.parse import _NOINDEX, ParsedPage, parse_page
 from app.ingestion.crawler.safe_http import PublicOnlyTransport
@@ -108,17 +108,6 @@ async def _fetch(url: str) -> Fetched:
         headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"},
     ) as client:
         response = await client.get(url)
-        asked_as = USER_AGENT
-        # A plain 401 or 403 is the host refusing a name it does not know. Ask once more as a browser, on the client's own site only (read_page
-        # checks that), and say on the record that this is how the page was read.
-        if refused_by_name(response.status_code, response.headers, response.text[:3000]):
-            refused = response.status_code
-            again = await client.get(url, headers={"User-Agent": BROWSER_USER_AGENT})
-            if again.status_code not in REFUSAL_STATUSES:
-                response = again
-                asked_as = f"a browser-style request (the site answered HTTP {refused} to {BOT_NAME})"
-            else:
-                asked_as = f"{BOT_NAME} and then a browser-style request"
         raw = response.content[:MAX_BODY_BYTES]
         return Fetched(
             status=response.status_code,
@@ -126,7 +115,7 @@ async def _fetch(url: str) -> Fetched:
             headers={k.lower(): v for k, v in response.headers.items()},
             body=raw.decode(response.encoding or "utf-8", errors="replace"),
             requested_url=url,
-            user_agent=asked_as,
+            user_agent=USER_AGENT,
             fetched_at=datetime.now(timezone.utc).isoformat(),
             size=len(raw),
         )
@@ -276,7 +265,7 @@ def unreadable_reason(fetched: Fetched, parsed: ParsedPage) -> str | None:
     if fetched.source == "live" and fetched.status in REFUSAL_STATUSES:
         # Who asked, not what the page is. Read as a page, this was a live services page reviewed as "403 Forbidden", three words, no way to enquire.
         return (
-            f"The site refused our reader (HTTP {fetched.status}), under its own name and as a browser. That is a host turning a bot away, "
+            f"The site refused our reader (HTTP {fetched.status}). That is a host turning a bot away, "
             f"not proof the page is broken: open it in a browser to check, and ask the host to allow {BOT_NAME}."
         )
     if fetched.status < 400 and not parsed.title and not parsed.h1 and parsed.word_count == 0:
