@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,6 +48,44 @@ def verify_link(
         return inlinks.verify(db, client, payload.source, payload.target, user.email)
     except PageUnreadable as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+class StateIn(BaseModel):
+    source: str = Field(min_length=8, max_length=2048)
+    target: str = Field(min_length=8, max_length=2048)
+    #: todo, added or skipped. "live" is set only by the live check, never by hand.
+    status: Literal["todo", "added", "skipped"] | None = None
+    #: The link text chosen for this link.
+    anchor: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/state")
+def set_link_state(
+    payload: StateIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Save what was done with one suggested link, or the link text chosen for it."""
+    return inlinks.set_state(db, client, payload.source, payload.target, user.email, payload.status, payload.anchor)
+
+
+class SentenceIn(BaseModel):
+    source: str = Field(min_length=8, max_length=2048)
+    target: str = Field(min_length=8, max_length=2048)
+    #: The link text the sentence is written around.
+    anchor: str = Field(min_length=2, max_length=300)
+
+
+@router.post("/sentence")
+def write_link_sentence(
+    payload: SentenceIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Write the sentence that carries this link, to add after the suggested paragraph. Kept on the link for the whole team."""
+    return inlinks.write_sentence(db, client, payload.source, payload.target, payload.anchor, user.email)
 
 
 class IgnoreIn(BaseModel):

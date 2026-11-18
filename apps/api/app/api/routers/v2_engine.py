@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -14,7 +16,11 @@ from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
 from app.models.client import Client
-from app.services import crawl_fallback, crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic
+from app.services import crawl_fallback, crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic, search_signals, winners
+from app.services.memo import Memo
+
+#: Who is winning for a term and page, kept for an hour: reading the winners' pages and comparing them is the slow, paid part.
+_WINNERS = Memo(size=64, ttl=3600.0)
 from app.services.monthly_review import last_complete_month, parse_month
 
 router = APIRouter(prefix="/v2/engine", tags=["v2 engine"])
@@ -41,7 +47,20 @@ def visibility_candidates_for(
     chosen = month or last_complete_month()
     try:
         parse_month(chosen)
-        return visibility_candidates.build(db, client, chosen, bucket_id)
+        found = visibility_candidates.build(db, client, chosen, bucket_id)
+        # When each listed page was last read by the site crawl, so a row can say its page was read long ago before anyone diagnoses it.
+        from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+
+        urls = {c["page"] for c in found["candidates"]}
+        read_on = dict(
+            db.query(FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.snapshot_date).filter(
+                FactCrawlPageSnapshot.client_id == client.id, FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot.normalized_url.in_(urls)
+            )
+        ) if urls else {}
+        for c in found["candidates"]:
+            day = read_on.get(c["page"])
+            c["page_crawled_on"] = day.isoformat() if day else None
+        return found
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except LookupError as exc:
@@ -225,6 +244,8 @@ class GrowthActionRequest(BaseModel):
     #: Leads page's own suggestions join the action so they appear once.
     focus: Literal["visibility", "traffic", "leads"] = "visibility"
     candidate_page: str | None = Field(default=None, max_length=2048)
+    #: The search the person selected. The results page read, and everything built from it, is this search's and no other's.
+    search: str | None = Field(default=None, max_length=400)
 
 
 def _month_or_last(month: str | None) -> str:
@@ -250,7 +271,12 @@ def topic_for(
     topic = growth_action.resolve_topic(db, client, month, search, page)
     if topic["keyword"] is None:
         return {**topic, "pages": None}
-    return {**topic, "pages": growth_action.topic_pages(db, client, month, topic["keyword"], include=page)}
+    term = " ".join(search.lower().split())
+    if term and not term.startswith("("):
+        # A search was selected: the pages listed are the ones that show for that search, not for the whole watchlist keyword.
+        signals = search_signals.for_search(db, client, term, pull=False)
+        return {**topic, "search": term, "pages": growth_action.topic_pages(db, client, month, term, include=page, signals=signals, exact=True)}
+    return {**topic, "search": None, "pages": growth_action.topic_pages(db, client, month, topic["keyword"], include=page)}
 
 
 @router.get("/topic-pages")
@@ -262,7 +288,7 @@ def topic_pages(
     month: str | None = None,
 ) -> dict:
     """The pages that show for a topic and the one to work on first, with the numbers behind the choice."""
-    return growth_action.topic_pages(db, client, _month_or_last(month), keyword)
+    return growth_action.topic_pages(db, client, _month_or_last(month), keyword, signals=search_signals.for_search(db, client, keyword, pull=False))
 
 
 @router.post("/growth-action")
@@ -296,8 +322,15 @@ def build_growth_action(
         ),
         evidence_for=lambda search, url: _evidence(db, client, month, search, url),
         extra_suggestions=extras,
+        signals_for=lambda search: search_signals.for_search(db, client, search),
+        planned_month=_next_month(month),
+        search=payload.search,
+        winners_for=lambda search, intent, url, page_type, own, questions: _WINNERS.get(
+            (str(client.id), search, url, date.today().isoformat(), intent.get("serp_date")),
+            lambda: winners.gather(db, client, search=search, intent=intent, page_url=url, page_type=page_type, own=own, questions=questions),
+        ),
     )
-    if bundle["ok"]:
+    if bundle["ok"] and bundle["parts"]:
         bundle["draft"] = growth_action.draft(bundle, _next_month(month))
     return bundle
 

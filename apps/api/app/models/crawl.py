@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -111,10 +111,41 @@ class FactCrawlPageSnapshot(Base):
     #: page without markup at the top.
     content_updated_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     content_updated_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: What kind of page this is (`app.decisions.action_context.classify_page`): product, category, service,
+    #: location, article, resource, homepage, about, contact, utility, landing or unknown. Null where the crawl
+    #: predates it; it is then worked out when asked for.
+    page_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    #: The page's body paragraphs in order, `[{heading, text}]`, without menus, header or footer. At most 60 a
+    #: page. Null where the crawl predates the capture or the page was not read.
+    paragraphs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    #: A fingerprint of `paragraphs`, and the crawl date on which it was first seen to differ from the crawl before.
+    content_hash: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    content_changed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: The paragraphs as they were before that change, kept for 30 days from `previous_replaced_on` so the change can be read.
+    previous_paragraphs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    previous_replaced_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PageParagraphVector(Base):
+    """The text vector of one body paragraph, kept by the paragraph's own text.
+
+    Keyed on a hash of the text and not on the page: the crawl replaces its pages every time, and a paragraph
+    that did not change must not be embedded again. Vectors no current page uses are removed after each crawl.
+    """
+
+    __tablename__ = "page_paragraph_vectors"
+    __table_args__ = (UniqueConstraint("client_id", "text_hash", name="uq_page_paragraph_vectors_grain"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clients.id"), nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(40), nullable=False)
+    #: 384 little-endian float32 values, L2-normalised, from the MiniLM model `text_embedding` pins.
+    vector: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class StagingSerAuditIssue(Base):

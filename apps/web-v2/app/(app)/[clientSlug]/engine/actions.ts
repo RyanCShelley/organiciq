@@ -114,12 +114,13 @@ export async function buildGrowthActionAction(
   page: string | null,
   focus: "visibility" | "traffic" | "leads",
   candidatePage: string,
+  search: string | null = null,
 ): Promise<GrowthActionBundle> {
   try {
     return await apiFetch<GrowthActionBundle>("/v2/engine/growth-action", {
       method: "POST",
       clientId,
-      body: { keyword, page, focus, candidate_page: candidatePage },
+      body: { keyword, page, focus, candidate_page: candidatePage, search },
     });
   } catch (error) {
     return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };

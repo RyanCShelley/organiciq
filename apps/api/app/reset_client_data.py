@@ -58,7 +58,7 @@ SYNCED = (
     "staging_ser_audit_issues", "staging_ser_audit_pages", "staging_ser_competitors", "staging_ser_keywords",
     "staging_ser_positions", "staging_ser_site_summary",
     "facts_bing_query_stats", "facts_crawl_internal_links", "facts_crawl_page_issues", "facts_crawl_page_schema",
-    "facts_crawl_page_snapshots", "facts_ga4_events", "facts_ga4_traffic", "facts_gsc_daily", "facts_gsc_pages",
+    "facts_crawl_page_snapshots", "page_paragraph_vectors", "facts_ga4_events", "facts_ga4_traffic", "facts_gsc_daily", "facts_gsc_pages",
     "facts_gsc_query_pages", "facts_ser_ai_checks", "facts_ser_ai_presence", "facts_ser_ai_prompts",
     "facts_ser_ai_search_prompts", "facts_ser_ai_tracker_stats", "facts_ser_backlink_pages",
     "facts_ser_competitor_keywords", "facts_ser_competitors", "facts_ser_domain_keywords", "facts_ser_keyword_metrics",

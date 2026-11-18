@@ -92,31 +92,47 @@ def test_a_link_to_a_duplicate_counts_as_a_link_to_the_real_page(client, db, cli
     assert target is None or BASE + "/blog/best-sunscreen" not in [s["source_url"] for s in target["suggestions"]]
 
 
-def test_ignoring_a_pair_or_a_page_removes_it_and_restoring_brings_it_back(client, db, client_a, admin_user):
+def links_to(client, client_a, admin_user, target):
+    found = [x for x in get(client, client_a, admin_user).json()["data"]["targets"] if x["target_url"] == target]
+    return {k["source_url"]: k for k in found[0]["suggestions"]} if found else None
+
+
+def test_a_link_keeps_its_status_and_chosen_text_and_an_ignored_page_leaves_the_list(client, db, client_a, admin_user):
     seed(db, client_a)
     h = client_header(client_a.id, admin_user.email)
     t, s = BASE + "/products/spf-30", BASE + "/blog/best-sunscreen"
+    assert links_to(client, client_a, admin_user, t)[s]["status"] == "todo"
+    assert client.post("/v2/inlinks/state", json={"target": t, "source": s, "anchor": "  mineral   sunscreen "}, headers=h).json() == {"status": "todo", "anchor": "mineral sunscreen"}
+    assert client.post("/v2/inlinks/state", json={"target": t, "source": s, "status": "added"}, headers=h).json() == {"status": "added", "anchor": "mineral sunscreen"}
+    link = links_to(client, client_a, admin_user, t)[s]
+    assert link["status"] == "added" and link["chosen_anchor"] == "mineral sunscreen", "an added link stays on its page with the words chosen for it"
+    client.post("/v2/inlinks/state", json={"target": t, "source": s, "status": "skipped"}, headers=h)
+    assert links_to(client, client_a, admin_user, t)[s]["status"] == "skipped", "a skipped link is shown as skipped, to be restored, not dropped"
+    client.post("/v2/inlinks/state", json={"target": t, "source": s, "status": "todo", "anchor": ""}, headers=h)
+    assert links_to(client, client_a, admin_user, t)[s]["status"] == "todo" and db.query(inlinks.InlinkState).count() == 0, "nothing left to remember, so no row"
+    assert client.post("/v2/inlinks/state", json={"target": t, "source": s, "status": "live"}, headers=h).status_code == 422, "only the live check can say a link is live"
     made = client.post("/v2/inlinks/ignore", json={"target": t, "source": s}, headers=h)
-    assert made.status_code == 200
-    data = get(client, client_a, admin_user).json()["data"]
-    assert all(x["target_url"] != t for x in data["targets"]) and data["summary"]["ignored"] == 1
+    assert links_to(client, client_a, admin_user, t)[s]["status"] == "skipped", "a pair ignored before statuses existed reads as skipped"
     assert client.delete(f"/v2/inlinks/ignore/{made.json()['id']}", headers=h).status_code == 200
-    assert any(x["target_url"] == t for x in get(client, client_a, admin_user).json()["data"]["targets"])
     whole = client.post("/v2/inlinks/ignore", json={"target": t}, headers=h).json()["id"]
-    assert all(x["target_url"] != t for x in get(client, client_a, admin_user).json()["data"]["targets"])
+    data = get(client, client_a, admin_user).json()["data"]
+    assert all(x["target_url"] != t for x in data["targets"]) and [i["target"] for i in data["ignored"]] == [t]
     client.delete(f"/v2/inlinks/ignore/{whole}", headers=h)
+    assert links_to(client, client_a, admin_user, t) is not None
 
 
-def test_checking_a_link_finds_it_live_records_it_and_stops_suggesting_it(client, db, client_a, admin_user, monkeypatch):
+def test_checking_a_link_finds_it_live_and_records_it_on_the_link(client, db, client_a, admin_user, monkeypatch):
     seed(db, client_a)
     h = client_header(client_a.id, admin_user.email)
     t, s = BASE + "/products/spf-30", BASE + "/blog/best-sunscreen"
+    client.post("/v2/inlinks/state", json={"target": t, "source": s, "status": "added", "anchor": "mineral sunscreen"}, headers=h)
     html = f'<html><body><nav><a href="/">Home</a></nav><p>Read about <a href="https://www.shop.example/products/spf-30/">our SPF 30 mineral sunscreen</a>.</p></body></html>'
     monkeypatch.setattr(inlinks, "read_page", lambda url, domain: Fetched(status=200, final_url=url, headers={}, body=html))
     out = client.post("/v2/inlinks/verify", json={"source": s, "target": t}, headers=h).json()
     assert out["found"] is True and out["anchor"] == "our SPF 30 mineral sunscreen" and out["checked"] is True
     data = get(client, client_a, admin_user).json()["data"]
-    assert data["summary"]["live"] == 1 and all(t != x["target_url"] for x in data["targets"]), "it is live now, so there is nothing left to suggest for this page"
+    link = links_to(client, client_a, admin_user, t)[s]
+    assert data["summary"]["live"] == 1 and link["status"] == "live" and link["live_anchor"] == "our SPF 30 mineral sunscreen" and link["checked_at"], "it stays on the page's list, marked live with the words found"
     monkeypatch.setattr(inlinks, "read_page", lambda url, domain: Fetched(status=200, final_url=url, headers={}, body="<html><body><a href='/other'>x</a></body></html>"))
     assert client.post("/v2/inlinks/verify", json={"source": BASE + "/blog/soap-guide", "target": t}, headers=h).json()["found"] is False
     monkeypatch.setattr(inlinks, "read_page", lambda url, domain: Fetched(status=404, final_url=url, headers={}, body=""))

@@ -96,6 +96,7 @@ def test_brand_searches_are_left_out_of_the_choice(db, client_a):
 
 
 # ── the bundle ───────────────────────────────────────────────────────────────
+# These use the article: a collection page is never given a question to answer at its top (test_growth_action_context).
 
 
 def fake_diagnosis(suggestions, prescriptions=(), skipped=()):
@@ -109,15 +110,28 @@ def sug(id_, title="t", steps=("do it",), evidence=()):
     return {"id": id_, "title": title, "why": "w", "steps": list(steps), "evidence": list(evidence), "confidence": "unconfirmed"}
 
 
-def build(db, client_a, diagnosis, page=None):
-    return ga.build(db, client_a, SEP, "natural sunscreen", page=page, diagnose=diagnosis, evidence_for=lambda s, u: {})
+def reading(primary, secondary=None, *, mixed=False, need=None, evidence=("7 of 10 results are of one kind",), **extra):
+    """A results-page reading as the model would return it, passed through the same checks."""
+    from app.decisions import serp_intent
+
+    raw = {"primary": primary, "secondary": secondary, "mixed": mixed, "confidence": "high", "evidence": list(evidence), "consumer_need": need, **extra}
+    return serp_intent._clean(raw, item_types=["organic"], serp_date="2026-10-01", labels=[])
+
+
+def build(db, client_a, diagnosis, page=None, **kw):
+    """The bundle's own mechanics, on a search read as informational. The intent-matched part is tested in test_growth_action_context."""
+    out = ga.build(db, client_a, SEP, "natural sunscreen", page=page, diagnose=diagnosis, evidence_for=lambda s, u: {},
+                   signals_for=lambda s: {"reading": reading("informational")}, **kw)
+    if out.get("parts"):
+        out["parts"] = [p for p in out["parts"] if p["id"] != "IM-1"]
+    return out
 
 
 def test_the_bundle_holds_the_core_parts_that_apply_and_the_extras_the_page_read_found(db, client_a):
     data(db, client_a)
     watch(db, client_a)
-    out = build(db, client_a, fake_diagnosis([sug("A-1"), sug("S-1"), sug("S-2"), sug("S-5"), sug("S-3"), sug("S-6")]), page=COLL)
-    assert out["ok"] and out["page"] == COLL and out["search"] == "natural sunscreen"
+    out = build(db, client_a, fake_diagnosis([sug("A-1"), sug("S-1"), sug("S-2"), sug("S-5"), sug("S-3"), sug("S-6")]), page=BLOG)
+    assert out["ok"] and out["page"] == BLOG and out["search"] == "natural sunscreen reviews"
     assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "S-2", "S-5"]
     assert [p["core"] for p in out["parts"]] == [True, True, True, False]
     assert [o["id"] for o in out["optional"]] == ["S-3"]  # offered to add; S-6 is answered by choosing the page
@@ -126,7 +140,7 @@ def test_the_bundle_holds_the_core_parts_that_apply_and_the_extras_the_page_read
 def test_a_core_part_with_nothing_to_do_is_named_and_not_padded_in(db, client_a):
     data(db, client_a)
     watch(db, client_a, prompt="")
-    out = build(db, client_a, fake_diagnosis([sug("S-5")], skipped=[{"id": "S-2", "reason": "No question-shaped search."}]), page=COLL)
+    out = build(db, client_a, fake_diagnosis([sug("S-5")], skipped=[{"id": "S-2", "reason": "No question-shaped search."}]), page=BLOG)
     assert [p["id"] for p in out["parts"]] == ["S-5"]
     assert {x["id"] for x in out["left_out"]} == {"A-1", "S-1", "S-2"}
 
@@ -134,37 +148,38 @@ def test_a_core_part_with_nothing_to_do_is_named_and_not_padded_in(db, client_a)
 def test_the_topics_paired_question_stands_in_for_a_core_part_the_page_read_could_not_make(db, client_a):
     data(db, client_a)
     watch(db, client_a)
-    out = build(db, client_a, fake_diagnosis([sug("S-1")], skipped=[{"id": "A-1", "reason": "No LLM visibility run has been done."}]), page=COLL)
+    out = build(db, client_a, fake_diagnosis([sug("S-1")], skipped=[{"id": "A-1", "reason": "No LLM visibility run has been done."}]), page=BLOG)
     by = {p["id"]: p for p in out["parts"]}
     assert by["A-1"]["title"] == "Answer “Best natural sunscreen for sensitive skin?” at the top of the page"
     assert "Best natural sunscreen for sensitive skin?" in " ".join(by["S-2"]["steps"])
     assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "S-2"]
 
 
-def test_a_rules_own_faq_markup_prescription_counts_as_the_faq_part(db, client_a):
+def test_faq_markup_is_offered_and_never_selected_for_the_person(db, client_a):
     data(db, client_a)
     watch(db, client_a)
     v7 = {"action_id": "V-7", "title": "Mark up the FAQ", "why": "It has one", "steps": ["Add FAQPage"], "evidence": []}
-    out = build(db, client_a, fake_diagnosis([sug("A-1"), sug("S-1")], prescriptions=[v7]), page=COLL)
-    assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "V-7"] and out["parts"][2]["confirmed_by_rule"] is True
+    out = build(db, client_a, fake_diagnosis([sug("A-1"), sug("S-1")], prescriptions=[v7]), page=BLOG)
+    assert [p["id"] for p in out["parts"]] == ["A-1", "S-1"], "markup is not a growth lever by default"
+    offered = next(p for p in out["optional"] if p["id"] == "V-7")
+    assert offered["confirmed_by_rule"] is True and offered["role"] == "optional"
 
 
-def test_a_page_that_does_not_show_for_the_topic_or_cannot_be_read_is_refused(db, client_a):
+def test_a_page_that_does_not_show_for_the_topic_is_refused(db, client_a):
     data(db, client_a)
     watch(db, client_a)
     assert "does not show for this topic" in build(db, client_a, fake_diagnosis([]), page="https://shop.example/other")["error"]
     unreadable = lambda s, u, r, e: {"read": {"ok": False, "error": "timed out"}}
-    assert "could not be read: timed out" in build(db, client_a, unreadable)["error"]
     assert "No page shows" in ga.build(db, client_a, SEP, "nothing here", page=None, diagnose=unreadable, evidence_for=lambda s, u: {})["error"]
 
 
 def test_the_draft_is_one_task_with_every_part_as_a_headed_checklist(db, client_a):
     data(db, client_a)
     watch(db, client_a, prompt="")
-    bundle = build(db, client_a, fake_diagnosis([sug("A-1", steps=("Write the answer",), evidence=("quoted",)), sug("S-1", steps=("Say it",))]), page=COLL)
+    bundle = build(db, client_a, fake_diagnosis([sug("A-1", steps=("Write the answer",), evidence=("quoted",)), sug("S-1", steps=("Say it",))]), page=BLOG)
     d = ga.draft(bundle, "2026-10")
-    assert d["kind"] == "growth_action" and d["rule_id"] == "GA" and d["search"] == "natural sunscreen" and d["page"] == COLL
-    assert d["title"] == "Growth action: /collections/spf for “natural sunscreen”"
+    assert d["kind"] == "growth_action" and d["rule_id"] == "GA" and d["search"] == "natural sunscreen" and d["page"] == BLOG
+    assert d["title"] == "Growth action: /blogs/sun for “natural sunscreen”"
     assert d["steps"] == ["# 1. Answer the question at the top", "Write the answer", "# 2. Use the phrasing people search", "Say it"]
     assert "2 parts" in d["why"] and "Answer the question at the top: quoted" in d["evidence"]
 
@@ -241,19 +256,19 @@ def test_the_route_returns_the_topic_and_its_pages(client, db, client_a, admin_u
     assert none["keyword"] is None and none["pages"] is None
 
 
-def test_every_rule_that_fired_is_in_the_action_and_replaces_its_unconfirmed_twin(db, client_a):
+def test_a_link_count_alone_does_not_make_a_task(db, client_a):
     data(db, client_a)
     watch(db, client_a, prompt="")
     v4 = {"action_id": "V-4", "title": "Add internal links to the page that owns “natural sunscreen”", "why": "0 links", "steps": ["Link from the donors"], "evidence": ["0 editorial inbound"]}
-    out = build(db, client_a, fake_diagnosis([sug("S-1")], prescriptions=[v4]), page=COLL)
-    assert [p["id"] for p in out["parts"]] == ["S-1", "V-4"]
-    v4_part = out["parts"][1]
-    assert v4_part["confirmed_by_rule"] is True and v4_part["name"] == "Add internal links"
+    out = build(db, client_a, fake_diagnosis([sug("S-1")], prescriptions=[v4]), page=BLOG)
+    assert [p["id"] for p in out["parts"]] == ["S-1"] and "V-4" not in [p["id"] for p in out["optional"]]
+    held = next(x for x in out["left_out"] if x["id"] == "V-4")
+    assert "how many links a page has is not a reason" in held["reason"] and "internal link tool" in held["reason"]
 
 
 def test_a_page_level_suggestion_from_traffic_or_leads_joins_the_action_when_it_is_the_candidates_page(db, client_a):
     data(db, client_a)
     watch(db, client_a, prompt="")
     leads_s = sug("L-S2", title="Check the way to an order", steps=("Look at the next step",))
-    out = ga.build(db, client_a, SEP, "natural sunscreen", page=COLL, diagnose=fake_diagnosis([sug("S-1")]), evidence_for=lambda s, u: {}, extra_suggestions=[leads_s])
+    out = build(db, client_a, fake_diagnosis([sug("S-1")]), page=BLOG, extra_suggestions=[leads_s])
     assert [p["id"] for p in out["parts"]] == ["S-1", "L-S2"] and out["parts"][1]["name"] == "Check the way to an order"

@@ -25,11 +25,12 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.decisions.action_context import OUTCOME_NAMES, crawl_outcome
 from app.decisions.catalog import VISIBILITY_ACTIONS, PageFacts, SectionFacts, _mentions
 from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.page_targets import LinkDonor
 from app.decisions.provisional import suggest as provisional_suggest
-from app.decisions.provisional import suggest_leads, suggest_traffic
+from app.decisions.provisional import _tokens, suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
 from app.ingestion.crawler.fetch import BOT_NAME, REFUSAL_STATUSES, challenge_reason
@@ -88,6 +89,9 @@ class Fetched:
     #: Counts the crawl measured over the whole page, which the short rebuilt page cannot show.
     word_count: int | None = None
     conversion_elements: int | None = None
+    #: For a page rebuilt from the crawl: what the live read came back as (an `action_context` outcome), and the crawl's date.
+    live_outcome: str = ""
+    crawl_date: str = ""
 
 
 def _host(value: str) -> str:
@@ -269,6 +273,26 @@ def unreadable_reason(fetched: Fetched, parsed: ParsedPage) -> str | None:
     return None
 
 
+def outcome_of(fetched: Fetched, parsed: ParsedPage) -> dict[str, Any]:
+    """What the read came back as, in one category, and which copy of the page every finding stands on.
+
+    A page rebuilt from the crawl keeps the live read's outcome: the crawl's copy is evidence, but it is older
+    and partial, and the live refusal is still a fact about the site.
+    """
+    if fetched.source != "live":
+        kind = fetched.live_outcome or "other"
+        return {"outcome": kind, "outcome_name": OUTCOME_NAMES[kind], "evidence_source": "crawl", "crawl_date": fetched.crawl_date or None, "usable": True}
+    challenged = challenge_reason(fetched.status, fetched.headers, fetched.body[:3000]) is not None
+    empty = fetched.status < 400 and not parsed.title and not parsed.h1 and parsed.word_count == 0
+    kind = crawl_outcome(status=fetched.status, challenged=challenged, empty=empty)
+    return {"outcome": kind, "outcome_name": OUTCOME_NAMES[kind], "evidence_source": "live", "crawl_date": None, "usable": kind == "read"}
+
+
+def _failed_read(error: str) -> dict[str, Any]:
+    kind = crawl_outcome(status=None, error=error)
+    return {"outcome": kind, "outcome_name": OUTCOME_NAMES[kind], "evidence_source": "none", "crawl_date": None, "usable": False}
+
+
 def read_record(fetched: Fetched) -> dict[str, Any]:
     """What came back, shown beside any finding that could not be made: status, the headers that matter, size, and the first words of the body."""
     keep = ("server", "content-type", "x-robots-tag", "location", "sg-captcha", "cf-mitigated")
@@ -377,12 +401,14 @@ def diagnose(
         fetched = read_page(url, client_domain, fetch)
     except PageUnreadable as exc:
         result["read"]["error"] = str(exc)
+        result["read"].update(_failed_read(str(exc)))
         return result
 
     result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
     if fetched.source != "live":
         result["read"]["source"], result["read"]["source_note"] = fetched.source, fetched.source_note
     parsed = parse_fetched(fetched)
+    result["read"].update(outcome_of(fetched, parsed))
     blocked = unreadable_reason(fetched, parsed)
     if blocked:
         result["read"]["blocked"] = blocked
@@ -435,6 +461,19 @@ def diagnose(
         "h1": parsed.h1,
         "word_count": parsed.word_count,
         "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
+        # Words of the search the page does not use anywhere we read: its title, description, headings and the paragraph under each.
+        "search_terms_missing": sorted(
+            _tokens(search) - _tokens(" ".join([parsed.title or "", parsed.description or "", parsed.h1 or ""] + [f"{sec.heading} {sec.first_paragraph}" for sec in parsed.sections]))
+        ),
+        "has_faq": facts.has_faq_section or facts.has_faq_schema,
+        # The page as an outline, for setting beside the pages that are winning for the term.
+        "outline": {
+            "title": parsed.title, "h1": parsed.h1, "word_count": parsed.word_count,
+            "sections": [{"heading": sec.heading, "text": " ".join(sec.first_paragraph.split())[:220], "has_table": sec.has_table, "has_list": sec.has_list} for sec in parsed.sections[:25]],
+            "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
+            "faq_questions": len(parsed.faq_questions), "faq_list": [" ".join(q.split())[:200] for q in parsed.faq_questions[:15]],
+            "conversion_elements": parsed.conversion_elements,
+        },
     }
     return result
 
@@ -467,12 +506,14 @@ def diagnose_page(
         fetched = read_page(url, client_domain, fetch)
     except PageUnreadable as exc:
         result["read"]["error"] = str(exc)
+        result["read"].update(_failed_read(str(exc)))
         return result
 
     result["read"].update(ok=True, status=fetched.status, final_url=fetched.final_url, received=read_record(fetched))
     if fetched.source != "live":
         result["read"]["source"], result["read"]["source_note"] = fetched.source, fetched.source_note
     parsed = parse_fetched(fetched)
+    result["read"].update(outcome_of(fetched, parsed))
     blocked = unreadable_reason(fetched, parsed)
     if blocked:
         result["read"]["blocked"] = blocked

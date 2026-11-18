@@ -579,6 +579,12 @@ class FactSerpFeature(Base):
     location_code: Mapped[int] = mapped_column(Integer, nullable=False, default=2840)
     item_types: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     holders: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The top organic results as pulled: `[{rank, url, domain, title, snippet}]`. None for a pull made before these were kept.
+    results: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    #: The reading of intent made from this pull (`app.decisions.serp_intent`), so one pull is read once.
+    reading: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The "People also ask" questions on the page as pulled. None for a pull made before these were kept; an empty list when the page had none.
+    questions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="dataforseo")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
