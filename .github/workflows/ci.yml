@@ -15,8 +15,11 @@ on:
     branches: [main]
   pull_request:
 
+# A pull request's runs are grouped by its branch and a push's by its ref, and the two never share a group.
+# Grouped by ref alone, a pull request run that started after its merge landed in main's group and cancelled
+# main's own run, which Railway then reported as a failed check suite.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
