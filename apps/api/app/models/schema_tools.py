@@ -107,6 +107,9 @@ class InlinkState(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     anchor: Mapped[str | None] = mapped_column(Text, nullable=True)
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: The sentence written to carry this link, and the link text it was written around. Shared by everyone on the client.
+    sentence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sentence_anchor: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -7,6 +7,7 @@ parallel period is to diff the two before anything is switched over.
 
 from __future__ import annotations
 
+import hashlib
 import asyncio
 from urllib.parse import urlsplit
 import logging
@@ -18,6 +19,7 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.decisions.action_context import classify_page
 from app.ingestion.crawler.fetch import (
     CrawledPage,
     USER_AGENT,
@@ -190,9 +192,60 @@ def _snapshot_rows(
                 "content_updated_source": (
                     parsed.content_updated_source if parsed is not None else None
                 ),
+                "page_type": classify_page(
+                    page.normalized_url,
+                    schema_types=[b.schema_type for b in parsed.schema_blocks if b.schema_type] if parsed else None,
+                    title=title or None,
+                    h1=(parsed.h1 if parsed else None) or None,
+                )["type"],
+                # Same rule again: only from a page that was read.
+                "paragraphs": (
+                    list(parsed.paragraphs)
+                    if parsed is not None
+                    and page.status_code is not None
+                    and 200 <= page.status_code < 300
+                    else None
+                ),
             }
         )
+    for row in rows:
+        row["content_hash"] = content_hash(row["paragraphs"])
     return rows
+
+
+#: How long the version of a page before its last change is kept.
+PREVIOUS_KEPT_DAYS = 30
+
+
+def content_hash(paragraphs: list[dict[str, Any]] | None) -> str | None:
+    """A fingerprint of a page's body text. None for a page that was not read: unknown, not empty."""
+    if paragraphs is None:
+        return None
+    return hashlib.sha1("\n".join(p.get("text") or "" for p in paragraphs).encode("utf-8")).hexdigest()
+
+
+def carry_changes(rows: list[dict[str, Any]], before: dict[str, Any], *, today: date) -> None:
+    """Set each new row's change history from the row it replaces.
+
+    The crawl replaces its pages whole, so what was there has to be read first. A page whose body differs from
+    last time is dated today and keeps the version it replaced; that earlier version is dropped 30 days on.
+    A page seen for the first time, or not read this time, has no change to report.
+    """
+    for row in rows:
+        old = before.get(row["normalized_url"])
+        row["content_changed_on"] = row["previous_paragraphs"] = row["previous_replaced_on"] = None
+        if old is None:
+            continue
+        if row["content_hash"] is None:
+            # Not read this time. What was known stands; a failed read is not a change to the page.
+            row["content_hash"], row["paragraphs"] = old.content_hash, old.paragraphs
+        changed = old.content_hash is not None and row["content_hash"] is not None and row["content_hash"] != old.content_hash
+        if changed:
+            row["content_changed_on"], row["previous_paragraphs"], row["previous_replaced_on"] = today, old.paragraphs, today
+        else:
+            row["content_changed_on"] = old.content_changed_on
+            if old.previous_replaced_on and (today - old.previous_replaced_on).days <= PREVIOUS_KEPT_DAYS:
+                row["previous_paragraphs"], row["previous_replaced_on"] = old.previous_paragraphs, old.previous_replaced_on
 
 
 def _schema_rows(client_id: Any, result: CrawlResult, *, snapshot_date: date) -> list[dict[str, Any]]:
@@ -465,6 +518,14 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
 
         snapshot_date = date.today()
         rows = _snapshot_rows(job.client_id, result, snapshot_date=snapshot_date)
+        before = {
+            r.normalized_url: r
+            for r in db.query(
+                FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.content_hash, FactCrawlPageSnapshot.paragraphs,
+                FactCrawlPageSnapshot.content_changed_on, FactCrawlPageSnapshot.previous_paragraphs, FactCrawlPageSnapshot.previous_replaced_on,
+            ).filter(FactCrawlPageSnapshot.client_id == job.client_id, FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY)
+        }
+        carry_changes(rows, before, today=snapshot_date)
         # A full replacement per crawl: a page removed from the site has to
         # disappear, or the engine keeps reporting on URLs that no longer exist.
         db.query(FactCrawlPageSnapshot).filter(
@@ -473,6 +534,10 @@ def run_site_crawl_job(db: Session, job: SyncJob) -> SyncJob:
         ).delete(synchronize_session=False)
         for batch in _chunked(rows, UPSERT_BATCH_SIZE):
             db.execute(insert(FactCrawlPageSnapshot).values(batch))
+        # Vectors of paragraphs no page holds any more go with them. New ones are worked out when links are next suggested.
+        from app.services import paragraph_vectors
+
+        paragraph_vectors.prune(db, job.client_id, {paragraph_vectors.text_hash(p["text"]) for r in rows for p in (r["paragraphs"] or [])})
 
         # Schema is a full replacement per crawl: a block removed from a page
         # has to disappear, and there is no stable key to upsert a block on.

@@ -93,8 +93,14 @@ def _title_case(phrase: str) -> str:
     if not words:
         return phrase
     out: list[str] = []
+    # A title written all in capitals is shouting, not a run of acronyms, so its words are still recased.
+    shouting = phrase.upper() == phrase
     for i, w in enumerate(words):
         stripped = re.sub(r"[^A-Za-z0-9]", "", w)
+        # A word the page writes with capitals past its first letter ("FSA/HSA", "SPF", "iPhone") is kept as written.
+        if not shouting and any(ch.isupper() for ch in w[1:]):
+            out.append(w)
+            continue
         if stripped.upper() in acronym_upper:
             # Preserve the canonical casing of the acronym.
             preserved = acronym_upper[stripped.upper()]
@@ -181,7 +187,8 @@ def build_candidates(
     if target_title:
         short = _shorten_to_anchor(target_title, max_words=6)
         if short and not _is_too_generic(short):
-            partial.append(short.lower())
+            # As the title writes it: lowering it here loses "FSA/HSA" and "SPF" for good.
+            partial.append(short)
 
     # 2. Seed / hub label as partial match (pulls in the canonical topic term).
     if matched_seed:
@@ -201,7 +208,7 @@ def build_candidates(
 
     # 4. Cluster keywords combined — gives a "topic + context" anchor.
     #    Pick the first 2 keywords that are not already in the partials.
-    joined_so_far = " ".join(partial)
+    joined_so_far = " ".join(partial).lower()
     extra_kw: list[str] = []
     for kw in cluster_keywords:
         k = kw.strip()
@@ -218,9 +225,9 @@ def build_candidates(
     partial_unique: list[str] = []
     for p in partial:
         norm = re.sub(r"\s+", " ", p).strip(" ,.:;-—–'\"")
-        if not norm or norm in seen or _is_too_generic(norm):
+        if not norm or norm.lower() in seen or _is_too_generic(norm):
             continue
-        seen.add(norm)
+        seen.add(norm.lower())
         partial_unique.append(norm)
 
     branded: list[str] = []

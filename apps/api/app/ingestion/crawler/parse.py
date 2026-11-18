@@ -179,6 +179,10 @@ class ParsedPage:
     #: so. None where none of them carried a date — "unknown", not "never".
     content_updated_on: date | None = None
     content_updated_source: str | None = None
+    #: The page's own body text, paragraph by paragraph in document order, each with the heading it sits under:
+    #: `[{"heading": ..., "text": ...}]`. Menus, headers and footers are left out. Internal link suggestions are
+    #: made from these (which paragraph a link belongs in), and a change between crawls is read from them.
+    paragraphs: list[dict[str, Any]] = field(default_factory=list)
 
 
 #: A heading that reads as a question. Matches the engine's `is_question`
@@ -251,6 +255,75 @@ def extract_sections(doc: Any) -> list[PageSection]:
     if pending is not None:
         sections.append(pending)
     return [s for s in sections if s.heading]
+
+
+#: A page keeps at most this many paragraphs, and none shorter than this many words: a large site must not turn
+#: the crawl into a copy of itself, and a five-word line is a label, not a place for a link.
+MAX_PARAGRAPHS = 60
+MIN_PARAGRAPH_WORDS = 8
+MAX_PARAGRAPH_CHARS = 1500
+_NOT_BODY = frozenset({"aside", "form", "button", "nav", "header", "footer", "menu", "select", "label"})
+#: The names a block of customer reviews goes by in a page's markup: the word itself, or a review app's own prefix
+#: (Judge.me, Yotpo, Stamped, Okendo, Loox, Shopify Product Reviews, Trustpilot). "preview" is not a review.
+_REVIEW_BLOCK = re.compile(r"(?<![a-z])(reviews?|testimonials?|jdgm|judgeme|yotpo|stamped|okendo|loox|spr|trustpilot)(?![a-z])", re.I)
+_REVIEW_HEADING = re.compile(r"\b(reviews?|testimonials?|customer feedback|(what|why) (our |real )?(customers|clients|people|families) (are saying|say|think|love))\b", re.I)
+#: The page's own frame. A class on one of these describes the whole page ("has-reviews"), not the block a paragraph is in.
+_PAGE_FRAME = frozenset({"html", "body", "main"})
+
+
+def review_heading(heading: str | None) -> bool:
+    """Whether a heading introduces what customers wrote ("Customer Reviews", "What our customers say")."""
+    return bool(_REVIEW_HEADING.search(heading or ""))
+
+
+def _in_review_block(node: Any) -> bool:
+    for a in [node, *node.iterancestors()]:
+        if str(getattr(a, "tag", "") or "").lower() in _PAGE_FRAME:
+            break
+        if (a.get("itemprop") or "").lower() == "review" or (a.get("itemtype") or "").rstrip("/").lower().endswith("/review"):
+            return True
+        if _REVIEW_BLOCK.search(f"{a.get('class') or ''} {a.get('id') or ''}"):
+            return True
+    return False
+
+
+def extract_paragraphs(root: Any) -> list[dict[str, Any]]:
+    """The body's paragraphs in document order, each with the heading above it.
+
+    Called after the menus, header and footer have been removed from the tree. A list item counts when it
+    holds a sentence of its own and no paragraph or list inside it (which would be read twice).
+
+    Two things are noted on a paragraph when they are true of it: `review`, that a customer wrote it and not the site
+    (it sits in a reviews block or under a reviews heading), and `links`, the words in it that are already links.
+    """
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    heading = ""
+    for node in root.iter():
+        tag = str(getattr(node, "tag", "") or "").lower()
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            heading = " ".join((node.text_content() or "").split())[:200]
+            continue
+        if tag not in {"p", "li", "blockquote"}:
+            continue
+        if tag != "p" and node.xpath(".//p|.//ul|.//ol"):
+            continue
+        if any(str(getattr(a, "tag", "") or "").lower() in _NOT_BODY for a in node.iterancestors()):
+            continue
+        text = " ".join((node.text_content() or "").split())
+        if len(_WORD.findall(text)) < MIN_PARAGRAPH_WORDS or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        kept: dict[str, Any] = {"heading": heading, "text": text[:MAX_PARAGRAPH_CHARS]}
+        if _in_review_block(node) or review_heading(heading):
+            kept["review"] = True
+        linked = [t for t in (" ".join((a.text_content() or "").split())[:200] for a in node.iter("a") if a.get("href")) if t]
+        if linked:
+            kept["links"] = linked[:20]
+        found.append(kept)
+        if len(found) >= MAX_PARAGRAPHS:
+            break
+    return found
 
 
 def extract_faq_questions(doc: Any, schema_blocks: list[SchemaBlock]) -> list[str]:
@@ -645,6 +718,7 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
                 node.getparent().remove(node)
     body = doc.find("body")
     word_count = len(_WORD.findall((body if body is not None else doc).text_content() or ""))
+    paragraphs = extract_paragraphs(body if body is not None else doc)
 
     return ParsedPage(
         title=title,
@@ -668,4 +742,5 @@ def parse_page(*, url: str, body: str, headers: dict[str, str] | None = None) ->
         says_not_found=bool(_NOT_FOUND.search(title) or _NOT_FOUND.search(h1)),
         content_updated_on=content_updated_on,
         content_updated_source=content_updated_source,
+        paragraphs=paragraphs,
     )
