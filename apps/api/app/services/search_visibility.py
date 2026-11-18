@@ -167,6 +167,8 @@ def build(db: Session, client: Client, start: date, end: date, bucket_id: str | 
         distribution["now"][band(r["google"]["position"])] += 1
         distribution["before"][band(r["google"]["position_before"])] += 1
     ranked = [r for r in rows if r["move"] is not None and abs(r["move"]) >= 0.5]
+    # The newest day Search Console has reported for this client, whatever range is on screen.
+    google_through = db.query(func.max(FactGscQueryPage.date)).filter(FactGscQueryPage.client_id == client.id).scalar()
     return {
         "from": start.isoformat(), "to": end.isoformat(),
         "buckets": [{"id": str(b.id), "name": b.name} for b in db.query(WatchlistBucket).filter(WatchlistBucket.client_id == client.id).order_by(WatchlistBucket.sort_order)],
@@ -178,7 +180,7 @@ def build(db: Session, client: Client, start: date, end: date, bucket_id: str | 
         "losers": sorted((r for r in ranked if r["move"] < 0), key=lambda r: r["move"])[:MOVERS_SHOWN],
         "terms": rows,
         "updates": google_updates.between(db, start, end),
-        "sources": {"ser_tracked": len(ser), "bing_terms": len([1 for v in bing.values() if (v.get("impressions") or 0) > 0]), "ser_from": next((v["from"] for v in ser.values()), None), "ser_to": next((v["to"] for v in ser.values()), None)},
+        "sources": {"google_through": google_through.isoformat() if google_through else None, "ser_tracked": len(ser), "bing_terms": len([1 for v in bing.values() if (v.get("impressions") or 0) > 0]), "ser_from": next((v["from"] for v in ser.values()), None), "ser_to": next((v["to"] for v in ser.values()), None)},
     }
 
 

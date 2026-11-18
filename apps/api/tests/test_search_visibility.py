@@ -76,6 +76,13 @@ def test_terms_show_each_source_and_a_move_and_flag_where_the_sources_disagree(c
     assert by["tanning oil"]["google"]["position"] is None and by["tanning oil"]["band"] == "none", "3 impressions say nothing"
 
 
+def test_it_says_where_search_console_data_ends(client, db, client_a, admin_user):
+    """The range on screen can run past the newest day Google has reported; the report names that day."""
+    assert get(client, client_a, admin_user).json()["sources"]["google_through"] is None
+    seed(db, client_a)
+    assert get(client, client_a, admin_user).json()["sources"]["google_through"] == "2026-10-20"
+
+
 def test_the_headline_distribution_and_movers(client, db, client_a, admin_user):
     seed(db, client_a)
     out = get(client, client_a, admin_user).json()

@@ -32,7 +32,7 @@ export type Sv = {
   losers: SvTerm[];
   terms: SvTerm[];
   updates: SvUpdate[];
-  sources: { ser_tracked: number; bing_terms: number; ser_from: string | null; ser_to: string | null };
+  sources: { google_through: string | null; ser_tracked: number; bing_terms: number; ser_from: string | null; ser_to: string | null };
 };
 
 export type SvDetail = {

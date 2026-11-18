@@ -175,7 +175,7 @@ export function SearchVisibility({ client, from, to, bucket, data, error }: { cl
             </select>
           </label>
         ) : null}
-        <span className="pb-2 text-xs text-[var(--text-tertiary)]">{day(from)} to {day(to)}</span>
+        <span className="pb-2 text-xs text-[var(--text-tertiary)]">{day(from)} to {day(to)}{data ? (data.sources.google_through ? `. Search Console data ends ${day(data.sources.google_through)}.` : ". No Search Console data yet.") : ""}</span>
       </div>
 
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
