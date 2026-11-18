@@ -50,18 +50,17 @@ _PROVIDER_SOURCES: dict[IntegrationProvider, tuple[str, ...]] = {
 }
 
 
-#: How many days behind "today" a source's data actually is.
+#: How many days behind "today" each source is asked for.
 #:
-#: Search Console finalises a day two to three days late. The daily sync asked
-#: every source for the last three days ending today, so every Search Console
-#: window sat entirely inside that lag and came back empty — for every client,
-#: every day. The job then recorded success and advanced the watermark to
-#: today, so the next run asked for the same empty window, and the one after
-#: that. SMA's facts stopped on 24 September and nothing noticed for fifteen
-#: days.
+#: Search Console is asked for fresh data (see `dataState` in the GSC client),
+#: which reaches yesterday on most days; a finalised day arrives two to three
+#: days late. A window that sits wholly inside whatever lag remains comes back
+#: empty, and the pipeline then leaves the watermark where the facts stop, so a
+#: late day is asked for again on the next run. RESTATEMENT_OVERLAP_DAYS covers
+#: the days Google is still revising.
 SOURCE_LAG_DAYS: dict[str, int] = {
-    "gsc_pages": 3,
-    "gsc_queries": 3,
+    "gsc_pages": 1,
+    "gsc_queries": 1,
     # GA4 keeps revising the current day; yesterday is the first stable one.
     "ga4": 1,
 }

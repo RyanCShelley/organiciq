@@ -52,6 +52,10 @@ def query_search_analytics(
                 "dimensions": dimensions,
                 "rowLimit": row_limit,
                 "startRow": start_row,
+                # Fresh days as well as finalised ones. Google finalises a day two to three days late and
+                # may revise a fresh day until then; the daily sync re-pulls its last days, so a revised
+                # day is overwritten.
+                "dataState": "all",
             }
             res = post_json(
                 client,

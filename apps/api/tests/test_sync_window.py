@@ -6,6 +6,10 @@ days ending today; Search Console finalises a day two to three days late, so
 that window sat entirely inside the lag, came back empty for every client every
 day, was recorded as success, and pushed the watermark to today. The next run
 asked for the same empty window. Nothing could ever catch up.
+
+Search Console is now asked for fresh data, so the window ends yesterday. The
+guards from that bug stay: the window never ends today, and a client that is
+behind is asked for the days it is missing.
 """
 
 from __future__ import annotations
@@ -43,15 +47,6 @@ def test_the_window_stops_short_of_search_consoles_lag(db, client_a):
     _start, end = _window_for_source(db, client_a.id, "gsc_pages", 3)
     assert end == TODAY - timedelta(days=SOURCE_LAG_DAYS["gsc_pages"])
     assert end < TODAY
-
-
-def test_the_old_window_would_have_been_entirely_inside_the_lag():
-    """Three days ending today, against a three-day lag. Not one requested
-    day could have returned anything."""
-    old_start, old_end = TODAY - timedelta(days=2), TODAY
-    first_day_with_data = TODAY - timedelta(days=SOURCE_LAG_DAYS["gsc_pages"])
-    assert old_start > first_day_with_data
-    assert old_end > first_day_with_data
 
 
 def test_a_client_that_fell_behind_catches_up(db, client_a):
