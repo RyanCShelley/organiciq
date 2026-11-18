@@ -192,7 +192,7 @@ export function GrowthActionPlanner({
                     {p.url === page ? <span className="rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-semibold">this candidate</span> : null}
                     {inPlan(p.url) ? <span className="text-xs font-semibold text-green-800">✓ in the plan</span> : null}
                     <span className="text-xs tabular-nums">
-                      {num(p.impressions)} impressions · position {p.position ?? "–"} · title {p.title_says_topic ? "says" : "does not say"} the topic
+                      {num(p.impressions)} impressions · position {p.position ?? "–"} · {p.title_read === false ? "title not read (the site turned our crawler away)" : `title ${p.title_says_topic ? "says" : "does not say"} the topic`}
                     </span>
                   </li>
                 ))}

@@ -32,7 +32,8 @@ from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.provisional import suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
 from app.decisions.targets import Candidate, ScoredCandidate
-from app.ingestion.crawler.fetch import challenge_reason
+from app.ingestion.crawler.fetch import BOT_NAME, REFUSAL_STATUSES, challenge_reason
+from app.ingestion.crawler.fetch import USER_AGENT as CRAWLER_USER_AGENT
 from app.ingestion.crawler.parse import _NOINDEX, ParsedPage, parse_page
 from app.ingestion.crawler.safe_http import PublicOnlyTransport
 from app.services.page_eligibility import classify_page_url
@@ -40,7 +41,8 @@ from app.services.target_signals import _declares_faq, _entity_properties, _has_
 
 MAX_BODY_BYTES = 3_000_000
 TIMEOUT_SECONDS = 20.0
-USER_AGENT = "OrganicIQ-page-diagnostic/1.0"
+#: One name for the site crawl and this reader, so a host has one thing to allow and a page is not refused by one and read by the other.
+USER_AGENT = CRAWLER_USER_AGENT
 
 #: Why a rule that returned nothing returned nothing, in terms of what this reader cannot see.
 _NOT_JUDGED = {
@@ -256,6 +258,12 @@ def unreadable_reason(fetched: Fetched, parsed: ParsedPage) -> str | None:
     who = challenge_reason(fetched.status, fetched.headers, fetched.body[:3000])
     if who:
         return f"The site answered our reader with {who} instead of the page."
+    if fetched.source == "live" and fetched.status in REFUSAL_STATUSES:
+        # Who asked, not what the page is. Read as a page, this was a live services page reviewed as "403 Forbidden", three words, no way to enquire.
+        return (
+            f"The site refused our reader (HTTP {fetched.status}). That is a host turning a bot away, "
+            f"not proof the page is broken: open it in a browser to check, and ask the host to allow {BOT_NAME}."
+        )
     if fetched.status < 400 and not parsed.title and not parsed.h1 and parsed.word_count == 0:
         return f"The response had no title, no heading and no text ({fetched.size or len(fetched.body):,} bytes), so it is not a readable page."
     return None

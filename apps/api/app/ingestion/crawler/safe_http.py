@@ -31,6 +31,9 @@ import httpx
 #: alternates are the usual staging ports and cost nothing to allow.
 ALLOWED_PORTS = frozenset({80, 443, 8080, 8443})
 
+#: Hostnames one transport keeps a connection pool open for at a time.
+MAX_POOLS = 32
+
 
 class UnsafeDestination(httpx.TransportError):
     """The address is not one the crawler may contact.
@@ -75,7 +78,29 @@ async def _resolve(host: str, port: int) -> list[str]:
 
 class PublicOnlyTransport(httpx.AsyncBaseTransport):
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None, **kwargs) -> None:
-        self._inner = inner or httpx.AsyncHTTPTransport(**kwargs)
+        self._inner = inner
+        self._kwargs = kwargs
+        #: One connection pool per name. Requests go out addressed to the checked IP, so a single
+        #: pool keys its connections by IP: nashvillehomeorganizers.com and its www share one at
+        #: Cloudflare, the second name rode the TLS connection opened for the first, and
+        #: Cloudflare answers 403 to a Host that does not match the connection's SNI. Every page
+        #: of that site but the home page came back "forbidden".
+        self._pools: dict[tuple[str, str, int], httpx.AsyncBaseTransport] = {}
+        self._retired: list[httpx.AsyncBaseTransport] = []
+
+    def _pool(self, scheme: str, host: str, port: int) -> httpx.AsyncBaseTransport:
+        if self._inner is not None:
+            return self._inner
+        key = (scheme, host.lower(), port)
+        pool = self._pools.get(key)
+        if pool is None:
+            pool = self._pools[key] = httpx.AsyncHTTPTransport(**self._kwargs)
+            # A crawl stays on one site; the rest are redirect targets. Drop the oldest rather
+            # than hold idle connections to every host a site ever pointed at.
+            if len(self._pools) > MAX_POOLS:
+                oldest = next(iter(self._pools))
+                self._retired.append(self._pools.pop(oldest))
+        return pool
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         url = request.url
@@ -120,11 +145,15 @@ class PublicOnlyTransport(httpx.AsyncBaseTransport):
                     extensions={**request.extensions, "sni_hostname": host},
                 )
             try:
-                return await self._inner.handle_async_request(attempt)
+                return await self._pool(url.scheme, host, port).handle_async_request(attempt)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 last_error = exc
         assert last_error is not None
         raise last_error
 
     async def aclose(self) -> None:
-        await self._inner.aclose()
+        if self._inner is not None:
+            await self._inner.aclose()
+        pools, self._pools, self._retired = [*self._pools.values(), *self._retired], {}, []
+        for pool in pools:
+            await pool.aclose()

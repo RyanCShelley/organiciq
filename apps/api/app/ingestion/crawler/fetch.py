@@ -138,6 +138,10 @@ class RobotsUnreachable(Exception):
     """robots.txt exists in principle but could not be fetched — not the same as absent."""
 
 USER_AGENT = "OrganicIQBot/1.0 (+https://smamarketing.com/organiciq; SEO monitoring)"
+#: The short name a host would allow, and the one people are told about.
+BOT_NAME = USER_AGENT.split(" ")[0]
+#: A host saying "not you". Unlike 404 or 500 these describe who asked, not the page.
+REFUSAL_STATUSES = frozenset({401, 403})
 
 DEFAULT_PAGE_LIMIT = 500
 #: Ceiling no per-client setting may exceed. A faceted site is effectively
@@ -232,6 +236,15 @@ _CHALLENGE_BODY_MARKERS = (
 )
 
 
+def refused_by_name(status_code: int, headers, body_start: str = "") -> bool:
+    """A plain 401 or 403 with no vendor's challenge behind it: the host turning our reader away.
+
+    The crawler asks under one name only, its own. A refusal is recorded as
+    a refusal and the page is not asked for again under any other name.
+    """
+    return status_code in REFUSAL_STATUSES and challenge_reason(status_code, headers, body_start) is None
+
+
 def challenge_reason(status_code: int, headers, body_start: str = "") -> str | None:
     """Who is challenging us, when a response is a bot challenge and not a page.
 
@@ -283,6 +296,8 @@ class CrawledPage:
     #: this is us being turned away, not the page being broken, and it must not
     #: be stored as a status code or counted as a page the site has.
     challenged_by: str | None = None
+    #: The host answered a plain 401 or 403: it turned our reader away.
+    refused_status: int | None = None
 
     @property
     def indexable(self) -> bool:
@@ -333,6 +348,9 @@ class CrawlResult:
     #: Pages the host answered with a bot challenge, and whose challenge it was.
     challenged_pages: int = 0
     challenged_by: str | None = None
+    #: Pages we expected (the home page, or a page the sitemap lists) that the
+    #: host refused. Us being turned away, not broken pages.
+    refused_pages: int = 0
     #: Whether the site asked us to slow down at any point.
     throttled: bool = False
     #: `Crawl-delay` from robots.txt, when the site declares one.
@@ -673,11 +691,17 @@ async def crawl_site(
         edges: dict[tuple[str, str], InternalLink] = {}
         pages: dict[str, CrawledPage] = {}
         semaphore = asyncio.Semaphore(concurrency)
+        # The pages something vouches for: the roots and what the sitemaps list.
+        expected_urls = set(queued)
 
         async def fetch_one(url: str) -> CrawledPage:
             async with semaphore:
                 return await _fetch_page(
-                    client, url, robots if respect_robots else None, throttle
+                    client,
+                    url,
+                    robots if respect_robots else None,
+                    throttle,
+                    normalize_url(url) in expected_urls,
                 )
 
         while queue and len(pages) < page_limit:
@@ -789,6 +813,11 @@ async def crawl_site(
         challenges = [p.challenged_by for p in result.pages if p.challenged_by]
         result.challenged_pages = len(challenges)
         result.challenged_by = challenges[0] if challenges else None
+        result.refused_pages = sum(
+            1 for p in result.pages if p.refused_status is not None and p.status_code is None
+        )
+        if result.refused_pages:
+            logger.warning("%s refused %s on %d expected pages", host, BOT_NAME, result.refused_pages)
         result.throttled = throttle.throttled
         if result.rate_limited_pages:
             logger.warning(
@@ -844,6 +873,41 @@ async def _fetch_page(
     url: str,
     robots: robotparser.RobotFileParser | None,
     throttle: Throttle | None = None,
+    expected: bool = False,
+) -> CrawledPage:
+    """Fetch one page, under our own name only.
+
+    `expected` says the page should exist: it is the home page or the sitemap
+    lists it. A refusal of such a page is recorded as us being turned away,
+    with no status, exactly as a rate limit is. Stored as a 403 it becomes
+    "this page is broken", which is how a live services page was reviewed as a
+    three-word error page. A refused page nothing vouches for keeps its
+    status: /wp-admin answering 401 is the site working.
+    """
+    page = await _fetch_page_once(client, url, robots, throttle)
+    if page.refused_status is None:
+        return page
+
+    if expected:
+        return CrawledPage(
+            raw_url=page.raw_url,
+            normalized_url=page.normalized_url,
+            status_code=None,
+            redirect_url=page.redirect_url,
+            redirect_count=page.redirect_count,
+            blocked_by_robots=False,
+            fetch_error=f"refused our reader (HTTP {page.refused_status})",
+            parsed=None,
+            refused_status=page.refused_status,
+        )
+    return page
+
+
+async def _fetch_page_once(
+    client: httpx.AsyncClient,
+    url: str,
+    robots: robotparser.RobotFileParser | None,
+    throttle: Throttle | None,
 ) -> CrawledPage:
     normalized = normalize_url(url)
 
@@ -1019,4 +1083,9 @@ async def _fetch_page(
         parsed=parsed,
         is_page=is_page,
         blocked_resources=_blocked_resource_count(parsed, robots),
+        refused_status=(
+            response.status_code
+            if refused_by_name(response.status_code, response.headers, response.text[:3000])
+            else None
+        ),
     )
