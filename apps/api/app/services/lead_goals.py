@@ -103,6 +103,12 @@ def goal_schedule(client: Any, on: date | None = None) -> list[GoalCheckpoint]:
         ahead = [row for row in future if int(row["month"]) >= elapsed]
         current_month = int((ahead or future[-1:])[0]["month"])
 
+    baseline_raw = next((row.get("monthly_leads") for row in ordered if int(row["month"]) == 0), None)
+    baseline_floor = max(
+        int(round(float(baseline_raw))) if isinstance(baseline_raw, (int, float)) else 0,
+        int(round(float(client.baseline_monthly_leads))) if isinstance(getattr(client, "baseline_monthly_leads", None), (int, float)) else 0,
+    )
+
     schedule: list[GoalCheckpoint] = []
     for row in ordered:
         month = int(row["month"])
@@ -111,7 +117,12 @@ def goal_schedule(client: Any, on: date | None = None) -> list[GoalCheckpoint]:
             int(round(float(projected_raw))) if isinstance(projected_raw, (int, float)) else None
         )
         override = _override_for(client, month)
-        goal = override if override is not None else (projected or 0)
+        if override is not None:
+            goal = override
+        elif month > 0:
+            goal = max(projected or 0, baseline_floor)
+        else:
+            goal = projected or 0
         due = None
         if anchor is not None:
             due = date.fromordinal(anchor.toordinal() + int(round(month * DAYS_PER_MONTH)))

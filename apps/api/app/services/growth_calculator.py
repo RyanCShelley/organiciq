@@ -61,6 +61,8 @@ def project_leads(
         traffic_proj = traffic0 * traffic_mult(month)
         cvr_proj = cvr0 * mult[i]
         leads_proj = traffic_proj * (cvr_proj / 100)
+        if month > 0:
+            leads_proj = max(leads_proj, leads0)
         checkpoints.append(
             {
                 "label": LABELS[i],
@@ -71,7 +73,7 @@ def project_leads(
             }
         )
 
-    goal_12 = int(round(checkpoints[-1]["monthly_leads"]))
+    goal_12 = max(int(round(checkpoints[-1]["monthly_leads"])), int(round(leads0)))
     if goal_12 < 0:
         goal_12 = 0
 

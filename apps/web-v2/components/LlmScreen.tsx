@@ -10,7 +10,7 @@ import { Markdown } from "@/components/bi/Markdown";
 import { SidePane } from "@/components/content/parts";
 import { Spinner } from "@/components/ui/Spinner";
 
-type Tab = "overview" | "queries" | "sov" | "run" | "setup";
+type Tab = "overview" | "prompts" | "setup";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(0)}%`);
 const num = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString());
@@ -45,6 +45,45 @@ const CODE_STYLE: Record<string, string> = {
   "—": "bg-[var(--bg)] text-[var(--text-tertiary)]",
 };
 
+function engineIconSrc(platform: string): string | null {
+  const key = platform.toLowerCase();
+  if (key.includes("chatgpt") || key.includes("openai")) return "/icons/engines/chatgpt.svg";
+  if (key.includes("gemini") || key.includes("google")) return "/icons/engines/gemini.svg";
+  if (key.includes("perplexity")) return "/icons/engines/perplexity.png";
+  if (key.includes("claude") || key.includes("anthropic")) return "/icons/engines/claude.svg";
+  return null;
+}
+
+function EngineIcon({ platform, className = "h-4 w-4" }: { platform: string; className?: string }) {
+  const src = engineIconSrc(platform);
+  if (src) {
+    return <img src={src} alt="" aria-hidden="true" className={`object-contain ${className}`} />;
+  }
+  return (
+    <span className={`inline-flex items-center justify-center rounded-full border border-current text-[10px] font-bold ${className}`} aria-hidden="true">
+      {platform.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+const ENGINE_COLOR: Record<string, string> = {
+  chatgpt: "text-emerald-700",
+  openai: "text-emerald-700",
+  gemini: "text-blue-600",
+  google: "text-blue-600",
+  perplexity: "text-teal-700",
+  claude: "text-amber-700",
+  anthropic: "text-amber-700",
+};
+
+function engineColor(platform: string): string {
+  const key = platform.toLowerCase();
+  for (const [k, v] of Object.entries(ENGINE_COLOR)) {
+    if (key.includes(k)) return v;
+  }
+  return "text-[var(--brand-teal)]";
+}
+
 function Mover({ row }: { row: QueryRow }) {
   return (
     <li className="flex items-start justify-between gap-3 border-t border-[var(--border)] py-2 first:border-t-0">
@@ -60,9 +99,10 @@ function Mover({ row }: { row: QueryRow }) {
   );
 }
 
-function Overview({ data }: { data: LlmOverview }) {
+function Overview({ client, data }: { client: Client; data: LlmOverview }) {
   const s = data.summary!;
   const trend = data.trend ?? [];
+  const [showBrandPrompts, setShowBrandPrompts] = useState(false);
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -111,7 +151,12 @@ function Overview({ data }: { data: LlmOverview }) {
             <tbody>
               {data.platforms!.map((p) => (
                 <tr key={p.platform} className="border-t border-[var(--border)]">
-                  <td className="py-2 pr-3 font-medium">{p.platform}</td>
+                  <td className="py-2 pr-3 font-medium">
+                    <span className="inline-flex items-center gap-2">
+                      <EngineIcon platform={p.platform} className={`h-4 w-4 shrink-0 ${engineColor(p.platform)}`} />
+                      <span>{p.platform}</span>
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{pct(p.visibility_rate.current)} <Delta pair={p.visibility_rate} percent /></td>
                   <td className="px-3 py-2 text-right tabular-nums">{p.mentions.current} <Delta pair={p.mentions} /></td>
                   <td className="px-3 py-2 text-right tabular-nums">{p.citations.current} <Delta pair={p.citations} /></td>
@@ -139,26 +184,43 @@ function Overview({ data }: { data: LlmOverview }) {
               </li>
             ))}
           </ul>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[34rem] text-left text-sm">
-              <tbody>
-                {data.brand_check.prompts.map((q) => (
-                  <tr key={q.query} className="border-t border-[var(--border)] align-top">
-                    <td className="py-2 pr-3">{q.query}</td>
-                    {Object.entries(q.by_platform).map(([platform, result]) => (
-                      <td key={platform} className="px-2 py-2 text-xs">
-                        <span className={result === "Cited" ? "font-semibold text-green-700" : "text-[var(--text-tertiary)]"}>
-                          {platform}: {result.toLowerCase()}
-                        </span>
-                      </td>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowBrandPrompts((v) => !v)}
+              aria-expanded={showBrandPrompts}
+              className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
+            >
+              {showBrandPrompts ? "Hide brand-check prompts" : `Show ${data.brand_check.prompts.length} brand-check prompts`}
+            </button>
+            {showBrandPrompts ? (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full min-w-[34rem] text-left text-sm">
+                  <tbody>
+                    {data.brand_check.prompts.map((q) => (
+                      <tr key={q.query} className="border-t border-[var(--border)] align-top">
+                        <td className="py-2 pr-3">{q.query}</td>
+                        {Object.entries(q.by_platform).map(([platform, result]) => (
+                          <td key={platform} className="px-2 py-2 text-xs">
+                            <span className={result === "Cited" ? "font-semibold text-green-700" : "text-[var(--text-tertiary)]"}>
+                              {platform}: {result.toLowerCase()}
+                            </span>
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Share of voice</h3>
+        <ShareOfVoice client={client} data={data} />
+      </div>
 
       {trend.length > 1 ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -185,51 +247,6 @@ function Overview({ data }: { data: LlmOverview }) {
           <span className="font-semibold">Some answers failed:</span> {data.errors.map((e) => `${e.platform}, ${e.count}×: ${e.message}`).join(" · ")}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function Queries({ data }: { data: LlmOverview }) {
-  const platforms = Array.from(new Set(data.queries!.flatMap((q) => Object.keys(q.by_platform)))).sort();
-  return (
-    <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <p className="mb-3 text-xs text-[var(--text-tertiary)]">
-        C+M = cited and mentioned, C = cited, M = mentioned, — = not visible. Score is 2 for cited and mentioned, 1 for either, 0 for neither, summed over platforms.
-      </p>
-      <table className="w-full min-w-[44rem] text-left text-sm">
-        <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-          <tr>
-            <th className="py-1 pr-3 font-medium">Prompt</th>
-            {platforms.map((p) => (
-              <th key={p} className="px-2 py-1 text-center font-medium">{p}</th>
-            ))}
-            <th className="px-3 py-1 text-right font-medium">Score</th>
-            <th className="px-3 py-1 text-right font-medium">Avg rank</th>
-            <th className="py-1 pl-3 font-medium">Named most often</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.queries!.map((q) => (
-            <tr key={q.query} className="border-t border-[var(--border)] align-top">
-              <td className="min-w-[14rem] py-2 pr-3">
-                <div className="font-medium">{q.query}</div>
-                <div className="text-xs text-[var(--text-tertiary)]">{q.topic_cluster ?? "Uncategorized"}</div>
-              </td>
-              {platforms.map((p) => (
-                <td key={p} className="px-2 py-2 text-center">
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${CODE_STYLE[q.by_platform[p] ?? "—"]}`}>{q.by_platform[p] ?? "—"}</span>
-                </td>
-              ))}
-              <td className="px-3 py-2 text-right tabular-nums">
-                {q.score}/{q.max_score}
-                {q.change != null && q.change !== 0 ? <span className={`ml-1 text-xs font-semibold ${q.change > 0 ? "text-green-700" : "text-red-700"}`}>{q.change > 0 ? "+" : ""}{q.change}</span> : null}
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums">{q.avg_brand_rank ?? "–"}</td>
-              <td className="py-2 pl-3 text-xs text-[var(--text-secondary)]">{q.top_competitors.map((c) => `${c.name} (${c.count})`).join(", ") || "–"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -448,10 +465,17 @@ function ShareOfVoice({ client, data }: { client: Client; data: LlmOverview }) {
   );
 }
 
-function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
+function visibilityChipClass(visibility: string | null): string {
+  if (visibility === "Error") return "bg-red-50 text-red-800";
+  if (visibility === "Named in prompt") return "bg-[var(--bg)] text-[var(--text-secondary)]";
+  return CHIP(visibility);
+}
+
+function PromptsTab({ client, data, run }: { client: Client; data: LlmOverview; run: LlmRunInfo }) {
   const [rows, setRows] = useState<LlmResponseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [platform, setPlatform] = useState("all");
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -466,44 +490,179 @@ function FullRun({ client, run }: { client: Client; run: LlmRunInfo }) {
       live = false;
     };
   }, [client.id, run.id]);
-  if (error) return <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>;
-  if (!rows) return <p className="text-sm text-[var(--text-secondary)]">Loading the run…</p>;
-  const platforms = Array.from(new Set(rows.map((r) => r.platform)));
-  const shown = rows.filter((r) => platform === "all" || r.platform === platform);
+
+  const queryByText = new Map((data.queries ?? []).map((q) => [q.query, q]));
+  const platforms = rows
+    ? Array.from(new Set(rows.map((r) => r.platform))).sort()
+    : Array.from(new Set((data.queries ?? []).flatMap((q) => Object.keys(q.by_platform)))).sort();
+  const term = search.trim().toLowerCase();
+
+  // Group responses by prompt so each prompt appears as a single collapsed line until expanded.
+  const grouped = new Map<string, { query: string; topic_cluster: string | null; keyword: string | null; answers: LlmResponseRow[] }>();
+  if (rows) {
+    for (const r of rows) {
+      const entry = grouped.get(r.query) ?? { query: r.query, topic_cluster: r.topic_cluster, keyword: r.keyword, answers: [] };
+      entry.answers.push(r);
+      grouped.set(r.query, entry);
+    }
+  } else {
+    for (const q of data.queries ?? []) {
+      grouped.set(q.query, { query: q.query, topic_cluster: q.topic_cluster, keyword: q.keyword, answers: [] });
+    }
+  }
+
+  const prompts = Array.from(grouped.values()).filter((g) => {
+    if (term && !g.query.toLowerCase().includes(term) && !(g.topic_cluster ?? "").toLowerCase().includes(term) && !(g.keyword ?? "").toLowerCase().includes(term)) {
+      return false;
+    }
+    if (platform !== "all" && rows && !g.answers.some((a) => a.platform === platform)) {
+      return false;
+    }
+    return true;
+  });
+
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <label className="text-sm">
-        <span className="font-semibold">Platform</span>
-        <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm">
-          <option value="all">All ({rows.length})</option>
-          {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-      </label>
-      <ul className="mt-3 divide-y divide-[var(--border)]">
-        {shown.map((r) => {
-          const key = `${r.query}|${r.platform}`;
+    <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search prompts or topics…"
+            aria-label="Search prompts"
+            className="w-64 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm focus:border-[var(--brand-teal)] focus:outline-none"
+          />
+          <label className="text-sm">
+            <span className="font-semibold">Platform</span>
+            <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm">
+              <option value="all">All ({platforms.length})</option>
+              {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+        </div>
+        <span className="text-xs text-[var(--text-tertiary)]">{prompts.length} of {grouped.size} prompts</span>
+      </div>
+
+      {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+
+      <ul className="divide-y divide-[var(--border)]">
+        {prompts.map((g) => {
+          const isOpen = open === g.query;
+          const qSummary = queryByText.get(g.query);
+          const visibleAnswers = g.answers.filter((a) => platform === "all" || a.platform === platform);
+          const platformStatus: Array<{ platform: string; code: string; visible: boolean; title: string }> = rows
+            ? visibleAnswers
+                .slice()
+                .sort((a, b) => a.platform.localeCompare(b.platform))
+                .map((a) => {
+                  const code = a.visibility === "Cited + Mentioned" ? "C+M" : a.visibility === "Cited" ? "C" : a.visibility === "Mentioned" ? "M" : "—";
+                  const visible = Boolean(a.brand_mentioned || a.url_cited);
+                  const title = `${a.platform}: ${a.visibility}${a.brand_rank != null ? ` (#${a.brand_rank})` : ""}`;
+                  return { platform: a.platform, code, visible, title };
+                })
+            : Object.entries(qSummary?.by_platform ?? {})
+                .filter(([p]) => platform === "all" || p === platform)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([p, code]) => ({
+                  platform: p,
+                  code,
+                  visible: code !== "—",
+                  title: `${p}: ${code === "C+M" ? "Cited + Mentioned" : code === "C" ? "Cited" : code === "M" ? "Mentioned" : "Not visible"}`,
+                }));
+
           return (
-            <li key={key} className="py-3">
-              <button type="button" onClick={() => setOpen(open === key ? null : key)} className="flex w-full items-start justify-between gap-3 text-left">
-                <span>
-                  <span className="block text-sm font-medium">{r.query}</span>
-                  <span className="text-xs text-[var(--text-tertiary)]">{r.platform} · {r.topic_cluster ?? "Uncategorized"}{r.position && r.position !== "Not mentioned" ? ` · ${r.position}` : ""}</span>
+            <li key={g.query} className="py-2.5">
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? null : g.query)}
+                aria-expanded={isOpen}
+                className="flex w-full items-center justify-between gap-4 text-left"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.query}</span>
+                <span className="flex shrink-0 items-center gap-3 text-xs text-[var(--text-tertiary)] tabular-nums">
+                  <span className="hidden md:inline">{g.topic_cluster ?? "Uncategorized"}</span>
+                  <span className="flex items-center gap-1.5" aria-label="Engine visibility">
+                    {platformStatus.map((ps) => (
+                      <span
+                        key={ps.platform}
+                        title={ps.title}
+                        className={`relative inline-flex h-6 w-6 items-center justify-center rounded-full border ${
+                          ps.visible
+                            ? `border-[var(--border)] bg-white shadow-xs`
+                            : "border-transparent bg-[var(--bg)] opacity-25 grayscale"
+                        }`}
+                      >
+                        <EngineIcon platform={ps.platform} className="h-3.5 w-3.5" />
+                        {ps.visible ? (
+                          <span className="sr-only">{ps.title}</span>
+                        ) : null}
+                      </span>
+                    ))}
+                  </span>
+                  {qSummary?.avg_brand_rank != null ? <span className="w-6 text-right font-semibold text-[var(--text-secondary)]">#{qSummary.avg_brand_rank}</span> : <span className="w-6 text-right">–</span>}
+                  <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
                 </span>
-                <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold ${r.visibility === "Error" ? "bg-red-50 text-red-800" : r.visibility === "Named in prompt" ? "bg-[var(--bg)] text-[var(--text-secondary)]" : CODE_STYLE[r.visibility === "Cited + Mentioned" ? "C+M" : r.visibility === "Cited" ? "C" : r.visibility === "Mentioned" ? "M" : "—"]}`}>{r.visibility}</span>
               </button>
-              {open === key ? (
-                <div className="mt-2 space-y-2 text-sm">
-                  {r.error ? <p className="text-red-800">{r.error}</p> : <p className="whitespace-pre-wrap text-[var(--text-secondary)]">{r.answer}</p>}
-                  <p className="text-xs text-[var(--text-tertiary)]">
-                    {r.competitors.length ? `Competitors named: ${r.competitors.join(", ")}. ` : ""}
-                    {r.other_brands.length ? `Other brands: ${r.other_brands.join(", ")}. ` : ""}
-                    {r.cited_urls.length ? `Cited: ${r.cited_urls.join(", ")}` : ""}
-                  </p>
+              {isOpen ? (
+                <div className="mt-3 space-y-3 border-l-2 border-[var(--brand-teal)]/40 pl-3">
+                  {qSummary ? (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]">
+                      <span>Score: <strong>{qSummary.score}/{qSummary.max_score}</strong></span>
+                      <span>Avg rank: <strong>{qSummary.avg_brand_rank != null ? `#${qSummary.avg_brand_rank}` : "–"}</strong></span>
+                      {qSummary.top_competitors.length > 0 ? (
+                        <span>Named most often: {qSummary.top_competitors.map((c) => `${c.name} (${c.count})`).join(", ")}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {!rows && !error ? (
+                    <p className="text-xs text-[var(--text-secondary)]"><Spinner />Loading platform answers…</p>
+                  ) : null}
+                  {visibleAnswers
+                    .slice()
+                    .sort((a, b) => a.platform.localeCompare(b.platform))
+                    .map((r) => (
+                      <div key={r.platform} className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 font-semibold">
+                            <EngineIcon platform={r.platform} className={`h-4 w-4 ${engineColor(r.platform)}`} />
+                            <span>{r.platform}</span>
+                            {r.brand_rank != null ? <span className="text-xs font-normal text-[var(--text-secondary)]">Rank #{r.brand_rank}</span> : null}
+                            {r.position && r.position !== "Not mentioned" ? <span className="text-xs font-normal text-[var(--text-tertiary)]">{r.position}</span> : null}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-semibold">
+                            <span className={`rounded-full px-2 py-0.5 ${r.brand_mentioned ? "bg-green-100 text-green-800" : "bg-white text-[var(--text-tertiary)]"}`}>
+                              Mentioned: {r.brand_mentioned ? "Yes" : "No"}
+                            </span>
+                            <span className={`rounded-full px-2 py-0.5 ${r.url_cited ? "bg-blue-100 text-blue-800" : "bg-white text-[var(--text-tertiary)]"}`}>
+                              Cited: {r.url_cited ? "Yes" : "No"}
+                            </span>
+                          </div>
+                        </div>
+                        {r.error ? (
+                          <p className="mt-2 text-xs text-red-800">{r.error}</p>
+                        ) : (
+                          <div className="mt-2 text-[var(--text-secondary)]">
+                            {r.answer ? <Markdown text={r.answer} /> : <p className="text-xs text-[var(--text-tertiary)]">No answer was kept.</p>}
+                          </div>
+                        )}
+                        {(r.competitors.length > 0 || r.other_brands.length > 0 || r.cited_urls.length > 0) ? (
+                          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                            {r.competitors.length ? `Competitors named: ${r.competitors.join(", ")}. ` : ""}
+                            {r.other_brands.length ? `Other brands: ${r.other_brands.join(", ")}. ` : ""}
+                            {r.cited_urls.length ? `Cited: ${r.cited_urls.join(", ")}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
                 </div>
               ) : null}
             </li>
           );
         })}
+        {prompts.length === 0 ? (
+          <li className="py-4 text-center text-sm text-[var(--text-secondary)]">No prompts match your filters.</li>
+        ) : null}
       </ul>
     </div>
   );
@@ -829,7 +988,7 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
     });
 
   const run = overview?.run ?? null;
-  const tabs: [Tab, string][] = [["overview", "Overview"], ["queries", "Query summary"], ["sov", "Share of voice"], ["run", "Full run"], ["setup", "Setup"]];
+  const tabs: [Tab, string][] = [["overview", "Overview"], ["prompts", "Prompts"], ["setup", "Setup"]];
 
   return (
     <section className="max-w-6xl space-y-6">
@@ -884,13 +1043,9 @@ export function LlmScreen({ client, overview, settings, error }: { client: Clien
           </p>
         </div>
       ) : tab === "overview" ? (
-        <Overview data={overview!} />
-      ) : tab === "queries" ? (
-        <Queries data={overview!} />
-      ) : tab === "sov" ? (
-        <ShareOfVoice client={client} data={overview!} />
+        <Overview client={client} data={overview!} />
       ) : (
-        <FullRun client={client} run={run} />
+        <PromptsTab client={client} data={overview!} run={run} />
       )}
     </section>
   );

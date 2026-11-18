@@ -35,11 +35,17 @@ export function ClientPicker({ clients }: { clients: Client[] }) {
   const current = clients.find((c) => c.slug === first);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const activeOption = useRef<HTMLAnchorElement>(null);
   const [find, setFind] = useState("");
   const sections = pickerSections(clients, find);
 
   useEffect(() => {
     if (!open) return;
+    requestAnimationFrame(() => {
+      searchInput.current?.focus();
+      activeOption.current?.scrollIntoView({ block: "nearest" });
+    });
     const onDown = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -67,31 +73,43 @@ export function ClientPicker({ clients }: { clients: Client[] }) {
         <ChevronsUpDown size={14} className="shrink-0 text-[#9db3bd]" aria-hidden />
       </button>
       {open ? (
-        <div role="listbox" aria-label="Client" className="absolute inset-x-0 top-full z-40 mt-1 max-h-80 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-white p-1 shadow-lg">
-          {clients.length > 8 ? (
-            <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a client" aria-label="Find a client" className="mb-1 w-full rounded-md border border-[var(--border)] px-2 py-1.5 text-sm" />
-          ) : null}
+        <div role="listbox" aria-label="Client" className="absolute inset-x-0 top-full z-40 mt-1 max-h-80 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-white p-1.5 shadow-lg">
+          <div className="sticky top-0 z-10 -mx-1.5 -mt-1.5 mb-1 border-b border-[var(--border)] bg-white p-1.5">
+            <input
+              ref={searchInput}
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              placeholder="Search clients..."
+              aria-label="Find a client"
+              className="w-full rounded-md border border-[var(--text-tertiary)]/50 bg-[var(--background)] px-2.5 py-1.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] focus:border-[var(--brand-teal)] focus:bg-white focus:outline-none"
+            />
+          </div>
           {sections.map((section) => (
             <div key={section.title}>
               <div className="px-2 pb-0.5 pt-2 text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">{section.title}</div>
-              {section.clients.map((c) => (
-            <Link
-              key={c.id}
-              href={`/${c.slug}`}
-              role="option"
-              aria-selected={c.slug === current?.slug}
-              onClick={() => setOpen(false)}
-              className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--background)] ${c.slug === current?.slug ? "bg-[var(--background)] font-semibold" : ""}`}
-            >
-              <ClientFavicon client={c} size={24} />
-              <span className="min-w-0">
-                <span className="block truncate">{c.client_name}</span>
-                <span className="block truncate text-[0.7rem] font-normal text-[var(--text-secondary)]">{c.domain}</span>
-              </span>
-            </Link>
-              ))}
+              {section.clients.map((c) => {
+                const isSelected = c.slug === current?.slug;
+                return (
+                  <Link
+                    key={c.id}
+                    ref={isSelected ? activeOption : undefined}
+                    href={`/${c.slug}`}
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => setOpen(false)}
+                    className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--background)] ${isSelected ? "bg-[var(--background)] font-semibold ring-1 ring-inset ring-[var(--brand-teal)]/30" : ""}`}
+                  >
+                    <ClientFavicon client={c} size={24} />
+                    <span className="min-w-0">
+                      <span className="block truncate">{c.client_name}</span>
+                      <span className="block truncate text-[0.7rem] font-normal text-[var(--text-secondary)]">{c.domain}</span>
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           ))}
+          {sections.length === 0 ? <p className="px-2 py-3 text-center text-xs text-[var(--text-secondary)]">No matching clients.</p> : null}
           <Link href="/new-client" onClick={() => setOpen(false)} className="mt-1 flex items-center gap-2 border-t border-[var(--border)] px-2 pb-1.5 pt-2.5 text-sm font-semibold text-[var(--text-primary)] hover:text-[var(--brand-teal-hover)]">
             <Plus size={14} aria-hidden /> Add client
           </Link>

@@ -128,15 +128,13 @@ def test_acc_tek_from_its_first_clean_month_is_stable_and_plausible():
 # --- ranges and the goal basis ---------------------------------------------
 
 
-def test_the_goal_is_anchored_on_the_low_end_of_the_lead_range():
+def test_the_goal_starts_from_the_typical_figure_and_never_sits_below_baseline():
     result = analyze(ACC, regime_start="2025-12")
-    leads, rng = result["baseline"]["monthly_leads"], result["ranges"]["monthly_leads"]
-    assert result["goal_basis"]["monthly_leads"] == pytest.approx(leads * (1 - rng["pct"] / 100), abs=0.02)
-    assert result["goal_basis"]["basis"] == "the low end of the lead range"
-    # The projection is built from the goal basis; the point projection from the estimate.
-    assert result["projection"]["baseline_monthly_leads"] == pytest.approx(result["goal_basis"]["monthly_leads"], abs=0.02)
-    assert result["projection_point"]["baseline_monthly_leads"] == pytest.approx(leads, abs=0.02)
-    assert result["projection"]["suggested_monthly_lead_goal"] < result["projection_point"]["suggested_monthly_lead_goal"]
+    leads = result["baseline"]["monthly_leads"]
+    assert result["goal_basis"]["monthly_leads"] == pytest.approx(leads, abs=0.02)
+    assert result["goal_basis"]["basis"] == "the typical baseline figure"
+    assert result["projection"]["baseline_monthly_leads"] == pytest.approx(leads, abs=0.02)
+    assert result["projection"]["suggested_monthly_lead_goal"] >= round(leads)
 
 
 def test_the_traffic_decline_in_the_projection_is_still_the_calculators_12_8_percent():

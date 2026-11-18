@@ -376,9 +376,9 @@ def analyze(
     def band(value: float, pct: float) -> dict[str, float]:
         return {"low": round(value * (1 - pct / 100), 2), "high": round(value * (1 + pct / 100), 2), "pct": round(pct, 1)}
 
-    # Anchored on the low end: estimates ran 10 to 25% optimistic in the backtests.
-    goal_leads = leads_level * (1 - lead_pct / 100)
-    goal_rate = lead_rate * (1 - lead_pct / 100)
+    # Goal starts from the typical figure (leads_level) and never sits below baseline.
+    goal_leads = leads_level
+    goal_rate = lead_rate
     projection_point = growth_calculator.project_leads(
         monthly_sessions=sessions_level, monthly_leads=leads_level, plan=plan
     )
@@ -581,7 +581,7 @@ def analyze(
             "monthly_sessions": _round(sessions_level),
             "monthly_leads": round(goal_leads, 2),
             "lead_rate_pct": round(goal_rate, 3),
-            "basis": "the low end of the lead range",
+            "basis": "the typical baseline figure",
         },
         "references": {
             "mean_leads_last_3_months": _round(_mean(row.leads for row in window[-3:]), 2),

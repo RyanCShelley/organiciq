@@ -108,7 +108,7 @@ export async function saveSeRankingAction(
   previous: string | null = null,
 ): Promise<ActionResult> {
   const result = await save(slug, "/integrations/seranking/property", clientId, { site_id: siteId, project_name: name });
-  if (result.ok) await pullAfterSave(clientId, slug, ["se_ranking_search", "se_ranking_ai"], previous, siteId);
+  if (result.ok) await pullAfterSave(clientId, slug, ["se_ranking_search"], previous, siteId);
   return result;
 }
 
