@@ -211,6 +211,7 @@ def pull(
                 item_types=list(features.item_types),
                 holders={k: list(v) for k, v in features.holders.items()},
                 results=list(features.organic),
+                questions=list(features.questions),
             )
         )
         pulled += 1

@@ -82,6 +82,8 @@ class SerpFeatures:
     holders: dict[str, tuple[str, ...]] = field(default_factory=dict)
     #: The top organic results, in order: `{rank, url, domain, title, snippet}`. What ranks is what says what a search is for.
     organic: tuple[dict, ...] = ()
+    #: The "People also ask" questions shown on the page, in order. Empty when the page has none.
+    questions: tuple[str, ...] = ()
 
     def holds(self, feature: str, domain: str) -> bool:
         target = domain.strip().lower().removeprefix("www.")
@@ -120,6 +122,8 @@ def _domains(item: dict) -> list[str]:
 
 #: How many organic results are kept from a pull.
 ORGANIC_KEPT = 10
+#: How many "People also ask" questions are kept from a pull.
+QUESTIONS_KEPT = 8
 
 
 def parse(result: dict) -> SerpFeatures:
@@ -129,6 +133,7 @@ def parse(result: dict) -> SerpFeatures:
     )
     holders: dict[str, list[str]] = {}
     organic: list[dict] = []
+    questions: list[str] = []
     for item in result.get("items") or []:
         if not isinstance(item, dict):
             continue
@@ -143,6 +148,11 @@ def parse(result: dict) -> SerpFeatures:
                 "title": " ".join(str(item.get("title") or "").split())[:300],
                 "snippet": " ".join(str(item.get("description") or "").split())[:400],
             })
+        if kind == "people_also_ask":
+            for child in item.get("items") or []:
+                asked = " ".join(str(child.get("title") or "").split()) if isinstance(child, dict) else ""
+                if asked and asked not in questions and len(questions) < QUESTIONS_KEPT:
+                    questions.append(asked[:300])
         found = _domains(item)
         if found:
             holders.setdefault(kind, []).extend(found)
@@ -151,6 +161,7 @@ def parse(result: dict) -> SerpFeatures:
         item_types=item_types,
         holders={k: tuple(sorted(set(v))) for k, v in holders.items()},
         organic=tuple(organic),
+        questions=tuple(questions),
     )
 
 

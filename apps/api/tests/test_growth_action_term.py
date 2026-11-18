@@ -66,7 +66,7 @@ def test_a_split_results_page_is_settled_by_what_the_searcher_is_there_to_do(db,
     assert coll["level"] == "high" and coll["leads"] == "selling" and blog["level"] == "medium"
     assert "level with" in blog["why"] and "transactional" in blog["why"]
     out = build(db, client_a, FACE, COLL)
-    assert out["context"]["fit"]["level"] == "high" and out["context"]["rerouted"] is False
+    assert out["context"]["fit"]["level"] == "high" and out["context"]["mismatch"] is False
     assert out["parts"][0]["title"] == "Help the searcher find, compare and buy from the range" and out["better_page"] is None
     learn = ranked("informational", {"product page": 4, "article or blog post": 4})
     assert ac.compatibility(learn, ac.classify_page(BLOG))["level"] == "high" and ac.compatibility(learn, ac.classify_page(COLL))["level"] == "medium"
@@ -171,7 +171,7 @@ def test_each_gap_becomes_a_part_with_its_issue_evidence_change_outcome_and_chec
     site(db, client_a)
     llm_run(db, client_a)
     out = build(db, client_a, FACE, COLL, found=WINNING,
-                winners_for=lambda s, i, u, t, own: winners.gather(db, client_a, search=s, intent=i, page_url=u, page_type=t, own=own, reader=reader, ask=answer([GAP])))
+                winners_for=lambda s, i, u, t, own, asked: winners.gather(db, client_a, search=s, intent=i, page_url=u, page_type=t, own=own, reader=reader, ask=answer([GAP])))
     part = next(p for p in out["parts"] if p["id"] == "W-1")
     assert part["why"] == GAP["issue"] and part["steps"][0] == GAP["change"]
     assert part["steps"][1].startswith("Expected: A shopper can compare") and part["steps"][2].startswith("Check afterwards: View the page source")

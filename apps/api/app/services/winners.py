@@ -39,6 +39,16 @@ PAGES_READ = 3
 TIMEOUT_SECONDS = 15.0
 MAX_BODY_BYTES = 2_000_000
 MAX_GAPS = 6
+#: How many questions are put to the comparison, and how many missing ones it may return.
+MAX_CANDIDATES = 30
+MAX_QUESTIONS = 6
+#: Where a question came from, as it is shown to a person.
+QUESTION_SOURCES = {
+    "people_also_ask": "People also ask, on the results page",
+    "search_console": "a search this page shows for",
+    "winner": "answered on a winning page",
+    "prompt": "the paired AI prompt",
+}
 
 
 def _host(url: str) -> str:
@@ -98,7 +108,8 @@ def outline(url: str, body: str, headers: dict[str, str]) -> dict[str, Any]:
         "title": parsed.title, "h1": parsed.h1, "word_count": parsed.word_count,
         "sections": [{"heading": s.heading, "text": " ".join(s.first_paragraph.split())[:220], "has_table": s.has_table, "has_list": s.has_list} for s in parsed.sections[:25]],
         "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
-        "faq_questions": len(parsed.faq_questions), "conversion_elements": parsed.conversion_elements,
+        "faq_questions": len(parsed.faq_questions), "faq_list": [" ".join(q.split())[:200] for q in parsed.faq_questions[:15]],
+        "conversion_elements": parsed.conversion_elements,
     }
 
 
@@ -166,11 +177,19 @@ WINNING IN THE AI PLATFORMS (pages the platforms cited for the prompt "{prompt}"
 {llm_winners}
 {llm_standing}
 
+QUESTIONS PEOPLE ASK ABOUT THIS TERM (each with where it was seen):
+{questions}
+
 Say:
 1. Whether the client's page is the right page to win this term, judged against these winners.
 2. Up to {max_gaps} gaps: things most of the winners do, relevant to what the searcher wants, that the client's page does not.
    Consider both a person (does it help them do what they came to do?) and a machine reading it (can the page's main content, names, attributes, prices and relationships be found, extracted and understood, section by section?).
    Skip anything the client's page already does. Skip differences that do not serve this searcher. Keep each change specific to this type of page.
+   Do not report a missing FAQ or missing questions as a gap: questions are handled in 3.
+3. Which of the numbered questions above the client's page does NOT answer, up to {max_questions}.
+   A question is answered if the page's FAQ, a heading or the text under a heading answers it, however it is worded there.
+   Leave out a question that is not about this term, that this type of page should not answer, or that repeats one you already listed.
+   Use only the numbered questions. Do not write new ones. If none is listed, or none is missing, return an empty list.
 
 Return ONLY this JSON:
 {{
@@ -184,7 +203,8 @@ Return ONLY this JSON:
     "validation": "how to check afterwards that it worked",
     "serves": "search|llm|both",
     "basis": "observed|inferred"
-  }}]
+  }}],
+  "missing_questions": [{{"id": "Q1", "why": "one sentence: why it matters for this searcher, and that the page does not answer it"}}]
 }}
 "basis" is "observed" when the outlines show it directly, "inferred" when you are reasoning from them. If the outlines do not support any gap, return an empty list."""
 
@@ -194,18 +214,43 @@ def _show(page: dict[str, Any]) -> str:
     for s in (page.get("sections") or [])[:18]:
         extra = " [table]" if s.get("has_table") else " [list]" if s.get("has_list") else ""
         lines.append(f"  · {s['heading']}{extra}: {s.get('text') or ''}"[:300])
+    for q in (page.get("faq_list") or [])[:15]:
+        lines.append(f"  ? {q}")
     return "\n".join(lines)
+
+
+def _candidates(questions: list[dict[str, Any]] | None, pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The questions put to the comparison: those passed in, then the ones the winners' own FAQs answer. One of each wording."""
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    winners_ask = [{"question": q, "source": "winner", "detail": p["url"]} for p in pages for q in (p.get("faq_list") or [])[:6]]
+    for q in [*(questions or []), *winners_ask]:
+        text = " ".join(str(q.get("question") or "").split())
+        key = text.lower().rstrip("?")
+        if not text or key in seen or q.get("source") not in QUESTION_SOURCES:
+            continue
+        seen.add(key)
+        found.append({"question": text, "source": q["source"], "detail": q.get("detail")})
+    return found[:MAX_CANDIDATES]
 
 
 def compare(
     *, search: str, intent: dict[str, Any], page_url: str, page_type: str, own: dict[str, Any], search_pages: list[dict[str, Any]],
-    llm_pages: list[dict[str, Any]], llm: dict[str, Any], ask: Callable[[str], str] | None = None,
+    llm_pages: list[dict[str, Any]], llm: dict[str, Any], ask: Callable[[str], str] | None = None, questions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """`{ok, best_page, gaps}`. A gap is kept only if it names winners it was shown and gives its evidence."""
+    """`{ok, best_page, gaps, questions}`. A gap is kept only if it names winners it was shown and gives its evidence.
+
+    `questions` are the questions people ask about the term, each `{question, source, detail}`. The ones the winners'
+    own FAQs answer are added, and the model says which of the list the client's page does not answer. It picks by
+    number, so a question nobody asked cannot come back. `questions` in the result is None when there was no
+    question to check, and `{checked, missing}` otherwise. With no winner readable the questions are still checked.
+    """
     read_search = [p for p in search_pages if p.get("read")]
     read_llm = [p for p in llm_pages if p.get("read")]
-    if not read_search and not read_llm:
-        return {"ok": False, "reason": "None of the winning pages could be read, so there is nothing to compare with.", "gaps": [], "best_page": None}
+    asked = _candidates(questions, read_search + read_llm)
+    no_winner = "None of the winning pages could be read, so there is nothing to compare with."
+    if not read_search and not read_llm and not asked:
+        return {"ok": False, "reason": no_winner, "gaps": [], "best_page": None, "questions": None}
     if ask is None:
         from app.schema_tools import llm as model
 
@@ -220,14 +265,15 @@ def compare(
         search=search, goal=intent.get("searcher_goal") or "not read", intent=intent.get("name") or "not read", page_type=page_type, page=page_url,
         own=_show({"url": page_url, **own}), search_winners="\n".join(_show(p) for p in read_search) or "(none could be read)",
         prompt=llm.get("prompt") or "none", llm_winners="\n".join(_show(p) for p in read_llm) or "(none could be read, or no prompt is paired)",
-        llm_standing=standing, max_gaps=MAX_GAPS,
+        llm_standing=standing, max_gaps=MAX_GAPS, max_questions=MAX_QUESTIONS,
+        questions="\n".join(f"Q{n}. {q['question']} ({QUESTION_SOURCES[q['source']]})" for n, q in enumerate(asked, start=1)) or "(none)",
     )
     try:
         from app.schema_tools.llm import extract_json
 
         raw = extract_json(ask(prompt))
     except Exception as exc:
-        return {"ok": False, "reason": f"The comparison could not be made ({type(exc).__name__}: {str(exc)[:120]}).", "gaps": [], "best_page": None}
+        return {"ok": False, "reason": f"The comparison could not be made ({type(exc).__name__}: {str(exc)[:120]}).", "gaps": [], "best_page": None, "questions": None}
     shown = {p["url"] for p in read_search + read_llm}
     gaps = []
     for g in (raw.get("gaps") or []) if isinstance(raw, dict) else []:
@@ -243,17 +289,28 @@ def compare(
             **text, "seen_on": seen, "serves": serves if serves in ("search", "llm", "both") else "search",
             "basis": "observed" if str(g.get("basis") or "").lower() == "observed" else "inferred",
         })
+    missing: list[dict[str, Any]] = []
+    by_id = {f"Q{n}": q for n, q in enumerate(asked, start=1)}
+    for m in (raw.get("missing_questions") or []) if isinstance(raw, dict) else []:
+        # Only a question that was on the list, once. Anything else is the model writing its own.
+        q = by_id.pop(str(m.get("id") or "").strip().upper(), None) if isinstance(m, dict) else None
+        if q is not None:
+            missing.append({**q, "source_name": QUESTION_SOURCES[q["source"]], "why": " ".join(str(m.get("why") or "").split())})
+    checked = {"checked": len(asked), "missing": missing[:MAX_QUESTIONS]} if asked else None
+    if not read_search and not read_llm:
+        # Questions were checked against the page; there was still no winner to judge the page against.
+        return {"ok": False, "reason": no_winner, "gaps": [], "best_page": None, "questions": checked}
     best = raw.get("best_page") if isinstance(raw, dict) else None
     verdict = str((best or {}).get("verdict") or "").lower()
     return {
-        "ok": True, "gaps": gaps[:MAX_GAPS],
+        "ok": True, "gaps": gaps[:MAX_GAPS], "questions": checked,
         "best_page": {"verdict": verdict, "why": " ".join(str(best.get("why") or "").split())} if isinstance(best, dict) and verdict in ("yes", "partly", "no") else None,
     }
 
 
 def gather(
     db: Session, client: Client, *, search: str, intent: dict[str, Any], page_url: str, page_type: str, own: dict[str, Any],
-    reader=_read_all, ask=None,
+    reader=_read_all, ask=None, questions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Everything about who is winning for the term: the ranking pages, the platforms' answers, the pages read, and the gaps."""
     own_hosts = {_host(client.domain), _host(page_url)}
@@ -265,7 +322,7 @@ def gather(
     by_url = {p["url"]: p for p in pages}
     search_pages = [by_url[u] for u in search_urls if u in by_url]
     llm_pages = [by_url[u] for u in llm_urls if u in by_url]
-    comparison = compare(search=search, intent=intent, page_url=page_url, page_type=page_type, own=own, search_pages=search_pages, llm_pages=llm_pages, llm=llm, ask=ask)
+    comparison = compare(search=search, intent=intent, page_url=page_url, page_type=page_type, own=own, search_pages=search_pages, llm_pages=llm_pages, llm=llm, ask=ask, questions=questions)
     trim = lambda p: {k: p.get(k) for k in ("url", "read", "reason", "title", "word_count", "schema_types")}  # noqa: E731
     return {
         "search": {"ranked": ranked, "client_ranks": [r for r in ranked if _host(r["url"]) in own_hosts], "pages": [trim(p) for p in search_pages]},

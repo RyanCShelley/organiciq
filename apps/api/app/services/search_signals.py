@@ -72,11 +72,12 @@ def _pull_serp(db: Session, client: Client, keyword: str, fetch=dataforseo.fetch
     today = db.query(FactSerpFeature).filter(FactSerpFeature.client_id == client.id, FactSerpFeature.pulled_on == date.today(), FactSerpFeature.keyword == keyword).first()
     if today is not None:
         today.item_types, today.holders, today.results, today.reading = list(features.item_types), {k: list(v) for k, v in features.holders.items()}, list(features.organic), None
+        today.questions = list(features.questions)
         db.commit()
         return today
     row = FactSerpFeature(
         client_id=client.id, pulled_on=date.today(), keyword=keyword, item_types=list(features.item_types),
-        holders={k: list(v) for k, v in features.holders.items()}, results=list(features.organic),
+        holders={k: list(v) for k, v in features.holders.items()}, results=list(features.organic), questions=list(features.questions),
     )
     db.add(row)
     db.commit()
@@ -98,11 +99,12 @@ def _labels(db: Session, client: Client, keyword: str, pull: bool, overview) -> 
 def for_search(
     db: Session, client: Client, search: str, *, pull: bool = True, overview=dataforseo.keyword_overview, fetch=dataforseo.fetch, ask=None,
 ) -> dict[str, Any]:
-    """`{reading, labels}` for one search: the intent as read from its results page, and the tools' labels for reference.
+    """`{reading, labels, questions}` for one search: the intent as read from its results page, the tools' labels for
+    reference, and the "People also ask" questions the page showed.
 
     With `pull`, a results page that is missing, over a month old, or was kept without its ranking results is pulled
-    again, and a page not yet read is read. Without it, only what is already held is returned: listing pages must not
-    spend anything.
+    again, and a page not yet read is read. So is one that showed a "People also ask" box before its questions were
+    kept. Without `pull`, only what is already held is returned: listing pages must not spend anything.
     """
     from app.decisions import serp_intent
     from app.ingestion.seranking.pipeline_domain import resolve_source
@@ -117,7 +119,10 @@ def for_search(
         .order_by(FactSerpFeature.pulled_on.desc())
         .first()
     )
-    stale = serp is None or not serp.results or (date.today() - serp.pulled_on).days > SERP_FRESH_DAYS
+    stale = (
+        serp is None or not serp.results or (date.today() - serp.pulled_on).days > SERP_FRESH_DAYS
+        or (serp.questions is None and "people_also_ask" in (serp.item_types or []))
+    )
     pull_error: str | None = None
     if pull and stale:
         if not dataforseo.configured():
@@ -134,7 +139,7 @@ def for_search(
         return {"reading": {**reading, "labels": labels, "search": keyword}, "labels": labels}
     # A reading kept before ranked results were listed in it is read again from the same pull: no new results page is bought.
     if serp.reading and serp.reading.get("read") is not None and (serp.reading.get("ranked") is not None or not pull):
-        return {"reading": {**serp.reading, "labels": labels, "search": keyword}, "labels": labels}
+        return {"reading": {**serp.reading, "labels": labels, "search": keyword}, "labels": labels, "questions": list(serp.questions or [])}
     if not pull:
         return {"reading": {**serp_intent.not_read("A results page is held for this search but has not been read yet. It is read when an action is built."), "labels": labels, "search": keyword}, "labels": labels}
     reading = serp_intent.read(
@@ -146,4 +151,4 @@ def for_search(
     if not (reading.get("uncertainty") or "").startswith("The results page could not be read"):
         serp.reading = reading
         db.commit()
-    return {"reading": reading, "labels": labels}
+    return {"reading": reading, "labels": labels, "questions": list(serp.questions or [])}

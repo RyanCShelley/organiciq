@@ -43,22 +43,30 @@ def is_read(intent: dict[str, Any]) -> bool:
 PRODUCT, CATEGORY, SERVICE, LOCATION, ARTICLE, RESOURCE, HOMEPAGE, ABOUT, LANDING, OTHER = (
     "product", "category", "service", "location", "article", "resource", "homepage", "about", "landing", "unknown",
 )
+#: Pages that exist to be reached, not read: a contact page, and the cart, account, policy and search pages.
+CONTACT, UTILITY = "contact", "utility"
 PAGE_NAMES = {
     PRODUCT: "Product page", CATEGORY: "Category or collection page", SERVICE: "Service page", LOCATION: "Location page",
     ARTICLE: "Blog or article", RESOURCE: "Resource or guide", HOMEPAGE: "Homepage", ABOUT: "About or company page",
-    LANDING: "Landing page", OTHER: "Not established",
+    LANDING: "Landing page", OTHER: "Not established", CONTACT: "Contact page", UTILITY: "Utility page",
 }
 _FROM_DETECTED = {
     "editorial": ARTICLE, "product": PRODUCT, "service": SERVICE, "productized_service": SERVICE, "category": CATEGORY,
     "landing": LANDING, "faq": RESOURCE, "documentation": RESOURCE, "homepage": HOMEPAGE, "about": ABOUT, "generic": OTHER,
 }
 _LOCATION_PATH = re.compile(r"/(locations?|service-areas?|areas-we-serve|areas-served|cities|city|stores?/[^/]+)(/|$)", re.I)
+_CONTACT_PATH = re.compile(r"(^|/)(contact(-us)?|get-in-touch|request-a-quote|book(-a-call|-now|ing)?|schedule(-a-call)?)(\.html?)?/?$", re.I)
+_UTILITY_PATH = re.compile(
+    r"(^|/)(cart|checkout|account|login|log-in|sign-in|register|search|wishlist|password|thank-?you|order-status|404|sitemap|privacy(-policy)?|terms(-of-(service|use))?"
+    r"|cookie(-policy)?|preferences|opt-out(-preferences)?|polic(y|ies)|shipping(-policy)?|returns?(-policy)?|refunds?(-policy)?|unsubscribe|accessibility)(/|$|\.html?$|-)", re.I)
+_ABOUT_PATH = re.compile(r"(^|/)(about(-us)?|our-story|our-team|team|company|who-we-are)(\.html?)?/?$", re.I)
 _COLLECTION_PATH = re.compile(r"/collections?/[^/]+/?$", re.I)
 #: What each type of page is for. A page's purpose is what a change to it must not break.
 PAGE_PURPOSE = {
     PRODUCT: "sell the product", CATEGORY: "help a buyer find and choose a product", SERVICE: "win an enquiry for the service",
     LOCATION: "win a local enquiry", ARTICLE: "answer a question", RESOURCE: "explain or teach", HOMEPAGE: "say who the business is and route visitors",
     ABOUT: "say who the business is", LANDING: "convert a visitor on one offer", OTHER: "not established",
+    CONTACT: "let a visitor get in touch", UTILITY: "let a visitor do or find something, not read",
 }
 COMMERCIAL_PAGES = frozenset({PRODUCT, CATEGORY, SERVICE, LOCATION, LANDING})
 INFORMATIONAL_PAGES = frozenset({ARTICLE, RESOURCE})
@@ -84,6 +92,16 @@ def classify_page(url: str, *, schema_types: Iterable[str] | None = None, title:
         kind, basis = CATEGORY, ["its address (a collection)"]
     if kind in (SERVICE, OTHER, LANDING) and _LOCATION_PATH.search(path):
         kind, basis = LOCATION, ["its address (a location)"]
+    # The root of the site is the homepage, whatever markup it carries (a shop's homepage often declares a Service or Store).
+    if path.rstrip("/") == "":
+        kind, basis = HOMEPAGE, ["its address"]
+    if kind == OTHER and _ABOUT_PATH.search(path):
+        kind, basis = ABOUT, ["its address"]
+    # Said by the address and by nothing else: no markup names a contact or a policy page as such.
+    if _UTILITY_PATH.search(path) and kind not in (PRODUCT, ARTICLE):
+        kind, basis = UTILITY, ["its address (a utility page)"]
+    elif _CONTACT_PATH.search(path):
+        kind, basis = CONTACT, ["its address (a contact page)"]
     if kind == OTHER:
         confidence = "none"
     elif any("markup" in b for b in basis):
@@ -255,11 +273,11 @@ def technical_finding(outcome: str, *, impressions: int, window_to: str | None) 
 
 # ── how far a change reaches ─────────────────────────────────────────────────
 
-PAGE_SPECIFIC, TEMPLATE_WIDE, SITEWIDE, NEW_CONTENT = "page-specific", "template-wide", "sitewide", "new supporting content"
+PAGE_SPECIFIC, TEMPLATE_WIDE, SITEWIDE = "page-specific", "template-wide", "sitewide"
 #: Parts that change a page's structure, where a shared template matters.
 _STRUCTURAL = frozenset({"A-1", "S-2", "P-1", "PC-1"})
 _MARKUP = frozenset({"V-7"})
-_ELSEWHERE = frozenset({"S-4", "V-4"})
+_ELSEWHERE = frozenset({"S-4", "V-4", "FQ-1"})
 
 
 def template_of(url: str, kind: str, site_urls: Iterable[str] | None) -> dict[str, Any]:
@@ -286,8 +304,6 @@ def template_of(url: str, kind: str, site_urls: Iterable[str] | None) -> dict[st
 
 def scope_of(part_id: str, template: dict[str, Any]) -> dict[str, str]:
     """Where a part's change lands and what to watch for."""
-    if part_id == "SC-1":
-        return {"scope": NEW_CONTENT, "note": "A separate page. The page this action started from is not restructured."}
     if part_id == "TI-1":
         return {"scope": SITEWIDE, "note": "Access rules usually apply to the whole site or host."}
     if part_id in _ELSEWHERE:
@@ -310,7 +326,7 @@ def scope_of(part_id: str, template: dict[str, Any]) -> dict[str, str]:
 PUBLISH, VERIFY, REJECT = "publish", "needs_verification", "reject"
 
 
-def validate(*, intent: dict[str, Any], page: dict[str, Any], fit: dict[str, Any], evidence: dict[str, Any], template: dict[str, Any], parts: list[dict[str, Any]], rerouted: bool, duplicate_of: str | None = None) -> dict[str, Any]:
+def validate(*, intent: dict[str, Any], page: dict[str, Any], fit: dict[str, Any], evidence: dict[str, Any], template: dict[str, Any], parts: list[dict[str, Any]], mismatch: bool = False, duplicate_of: str | None = None) -> dict[str, Any]:
     """Ten questions, each answered pass, unverified or fail, and what to do with the action as a result.
 
     A failed critical check rejects the action. An unverified one lets it through marked for verification.
@@ -328,10 +344,12 @@ def validate(*, intent: dict[str, Any], page: dict[str, Any], fit: dict[str, Any
     add("intent", "Is the search's intent understood?", "pass" if is_read(intent) and intent["confidence"] in ("high", "medium") else "unverified",
         (f"{intent['name']}, {intent['confidence']} confidence, read from the results page of {intent.get('serp_date')}." if is_read(intent) else f"{intent['name']}. {intent.get('uncertainty') or ''}".strip()))
     add("page_type", "Is the page's type known?", "pass" if page["type"] != OTHER else "unverified", page["name"] + (f", from {' and '.join(page['basis'])}" if page["basis"] else "") + ".")
-    purpose_ok = True if investigation or rerouted else None if fit["level"] == UNVERIFIED else fit["level"] != LOW
-    add("purpose", "Does the action match the page's purpose?", tri(purpose_ok), "The work was routed to the kind of page that ranks for the search." if rerouted else fit["why"], critical=True)
-    add("destination", "Is the page the right destination for the search?", "pass" if rerouted or investigation else tri(None if fit["level"] == UNVERIFIED else fit["level"] != LOW),
-        "The page is kept as the place the search was noticed; the work goes elsewhere." if rerouted else fit["why"], critical=True)
+    # On a mismatch nothing is done to the page for the search. Any part left stands on the page's own evidence, so it
+    # is judged as work on the page and not as work for the search.
+    purpose_ok = True if investigation or mismatch else None if fit["level"] == UNVERIFIED else fit["level"] != LOW
+    add("purpose", "Does the action match the page's purpose?", tri(purpose_ok), "Only work that stands on the page's own evidence is kept; none of it is for this search." if mismatch else fit["why"], critical=True)
+    add("destination", "Is the page the right destination for the search?", "pass" if mismatch or investigation else tri(None if fit["level"] == UNVERIFIED else fit["level"] != LOW),
+        f"No. {fit['why']} No work for the search is placed on this page; the right kind of page is named separately." if mismatch else fit["why"], critical=True)
     add("template", "Does the action respect template constraints?", "unverified" if template["shared"] is None else "pass", template["note"])
     enough = evidence["sufficient"]
     add("evidence", "Is the evidence sufficient and current?", "pass" if enough and not evidence["unverified"] else "unverified" if enough or investigation else "fail",
@@ -352,29 +370,6 @@ def validate(*, intent: dict[str, Any], page: dict[str, Any], fit: dict[str, Any
             else "Every check passed" + (f", {len(unverified)} left unverified" if unverified else "") + "."
         ),
     }
-
-
-# ── choosing between candidates ──────────────────────────────────────────────
-
-_TIER = {HIGH: 0, MEDIUM: 1, UNVERIFIED: 2, LOW: 3}
-
-
-def select(candidates: list[dict[str, Any]], limit: int) -> dict[str, list[dict[str, Any]]]:
-    """Eligibility first, score second, and never a weak candidate to make up the number.
-
-    A candidate is `{..., "score": number, "fit": level, "evidence_ok": bool}`. A low fit or missing evidence
-    excludes it, with the reason. Fewer than `limit` may come back.
-    """
-    chosen: list[dict[str, Any]] = []
-    excluded: list[dict[str, Any]] = []
-    for c in sorted(candidates, key=lambda c: (_TIER.get(c.get("fit", UNVERIFIED), 2), -float(c.get("score") or 0))):
-        if c.get("fit") == LOW:
-            excluded.append({**c, "excluded_because": "The page does not suit the search's intent, however many impressions it has."})
-        elif c.get("evidence_ok") is False:
-            excluded.append({**c, "excluded_because": "The page could not be read and no earlier copy of it is held."})
-        elif len(chosen) < limit:
-            chosen.append(c)
-    return {"chosen": chosen, "excluded": excluded}
 
 
 # ── why a reviewer turned an action down ─────────────────────────────────────

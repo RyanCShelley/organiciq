@@ -17,6 +17,7 @@ person can choose another.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -28,7 +29,7 @@ from app.decisions import serp_intent
 from app.decisions import visibility_candidates as vc
 from app.decisions.provisional import _opening, _tokens
 from app.models.client import Client
-from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlInternalLink, FactCrawlPageSnapshot
 from app.services import llm_evidence
 
 #: A page whose title already says the topic counts for this much more than its impressions alone.
@@ -40,6 +41,10 @@ _TURNED_AWAY = frozenset({401, 403, 429, 503})
 #: Parts that join the bundle when the page read produces them, in the order they are listed.
 CORE = ("A-1", "S-1", "S-2", "V-7")
 EXTRAS = ("P-1", "S-5", "S-4")
+#: Parts that are never selected for the person: offered, and theirs to add. FAQ markup is not a growth lever by default.
+NOT_DEFAULT = ("V-7",)
+#: Parts that a link count alone used to produce. Links are suggested by the internal link tool, on relatedness.
+NOT_BY_COUNT = ("V-4", "S-4")
 #: Suggestions that are not offered at all here: S-6 asks which page should own the topic, and choosing the
 #: page is what this screen does.
 NOT_OFFERED = ("S-6",)
@@ -53,17 +58,14 @@ PART_NAMES = {
     "S-5": "Reread the title and description",
     "S-4": "Link here from related pages",
     "V-4": "Add internal links",
-    "SC-1": "Answer the search on a supporting article",
     "IM-1": "Match the page to what the searcher wants",
-    "RT-1": "Use the page that sells it",
     "TI-1": "Investigate crawler access",
 }
 #: What kind of work each part is, and what it is for. No figure is forecast for any of them.
 ACTION_TYPES = {
     "A-1": "Optimize existing page", "S-1": "Optimize existing page", "S-2": "Optimize existing page", "P-1": "Optimize existing page", "S-5": "Optimize existing page",
     "V-7": "Update structured data", "S-4": "Improve internal linking", "V-4": "Improve internal linking",
-    "SC-1": "Create supporting content", "TI-1": "Investigate technical issue", "IM-1": "Optimize existing page",
-    "RT-1": "Improve internal linking",
+    "TI-1": "Investigate technical issue", "IM-1": "Optimize existing page",
 }
 BENEFITS = {
     "A-1": ("AI visibility", "An answer an AI platform can lift gives it something of this site to cite."),
@@ -74,17 +76,14 @@ BENEFITS = {
     "S-5": ("SEO", "A clearer title and description can earn more of the clicks the page is already shown for."),
     "S-4": ("SEO", "Links from related pages tell the search engine this page matters for the topic."),
     "V-4": ("SEO", "Links from related pages tell the search engine this page matters for the topic."),
-    "SC-1": ("SEO and AI visibility", "The search gets a page built to answer it, and the commercial page keeps its job."),
     "TI-1": ("Technical reliability", "Until our reader can fetch the page, nothing about it can be checked or measured."),
-    "RT-1": ("SEO and conversion", "The search is served by the kind of page that ranks for it, and this page sends its readers there."),
     "IM-1": ("SEO and conversion", "A page that does what the searcher came to do is the page a search engine wants to show for it."),
 }
 #: Parts that put an explanation into the page. They are the ones a commercial page should not take for an informational search.
-_EXPLAINERS = ("A-1", "S-1", "P-1")
 #: The parts that lead an action when present: what the searcher wants, or where the work was routed.
-_LEADS = ("IM-1", "SC-1", "RT-1")
+_LEADS = ("IM-1",)
 #: Parts whose worth depends on what the searcher wants. With no results page read they are held back, not guessed at.
-INTENT_DEPENDENT = ("A-1", "S-1", "P-1", "S-2", "SC-1", "RT-1", "PC-1", "IM-1")
+INTENT_DEPENDENT = ("A-1", "S-1", "P-1", "S-2", "PC-1", "IM-1")
 #: What the page must do for each intent on each kind of page: `(what the searcher needs from it, the changes that serve that)`.
 _MATCH: dict[str, dict[str, tuple[str, list[str]]]] = {
     serp_intent.TRANSACTIONAL: {
@@ -403,85 +402,29 @@ def _existing_page(topic: dict[str, Any], site: dict[str, str] | None, keyword: 
     return None
 
 
-#: How to say the style that ranks, as the thing to build.
-_STYLE_AS = {
-    "list": "a “best of” list", "how-to": "a how-to", "question and answer": "a question-and-answer page", "comparison": "a comparison",
-    "product review": "a review", "guide": "a guide", "case study": "a case study", "research or stats": "a piece built on research and figures",
-}
+def _suggested_page(topic: dict[str, Any], site: dict[str, str] | None, chosen: dict[str, Any], kind: dict[str, Any], fit: dict[str, Any], wants: str | None) -> dict[str, Any]:
+    """The page of the right kind for a search this page does not suit. Named for the person to review on its own.
 
-
-def _ranking_style(intent: dict[str, Any]) -> str | None:
-    styles = intent.get("content_styles") or {}
-    top = next(iter(styles), None)
-    return _STYLE_AS.get(top or "")
-
-
-def _supporting_content(search: str, keyword: str, chosen: dict[str, Any], kind: dict[str, Any], article: dict[str, Any] | None, site: dict[str, str] | None, intent: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
-    """The work, moved to an article: this page is not the kind that ranks for the search.
-
-    An existing article is improved before anything new is written. What to build follows the style that ranks.
+    Never switched to and never worked on inside this action. Where the site has no such page, that is said, and
+    whether to make one is left as a separate decision: the format that ranks informs it and does not dictate it.
     """
-    style = _ranking_style(intent)
-    as_what = style or "an article"
-    reason = fit["why"] if fit.get("basis") == "what ranks" else f"The search asks for an explanation, and this {kind['name'].lower()} is there to {kind['purpose']}."
-    seen = list(intent.get("evidence") or [])[:3]
-    base_evidence = [f"{chosen['impressions']:,} impressions for searches containing “{keyword}” land on {chosen['url']}, which is not the kind of page that ranks for it.", *seen]
-    match = [f"What ranks for this search: {intent['content_to_match']}"] if intent.get("content_to_match") else []
-    if article:
+    kinds = ac.INFORMATIONAL_PAGES if wants == "article" else ac.COMMERCIAL_PAGES if wants == "selling page" else None
+    found = _existing_page(topic, site, topic["keyword"], chosen["url"], kinds) if kinds else None
+    if found is None:
+        better = _better_page(topic, chosen, fit)
+        found = {"url": better["url"], "title": next((p["title"] for p in topic["pages"] if p["url"] == better["url"]), ""), "how": f"it shows for this search and suits it better ({better['impressions']:,} impressions)"} if better else None
+    what = {"article": "an article or guide", "selling page": "a product, collection or service page"}.get(wants or "", "a different kind of page")
+    if found:
         return {
-            "id": "SC-1", "name": "Answer the search on the existing article", "core": True, "confirmed_by_rule": False,
-            "title": f"Answer “{search}” on the existing article, and link it to the {kind['name'].lower()}",
-            "why": f"{reason} An article already covers the topic ({article['how']}), so it is improved before anything new is written.",
-            "steps": [
-                f"The article: {article['url']}" + (f" (“{article['title']}”)" if article["title"] else "") + ".",
-                f"Shape it as {as_what}, which is what ranks for “{search}”, and make sure it answers the search near the top.",
-                *match,
-                f"Link from the article to {chosen['url']} where the product or service is the natural next step, with descriptive anchor text.",
-                f"Leave the {kind['name'].lower()}'s layout and opening as they are.",
-            ],
-            "evidence": base_evidence,
-            "action_type": "Optimize existing page", "benefit": BENEFITS["SC-1"][0], "benefit_why": BENEFITS["SC-1"][1],
+            "kind": wants, "exists": True, "url": found["url"], "title": found["title"],
+            "why": f"This search is better served by {what}, and one already exists: {found['how']}.",
+            "next": "Review that page on its own. This action is not moved to it.",
         }
-    checked = "No article whose title says the topic was found in the site crawl, and none shows for it in Search Console." if site is not None else "The site has not been crawled, so whether an article already covers this is unverified: check before writing."
+    checked = "none shows for it in Search Console and none in the site crawl says the topic in its title" if site is not None else "none shows for it in Search Console, and the site has not been crawled, so check before deciding"
     return {
-        "id": "SC-1", "name": PART_NAMES["SC-1"], "core": True, "confirmed_by_rule": False,
-        "title": f"Write {as_what} for “{search}”" if style else f"Write a supporting article that answers “{search}”",
-        "why": f"{reason} {checked}",
-        "steps": [
-            "Search the site for an existing article on this before writing, so two pages do not compete.",
-            f"Write {as_what} for “{search}”: say what the reader came for in the first two to three sentences, then cover what they ask next.",
-            *match,
-            "State only what is true of the products or services. Where the search assumes something they are not, say so plainly.",
-            f"Link from the article to {chosen['url']} where it is the natural next step.",
-            f"Leave the {kind['name'].lower()}'s layout and opening as they are.",
-        ],
-        "evidence": base_evidence,
-        "action_type": ACTION_TYPES["SC-1"], "benefit": BENEFITS["SC-1"][0], "benefit_why": BENEFITS["SC-1"][1],
-    }
-
-
-def _route_to_selling_page(search: str, keyword: str, chosen: dict[str, Any], kind: dict[str, Any], target: dict[str, Any] | None, intent: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
-    """The work, moved the other way: pages that sell rank for the search, and this one explains."""
-    seen = list(intent.get("evidence") or [])[:3]
-    if target:
-        title = f"Work on {target['url']} for “{search}”, and link to it from here"
-        why = f"{fit['why']} A page that sells this already exists ({target['how']})."
-        steps = [
-            f"The page: {target['url']}" + (f" (“{target['title']}”)" if target["title"] else "") + ".",
-            "Choose it under “Choose a different page” to build its growth action.",
-            f"From this {kind['name'].lower()}, link to it where a reader is ready to buy or enquire, with descriptive anchor text.",
-        ]
-    else:
-        title = f"Decide which product, collection or service page should serve “{search}”"
-        why = f"{fit['why']} No product, collection or service page of this site shows for the topic or says it in its title."
-        steps = [
-            "Check whether the site sells what this search is for. If it does not, this search is not a target.",
-            "If it does, name the page that should serve it, or plan one, and link to it from this page.",
-        ]
-    return {
-        "id": "RT-1", "name": PART_NAMES["RT-1"], "core": True, "confirmed_by_rule": False, "title": title, "why": why, "steps": steps,
-        "evidence": [f"{chosen['impressions']:,} impressions for searches containing “{keyword}” land on {chosen['url']}, which is not the kind of page that ranks for it.", *seen],
-        "action_type": ACTION_TYPES["RT-1"], "benefit": BENEFITS["RT-1"][0], "benefit_why": BENEFITS["RT-1"][1],
+        "kind": wants, "exists": False, "url": None, "title": None,
+        "why": f"This search is better served by {what}. This site has none for it: {checked}.",
+        "next": "Whether to create one is a separate decision. Nothing is planned for it here.",
     }
 
 
@@ -633,7 +576,8 @@ def build(
     # The reading must be of the term on the screen. One that is not is worth nothing here, and is not used.
     if intent.get("search") and _key(intent["search"]) != _key(search):
         intent = serp_intent.not_read(f"The results page returned was for “{intent['search']}”, not “{search}”, so it was not used.")
-    result = diagnose(search, chosen["url"], row, evidence_for(search, chosen["url"]))
+    page_evidence = evidence_for(search, chosen["url"])
+    result = diagnose(search, chosen["url"], row, page_evidence)
     read = result["read"]
     facts = result.get("page_facts") or {}
     stopped = not read.get("ok") or bool(read.get("blocked"))
@@ -645,28 +589,46 @@ def build(
     evidence = _evidence(read, intent, template)
     duplicate = _duplicate(db, client, planned_month, topic["keyword"], chosen["url"])
 
-    def finish(parts: list[dict[str, Any]], left_out: list[dict[str, str]], optional: list[dict[str, Any]], *, rerouted: bool, observations: list[dict[str, Any]]) -> dict[str, Any]:
-        for p in parts + optional:
+    def finish(parts: list[dict[str, Any]], left_out: list[dict[str, str]], optional: list[dict[str, Any]], *, mismatch: bool, observations: list[dict[str, Any]], suggested: dict[str, Any] | None = None, held: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        held = held or []
+        for p in parts + optional + held:
             p.update(ac.scope_of(p["id"], template))
-        gate = ac.validate(intent=intent, page=kind, fit=fit, evidence=evidence, template=template, parts=parts, rerouted=rerouted, duplicate_of=duplicate)
+        for p in held:
+            p["role"] = "held"
+        # One primary action; the rest support it. What is offered but not selected stays optional.
+        for n, p in enumerate(parts):
+            p["role"] = "primary" if n == 0 else "supporting"
+        for p in optional:
+            p["role"] = "optional"
+        gate = ac.validate(intent=intent, page=kind, fit=fit, evidence=evidence, template=template, parts=parts, mismatch=mismatch, duplicate_of=duplicate)
         context = {
-            "intent": intent, "page_type": kind, "fit": fit, "template": template, "evidence": evidence, "validation": gate, "rerouted": rerouted,
+            "intent": intent, "page_type": kind, "fit": fit, "template": template, "evidence": evidence, "validation": gate, "mismatch": mismatch,
             "action_types": list(dict.fromkeys(p["action_type"] for p in parts)),
             "benefits": list(dict.fromkeys(p["benefit"] for p in parts)),
         }
         context["winners"] = winners
         base = {
             "topic": topic, "keyword": topic["label"], "page": chosen["url"], "chosen": chosen, "search": search, "search_source": search_source,
-            "row": row, "context": context, "better_page": _better_page(topic, chosen, fit),
+            "row": row, "context": context, "better_page": None if mismatch else _better_page(topic, chosen, fit), "suggested_page": suggested,
         }
+        done = {"left_out": left_out, "optional": optional, "observations": observations, "opening": _opening_text(result), "held": held}
+        if duplicate:
+            return {**base, "ok": False, "error": gate["summary"], "left_out": left_out}
+        if not parts:
+            # A finding does not have to produce work. Nothing recommended is an answer, with its reason, and not an error.
+            reason = (
+                f"{fit['why']} No change to this page is recommended for this search." if mismatch
+                else "Nothing was found on this page to change for this search."
+            )
+            return {**base, "ok": True, "parts": [], **done, "nothing_recommended": {"reason": reason}}
         if gate["verdict"] == ac.REJECT:
             return {**base, "ok": False, "error": gate["summary"], "left_out": left_out}
-        return {**base, "ok": True, "parts": parts, "left_out": left_out, "optional": optional, "observations": observations, "opening": _opening_text(result)}
+        return {**base, "ok": True, "parts": parts, **done, "nothing_recommended": None}
 
     winners: dict[str, Any] | None = None
     if stopped:
         received = ((read.get("received") or {}).get("status"))
-        return finish([_investigation(chosen, topic, read, f"HTTP {received} was returned." if received else None)], [], [], rerouted=False, observations=result.get("observations") or [])
+        return finish([_investigation(chosen, topic, read, f"HTTP {received} was returned." if received else None)], [], [], mismatch=False, observations=result.get("observations") or [])
 
     found: dict[str, dict[str, Any]] = {}
     for s in result["suggestions"]:
@@ -680,18 +642,26 @@ def build(
     paired = llm_evidence.paired_keyword(db, client, search)
     prompt = " ".join(paired.paired_ai_prompt.split()) if paired is not None else ""
 
-    # A commercial page showing for a search that wants an explanation: the page is where the search was noticed, not where it is answered.
     read_intent = ac.is_read(intent)
-    # This page is not the kind that ranks for the search. The work goes to the kind that does: an article when pages that
-    # explain rank, a selling page when pages that sell rank. Where what ranks could not be read, the intent says which.
-    wrong_page = read_intent and fit["level"] == ac.LOW
-    explains = kind["type"] in ac.INFORMATIONAL_PAGES
-    to_article = wrong_page and not explains and (fit.get("leads") == ac.EXPLAINING or (fit.get("leads") is None and intent["primary"] == ac.INFORMATIONAL))
-    to_selling = wrong_page and explains and (fit.get("leads") == ac.SELLING or (fit.get("leads") is None and intent["primary"] in (ac.TRANSACTIONAL, ac.LOCAL)))
-    rerouted = to_article or to_selling
+    # This page is not the kind that ranks for the search. No work for the search is placed on it, and none is moved to
+    # another page inside this action: the page of the right kind is named separately, for the person to review on its own.
+    # What stays is only what stands on the page's own evidence, whatever the search (the conversion parts of a page
+    # picked from the Traffic or Leads list).
+    mismatch = read_intent and fit["level"] == ac.LOW
+    if mismatch:
+        explains = kind["type"] in ac.INFORMATIONAL_PAGES
+        wants = "article" if not explains and (fit.get("leads") == ac.EXPLAINING or (fit.get("leads") is None and intent["primary"] == ac.INFORMATIONAL)) else \
+            "selling page" if explains and (fit.get("leads") == ac.SELLING or (fit.get("leads") is None and intent["primary"] in (ac.TRANSACTIONAL, ac.LOCAL))) else None
+        own = [_part(extra["id"], extra, core=False) for extra in extra_suggestions or []]
+        considered = [
+            {"id": id_, "name": PART_NAMES.get(id_) or found[id_].get("title") or id_, "reason": f"Not recommended here: {fit['why']} Work for this search belongs on the kind of page that ranks for it."}
+            for id_ in found
+        ]
+        return finish(own, considered, [], mismatch=True, observations=result["observations"], suggested=_suggested_page(topic, site, chosen, kind, fit, wants))
+
     # A product or collection page opens with what is for sale. A question answered at its top displaces that, whatever the
     # search and whatever the question, so it is never added there automatically.
-    no_top_answer = rerouted or kind["type"] in (ac.PRODUCT, ac.CATEGORY)
+    no_top_answer = kind["type"] in (ac.PRODUCT, ac.CATEGORY)
     # Words in the search that the page never uses. On a commercial page that can be demand for something the product is not.
     missing = [t for t in facts.get("search_terms_missing") or []]
     claim_risk = bool(missing) and kind["type"] in ac.COMMERCIAL_PAGES
@@ -704,24 +674,19 @@ def build(
         # Someone here to buy, book or reach a site is not helped by an answer or a rewritten opening built for a reader.
         for id_ in ("A-1", "P-1"):
             barred[id_] = f"Not added: the search is {intent['name'].lower()}, so an explanation at the top of a {kind['name'].lower()} does not serve it."
-    if not read_intent:
-        pass
-    elif to_selling:
-        for id_ in ("A-1", "S-1", "P-1", "S-2"):
-            barred[id_] = f"Not added: {fit['why']} The work goes to the page that sells it."
-    elif rerouted:
-        for id_ in _EXPLAINERS:
-            barred[id_] = f"Not added: {fit['why']} The search is answered on a supporting article instead."
-    elif no_top_answer:
+    if read_intent and no_top_answer and "A-1" not in barred:
         barred["A-1"] = f"Not added: a {kind['name'].lower()} opens with what is for sale, and a question answered at the top displaces that. A brief clarification in the page's description is offered below instead."
     if claim_risk and "S-1" not in barred:
         words = ", ".join(f"“{w}”" for w in missing[:4])
         barred["S-1"] = f"Not added: the search uses words this page never does ({words}). On a {kind['name'].lower()} that can mean people want something this is not, so the wording is not copied in. Use it only if it is true of what is sold."
         evidence["unverified"].append(f"Whether the page's product or service really is what the search names ({words}) has not been checked.")
+    # A link count is not a reason to add links, and FAQ markup is not a growth lever by default. Neither makes a task of its own.
+    for id_ in NOT_BY_COUNT:
+        barred[id_] = "Not added: how many links a page has is not a reason to add more. Link suggestions come from the internal link tool, which checks that the two pages are related."
 
     # Order: the core parts, then every rule that fired (a prescription is a fact, not a hunch), then the extras.
     for id_ in CORE:
-        if id_ in found and id_ not in barred:
+        if id_ in found and id_ not in barred and id_ not in NOT_DEFAULT:
             parts.append(_part(id_, found[id_], core=True))
     fired = [p["action_id"] for p in result["prescriptions"]]
     for id_ in fired:
@@ -732,19 +697,17 @@ def build(
             parts.append(_part(id_, found[id_], core=False))
     for extra in extra_suggestions or []:
         parts.append(_part(extra["id"], extra, core=False))
-    matched = None if rerouted else _intent_match(search, intent, kind)
-    # What the winners do that this page does not: only for a page that is the right kind for the term, and only from
-    # pages that were read. Each gap becomes a part of its own, after the part that says what the searcher wants.
-    if winners_for and not rerouted and facts.get("outline"):
-        winners = winners_for(search, intent, chosen["url"], kind["name"], facts["outline"])
+    matched = _intent_match(search, intent, kind)
+    # What the winners do that this page does not, only from pages that were read. A gap the comparison observed in
+    # them becomes a part; one it only inferred is offered, not selected.
+    inferred: list[dict[str, Any]] = []
+    if winners_for and facts.get("outline"):
+        asked = [] if "S-2" in barred else _questions_asked(signals, page_evidence, prompt)
+        winners = winners_for(search, intent, chosen["url"], kind["name"], facts["outline"], asked)
         for n, gap in enumerate((winners.get("comparison") or {}).get("gaps") or [], start=1):
-            parts.append(_gap_part(n, gap, read_intent))
+            (parts if gap["basis"] == "observed" else inferred).append(_gap_part(n, gap, read_intent))
     if matched:
         parts.insert(0, matched)
-    if to_selling:
-        parts.insert(0, _route_to_selling_page(search, topic["keyword"], chosen, kind, _existing_page(topic, site, topic["keyword"], chosen["url"], ac.COMMERCIAL_PAGES), intent, fit))
-    elif to_article:
-        parts.insert(0, _supporting_content(search, topic["keyword"], chosen, kind, _existing_page(topic, site, topic["keyword"], chosen["url"], ac.INFORMATIONAL_PAGES), site, intent, fit))
 
     # A core part with nothing from the page read can still be built from the topic's paired question.
     have = {p["id"] for p in parts}
@@ -774,12 +737,26 @@ def build(
         left_out.append({"id": "S-1", "name": PART_NAMES["S-1"], "reason": "The page's title and main heading already say the phrasing people search, or no longer phrasing shows for it."})
     if "P-1" in barred and "P-1" in found:
         left_out.append({"id": "P-1", "name": PART_NAMES["P-1"], "reason": barred["P-1"]})
-    if "S-2" not in have and "V-7" not in have:
-        if facts.get("has_faq"):
-            left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": "The page already has an FAQ."})
+    # Questions people ask about the term that the page does not answer, whether or not it already has an FAQ.
+    # A rule that found an FAQ to mark up found an FAQ.
+    has_faq = bool(facts.get("has_faq")) or "V-7" in found
+    checked = ((winners or {}).get("comparison") or {}).get("questions")
+    if checked and checked["missing"] and "S-2" not in barred:
+        parts[:] = [p for p in parts if p["id"] != "S-2"]  # The questions that were checked replace a list that was not.
+        idx = next((i for i, p in enumerate(parts) if p["id"] not in ("A-1", "S-1", *_LEADS)), len(parts))
+        parts.insert(idx, _questions_part(checked, has_faq))
+        have.add("S-2")
+    if "S-2" not in have and has_faq and "S-2" not in barred:
+        left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": (
+            f"The page already has an FAQ, and it answers all {checked['checked']} of the questions found for this search." if checked
+            else "The page already has an FAQ. No question people ask about this search was found to check it against."
+        )})
+    elif "S-2" not in have and "V-7" not in have:
+        if has_faq:
+            left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": barred["S-2"]})
         elif "S-2" in barred:
             left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": barred["S-2"]})
-        elif prompt and not rerouted:
+        elif prompt:
             idx = next((i for i, p in enumerate(parts) if p["id"] not in ("A-1", "S-1", *_LEADS)), len(parts))
             parts.insert(
                 idx,
@@ -790,19 +767,30 @@ def build(
                     "steps": [
                         f"Start with the question customers ask AI platforms: “{prompt}”.",
                         "Add three to five questions a customer would ask before buying, each answered in one to three sentences.",
-                        "Then mark the FAQ up as FAQPage.",
                     ],
                     "evidence": [],
                     "action_type": ACTION_TYPES["S-2"], "benefit": BENEFITS["S-2"][0], "benefit_why": BENEFITS["S-2"][1],
                 }
             )
         else:
-            reason = "The work goes to the kind of page that ranks for the search, so no FAQ is added here for it." if rerouted else skipped.get("S-2", "No question to base an FAQ on.")
+            reason = skipped.get("S-2", "No question to base an FAQ on.")
             left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": reason})
 
     seen = {p["id"] for p in parts}
     # Suggestions the page read produced that are not in the action: offered to add, never repeated elsewhere.
     optional = [_part(s["id"], s, core=False) for s in result["suggestions"] if s["id"] not in seen and s["id"] not in NOT_OFFERED and s["id"] not in barred]
+    # The site's own FAQ page, when this page does not link to it: part of the FAQ work when there is some, offered otherwise.
+    for id_ in NOT_BY_COUNT:
+        if id_ in found:
+            left_out.append({"id": id_, "name": PART_NAMES.get(id_) or found[id_].get("title") or id_, "reason": barred[id_]})
+    optional.extend(inferred)
+    # Markup for an FAQ the page already has: offered, never selected for the person.
+    optional.extend(_part(id_, found[id_], core=False) for id_ in NOT_DEFAULT if id_ in found)
+    faq_link = _faq_page_link(db, client, site, chosen["url"])
+    if faq_link and "S-2" in seen:
+        parts.insert(next(i for i, p in enumerate(parts) if p["id"] == "S-2") + 1, faq_link)
+    elif faq_link:
+        optional.append(faq_link)
     if read_intent and no_top_answer and (prompt or "A-1" in found):
         optional.insert(0, {
             "id": "PC-1", "name": "Add a brief clarification", "core": False, "confirmed_by_rule": False,
@@ -811,7 +799,86 @@ def build(
             "steps": ["Write one or two sentences in the page's existing description area.", "Say only what is true of what is sold.", "Do not move or push down the price, options or call to action."],
             "evidence": [], "action_type": "Clarify product or service positioning", "benefit": "Conversion", "benefit_why": "A buyer who understands what the product is decides faster.",
         })
-    return finish(parts, left_out, optional, rerouted=rerouted, observations=result["observations"])
+    # With no results page read, the parts that depend on intent are held, not dropped: they are shown as they would be and
+    # cannot be approved until the results page is read.
+    held = [] if read_intent else [
+        {**_part(id_, found[id_], core=id_ in CORE), "held": True, "held_reason": barred[id_]}
+        for id_ in found if id_ in barred and id_ in INTENT_DEPENDENT
+    ]
+    return finish(parts, left_out, optional, mismatch=False, observations=result["observations"], held=held)
+
+
+def _questions_asked(signals: dict[str, Any] | None, page_evidence: dict[str, Any] | None, prompt: str) -> list[dict[str, Any]]:
+    """The questions people ask about the term, each with where it was seen: the results page's "People also ask",
+    question-shaped searches this page shows for, and the watchlist keyword's paired AI prompt."""
+    from app.services.target_signals import _is_question
+
+    asked = [{"question": q, "source": "people_also_ask", "detail": None} for q in (signals or {}).get("questions") or []]
+    for q in (page_evidence or {}).get("page_queries") or []:
+        if _is_question(q.get("query") or ""):
+            asked.append({"question": q["query"], "source": "search_console", "detail": f"{int(q.get('impressions') or 0):,} impressions"})
+    if prompt:
+        asked.append({"question": prompt, "source": "prompt", "detail": None})
+    return asked
+
+
+def _questions_part(checked: dict[str, Any], has_faq: bool) -> dict[str, Any]:
+    """The FAQ part, built from questions that were found for the term and checked against the page."""
+    missing = checked["missing"]
+    n = len(missing)
+    steps = []
+    for q in missing:
+        seen_in = q["source_name"] + (f" ({q['detail']})" if q.get("detail") and q["source"] == "search_console" else f": {q['detail']}" if q.get("detail") else "")
+        steps.append(f"“{q['question']}” Seen in: {seen_in}." + (f" {q['why']}" if q.get("why") else ""))
+    steps.append("Answer each in one to three sentences, in the words you would use to a customer, using only facts already true of this page.")
+    # No markup step: FAQ markup is not a default lever. Where a page's existing FAQ has markup, keeping the two in step is noted.
+    steps.append("Add them to the page's existing FAQ. If that FAQ has markup, add them there too so the two stay in step." if has_faq else "Put them in a short FAQ section on the page.")
+    sources = list(dict.fromkeys(q["source_name"] for q in missing))
+    return {
+        "id": "S-2", "name": "Add the missing questions to the FAQ" if has_faq else PART_NAMES["S-2"], "core": True, "confirmed_by_rule": False,
+        "title": f"Add {n} missing question{'s' if n != 1 else ''} to the page's FAQ" if has_faq else f"Add a short FAQ with {n} question{'s' if n != 1 else ''} people ask",
+        "why": (
+            f"{checked['checked']} questions people ask about this search were checked against the page, and it does not answer {'this one' if n == 1 else f'these {n}'}. "
+            + ("The page has an FAQ already, so they are added to it." if has_faq else "The page has no FAQ.")
+            + " Which questions are missing is a model's reading of the page, not a rule: check each before writing."
+        ),
+        "steps": steps,
+        "evidence": [f"{checked['checked']} questions checked, {n} not answered on the page", "Where the missing ones were seen: " + "; ".join(sources)],
+        "action_type": ACTION_TYPES["S-2"], "benefit": BENEFITS["S-2"][0], "benefit_why": BENEFITS["S-2"][1],
+    }
+
+
+_FAQ_PAGE = re.compile(r"(^|[/\-_])(faqs?|frequently[-_]asked[-_]questions)([/\-_.]|$)", re.I)
+_FAQ_TITLE = re.compile(r"\b(faqs?|frequently asked questions)\b", re.I)
+
+
+def _faq_page_link(db: Session, client: Client, site: dict[str, str] | None, page: str) -> dict[str, Any] | None:
+    """A part that links this page to the site's FAQ page, when the crawl holds one and no in-content link to it from this page.
+
+    The FAQ page is one whose address says so; a title alone is not enough, since articles are often titled as FAQs.
+    """
+    from urllib.parse import urlsplit
+
+    if not site:
+        return None
+    found = sorted((u for u, title in site.items() if u != page and _FAQ_PAGE.search(urlsplit(u).path) and (_FAQ_TITLE.search(title or "") or not title)), key=len)
+    if not found:
+        return None
+    target = found[0]
+    linked = db.query(FactCrawlInternalLink.id).filter(
+        FactCrawlInternalLink.client_id == client.id, FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY,
+        FactCrawlInternalLink.from_url == page, FactCrawlInternalLink.to_url == target, FactCrawlInternalLink.in_content.is_(True),
+    ).first()
+    if linked:
+        return None
+    return {
+        "id": "FQ-1", "name": "Link to the site's FAQ page", "core": False, "confirmed_by_rule": False,
+        "title": "Link to the site's FAQ page",
+        "why": "The site has an FAQ page, and the crawl found no link to it in this page's content. Someone with a question this page does not answer has nowhere to go from here.",
+        "steps": [f"The FAQ page: {target}", "Link to it from this page's FAQ, or from the point where a reader is most likely to have a further question.", "Use link text that says what is there, such as “See all frequently asked questions”."],
+        "evidence": [f"FAQ page in the site crawl: {target}", "No in-content link from this page to it in the crawl."],
+        "action_type": "Improve internal linking", "benefit": "SEO", "benefit_why": "A link from a page on the topic helps both a reader and a search engine reach the questions answered elsewhere on the site.",
+    }
 
 
 def _opening_text(result: dict[str, Any]) -> str | None:
@@ -850,19 +917,6 @@ def draft(bundle: dict[str, Any], month: str) -> dict[str, Any]:
         why = f"Our reader could not fetch this page, so nothing on it was judged. {parts[0]['why']}"
         done_when = "It is known whether the block affects search engines, and our reader can fetch the page or the reason it cannot is recorded."
         metric = "Whether the page is read on the next site crawl, and what Search Console's URL Inspection reports for it"
-    elif any(p["id"] == "RT-1" for p in parts):
-        title = f"Growth action: the selling page for “{bundle['keyword']}” (from /{path})"
-        why = f"/{path} shows for “{bundle['keyword']}” ({chosen['impressions']:,} impressions over three months), but {ctx['fit']['why'][0].lower() + ctx['fit']['why'][1:]} The work is {len(parts)} part{'s' if len(parts) != 1 else ''}: {names}."
-        done_when = "The page that sells it is chosen or planned, and this page links to it."
-        metric = f"Clicks and impressions for searches containing “{bundle['keyword']}” in Search Console, on the selling page"
-    elif ctx.get("rerouted"):
-        title = f"Growth action: supporting content for “{bundle['keyword']}” (from /{path})"
-        why = (
-            f"/{path} shows for “{bundle['keyword']}” ({chosen['impressions']:,} impressions over three months), but {ctx['fit']['why'][0].lower() + ctx['fit']['why'][1:]} "
-            f"So the page is left to do its own job and the work is {len(parts)} part{'s' if len(parts) != 1 else ''}: {names}."
-        )
-        done_when = "Every part above is live, and the commercial page's layout is unchanged."
-        metric = f"Clicks and impressions for searches containing “{bundle['keyword']}” in Search Console, on the article and on /{path}"
     else:
         title = f"Growth action: /{path} for “{bundle['keyword']}”"
         why = (

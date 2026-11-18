@@ -12,7 +12,7 @@ const shortPage = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
 type Choice = { on: boolean; editing: boolean; text: string };
 
 /** The task as the person left it: only the ticked parts, with their steps as edited. */
-function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: GrowthPart[], choices: Record<string, Choice>): TaskDraft {
+export function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: GrowthPart[], choices: Record<string, Choice>): TaskDraft {
   const chosen = parts.filter((p) => choices[p.id]?.on);
   const steps: string[] = [];
   chosen.forEach((p, i) => {
@@ -22,13 +22,14 @@ function assemble(bundle: Extract<GrowthActionBundle, { ok: true }>, parts: Grow
   // The draft's own lines about a part that was unticked are dropped; the lines about the search, the page and the read are kept.
   const dropped = parts.filter((p) => !choices[p.id]?.on).map((p) => `${p.name}: `);
   const added = chosen.filter((p) => !bundle.parts.some((b) => b.id === p.id)).flatMap((p) => p.evidence.map((e) => `${p.name}: ${e}`));
-  const evidence = [...bundle.draft.evidence.filter((e) => !dropped.some((d) => e.startsWith(d))), ...added].filter(Boolean);
-  // A rerouted action or an investigation says why in its own words, which the usual sentence would contradict.
-  const special = bundle.context?.rerouted || bundle.parts.some((p) => p.id === "TI-1");
+  const draft = bundle.draft!; // Only called to confirm, and there is nothing to confirm without a draft.
+  const evidence = [...draft.evidence.filter((e) => !dropped.some((d) => e.startsWith(d))), ...added].filter(Boolean);
+  // An investigation says why in its own words, which the usual sentence would contradict.
+  const special = bundle.parts.some((p) => p.id === "TI-1");
   return {
-    ...bundle.draft,
+    ...draft,
     why: special
-      ? bundle.draft.why
+      ? draft.why
       : `This page gets the most impressions for “${bundle.keyword}” (${bundle.chosen.impressions.toLocaleString()} over three months). The work is ${chosen.length} part${chosen.length === 1 ? "" : "s"}, done together on this one page: ${chosen.map((p) => p.name.toLowerCase()).join(", ")}.`,
     steps,
     evidence,
@@ -236,6 +237,8 @@ export function GrowthActionPlanner({
   // Once the action is built its page list carries the fit read from the term's own results page.
   const pages = (bundle && bundle.ok && bundle.topic) || topic?.pages;
   const better = bundle && bundle.ok ? bundle.better_page : null;
+  const suggested = bundle && bundle.ok ? bundle.suggested_page : null;
+  const nothing = bundle && bundle.ok ? bundle.nothing_recommended : null;
   const all = useMemo(() => (bundle && bundle.ok ? [...bundle.parts, ...bundle.optional] : []), [bundle]);
   const kept = all.filter((p) => choices[p.id]?.on).length;
 
@@ -331,6 +334,16 @@ export function GrowthActionPlanner({
               </button>
             </span>
           ) : null}
+          {suggested ? (
+            <span className="mt-1 block rounded bg-amber-50 px-2 py-1 text-amber-900">
+              {suggested.url ? <><strong>{shortPage(suggested.url)}</strong>: </> : null}{suggested.why} {suggested.next}{" "}
+              {suggested.url && pages.pages.some((p) => p.url === suggested.url) ? (
+                <button type="button" onClick={() => setChosen(suggested.url!)} className="font-semibold underline">
+                  Review that page
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           {pages.pages.length > 1 ? (
             <button type="button" onClick={() => setShowPages((v) => !v)} className="text-xs font-semibold underline">
               {showPages ? "Hide the pages" : `Choose a different page (${pages.pages.length})`}
@@ -371,15 +384,16 @@ export function GrowthActionPlanner({
 
       {bundle && bundle.ok ? (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
-          <h5 className="font-semibold">{bundle.draft.title}</h5>
+          <h5 className="font-semibold">{nothing ? "Nothing recommended for this page and search" : bundle.draft?.title}</h5>
+          {nothing ? <p className="mt-1">{nothing.reason}</p> : null}
           {bundle.context ? <ContextSummary context={bundle.context} /> : null}
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Check what to keep, edit a part's steps if you want it said differently, then confirm. Each thing appears here once.</p>
+          {nothing ? null : <p className="mt-1 text-xs text-[var(--text-tertiary)]">Check what to keep, edit a part's steps if you want it said differently, then confirm. Each thing appears here once.</p>}
           <ul className="mt-3 space-y-3">
             {bundle.parts.map((p) => renderPart(p, choices[p.id]?.on ? ++number : null))}
           </ul>
           {bundle.optional.length > 0 ? (
             <>
-              <h5 className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Also seen on the page: tick to add</h5>
+              <h5 className="mt-4 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Optional: tick to add</h5>
               <ul className="mt-2 space-y-3">
                 {bundle.optional.map((p) => renderPart(p, choices[p.id]?.on ? ++number : null))}
               </ul>
@@ -391,12 +405,12 @@ export function GrowthActionPlanner({
           <div className="mt-3">
             {inPlan(bundle.page) ? (
               <span className="font-semibold text-green-800">✓ This page is already in the plan.</span>
-            ) : (
+            ) : nothing ? null : (
               <button type="button" onClick={confirm} disabled={pending || kept === 0} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                 {pending ? <><Spinner />Adding…</> : `Confirm as a growth action (${kept} part${kept === 1 ? "" : "s"})`}
               </button>
             )}
-            {!inPlan(bundle.page) && kept === 0 ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Nothing here to confirm: no part applies to this page. Choose a different page, or see why each part was left out above.</p> : null}
+            {!inPlan(bundle.page) && kept === 0 && !nothing ? <p className="mt-2 text-xs text-[var(--text-secondary)]">Nothing here to confirm: no part applies to this page. Choose a different page, or see why each part was left out above.</p> : null}
           </div>
         </div>
       ) : null}

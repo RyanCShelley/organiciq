@@ -47,7 +47,20 @@ def visibility_candidates_for(
     chosen = month or last_complete_month()
     try:
         parse_month(chosen)
-        return visibility_candidates.build(db, client, chosen, bucket_id)
+        found = visibility_candidates.build(db, client, chosen, bucket_id)
+        # When each listed page was last read by the site crawl, so a row can say its page was read long ago before anyone diagnoses it.
+        from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+
+        urls = {c["page"] for c in found["candidates"]}
+        read_on = dict(
+            db.query(FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.snapshot_date).filter(
+                FactCrawlPageSnapshot.client_id == client.id, FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot.normalized_url.in_(urls)
+            )
+        ) if urls else {}
+        for c in found["candidates"]:
+            day = read_on.get(c["page"])
+            c["page_crawled_on"] = day.isoformat() if day else None
+        return found
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except LookupError as exc:
@@ -312,12 +325,12 @@ def build_growth_action(
         signals_for=lambda search: search_signals.for_search(db, client, search),
         planned_month=_next_month(month),
         search=payload.search,
-        winners_for=lambda search, intent, url, page_type, own: _WINNERS.get(
+        winners_for=lambda search, intent, url, page_type, own, questions: _WINNERS.get(
             (str(client.id), search, url, date.today().isoformat(), intent.get("serp_date")),
-            lambda: winners.gather(db, client, search=search, intent=intent, page_url=url, page_type=page_type, own=own),
+            lambda: winners.gather(db, client, search=search, intent=intent, page_url=url, page_type=page_type, own=own, questions=questions),
         ),
     )
-    if bundle["ok"]:
+    if bundle["ok"] and bundle["parts"]:
         bundle["draft"] = growth_action.draft(bundle, _next_month(month))
     return bundle
 

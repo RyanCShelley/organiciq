@@ -17,6 +17,8 @@ export type Candidate = {
   /** Places moved up since the three months before (negative = moved down). */
   position_change: number | null;
   last_year: { impressions: number; position: number } | null;
+  /** When the site crawl last read this page, YYYY-MM-DD. Null when the crawl does not hold it. */
+  page_crawled_on?: string | null;
 };
 
 export type VisibilityCandidates = {
@@ -312,6 +314,8 @@ export type ActionContext = {
     searcher_goal: string | null; evidence: string[]; uncertainty: string | null;
     content_types: Record<string, number>; content_styles: Record<string, number>; features: string[];
     label_disagreement: string | null; labels: string[]; serp_date: string | null; content_to_match: string | null;
+    /** The top organic results as read, each with the kind of page it is. Absent when no results page was read. */
+    ranked?: { rank: number; url: string; domain: string; title: string; content_type: string | null; content_style: string | null }[];
     consumer_need: { need: string; name: string; basis: "observed" | "inferred"; evidence: string } | null;
   };
   page_type: { type: string; name: string; confidence: string; basis: string[]; purpose: string; note: string | null };
@@ -319,7 +323,8 @@ export type ActionContext = {
   template: { shared: boolean | null; peers: number; pattern: string | null; basis: string; note: string };
   evidence: { crawl_status: string; crawl_status_name: string; source: "live" | "crawl" | "none"; crawl_date: string | null; confidence: string; sufficient: boolean; unverified: string[]; summary: string };
   validation: { verdict: "publish" | "needs_verification" | "reject"; summary: string; checks: { key: string; question: string; state: "pass" | "unverified" | "fail"; detail: string; critical: string }[] };
-  rerouted: boolean;
+  /** The page is not the kind that ranks for the search: nothing is done to it for the search, and the right kind of page is named separately. */
+  mismatch: boolean;
   winners?: Winners | null;
   action_types: string[];
   benefits: string[];
@@ -343,6 +348,11 @@ export type GrowthPart = {
   evidence: string[];
   core: boolean;
   confirmed_by_rule: boolean;
+  /** One part is the primary action; the others support it or are offered unselected. */
+  role?: "primary" | "supporting" | "optional" | "held";
+  /** Shown but not approvable: it depends on the search's intent, which was not read. */
+  held?: boolean;
+  held_reason?: string;
   action_type?: string;
   benefit?: string;
   benefit_why?: string;
@@ -362,7 +372,14 @@ export type GrowthActionBundle =
       parts: GrowthPart[];
       left_out: { id: string; name: string; reason: string }[];
       optional: GrowthPart[];
-      draft: TaskDraft;
+      /** Tasks that depend on intent, when intent was not read. Released by reading the results page. */
+      held?: GrowthPart[];
+      /** Absent when nothing is recommended: there is nothing to add to the plan. */
+      draft?: TaskDraft;
+      /** A finding without work: the reason no change is recommended for this page and search. */
+      nothing_recommended?: { reason: string } | null;
+      /** The page of the right kind for a search this page does not suit. Reviewed on its own; the action is never moved to it. */
+      suggested_page?: { kind: string | null; exists: boolean; url: string | null; title: string | null; why: string; next: string } | null;
       context?: ActionContext;
       /** How the search was arrived at: the one selected, or the page's top search when none was. */
       search_source?: string;
@@ -387,7 +404,7 @@ export type Winners = {
     cited_pages?: { url: string; domain: string; platforms: string[]; own: boolean; page_type: string }[];
     pages: WinnerPage[];
   };
-  comparison: { ok: boolean; reason?: string; best_page: { verdict: "yes" | "partly" | "no"; why: string } | null; gaps: unknown[] };
+  comparison: { ok: boolean; reason?: string; best_page: { verdict: "yes" | "partly" | "no"; why: string } | null; gaps: unknown[]; questions?: { checked: number; missing: { question: string; source: string; source_name: string; detail: string | null; why: string }[] } | null };
 };
 
 export type GscNumbers = { clicks: number; impressions: number; position: number | null };

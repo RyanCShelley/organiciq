@@ -471,7 +471,8 @@ def diagnose(
             "title": parsed.title, "h1": parsed.h1, "word_count": parsed.word_count,
             "sections": [{"heading": sec.heading, "text": " ".join(sec.first_paragraph.split())[:220], "has_table": sec.has_table, "has_list": sec.has_list} for sec in parsed.sections[:25]],
             "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
-            "faq_questions": len(parsed.faq_questions), "conversion_elements": parsed.conversion_elements,
+            "faq_questions": len(parsed.faq_questions), "faq_list": [" ".join(q.split())[:200] for q in parsed.faq_questions[:15]],
+            "conversion_elements": parsed.conversion_elements,
         },
     }
     return result

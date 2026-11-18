@@ -8,6 +8,7 @@ import type { Client } from "@/lib/api";
 import { confirmTaskAction, diagnoseAction, diagnosePagesAction } from "@/app/(app)/[clientSlug]/engine/actions";
 import { saveFocusAction } from "@/app/(app)/[clientSlug]/focus/actions";
 import { EnginePlan } from "@/components/EnginePlan";
+import { EngineWorkbench } from "@/components/EngineWorkbench";
 import { GrowthActionPlanner } from "@/components/GrowthActionPlanner";
 import { LeadsList, TrafficList } from "@/components/FocusLists";
 import type {
@@ -261,13 +262,42 @@ export function EngineScreen({
   );
 
   return (
-    <section className="max-w-6xl">
-      <header className="mb-6">
+    <section className={kind === "visibility" ? "max-w-[90rem]" : "max-w-6xl"}>
+      {kind === "visibility" ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-[#4a5560]">
+            <h1 className="font-[family-name:var(--font-display)] text-base font-bold text-[#0a0c0f]">Decision engine</h1>
+            <span className="h-4 w-px bg-[#e3e6e8]" />
+            <span>
+              <strong className="text-[#0a0c0f]">{monthLabel(workMonth)} focus:</strong>{" "}
+              {focus ? <>{focusLabel}{focus.bucket_name ? ` · ${focus.bucket_name}` : ""}</> : "not set"}
+            </span>
+            <Link href={`/${client.slug}/review`} className="font-semibold text-[var(--brand-teal)] hover:underline">
+              {focus ? "Change" : "Choose it"} →
+            </Link>
+          </div>
+          <div className="flex rounded-full bg-[#f1f3f4] p-[3px]" role="tablist" aria-label="Focus">
+            {FOCUSES.map((f) => (
+              <Link
+                key={f.value}
+                role="tab"
+                aria-selected={kind === f.value}
+                href={`/${client.slug}/engine?show=${f.value}${bucketId ? `&bucket=${bucketId}` : ""}`}
+                className="rounded-full px-3 py-1 font-semibold"
+                style={kind === f.value ? { background: "#223540", color: "#fff" } : undefined}
+              >
+                {f.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <header className={kind === "visibility" ? "hidden" : "mb-6"}>
         <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold">Decision engine</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">{client.client_name}</p>
       </header>
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+      <div className={`mb-6 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm ${kind === "visibility" ? "hidden" : "flex"}`}>
         {focus ? (
           <span>
             Focus for <strong>{monthLabel(workMonth)}</strong>: <strong>{focusLabel}</strong>
@@ -286,7 +316,7 @@ export function EngineScreen({
         </Link>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm" role="tablist" aria-label="Focus">
+      <div className={`mb-6 flex-wrap items-center gap-2 text-sm ${kind === "visibility" ? "hidden" : "flex"}`} role="tablist" aria-label="Focus">
         {FOCUSES.map((f) => {
           const on = kind === f.value;
           return (
@@ -349,8 +379,8 @@ export function EngineScreen({
       ) : null}
 
       {kind === "visibility" && buckets_.length > 0 ? (
-        <div className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <h2 className="text-sm font-semibold">What each bucket has to move</h2>
+        <details className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm">
+          <summary className="cursor-pointer text-xs font-semibold text-[var(--text-secondary)]">What each bucket has to move</summary>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Searches where a page already ranks 2 to 20. A bucket with nothing here needs pages built for its terms
             before there is anything to move.
@@ -390,7 +420,7 @@ export function EngineScreen({
               </tbody>
             </table>
           </div>
-        </div>
+        </details>
       ) : null}
 
       {error ? (
@@ -424,166 +454,59 @@ export function EngineScreen({
       ) : null}
 
       {kind === "visibility" && data ? (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold">Visibility candidates</h2>
-                {collapsed ? (
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    {picked.length} selected · {data.counts.found.toLocaleString()} found ({data.counts.strong} strong).
-                  </p>
-                ) : null}
-                {!collapsed ? (
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    Searches where a page ranks 2 to 20 and a better position is worth chasing. Read over{" "}
-                    {data.window.from} to {data.window.to}, against the three months before.
-                  </p>
-                ) : null}
-              </div>
-              {collapsed ? (
-                <button type="button" onClick={() => setCollapsed(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-semibold">
-                  Show the candidates
-                </button>
-              ) : null}
-              <label className={collapsed ? "hidden" : "text-sm"}>
-                <span className="font-semibold">Scope</span>
-                <select
-                  value={bucketId ?? "site"}
-                  onChange={(e) => router.push(`/${client.slug}/engine?bucket=${e.target.value}${kind && kind !== focus?.focus ? `&show=${kind}` : ""}`)}
-                  className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
-                >
-                  <option value="site">Whole site</option>
-                  {buckets.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            {!collapsed ? (
-              <>
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setBand(null)}
-                aria-pressed={band === null}
-                className={`rounded-full border px-3 py-1 text-xs font-semibold ${band === null ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)]"}`}
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <label>
+              <span className="font-semibold">Scope</span>
+              <select
+                value={bucketId ?? "site"}
+                onChange={(e) => router.push(`/${client.slug}/engine?bucket=${e.target.value}${kind && kind !== focus?.focus ? `&show=${kind}` : ""}`)}
+                className="ml-2 rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm"
               >
-                All {data.counts.found.toLocaleString()}
-              </button>
-              {data.bands.map((b) => (
-                <button
-                  key={b.key}
-                  type="button"
-                  aria-pressed={band === b.key}
-                  onClick={() => setBand(band === b.key ? null : b.key)}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${band === b.key ? "border-[var(--brand-teal)] bg-[var(--brand-teal)] text-white" : "border-[var(--border)]"}`}
-                >
-                  Rank {b.key}: {b.label.toLowerCase()} ({b.count.toLocaleString()})
-                </button>
-              ))}
-              <span className="ml-auto text-xs text-[var(--text-secondary)]">
-                {data.counts.strong} strong · {data.counts.possible.toLocaleString()} possible · top {data.counts.listed} listed
-              </span>
-            </div>
-
-            {data.site_trend.impressions_change_pct != null ? (
-              <p className="mt-3 text-xs text-[var(--text-secondary)]">
-                For context, the whole site&apos;s impressions are {data.site_trend.impressions_change_pct > 0 ? "up" : "down"}{" "}
-                {Math.abs(data.site_trend.impressions_change_pct).toFixed(0)}% and clicks{" "}
-                {data.site_trend.clicks_change_pct != null && data.site_trend.clicks_change_pct > 0 ? "up" : "down"}{" "}
-                {Math.abs(data.site_trend.clicks_change_pct ?? 0).toFixed(0)}% on the three months before, so judge a
-                row&apos;s change against that.
-              </p>
-            ) : null}
-
-            {data.bucket && data.bucket.id !== focus?.bucket_id && data.counts.strong === 0 && data.counts.found < 5 ? (
-              <div className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
-                <strong>{data.bucket.name}</strong> has almost nothing to move: {data.counts.found}{" "}
-                {data.counts.found === 1 ? "search" : "searches"} in reach, none strong
-                {data.unranked.length > 0 ? `, and ${data.unranked.length} of its ${data.bucket.terms.length} terms have no Google impressions at all` : ""}.
-                No page ranks well enough to nudge. These terms need a page written for them, which is content work
-                and not a ranking fix.
-                {buckets_.some((o) => o.id !== data.bucket?.id && o.strong > 0) ? (
-                  <>
-                    {" "}Buckets with real candidates: {buckets_.filter((o) => o.id !== data.bucket?.id && o.strong > 0).map((o) => `${o.name} (${o.strong} strong)`).join(", ")}.
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-              <button
-                type="button"
-                disabled={diagnosing || picked.length === 0}
-                onClick={diagnose}
-                className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {diagnosing ? <><Spinner />Reading the pages…</> : `Diagnose ${picked.length || ""} selected`.replace("  ", " ")}
-              </button>
-              <span className="text-xs text-[var(--text-secondary)]">
-                Select up to {MAX_PICKS}. Each page is read live from the client&apos;s site and checked against the rules.
-              </span>
-              {picked.length > 0 ? (
-                <button type="button" onClick={() => setPicked([])} className="text-xs text-[var(--text-secondary)] hover:underline">
-                  Clear
-                </button>
-              ) : null}
-            </div>
-            {diagnoseError ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{diagnoseError}</p> : null}
-
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-left text-sm">
-                <thead className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
-                  <tr>
-                    <th className="w-6 py-1 pr-2" />
-                    <th className="py-1 pr-3 font-medium">Search and page</th>
-                    <th className="px-3 py-1 text-right font-medium">Position</th>
-                    <th className="px-3 py-1 text-right font-medium">Impressions</th>
-                    <th className="px-3 py-1 text-right font-medium">Clicks</th>
-                    <th className="px-3 py-1 text-right font-medium">Extra clicks</th>
-                    <th className="py-1 pl-3 font-medium">Strength</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((c) => {
-                    const key = `${c.search}|${c.page}`;
-                    return <Row key={key} c={c} checked={picked.includes(key)} disabled={picked.length >= MAX_PICKS} onToggle={() => togglePick(key)} />;
-                  })}
-                </tbody>
-              </table>
-              {shown.length === 0 ? (
-                <p className="py-4 text-sm text-[var(--text-tertiary)]">Nothing in this band for this scope.</p>
-              ) : null}
-            </div>
-              </>
-            ) : null}
+                <option value="site">Whole site</option>
+                {buckets.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="text-xs text-[var(--text-secondary)]">
+              Searches where a page ranks 2 to 20, read over {data.window.from} to {data.window.to}. {data.counts.strong} strong · {data.counts.possible.toLocaleString()} possible · top {data.counts.listed} listed.
+            </span>
           </div>
-
-          {!collapsed && data.unranked.length > 0 ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <h2 className="text-sm font-semibold">Watchlist terms with no Google impressions</h2>
-              <ul className="mt-3 divide-y divide-[var(--border)] text-sm">
-                {data.unranked.map((u) => (
-                  <li key={u.keyword} className="flex items-center justify-between gap-4 py-2">
-                    <span className="font-medium">{u.keyword}</span>
-                    <span className="text-[var(--text-secondary)]">{num(u.volume)} searches a month</span>
-                    <span className="rounded bg-[var(--bg)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">{u.strength}</span>
-                  </li>
+          <EngineWorkbench
+            clientId={client.id}
+            clientSlug={client.slug}
+            month={workMonth}
+            monthName={monthLabel(workMonth).split(" ")[0]}
+            data={data}
+            tasks={tasks}
+            allowance={allowance}
+            teamworkReady={plan.teamwork.configured && Boolean(plan.teamwork.tasklist_id)}
+            onTaskChange={upsertTask}
+          />
+          {data.unranked.length > 0 || data.notes.length > 0 ? (
+            <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+              <summary className="cursor-pointer font-semibold">About this list{data.unranked.length > 0 ? ` · ${data.unranked.length} watchlist terms with no Google impressions` : ""}</summary>
+              {data.unranked.length > 0 ? (
+                <ul className="mt-3 divide-y divide-[var(--border)]">
+                  {data.unranked.map((u) => (
+                    <li key={u.keyword} className="flex items-center justify-between gap-4 py-2">
+                      <span className="font-medium">{u.keyword}</span>
+                      <span className="text-[var(--text-secondary)]">{num(u.volume)} searches a month</span>
+                      <span className="rounded bg-[var(--bg)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">{u.strength}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <ul className="mt-3 space-y-1 text-xs text-[var(--text-tertiary)]">
+                {data.notes.map((n) => (
+                  <li key={n}>{n}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-[var(--text-tertiary)]">{data.unranked[0].note}</p>
-            </div>
+            </details>
           ) : null}
-
-          <ul className={`space-y-1 text-xs text-[var(--text-tertiary)] ${collapsed ? "hidden" : ""}`}>
-            {data.notes.map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
         </div>
       ) : null}
       {diagnoses ? (

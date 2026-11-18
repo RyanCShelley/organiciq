@@ -155,12 +155,14 @@ def test_the_topics_paired_question_stands_in_for_a_core_part_the_page_read_coul
     assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "S-2"]
 
 
-def test_a_rules_own_faq_markup_prescription_counts_as_the_faq_part(db, client_a):
+def test_faq_markup_is_offered_and_never_selected_for_the_person(db, client_a):
     data(db, client_a)
     watch(db, client_a)
     v7 = {"action_id": "V-7", "title": "Mark up the FAQ", "why": "It has one", "steps": ["Add FAQPage"], "evidence": []}
     out = build(db, client_a, fake_diagnosis([sug("A-1"), sug("S-1")], prescriptions=[v7]), page=BLOG)
-    assert [p["id"] for p in out["parts"]] == ["A-1", "S-1", "V-7"] and out["parts"][2]["confirmed_by_rule"] is True
+    assert [p["id"] for p in out["parts"]] == ["A-1", "S-1"], "markup is not a growth lever by default"
+    offered = next(p for p in out["optional"] if p["id"] == "V-7")
+    assert offered["confirmed_by_rule"] is True and offered["role"] == "optional"
 
 
 def test_a_page_that_does_not_show_for_the_topic_is_refused(db, client_a):
@@ -254,14 +256,14 @@ def test_the_route_returns_the_topic_and_its_pages(client, db, client_a, admin_u
     assert none["keyword"] is None and none["pages"] is None
 
 
-def test_every_rule_that_fired_is_in_the_action_and_replaces_its_unconfirmed_twin(db, client_a):
+def test_a_link_count_alone_does_not_make_a_task(db, client_a):
     data(db, client_a)
     watch(db, client_a, prompt="")
     v4 = {"action_id": "V-4", "title": "Add internal links to the page that owns “natural sunscreen”", "why": "0 links", "steps": ["Link from the donors"], "evidence": ["0 editorial inbound"]}
     out = build(db, client_a, fake_diagnosis([sug("S-1")], prescriptions=[v4]), page=BLOG)
-    assert [p["id"] for p in out["parts"]] == ["S-1", "V-4"]
-    v4_part = out["parts"][1]
-    assert v4_part["confirmed_by_rule"] is True and v4_part["name"] == "Add internal links"
+    assert [p["id"] for p in out["parts"]] == ["S-1"] and "V-4" not in [p["id"] for p in out["optional"]]
+    held = next(x for x in out["left_out"] if x["id"] == "V-4")
+    assert "how many links a page has is not a reason" in held["reason"] and "internal link tool" in held["reason"]
 
 
 def test_a_page_level_suggestion_from_traffic_or_leads_joins_the_action_when_it_is_the_candidates_page(db, client_a):

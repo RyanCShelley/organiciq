@@ -50,7 +50,7 @@ def ids(parts):
 # ── A: an informational search on a product page ─────────────────────────────
 
 
-def test_a_an_informational_search_on_a_high_impression_product_page_is_routed_to_supporting_content(db, client_a):
+def test_a_an_informational_search_on_a_high_impression_product_page_gets_nothing_recommended_for_that_page(db, client_a):
     gsc(db, client_a, ASK, PROD, 5000)
     crawled(db, client_a, PROD, "SPF 30 Mineral Sunscreen")
     watch(db, client_a, keyword=TOPIC, prompt="What is the difference between tanning oil and sunscreen?")
@@ -58,12 +58,12 @@ def test_a_an_informational_search_on_a_high_impression_product_page_is_routed_t
     ctx = out["context"]
     assert ctx["intent"]["intent"] == "informational" and ctx["page_type"]["type"] == "product" and ctx["fit"]["level"] == "low"
     assert ctx["intent"]["serp_date"] == "2026-10-01", "the intent is the one read from the results page"
-    assert ctx["rerouted"] is True and ids(out["parts"])[0] == "SC-1"
-    assert not {"A-1", "S-1", "P-1", "S-2"} & set(ids(out["parts"])), "no explanation is put at the top of the product page"
-    assert out["parts"][0]["scope"] == "new supporting content" and "Write a supporting article" in out["parts"][0]["title"]
-    assert "displaces" not in out["parts"][0]["why"] and {"A-1", "S-1"} <= {x["id"] for x in out["left_out"]}
-    d = ga.draft(out, "2026-10")
-    assert "supporting content" in d["title"] and "layout is unchanged" in d["done_when"]
+    assert out["ok"] is True and ctx["mismatch"] is True and out["parts"] == [] and out["optional"] == [], "a finding, not work: no impressions count makes a product page explain"
+    assert "No change to this page is recommended for this search." in out["nothing_recommended"]["reason"]
+    assert {"A-1", "S-1", "P-1", "S-5"} == {x["id"] for x in out["left_out"]} and all(x["reason"].startswith("Not recommended here:") for x in out["left_out"])
+    other = out["suggested_page"]
+    assert other["exists"] is False and other["kind"] == "article" and "an article or guide" in other["why"]
+    assert other["next"] == "Whether to create one is a separate decision. Nothing is planned for it here.", "no article is written on the engine's say-so"
 
 
 # ── B: a buying search on a product page ─────────────────────────────────────
@@ -75,9 +75,10 @@ def test_b_a_buying_search_on_a_product_page_gets_work_on_the_product_page(db, c
     db.commit()
     out = build(db, client_a, read([sug("A-1"), sug("S-1"), sug("P-1"), sug("S-5")]), "spf 30 sunscreen", page=PROD, intent=BUY)
     ctx = out["context"]
-    assert ctx["intent"]["intent"] == "transactional" and ctx["fit"]["level"] == "high" and ctx["rerouted"] is False
+    assert ctx["intent"]["intent"] == "transactional" and ctx["fit"]["level"] == "high" and ctx["mismatch"] is False and out["nothing_recommended"] is None and out["suggested_page"] is None
     assert ids(out["parts"]) == ["IM-1", "S-1", "S-5"], "work on the product page, led by what a buyer needs; no answer or rewritten opening for a reader"
     assert out["parts"][0]["title"] == "Help the searcher decide on and buy this product"
+    assert [p["role"] for p in out["parts"]] == ["primary", "supporting", "supporting"], "one primary action; the rest support it"
     assert ctx["validation"]["verdict"] != "reject"
 
 
@@ -94,7 +95,7 @@ def test_c_a_page_on_a_shared_template_keeps_the_change_in_its_own_content_and_f
     out = build(db, client_a, read([sug("P-1")], prescriptions=[v7]), "spf 30 sunscreen", page=PROD, intent=reading("commercial"))
     tpl = out["context"]["template"]
     assert tpl["shared"] is True and tpl["peers"] == 6 and tpl["pattern"] == "/products/" and tpl["basis"] == "inferred"
-    by = {p["id"]: p for p in out["parts"]}
+    by = {p["id"]: p for p in out["parts"] + out["optional"]}
     assert by["P-1"]["scope"] == "page-specific" and "Do not change the template" in by["P-1"]["note"]
     assert by["V-7"]["scope"] == "template-wide" and "6 pages" in by["V-7"]["note"]
     assert any("Do not change the template" in line for line in ga.draft(out, "2026-10")["evidence"])
@@ -157,16 +158,6 @@ def test_e_a_block_on_our_reader_is_not_called_a_block_on_search_engines(db, cli
 # ── F: weak candidates are not used to make up the number ────────────────────
 
 
-def test_f_two_of_three_candidates_with_poor_fit_are_excluded_with_the_reason():
-    picked = ac.select([
-        {"url": "a", "score": 9000, "fit": "low", "evidence_ok": True},
-        {"url": "b", "score": 300, "fit": "high", "evidence_ok": True},
-        {"url": "c", "score": 7000, "fit": "low", "evidence_ok": True},
-    ], limit=3)
-    assert [c["url"] for c in picked["chosen"]] == ["b"], "one strong action, not three"
-    assert {c["url"] for c in picked["excluded"]} == {"a", "c"} and all("does not suit" in c["excluded_because"] for c in picked["excluded"])
-
-
 def test_f_the_page_with_the_most_impressions_does_not_win_when_it_does_not_suit_the_search(db, client_a):
     gsc(db, client_a, ASK, PROD, 9000)
     gsc(db, client_a, ASK, BLOG, 120)
@@ -188,23 +179,23 @@ def test_f_an_action_already_planned_for_the_page_and_topic_is_not_offered_twice
 # ── G: an article already covers it ──────────────────────────────────────────
 
 
-def test_g_an_existing_article_is_improved_and_linked_before_anything_new_is_written(db, client_a):
+def test_g_an_existing_article_is_named_for_review_and_the_action_is_not_moved_to_it(db, client_a):
     gsc(db, client_a, ASK, PROD, 5000)
     gsc(db, client_a, ASK, BLOG, 80)
     db.commit()
     out = build(db, client_a, read([sug("A-1")]), TOPIC, page=PROD)
-    part = out["parts"][0]
-    assert part["id"] == "SC-1" and "existing article" in part["title"] and part["action_type"] == "Optimize existing page"
-    assert any(BLOG in s for s in part["steps"]) and any(PROD in s for s in part["steps"])
-    assert "Write a supporting article" not in part["title"]
+    other = out["suggested_page"]
+    assert out["parts"] == [] and out["page"] == PROD, "the selected page stays the page; nothing is done to it for this search"
+    assert other["exists"] is True and other["url"] == BLOG and "it already shows for this topic (80 impressions)" in other["why"]
+    assert other["next"] == "Review that page on its own. This action is not moved to it." and out["better_page"] is None
 
 
 def test_g_an_article_found_only_by_its_title_in_the_crawl_counts(db, client_a):
     gsc(db, client_a, ASK, PROD, 5000)
     crawled(db, client_a, "https://shop.example/blogs/guide", "The Difference Between Tanning Oil and Sunscreen")
     db.commit()
-    part = build(db, client_a, read(), TOPIC, page=PROD)["parts"][0]
-    assert "existing article" in part["title"] and "its title says the topic" in part["why"]
+    other = build(db, client_a, read(), TOPIC, page=PROD)["suggested_page"]
+    assert other["url"] == "https://shop.example/blogs/guide" and "its title says the topic" in other["why"]
 
 
 # ── H: the search wants something the product is not ─────────────────────────
@@ -273,10 +264,12 @@ def test_with_no_results_page_the_intent_is_not_read_and_nothing_that_depends_on
     out = build(db, client_a, read([sug("A-1"), sug("S-1"), sug("P-1"), sug("S-2"), sug("S-5")], prescriptions=[v4]), "natural sunscreen", page=COLL, intent=None)
     ctx = out["context"]
     assert ctx["intent"]["name"] == "Intent not read — No SERP available" and ctx["fit"]["level"] == "unverified"
-    assert ids(out["parts"]) == ["V-4", "S-5"], "what stands on other evidence carries on: the crawl's link count and the click-through against the benchmark"
+    assert ids(out["parts"]) == ["S-5"], "what stands on other evidence carries on: the click-through against the benchmark. A link count is not such evidence."
     held = {x["id"]: x["reason"] for x in out["left_out"]}
-    assert {"A-1", "S-1", "S-2"} <= set(held) and all(r.startswith("Held: Intent not read — No SERP available") for r in held.values())
+    assert {"A-1", "S-1", "S-2"} <= set(held) and all(r.startswith("Held: Intent not read — No SERP available") for i, r in held.items() if i != "V-4")
     assert out["optional"] == [] and any("Intent not read" in u for u in ctx["evidence"]["unverified"])
+    held = {p["id"]: p for p in out["held"]}
+    assert set(held) == {"A-1", "S-1", "P-1", "S-2"} and all(p["held"] and p["role"] == "held" and p["steps"] for p in held.values()), "shown as they would be, and not approvable until the results page is read"
 
 
 def test_the_same_page_and_search_get_different_advice_when_the_results_page_differs(db, client_a):
@@ -286,11 +279,11 @@ def test_the_same_page_and_search_get_different_advice_when_the_results_page_dif
     seen = {}
     for name, found in (("buy", BUY), ("compare", reading("commercial")), ("local", reading("local")), ("learn", INFO)):
         out = build(db, client_a, read([sug("S-5")], facts={"schema_types": ["Service"], "title": "Closet Organizing"}), "closet organizers", page=page, intent=found)
-        seen[name] = (ids(out["parts"]), out["parts"][0]["title"])
+        seen[name] = (ids(out["parts"]), out["parts"][0]["title"] if out["parts"] else out["nothing_recommended"]["reason"])
     assert seen["buy"][1] == "Help the searcher book or enquire about the service"
     assert seen["compare"][1] == "Help the searcher judge this provider against the alternatives"
     assert seen["local"][1] == "Help the searcher find this service nearby"
-    assert seen["learn"][0][0] == "SC-1", "a service page is not rewritten to explain; the work goes to an article"
+    assert seen["learn"][0] == [] and "No change to this page is recommended" in seen["learn"][1], "a service page is not rewritten to explain, and no article is invented for it"
     assert len({v[1] for v in seen.values()}) == 4
 
 
@@ -406,11 +399,10 @@ def test_a_collection_page_does_not_suit_a_search_where_only_articles_rank_whate
     crawled(db, client_a, COLL, "Natural Sunscreen | Shop")
     watch(db, client_a)
     out = build(db, client_a, read([sug("A-1"), sug("S-1"), sug("S-5")], facts={"schema_types": ["CollectionPage"], "title": "Natural Sunscreen | Shop"}), "natural sunscreen", page=COLL, intent=ROUNDUPS)
-    lead = out["parts"][0]
-    assert out["context"]["rerouted"] is True and lead["id"] == "SC-1" and "IM-1" not in ids(out["parts"])
-    assert lead["title"] == "Write a “best of” list for “natural sunscreen”", "no article exists, so a new page in the style that ranks"
-    assert any("What ranks for this search: Roundup lists" in s for s in lead["steps"]) and any("None of the 8 organic results" in e for e in lead["evidence"])
-    assert not {"A-1", "S-1"} & set(ids(out["parts"] + out["optional"])), "no work is proposed on the collection page's own copy"
+    assert out["context"]["mismatch"] is True and out["parts"] == [] and out["optional"] == [], "no work is proposed on the collection page's own copy"
+    assert "0 of the 8 ranking results are product, collection or service pages" in out["nothing_recommended"]["reason"]
+    other = out["suggested_page"]
+    assert other["exists"] is False and "best of" not in json.dumps(other), "the format that ranks does not dictate a page to write"
 
 
 def test_an_existing_blog_post_is_used_before_a_new_page_and_is_listed_first(db, client_a):
@@ -419,8 +411,8 @@ def test_an_existing_blog_post_is_used_before_a_new_page_and_is_listed_first(db,
     db.commit()
     pages = ga.topic_pages(db, client_a, SEP, "natural sunscreen", signals={"reading": ROUNDUPS})
     assert pages["recommended"] == BLOG and [p["fit"] for p in pages["pages"]] == ["high", "low"], "the blog post leads although the collection page has twenty times the impressions"
-    lead = build(db, client_a, read(facts={"schema_types": ["CollectionPage"]}), "natural sunscreen", page=COLL, intent=ROUNDUPS)["parts"][0]
-    assert "existing article" in lead["title"] and any(BLOG in s for s in lead["steps"]) and any("“best of” list" in s for s in lead["steps"])
+    other = build(db, client_a, read(facts={"schema_types": ["CollectionPage"]}), "natural sunscreen", page=COLL, intent=ROUNDUPS)["suggested_page"]
+    assert other["exists"] is True and other["url"] == BLOG and other["kind"] == "article"
 
 
 def test_the_cut_offs_none_is_low_half_is_high_between_is_partly_and_under_five_results_falls_back():
@@ -438,6 +430,5 @@ def test_an_article_is_not_worked_on_for_a_search_where_selling_pages_rank(db, c
     db.commit()
     shop = ranked("transactional", {"product page": 6, "category or collection page": 3})
     out = build(db, client_a, read([sug("A-1"), sug("S-1"), sug("S-5")], facts={"schema_types": ["Article"], "title": "Sun"}), "spf 30 sunscreen", page=BLOG, intent=shop)
-    lead = out["parts"][0]
-    assert lead["id"] == "RT-1" and PROD in lead["title"] and not {"A-1", "S-1"} & set(ids(out["parts"] + out["optional"]))
-    assert ga.draft(out, "2026-12")["title"].startswith("Growth action: the selling page for")
+    assert out["parts"] == [] and out["suggested_page"]["url"] == PROD and out["suggested_page"]["kind"] == "selling page"
+    assert "a product, collection or service page" in out["suggested_page"]["why"]
