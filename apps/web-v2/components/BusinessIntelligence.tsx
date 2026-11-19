@@ -25,6 +25,7 @@ const TYPE_LABEL: Record<string, string> = {
   conversion_change: "Conversion change",
   campaign_change: "Campaign change",
   algorithm_event: "Algorithm update",
+  visibility_check: "Visibility check",
   manual_note: "Note",
 };
 

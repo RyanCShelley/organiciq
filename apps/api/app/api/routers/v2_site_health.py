@@ -23,9 +23,18 @@ def site_health_for_month(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
     month: Annotated[str | None, Query(description="YYYY-MM; defaults to the month of the crawl held now")] = None,
+    compare_to: Annotated[str | None, Query(description="YYYY-MM snapshot to compare against")] = None,
 ) -> dict:
     if month is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Month must look like 2026-10.")
+    if compare_to is not None and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", compare_to):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="compare_to must look like 2026-10.")
     chosen = month or site_health.default_month(db, client)
-    data = site_health.for_month(db, client, chosen) if chosen else None
-    return {"month": chosen, "months": site_health.months(db, client), "data": data}
+    data = site_health.for_month(db, client, chosen, compare_to=compare_to) if chosen else None
+    return {
+        "month": chosen,
+        "months": site_health.months(db, client),
+        "crawls": site_health.crawls(db, client),
+        "compare_to": compare_to,
+        "data": data,
+    }

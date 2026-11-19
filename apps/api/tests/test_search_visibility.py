@@ -138,3 +138,131 @@ def test_google_updates_are_read_kept_and_listed_for_the_range(client, db, clien
     monkeypatch.setattr(google_updates.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     assert google_updates.refresh(db, now=datetime.now(timezone.utc)) == 0
     assert get(client, client_a, admin_user).json()["updates"][0]["id"] == "a1"
+
+
+def test_unsung_heroes_surfaces_relevant_rising_and_excludes_brand_and_watchlist(client, db, client_a, admin_user):
+    from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+
+    bucket_a = watch(db, client_a, "Sunscreen", "natural sunscreen")
+    bucket_b = WatchlistBucket(client_id=client_a.id, name="Lip Care", name_key="lip care", sort_order=1)
+    db.add(bucket_b)
+    db.flush()
+    db.add(WatchlistKeyword(client_id=client_a.id, bucket_id=bucket_b.id, keyword="lip balm", keyword_key="lip balm"))
+    db.add(
+        FactCrawlPageSnapshot(
+            client_id=client_a.id,
+            source=CRAWL_SOURCE_FIRST_PARTY,
+            snapshot_date=date(2026, 10, 10),
+            raw_url="https://shop.example/mineral-sunscreen",
+            normalized_url="https://shop.example/mineral-sunscreen",
+            indexable=True,
+            title="Organic Mineral Sunscreen Guide",
+            sections=[{"heading": "Reef Safe Face Sunscreen"}],
+        )
+    )
+
+    # Prior period [Sep 3 - Sep 30]
+    gsc(db, client_a, date(2026, 9, 10), "natural sunscreen", 200, 8.0, clicks=10)
+    gsc(db, client_a, date(2026, 9, 12), "reef safe body sunscreen", 20, 18.0, clicks=1)
+
+    # Current period [Oct 1 - Oct 28]
+    gsc(db, client_a, date(2026, 10, 6), "natural sunscreen", 300, 5.0, clicks=25)
+    gsc(db, client_a, date(2026, 10, 7), "mineral face sunscreen", 250, 7.0, clicks=18, url="https://shop.example/mineral-sunscreen")
+    gsc(db, client_a, date(2026, 10, 8), "reef safe body sunscreen", 80, 9.0, clicks=9, url="https://shop.example/mineral-sunscreen")
+    # Brand query (client_a.client_name is "Client A" in conftest)
+    gsc(db, client_a, date(2026, 10, 9), "client a sunscreen", 500, 1.0, clicks=120)
+    # Tracked in bucket B — must stay excluded even when filtering by bucket A
+    gsc(db, client_a, date(2026, 10, 10), "lip balm", 400, 3.0, clicks=30)
+    # Low-impression noise
+    gsc(db, client_a, date(2026, 10, 11), "random xyz", 5, 12.0, clicks=0)
+    db.commit()
+
+    out = get(client, client_a, admin_user, bucket=str(bucket_a.id)).json()
+    assert [t["term"] for t in out["terms"]] == ["natural sunscreen"], "terms stays strictly watchlist-only"
+
+    heroes_by_key = {h["key"]: h for h in out["unsung_heroes"]}
+    assert "mineral face sunscreen" in heroes_by_key
+    assert "high_impressions" in heroes_by_key["mineral face sunscreen"]["signals"]
+    assert "relevant" in heroes_by_key["mineral face sunscreen"]["signals"]
+    assert heroes_by_key["mineral face sunscreen"]["page"] == "https://shop.example/mineral-sunscreen"
+
+    assert "reef safe body sunscreen" in heroes_by_key
+    assert "rising" in heroes_by_key["reef safe body sunscreen"]["signals"]
+    assert heroes_by_key["reef safe body sunscreen"]["move"] == 9.0
+    assert heroes_by_key["reef safe body sunscreen"]["impressions_change_pct"] == 300.0
+
+    assert "client a sunscreen" not in heroes_by_key
+    assert "lip balm" not in heroes_by_key
+    assert "random xyz" not in heroes_by_key
+
+
+def test_elevated_bing_kpis_weekly_monday_alignment_and_movers(client, db, client_a, client_b, admin_user):
+    watch(db, client_a, "Sunscreen", "natural sunscreen", "mineral spf")
+    # Prior period [Sep 3 - Sep 30] — Friday week_starts
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 9, 11), query="natural sunscreen", query_key="natural sunscreen", impressions=100, clicks=4, avg_impression_position=Decimal("18.0")))
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 9, 11), query="mineral spf", query_key="mineral spf", impressions=80, clicks=5, avg_impression_position=Decimal("6.0")))
+    # Current period [Oct 1 - Oct 28] — Friday week_starts (truncate to Mondays 2026-10-05 & 2026-10-12)
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 10, 9), query="natural sunscreen", query_key="natural sunscreen", impressions=150, clicks=12, avg_impression_position=Decimal("9.0")))
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 10, 16), query="natural sunscreen", query_key="natural sunscreen", impressions=50, clicks=3, avg_impression_position=Decimal("9.0")))
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 10, 9), query="mineral spf", query_key="mineral spf", impressions=90, clicks=2, avg_impression_position=Decimal("12.0")))
+    db.add(FactBingQueryStat(client_id=client_a.id, week_start=date(2026, 10, 9), query="untracked bing query", query_key="untracked bing query", impressions=300, clicks=20, avg_impression_position=Decimal("4.0")))
+
+    # Client B has Bing data and zero watchlist terms
+    db.add(FactBingQueryStat(client_id=client_b.id, week_start=date(2026, 10, 9), query="b site query", query_key="b site query", impressions=120, clicks=8, avg_impression_position=Decimal("7.0")))
+    db.add(FactBingQueryStat(client_id=client_b.id, week_start=date(2026, 10, 16), query="b site query", query_key="b site query", impressions=140, clicks=10, avg_impression_position=Decimal("5.0")))
+    db.commit()
+
+    out = get(client, client_a, admin_user).json()
+    assert out["sources"]["has_bing"] is True
+    assert out["sources"]["bing_through"] == "2026-10-16"
+    assert out["sources"]["bing_site_terms"] == 3
+    assert out["bing_now"]["impressions"] == 290
+    assert out["bing_now"]["clicks"] == 17
+    assert out["bing_before"]["impressions"] == 180
+    assert out["bing_site"]["now"]["impressions"] == 590
+    assert out["bing_site"]["now"]["clicks"] == 37
+    assert out["weeks"] == ["2026-10-05", "2026-10-12"]
+    assert out["bing_series_scope"] == "watchlist"
+    assert [w["week"] for w in out["bing_series"]] == ["2026-10-05", "2026-10-12"]
+    assert out["bing_series"][0]["clicks"] == 14
+    assert [t["term"] for t in out["bing_winners"]] == ["natural sunscreen"]
+    assert [t["term"] for t in out["bing_losers"]] == ["mineral spf"]
+    by = {t["term"]: t for t in out["terms"]}
+    assert by["natural sunscreen"]["bing"]["position_before"] == 18.0
+    assert by["natural sunscreen"]["bing"]["move"] == 9.0
+
+    # Empty watchlist client with Bing data
+    out_b = get(client, client_b, admin_user).json()
+    assert out_b["terms_total"] == 0
+    assert out_b["sources"]["has_bing"] is True
+    assert out_b["bing_series_scope"] == "site"
+    assert out_b["bing_site"]["now"]["impressions"] == 260
+    assert [w["week"] for w in out_b["bing_series"]] == ["2026-10-05", "2026-10-12"]
+
+
+def test_search_visibility_includes_range_annotations(client, db, client_a, admin_user):
+    from app.models.annotation import Annotation, AnnotationType
+
+    db.add(
+        Annotation(
+            client_id=client_a.id,
+            date=date(2026, 10, 15),
+            annotation_type=AnnotationType.VISIBILITY_CHECK,
+            description="Monthly search check: promoted rising terms",
+        )
+    )
+    db.add(
+        Annotation(
+            client_id=client_a.id,
+            date=date(2026, 8, 15),
+            annotation_type=AnnotationType.VISIBILITY_CHECK,
+            description="Older out-of-range check",
+        )
+    )
+    db.commit()
+
+    out = get(client, client_a, admin_user).json()
+    assert len(out["annotations"]) == 1
+    assert out["annotations"][0]["type"] == "visibility_check"
+    assert out["annotations"][0]["type_label"] == "Visibility check"
+    assert out["annotations"][0]["description"] == "Monthly search check: promoted rising terms"

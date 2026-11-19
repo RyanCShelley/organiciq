@@ -35,6 +35,7 @@ export const GROUPS: NavGroup[] = [
     items: [
       { label: "Search visibility", path: "/search-visibility" },
       { label: "LLM visibility", path: "/llm" },
+      { label: "Visibility logs", path: "/visibility-logs" },
     ],
   },
   {

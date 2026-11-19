@@ -101,3 +101,36 @@ def test_completed_window_is_measured_after_both_sources_finish(db,client_a):
     summary=measure_annotation_impact(db,client_a,row,today=date(2026,10,18))
     assert summary['deltas']['clicks_change_pct']==100
     assert row.post_action_metrics_json['clicks']==20
+
+
+def test_post_visibility_check_annotation_is_unmeasured(client, db, client_a, admin_user):
+    from app.models.annotation import Annotation, AnnotationType
+    from tests.conftest import client_header
+
+    headers = client_header(client_a.id, admin_user.email)
+    resp = client.post(
+        "/v2/annotations",
+        json={
+            "date": "2026-10-15",
+            "description": "Monthly visibility check: Bing impressions steady",
+            "page": "https://clienta.example/spf",
+            "type": "visibility_check",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    row_id = resp.json()["id"]
+
+    row = db.query(Annotation).filter(Annotation.id == row_id).one()
+    assert row.annotation_type == AnnotationType.VISIBILITY_CHECK
+    assert row.measurement_start_date is None
+    assert row.measurement_end_date is None
+    assert row.completed_at is None
+
+    listing = client.get("/v2/annotations", headers=headers)
+    assert listing.status_code == 200
+    body = listing.json()
+    assert any(m["key"] == "visibility_check" and m["label"] == "Visibility check" for m in body["manual_types"])
+    entry = next(e for e in body["entries"] if e["id"] == row_id)
+    assert entry["type"] == "visibility_check"
+    assert entry["type_label"] == "Visibility check"

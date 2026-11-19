@@ -24,6 +24,7 @@ class AnnotationType(str, enum.Enum):
     CONVERSION_CHANGE = "conversion_change"
     CAMPAIGN_CHANGE = "campaign_change"
     ALGORITHM_EVENT = "algorithm_event"
+    VISIBILITY_CHECK = "visibility_check"
     MANUAL_NOTE = "manual_note"
 
 

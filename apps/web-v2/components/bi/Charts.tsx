@@ -134,33 +134,106 @@ export type WeekPoint = { week: string; value: number | null };
  * One value a week. With `invert` a lower number draws higher, which is how a position reads (1 at the top).
  * Bands are periods, such as Google updates, drawn behind the line.
  */
-export function WeeklyLine({ points, invert = false, bands = [], label, format = (n: number) => n.toLocaleString(), periodLabel = "Week of", spanDays = 6 }: { points: WeekPoint[]; invert?: boolean; bands?: { begin: string; end: string | null; title: string }[]; label: string; format?: (n: number) => string; periodLabel?: string; spanDays?: number }) {
+export function WeeklyLine({
+  points,
+  invert = false,
+  bands = [],
+  marks = [],
+  secondary,
+  primaryLabel = "Google",
+  label,
+  format = (n: number) => n.toLocaleString(),
+  periodLabel = "Week of",
+  spanDays = 6,
+}: {
+  points: WeekPoint[];
+  invert?: boolean;
+  bands?: { begin: string; end: string | null; title: string }[];
+  marks?: { date: string; text: string; type?: string }[];
+  secondary?: { label: string; points: WeekPoint[]; color?: string; separateAxis?: boolean };
+  primaryLabel?: string;
+  label: string;
+  format?: (n: number) => string;
+  periodLabel?: string;
+  spanDays?: number;
+}) {
   const [hover, setHover] = useState<number | null>(null);
-  const W = 640, H = 200, L = 44, R = 12, T = 12, B = 26;
+  const secPoints = secondary?.points ?? [];
+  const axisPoints = points.length >= 2 ? points : secPoints;
   const values = points.map((p) => p.value).filter((v): v is number => v != null);
-  if (points.length < 2 || values.length === 0) return <p className="text-sm text-[var(--text-secondary)]">Not enough weeks to draw.</p>;
-  const lo = invert ? Math.max(1, Math.floor(Math.min(...values) - 1)) : 0;
-  const hi = invert ? Math.ceil(Math.max(...values) + 1) : niceMax(Math.max(...values, 1));
-  const x = (i: number) => L + (i / (points.length - 1)) * (W - L - R);
+  const secValues = secPoints.map((p) => p.value).filter((v): v is number => v != null);
+  if (axisPoints.length < 2 || (values.length === 0 && secValues.length === 0)) {
+    return <p className="text-sm text-[var(--text-secondary)]">Not enough weeks to draw.</p>;
+  }
+
+  const hasRightAxis = Boolean(secondary?.separateAxis && values.length > 0 && secValues.length > 0);
+  const W = 640, H = 200, L = 44, R = hasRightAxis ? 44 : 12, T = 12, B = 26;
+  const secColor = secondary?.color ?? "#2563eb";
+  const primaryPool = values.length > 0 ? (secondary && !secondary.separateAxis && secValues.length > 0 ? [...values, ...secValues] : values) : secValues;
+  const lo = invert ? Math.max(1, Math.floor(Math.min(...primaryPool) - 1)) : 0;
+  const hi = invert ? Math.ceil(Math.max(...primaryPool) + 1) : niceMax(Math.max(...primaryPool, 1));
+  const secLo = invert ? Math.max(1, Math.floor(Math.min(...secValues) - 1)) : 0;
+  const secHi = invert ? Math.ceil(Math.max(...secValues, 1) + 1) : niceMax(Math.max(...secValues, 1));
+
+  const x = (i: number) => L + (i / (axisPoints.length - 1)) * (W - L - R);
   const y = (v: number) => (invert ? T + ((v - lo) / (hi - lo || 1)) * (H - T - B) : T + (1 - (v - lo) / (hi - lo || 1)) * (H - T - B));
-  const path = points.reduce((acc, p, i) => (p.value == null ? acc : `${acc}${acc && points[i - 1]?.value != null ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)} `), "");
+  const secY = (v: number) => {
+    if (!hasRightAxis) return y(v);
+    return invert
+      ? T + ((v - secLo) / (secHi - secLo || 1)) * (H - T - B)
+      : T + (1 - (v - secLo) / (secHi - secLo || 1)) * (H - T - B);
+  };
+
+  const buildPath = (pts: WeekPoint[], yFn: (v: number) => number, indexByWeek: Map<string, number>) => {
+    let acc = "";
+    let prevConnected = false;
+    for (const p of pts) {
+      const idx = indexByWeek.get(p.week);
+      if (idx == null || p.value == null) {
+        prevConnected = false;
+        continue;
+      }
+      acc += `${acc && prevConnected ? "L" : "M"}${x(idx).toFixed(1)},${yFn(p.value).toFixed(1)} `;
+      prevConnected = true;
+    }
+    return acc;
+  };
+
+  const axisIndex = new Map(axisPoints.map((p, i) => [p.week, i]));
+  const primaryByWeek = new Map(points.map((p) => [p.week, p]));
+  const secByWeek = new Map(secPoints.map((p) => [p.week, p]));
+
+  const path = values.length > 0 ? buildPath(points, y, axisIndex) : "";
+  const secPath = secValues.length > 0 ? buildPath(secPoints, secY, axisIndex) : "";
   const ticks = [0, 0.5, 1].map((f) => lo + f * (hi - lo));
-  const t0 = new Date(`${points[0].week}T00:00:00`).getTime();
-  const tN = new Date(`${points[points.length - 1].week}T00:00:00`).getTime() + spanDays * 86400000;
-  const px = (iso: string) => L + ((new Date(`${iso}T00:00:00`).getTime() - t0) / (tN - t0)) * (W - L - R);
+  const secTicks = hasRightAxis ? [0, 0.5, 1].map((f) => secLo + f * (secHi - secLo)) : [];
+
+  const t0 = new Date(`${axisPoints[0].week}T00:00:00`).getTime();
+  const tN = new Date(`${axisPoints[axisPoints.length - 1].week}T00:00:00`).getTime() + spanDays * 86400000;
+  const denom = tN - t0 || 1;
+  const px = (iso: string) => L + ((new Date(`${iso}T00:00:00`).getTime() - t0) / denom) * (W - L - R);
   const short = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const h = hover != null ? points[hover] : null;
+
+  const visibleMarks = marks
+    .map((m) => ({ ...m, mx: px(m.date) }))
+    .filter((m) => Number.isFinite(m.mx) && m.mx >= L - 8 && m.mx <= W - R + 8)
+    .map((m) => ({ ...m, cx: Math.max(L, Math.min(W - R, m.mx)) }));
+
+  const hAxis = hover != null ? axisPoints[hover] : null;
+  const hPrimary = hAxis ? primaryByWeek.get(hAxis.week) ?? null : null;
+  const hSecondary = hAxis ? secByWeek.get(hAxis.week) ?? null : null;
+
   return (
     <div className="relative">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label} className="w-full" onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          const i = Math.round(((((e.clientX - r.left) / r.width) * W - L) / (W - L - R)) * (points.length - 1));
-          setHover(Math.max(0, Math.min(points.length - 1, i)));
+          const i = Math.round(((((e.clientX - r.left) / r.width) * W - L) / (W - L - R)) * (axisPoints.length - 1));
+          setHover(Math.max(0, Math.min(axisPoints.length - 1, i)));
         }}>
         {bands.map((b) => {
           const x1 = Math.max(L, px(b.begin));
-          const x2 = Math.min(W - R, px(b.end ?? points[points.length - 1].week));
+          const x2 = Math.min(W - R, px(b.end ?? axisPoints[axisPoints.length - 1].week));
           return x2 <= L || x1 >= W - R ? null : (
             <g key={b.title + b.begin}>
               <rect x={x1} y={T} width={Math.max(3, x2 - x1)} height={H - T - B} fill="#b45309" opacity="0.14"><title>{`${b.title} (${short(b.begin)}${b.end ? ` to ${short(b.end)}` : ", still rolling out"})`}</title></rect>
@@ -170,22 +243,73 @@ export function WeeklyLine({ points, invert = false, bands = [], label, format =
         {ticks.map((t) => (
           <g key={t}>
             <line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="var(--border)" />
-            <text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill={GRAY}>{invert ? t.toFixed(0) : compact(Math.round(t))}</text>
+            <text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill={values.length === 0 && secValues.length > 0 ? secColor : GRAY}>{invert ? t.toFixed(0) : compact(Math.round(t))}</text>
           </g>
         ))}
-        <path d={path} fill="none" stroke={TEAL} strokeWidth="2.5" strokeLinejoin="round" />
-        {points.map((p, i) => (p.value != null ? <circle key={p.week} cx={x(i)} cy={y(p.value)} r={hover === i ? 4 : 2} fill={TEAL} /> : null))}
-        {[0, Math.floor(points.length / 2), points.length - 1].map((i) => (
-          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10" fill={GRAY}>{short(points[i].week)}</text>
+        {secTicks.map((t) => (
+          <text key={`sec-${t}`} x={W - R + 6} y={secY(t) + 3} textAnchor="start" fontSize="10" fill={secColor}>{invert ? t.toFixed(0) : compact(Math.round(t))}</text>
+        ))}
+        {visibleMarks.map((m) => {
+          const color = m.type === "visibility_check" ? "#4f46e5" : "#b45309";
+          return (
+            <g key={`${m.date}-${m.text}`}>
+              <line x1={m.cx} x2={m.cx} y1={T} y2={H - B} stroke={color} strokeWidth="1.25" strokeDasharray="3 3" opacity="0.75" />
+              <circle cx={m.cx} cy={H - B} r="3.5" fill={color}>
+                <title>{`${short(m.date)}: ${m.text}`}</title>
+              </circle>
+            </g>
+          );
+        })}
+        {path ? <path d={path} fill="none" stroke={TEAL} strokeWidth="2.5" strokeLinejoin="round" /> : null}
+        {secPath ? <path d={secPath} fill="none" stroke={secColor} strokeWidth="2" strokeDasharray={secondary?.separateAxis ? undefined : "5 3"} strokeLinejoin="round" /> : null}
+        {points.map((p) => {
+          const idx = axisIndex.get(p.week);
+          return p.value != null && idx != null ? <circle key={`p-${p.week}`} cx={x(idx)} cy={y(p.value)} r={hover === idx ? 4 : 2} fill={TEAL} /> : null;
+        })}
+        {secPoints.map((p) => {
+          const idx = axisIndex.get(p.week);
+          return p.value != null && idx != null ? <circle key={`s-${p.week}`} cx={x(idx)} cy={secY(p.value)} r={hover === idx ? 3.5 : 2} fill={secColor} /> : null;
+        })}
+        {[0, Math.floor(axisPoints.length / 2), axisPoints.length - 1].map((i) => (
+          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? "start" : i === axisPoints.length - 1 ? "end" : "middle"} fontSize="10" fill={GRAY}>{short(axisPoints[i].week)}</text>
         ))}
       </svg>
-      {h ? (
+      {hAxis ? (
         <div className="pointer-events-none absolute right-2 top-2 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-xs shadow-sm">
-          <div className="font-semibold">{periodLabel} {short(h.week)}</div>
-          <div>{h.value == null ? "no data" : format(h.value)}</div>
+          <div className="font-semibold">{periodLabel} {short(hAxis.week)}</div>
+          {values.length > 0 ? (
+            <div>
+              <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TEAL }} />
+              {secondary ? `${primaryLabel}: ` : ""}
+              {hPrimary?.value == null ? "no data" : format(hPrimary.value)}
+            </div>
+          ) : null}
+          {secondary && secValues.length > 0 ? (
+            <div>
+              <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: secColor }} />
+              {secondary.label}: {hSecondary?.value == null ? "no data" : format(hSecondary.value)}
+            </div>
+          ) : null}
         </div>
       ) : null}
-      {bands.length > 0 ? <div className="mt-1 text-xs text-[var(--text-secondary)]"><span className="mr-1 inline-block h-2.5 w-4 align-middle" style={{ background: "#b45309", opacity: 0.3 }} />Google update rolling out</div> : null}
+      {bands.length > 0 || (secondary && secValues.length > 0) || visibleMarks.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-4 text-xs text-[var(--text-secondary)]">
+          {values.length > 0 && secondary && secValues.length > 0 ? (
+            <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: TEAL }} />{primaryLabel}</span>
+          ) : null}
+          {secondary && secValues.length > 0 ? (
+            <span>
+              <span
+                className={`mr-1 inline-block w-4 align-middle ${secondary.separateAxis ? "h-0.5" : "h-0 border-t-2 border-dashed"}`}
+                style={secondary.separateAxis ? { background: secColor } : { borderColor: secColor }}
+              />
+              {secondary.label}
+            </span>
+          ) : null}
+          {bands.length > 0 ? <span><span className="mr-1 inline-block h-2.5 w-4 align-middle" style={{ background: "#b45309", opacity: 0.3 }} />Google update rolling out</span> : null}
+          {visibleMarks.length > 0 ? <span><span className="mr-1 inline-block h-2 w-2 rounded-full align-middle" style={{ background: "#4f46e5" }} />Visibility check / annotation</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

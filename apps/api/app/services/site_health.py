@@ -33,10 +33,22 @@ from app.models.site_health import SiteHealthSnapshot
 from app.services.competitors import bare_domain
 
 DEFAULT_PAGE_LIMIT = 500
+BY_PAGE_LIMIT = 500
 URLS_KEPT = 150  # per issue group, so a month's payload stays small and "new since last month" can still be told
 
 #: SEO health: what is checked and how much each counts. Out of 100.
-SEO_WEIGHTS = {"titles": 15, "descriptions": 10, "indexation": 15, "errors": 20, "redirects": 5, "links": 15, "schema": 10, "site_files": 10}
+SEO_WEIGHTS = {
+    "missing_titles": 8,
+    "duplicate_titles": 7,
+    "missing_descriptions": 5,
+    "duplicate_descriptions": 5,
+    "indexation": 15,
+    "errors": 20,
+    "redirects": 5,
+    "links": 15,
+    "schema": 10,
+    "site_files": 10,
+}
 #: GEO readiness: the GEO Grader's weights.
 GEO_WEIGHTS = {"schema": 15, "faq": 10, "entity": 10, "crawler": 10, "citation": 20, "depth": 15, "graph": 10, "attribution": 10}
 
@@ -74,11 +86,52 @@ def _path(url: str) -> str:
 # ── SEO health ────────────────────────────────────────────────────────────────
 
 
-def _check(key: str, label: str, score: float, affected: int, total: int, urls: list[str], detail: str) -> dict[str, Any]:
-    return {"key": key, "label": label, "weight": SEO_WEIGHTS[key], "score": round(max(0.0, min(100.0, score))), "affected": affected, "total": total, "detail": detail, "urls": urls[:URLS_KEPT]}
+def _check(
+    key: str,
+    label: str,
+    score: float,
+    affected: int,
+    total: int,
+    urls: list[str],
+    detail: str,
+    duplicate_groups: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "key": key,
+        "label": label,
+        "weight": SEO_WEIGHTS[key],
+        "score": round(max(0.0, min(100.0, score))),
+        "affected": affected,
+        "total": total,
+        "detail": detail,
+        "urls": urls[:URLS_KEPT],
+    }
+    if duplicate_groups is not None:
+        out["duplicate_groups"] = duplicate_groups
+    return out
 
 
-def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
+def _duplicate_groups(rows: list[Any], attr: str) -> tuple[list[dict[str, Any]], dict[str, tuple[str, int]]]:
+    """Group pages flagged as duplicate by normalized shared text, keeping full counts before URLS_KEPT truncation."""
+    grouped: dict[str, tuple[str, set[str]]] = {}
+    for s in rows:
+        raw = (getattr(s, attr) or "").strip()
+        if not raw:
+            continue
+        norm_key = raw.lower()
+        if norm_key not in grouped:
+            grouped[norm_key] = (raw, set())
+        grouped[norm_key][1].add(s.normalized_url)
+    groups = [
+        {"text": display_text, "urls": sorted(urls), "count": len(urls)}
+        for display_text, urls in grouped.values()
+    ]
+    groups.sort(key=lambda g: (-g["count"], g["text"].lower()))
+    per_url_meta = {u: (g["text"], g["count"]) for g in groups for u in g["urls"]}
+    return groups, per_url_meta
+
+
+def _seo_with_findings(db: Session, client: Client, crawl_date: date) -> tuple[dict[str, Any], dict[str, Any]]:
     snaps = (
         db.query(
             FactCrawlPageSnapshot.normalized_url, FactCrawlPageSnapshot.status_code, FactCrawlPageSnapshot.indexable, FactCrawlPageSnapshot.title,
@@ -99,22 +152,52 @@ def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
         return bad / whole if whole else 0.0
 
     no_title = [s.normalized_url for s in ok_pages if not (s.title or "").strip()]
-    dup_title = [s.normalized_url for s in ok_pages if (s.title or "").strip() and s.title_duplicate]
-    bad = len(no_title) + len(dup_title)
-    checks.append(_check("titles", "Page titles", 100 * (1 - share(bad, n_ok)), bad, n_ok, no_title + dup_title,
-                         f"{len(no_title)} without a title, {len(dup_title)} sharing a title with another page"))
+    checks.append(_check(
+        "missing_titles", "Missing page titles", 100 * (1 - share(len(no_title), n_ok)), len(no_title), n_ok, no_title,
+        f"{len(no_title)} of {n_ok} pages have no title",
+    ))
+
+    dup_title_rows = [s for s in ok_pages if (s.title or "").strip() and s.title_duplicate]
+    title_groups, title_meta = _duplicate_groups(dup_title_rows, "title")
+    dup_title = [u for g in title_groups for u in g["urls"]]
+    checks.append(_check(
+        "duplicate_titles", "Duplicate page titles", 100 * (1 - share(len(dup_title), n_ok)), len(dup_title), n_ok, dup_title,
+        (
+            f"{len(dup_title)} {'page shares' if len(dup_title) == 1 else 'pages share'} a title across "
+            f"{len(title_groups)} {'group' if len(title_groups) == 1 else 'groups'}"
+            if dup_title else "0 pages share a title"
+        ),
+        duplicate_groups=title_groups[:URLS_KEPT],
+    ))
+
     no_desc = [s.normalized_url for s in ok_pages if not (s.description or "").strip()]
-    dup_desc = [s.normalized_url for s in ok_pages if (s.description or "").strip() and s.description_duplicate]
-    bad = len(no_desc) + len(dup_desc)
-    checks.append(_check("descriptions", "Meta descriptions", 100 * (1 - share(bad, n_ok)), bad, n_ok, no_desc + dup_desc,
-                         f"{len(no_desc)} without a description, {len(dup_desc)} sharing one with another page"))
+    checks.append(_check(
+        "missing_descriptions", "Missing meta descriptions", 100 * (1 - share(len(no_desc), n_ok)), len(no_desc), n_ok, no_desc,
+        f"{len(no_desc)} of {n_ok} pages have no meta description",
+    ))
+
+    dup_desc_rows = [s for s in ok_pages if (s.description or "").strip() and s.description_duplicate]
+    desc_groups, desc_meta = _duplicate_groups(dup_desc_rows, "description")
+    dup_desc = [u for g in desc_groups for u in g["urls"]]
+    checks.append(_check(
+        "duplicate_descriptions", "Duplicate meta descriptions", 100 * (1 - share(len(dup_desc), n_ok)), len(dup_desc), n_ok, dup_desc,
+        (
+            f"{len(dup_desc)} {'page shares' if len(dup_desc) == 1 else 'pages share'} a description across "
+            f"{len(desc_groups)} {'group' if len(desc_groups) == 1 else 'groups'}"
+            if dup_desc else "0 pages share a meta description"
+        ),
+        duplicate_groups=desc_groups[:URLS_KEPT],
+    ))
+
     blocked = [s.normalized_url for s in ok_pages if not s.indexable]
     checks.append(_check("indexation", "Pages open to search engines", 100 * (1 - share(len(blocked), n_ok)), len(blocked), n_ok, blocked,
                          f"{len(blocked)} pages answer normally but ask not to be indexed"))
-    errors = [s.normalized_url for s in snaps if (s.status_code or 0) >= 400 or s.soft_404]
+    error_snaps = [s for s in snaps if (s.status_code or 0) >= 400 or s.soft_404]
+    errors = [s.normalized_url for s in error_snaps]
     checks.append(_check("errors", "Broken pages (404, server errors, pages that say not found)", 100 * (1 - min(1.0, 5 * share(len(errors), total))), len(errors), total, errors,
                          f"{len(errors)} of {total} addresses are broken"))
-    chains = [s.normalized_url for s in snaps if (s.redirect_count or 0) > 1]
+    chain_snaps = [s for s in snaps if (s.redirect_count or 0) > 1]
+    chains = [s.normalized_url for s in chain_snaps]
     checks.append(_check("redirects", "Redirect chains", 100 * (1 - min(1.0, 10 * share(len(chains), total))), len(chains), total, chains,
                          f"{len(chains)} {'address passes' if len(chains) == 1 else 'addresses pass'} through more than one redirect"))
 
@@ -123,6 +206,9 @@ def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
         FactCrawlInternalLink.client_id == client.id, FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY)}
     broken_edges = [(a, b) for a, b in edges if status.get(b, 0) >= 400]
     broken_targets = sorted({b for _, b in broken_edges})
+    broken_by_from: dict[str, set[str]] = defaultdict(set)
+    for from_u, to_u in broken_edges:
+        broken_by_from[from_u].add(to_u)
     checks.append(_check("links", "Internal links to broken pages", 100 * (1 - min(1.0, 10 * share(len(broken_edges), len(edges)))), len(broken_edges), len(edges), broken_targets,
                          f"{len(broken_edges)} of {len(edges)} internal links point at a broken page ({len(broken_targets)} different pages)"))
 
@@ -136,11 +222,29 @@ def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
     cost = {"no_robots": 40, "robots_not_accessible": 40, "robots_disallow_crawling": 100, "sitemap_missing": 30, "robots_has_errors": 30}
     lost = sum(cost.get(c, 0) for c in site)
     names = {"no_robots": "no robots.txt", "robots_not_accessible": "robots.txt could not be read", "robots_disallow_crawling": "robots.txt blocks crawling", "sitemap_missing": "no sitemap found", "robots_has_errors": "the declared sitemap does not load"}
-    problems = [names[c] for c in site if c in names]
+    site_codes = [c for c in site if c in names]
+    problems = [names[c] for c in site_codes]
     checks.append(_check("site_files", "robots.txt and sitemap", 100 - lost, len(problems), 2, problems, "; ".join(problems) or "robots.txt and the sitemap are in place"))
 
     score = round(sum(c["weight"] * c["score"] for c in checks) / sum(SEO_WEIGHTS.values()))
-    return {"score": score, "grade": grade(score), "checks": checks, "pages": total}
+    seo_payload = {"score": score, "grade": grade(score), "checks": checks, "pages": total}
+    findings = {
+        "missing_titles": no_title,
+        "duplicate_titles": title_meta,
+        "missing_descriptions": no_desc,
+        "duplicate_descriptions": desc_meta,
+        "indexation": blocked,
+        "errors": [(s.normalized_url, s.status_code, bool(s.soft_404)) for s in error_snaps],
+        "redirects": [(s.normalized_url, s.redirect_count) for s in chain_snaps],
+        "links": {u: sorted(targets) for u, targets in broken_by_from.items()},
+        "schema": missing,
+        "site_files": site_codes,
+    }
+    return seo_payload, findings
+
+
+def seo_health(db: Session, client: Client, crawl_date: date) -> dict[str, Any]:
+    return _seo_with_findings(db, client, crawl_date)[0]
 
 
 # ── GEO readiness (ported from the GEO Grader) ───────────────────────────────
@@ -389,7 +493,7 @@ def _geo_items(db: Session, client: Client, rows: list[Any], snaps: list[Any], a
     return items
 
 
-def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
+def _geo_with_items(db: Session, client: Client) -> tuple[dict[str, Any], dict[str, list[dict[str, str | None]]]]:
     rows = db.query(FactCrawlPageSchema).filter(FactCrawlPageSchema.client_id == client.id).all()
     snaps = db.query(FactCrawlPageSnapshot).filter(FactCrawlPageSnapshot.client_id == client.id, FactCrawlPageSnapshot.source == CRAWL_SOURCE_FIRST_PARTY).all()
     schema, schema_detail = _schema_signal(rows)
@@ -424,16 +528,407 @@ def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
             f"{p}: " + ("names the brand" if p in answers["platforms_naming"] else "never names the brand" if p in answers["platforms_all"] else "no usable answer")
             for p in every
         ) + "."
+    items_by_signal: dict[str, list[dict[str, str | None]]] = {}
     for sig in signals:
         sig["summary"] = summaries.get(sig["key"])
         found = items.get(sig["key"], []) if sig["measured"] else []
+        items_by_signal[sig["key"]] = found
         sig["items"] = found[:URLS_KEPT]
         sig["affected"] = len(found)
     measured = [s for s in signals if s["measured"]]
     weight = sum(s["weight"] for s in measured)
     score = round(sum(s["weight"] * s["score"] for s in measured) / weight) if weight else 0
     public = {k: v for k, v in (answers or {}).items() if k != "by_prompt"} or None
-    return {"score": score, "grade": grade(score), "signals": signals, "answers": public, "partial": len(measured) < len(signals)}
+    return {"score": score, "grade": grade(score), "signals": signals, "answers": public, "partial": len(measured) < len(signals)}, items_by_signal
+
+
+def geo_readiness(db: Session, client: Client) -> dict[str, Any]:
+    return _geo_with_items(db, client)[0]
+
+
+# ── By-page & site-wide merging with deterministic prescribed fixes ───────────
+
+SEVERITY_RANK = {"high": 3, "medium": 2, "low": 1}
+
+_SEO_LABELS = {
+    "missing_titles": "Missing page titles",
+    "duplicate_titles": "Duplicate page titles",
+    "missing_descriptions": "Missing meta descriptions",
+    "duplicate_descriptions": "Duplicate meta descriptions",
+    "indexation": "Pages open to search engines",
+    "errors": "Broken pages (404, server errors, pages that say not found)",
+    "redirects": "Redirect chains",
+    "links": "Internal links to broken pages",
+    "schema": "Pages with structured data",
+    "site_files": "robots.txt and sitemap",
+    "titles": "Page titles",
+    "descriptions": "Meta descriptions",
+}
+
+_SITE_FILE_FIXES: dict[str, tuple[str, str, str, str]] = {
+    "no_robots": (
+        "high",
+        "/robots.txt",
+        "No robots.txt file was found at the root domain.",
+        "Publish /robots.txt allowing search and AI crawlers and declaring your XML sitemap URL.",
+    ),
+    "no robots.txt": (
+        "high",
+        "/robots.txt",
+        "No robots.txt file was found at the root domain.",
+        "Publish /robots.txt allowing search and AI crawlers and declaring your XML sitemap URL.",
+    ),
+    "robots_not_accessible": (
+        "high",
+        "/robots.txt",
+        "robots.txt could not be read due to an HTTP or network error.",
+        "Ensure /robots.txt returns HTTP 200 OK (text/plain) and is not blocked by a firewall or WAF.",
+    ),
+    "robots.txt could not be read": (
+        "high",
+        "/robots.txt",
+        "robots.txt could not be read due to an HTTP or network error.",
+        "Ensure /robots.txt returns HTTP 200 OK (text/plain) and is not blocked by a firewall or WAF.",
+    ),
+    "robots_disallow_crawling": (
+        "high",
+        "/robots.txt",
+        "robots.txt disallows crawling across the site.",
+        "Remove the broad Disallow: / rule from /robots.txt so search engines can crawl public pages.",
+    ),
+    "robots.txt blocks crawling": (
+        "high",
+        "/robots.txt",
+        "robots.txt disallows crawling across the site.",
+        "Remove the broad Disallow: / rule from /robots.txt so search engines can crawl public pages.",
+    ),
+    "sitemap_missing": (
+        "medium",
+        "XML Sitemap",
+        "No XML sitemap was found in robots.txt or standard locations.",
+        "Generate an XML sitemap of canonical indexable URLs and add a Sitemap: line to /robots.txt.",
+    ),
+    "no sitemap found": (
+        "medium",
+        "XML Sitemap",
+        "No XML sitemap was found in robots.txt or standard locations.",
+        "Generate an XML sitemap of canonical indexable URLs and add a Sitemap: line to /robots.txt.",
+    ),
+    "robots_has_errors": (
+        "medium",
+        "XML Sitemap",
+        "The sitemap URL declared in robots.txt does not load.",
+        "Repair the sitemap endpoint or update the Sitemap: URL in /robots.txt so it returns valid XML with HTTP 200.",
+    ),
+    "the declared sitemap does not load": (
+        "medium",
+        "XML Sitemap",
+        "The sitemap URL declared in robots.txt does not load.",
+        "Repair the sitemap endpoint or update the Sitemap: URL in /robots.txt so it returns valid XML with HTTP 200.",
+    ),
+    "ai_crawlers_blocked": (
+        "medium",
+        "/robots.txt",
+        "robots.txt blocks one or more AI crawlers.",
+        "Review Disallow rules in /robots.txt for AI user-agents and allow access where desired.",
+    ),
+}
+
+
+def _site_file_issue(code_or_text: str, *, label: str | None = None) -> dict[str, Any]:
+    resolved_label = label or _SEO_LABELS["site_files"]
+    spec = _SITE_FILE_FIXES.get(code_or_text)
+    if spec:
+        severity, subject, problem, fix = spec
+    else:
+        severity = "medium"
+        subject = "Site files"
+        problem = f"Site-level crawl issue: {code_or_text}."
+        fix = "Inspect /robots.txt and XML sitemap configuration at the root domain and resolve the reported issue."
+    return {
+        "source": "seo",
+        "key": "site_files",
+        "label": resolved_label,
+        "severity": severity,
+        "subject": subject,
+        "problem": problem,
+        "fix": fix,
+    }
+
+
+def _seo_issue(
+    key: str,
+    *,
+    label: str | None = None,
+    shared_text: str | None = None,
+    shared_count: int | None = None,
+    status_code: int | None = None,
+    soft_404: bool = False,
+    redirect_count: int | None = None,
+    broken_targets: list[str] | None = None,
+    legacy_links: bool = False,
+) -> dict[str, Any]:
+    resolved_label = label or _SEO_LABELS.get(key, key)
+    subject: str | None = None
+
+    if key == "missing_titles":
+        severity = "high"
+        problem = "This indexable page has no <title> tag."
+        fix = "Write a unique, descriptive <title> tag (50–60 characters) summarizing the page's topic and primary keyword."
+    elif key == "duplicate_titles":
+        severity = "medium"
+        if shared_text:
+            subject = shared_text
+            if (shared_count or 0) > 1:
+                others = shared_count - 1  # type: ignore[operator]
+                problem = f"Shares the title “{shared_text}” with {others} other {'page' if others == 1 else 'pages'}."
+            else:
+                problem = f"Flagged with duplicate title “{shared_text}”."
+        else:
+            problem = "This page shares its <title> tag with other pages."
+        fix = "Rewrite the <title> tag so it is unique to this URL and clearly differentiates its content."
+    elif key == "missing_descriptions":
+        severity = "medium"
+        problem = "This indexable page has no meta description."
+        fix = "Add a unique meta description (140–155 characters) summarizing the page to improve search click-through rate."
+    elif key == "duplicate_descriptions":
+        severity = "medium"
+        if shared_text:
+            snippet = shared_text if len(shared_text) <= 120 else shared_text[:117] + "..."
+            subject = snippet
+            if (shared_count or 0) > 1:
+                others = shared_count - 1  # type: ignore[operator]
+                problem = f"Shares the meta description “{snippet}” with {others} other {'page' if others == 1 else 'pages'}."
+            else:
+                problem = f"Flagged with duplicate meta description “{snippet}”."
+        else:
+            problem = "This page shares its meta description with other pages."
+        fix = "Write a unique meta description (140–155 characters) tailored specifically to this page's content."
+    elif key == "indexation":
+        severity = "high"
+        problem = "This page returns HTTP 200 OK but is marked non-indexable (noindex or canonicalized elsewhere)."
+        fix = "Remove the noindex directive or fix the canonical tag if this page should rank; otherwise remove internal links to it."
+    elif key == "errors":
+        severity = "high"
+        code = status_code or 0
+        if soft_404 and code < 400:
+            subject = "Soft 404"
+            problem = "Returns HTTP 200 OK, but page content says not found (soft 404)."
+            fix = "Return HTTP 404/410 if removed, or restore valid content."
+        elif code >= 500:
+            subject = f"HTTP {code}"
+            problem = f"Returned server error HTTP {code}."
+            fix = "Check server logs and fix the 5xx error so the URL returns HTTP 200."
+        elif code >= 400:
+            subject = f"HTTP {code}"
+            problem = f"Returned HTTP {code}."
+            fix = "Restore the page, 301-redirect it to the closest live page, or remove internal links to it."
+        else:
+            problem = "Returned a broken status (4xx/5xx) or soft-404 response."
+            fix = "Restore the page, 301-redirect it to the closest live page, or remove internal links to it."
+    elif key == "redirects":
+        severity = "medium"
+        if redirect_count:
+            subject = f"{redirect_count} redirects"
+            problem = f"Passes through {redirect_count} redirects before reaching the destination."
+        else:
+            problem = "Passes through a multi-hop redirect chain."
+        fix = "Collapse the chain to a single 301 redirect and update internal links to point directly to the final canonical URL."
+    elif key == "links":
+        severity = "medium"
+        if broken_targets and not legacy_links:
+            n = len(broken_targets)
+            preview = ", ".join(_path(u) for u in broken_targets[:3])
+            if n > 3:
+                preview += f" (+{n - 3} more)"
+            problem = f"Links internally to {n} broken {'page' if n == 1 else 'pages'}: {preview}."
+            fix = "Edit links on this page to point to live 200 URLs or remove dead links."
+        else:
+            problem = "Internal links elsewhere on the site point to this broken URL."
+            fix = "Update internal links pointing here to a live URL, or restore/301-redirect this URL."
+    elif key == "schema":
+        severity = "medium"
+        problem = "This indexable page has no valid structured data markup."
+        fix = "Use the Machine Readability (Schema) tool to generate and add valid JSON-LD structured data matching the page type (Product, Service, Article, or LocalBusiness)."
+    elif key == "titles":
+        severity = "medium"
+        problem = "Missing or duplicate <title> tag reported in this snapshot."
+        fix = "Ensure the page has a unique, descriptive <title> tag (50–60 characters)."
+    elif key == "descriptions":
+        severity = "medium"
+        problem = "Missing or duplicate meta description reported in this snapshot."
+        fix = "Ensure the page has a unique meta description (140–155 characters)."
+    else:
+        severity = "medium"
+        problem = f"SEO check “{resolved_label}” flagged this page."
+        fix = "Inspect this URL for the flagged SEO issue and update the page accordingly."
+
+    return {
+        "source": "seo",
+        "key": key,
+        "label": resolved_label,
+        "severity": severity,
+        "subject": subject,
+        "problem": problem,
+        "fix": fix,
+    }
+
+
+def _geo_severity(key: str, item: dict[str, Any]) -> str:
+    text = f"{item.get('problem') or ''} {item.get('text') or ''}".lower()
+    if key == "schema":
+        return "high" if "organization" in text else "medium"
+    if key == "entity":
+        return "high" if "no title" in text else "medium"
+    if key in ("crawler", "citation"):
+        return "high"
+    if key in ("faq", "depth", "attribution"):
+        return "medium"
+    if key == "graph":
+        return "medium" if "never named the brand" in text else "low"
+    return "medium"
+
+
+def _geo_issue(sig_key: str, sig_label: str, item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source": "geo",
+        "key": sig_key,
+        "label": sig_label,
+        "severity": _geo_severity(sig_key, item),
+        "subject": item.get("subject"),
+        "problem": item.get("problem") or item.get("text") or f"GEO signal “{sig_label}” flagged an issue.",
+        "fix": item.get("fix") or "Improve structured data, entity clarity, and citable content for this GEO signal.",
+    }
+
+
+def _assemble_page_views(
+    pages_issues: dict[str, list[dict[str, Any]]],
+    site_wide: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_page: list[dict[str, Any]] = []
+    for url, issues in pages_issues.items():
+        if not issues:
+            continue
+        sorted_issues = sorted(
+            issues,
+            key=lambda i: (-SEVERITY_RANK[i["severity"]], 0 if i["source"] == "seo" else 1, i["key"], i.get("subject") or ""),
+        )
+        seo_count = sum(1 for i in sorted_issues if i["source"] == "seo")
+        geo_count = sum(1 for i in sorted_issues if i["source"] == "geo")
+        highest = max(sorted_issues, key=lambda i: SEVERITY_RANK[i["severity"]])["severity"]
+        by_page.append({
+            "url": url,
+            "issue_count": len(sorted_issues),
+            "seo_count": seo_count,
+            "geo_count": geo_count,
+            "highest_severity": highest,
+            "issues": sorted_issues,
+        })
+    by_page.sort(key=lambda p: (-p["issue_count"], -SEVERITY_RANK[p["highest_severity"]], p["url"]))
+    sorted_site_wide = sorted(
+        site_wide,
+        key=lambda i: (-SEVERITY_RANK[i["severity"]], 0 if i["source"] == "seo" else 1, i["key"], i.get("subject") or "", i["problem"]),
+    )
+    return {"by_page": by_page[:BY_PAGE_LIMIT], "site_wide": sorted_site_wide}
+
+
+def _build_page_views(
+    seo_payload: dict[str, Any],
+    seo_findings: dict[str, Any],
+    geo_payload: dict[str, Any],
+    geo_items: dict[str, list[dict[str, str | None]]],
+) -> dict[str, Any]:
+    pages_issues: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    site_wide: list[dict[str, Any]] = []
+    seo_labels = {c["key"]: c["label"] for c in seo_payload.get("checks", [])}
+
+    for url in seo_findings.get("missing_titles", []):
+        pages_issues[url].append(_seo_issue("missing_titles", label=seo_labels.get("missing_titles")))
+    for url, (shared_text, shared_count) in seo_findings.get("duplicate_titles", {}).items():
+        pages_issues[url].append(
+            _seo_issue("duplicate_titles", label=seo_labels.get("duplicate_titles"), shared_text=shared_text, shared_count=shared_count)
+        )
+    for url in seo_findings.get("missing_descriptions", []):
+        pages_issues[url].append(_seo_issue("missing_descriptions", label=seo_labels.get("missing_descriptions")))
+    for url, (shared_text, shared_count) in seo_findings.get("duplicate_descriptions", {}).items():
+        pages_issues[url].append(
+            _seo_issue("duplicate_descriptions", label=seo_labels.get("duplicate_descriptions"), shared_text=shared_text, shared_count=shared_count)
+        )
+    for url in seo_findings.get("indexation", []):
+        pages_issues[url].append(_seo_issue("indexation", label=seo_labels.get("indexation")))
+    for url, status_code, is_soft in seo_findings.get("errors", []):
+        pages_issues[url].append(_seo_issue("errors", label=seo_labels.get("errors"), status_code=status_code, soft_404=is_soft))
+    for url, redir_count in seo_findings.get("redirects", []):
+        pages_issues[url].append(_seo_issue("redirects", label=seo_labels.get("redirects"), redirect_count=redir_count))
+    for from_url, broken_targets in seo_findings.get("links", {}).items():
+        pages_issues[from_url].append(_seo_issue("links", label=seo_labels.get("links"), broken_targets=broken_targets))
+    for url in seo_findings.get("schema", []):
+        pages_issues[url].append(_seo_issue("schema", label=seo_labels.get("schema")))
+    for code in seo_findings.get("site_files", []):
+        site_wide.append(_site_file_issue(code, label=seo_labels.get("site_files")))
+
+    geo_labels = {s["key"]: s["label"] for s in geo_payload.get("signals", [])}
+    for sig_key, items in geo_items.items():
+        sig_label = geo_labels.get(sig_key, sig_key)
+        for item in items:
+            issue = _geo_issue(sig_key, sig_label, item)
+            url = item.get("url")
+            if url:
+                pages_issues[url].append(issue)
+            else:
+                site_wide.append(issue)
+
+    return _assemble_page_views(pages_issues, site_wide)
+
+
+def _synthesize_by_page_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically build by_page and site_wide on read for legacy locked snapshots lacking them."""
+    pages_issues: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    site_wide: list[dict[str, Any]] = []
+
+    for c in payload.get("seo", {}).get("checks", []):
+        key = c.get("key") or ""
+        label = c.get("label") or _SEO_LABELS.get(key, key)
+        urls = c.get("urls") or []
+        if key == "site_files":
+            for code_or_text in urls:
+                site_wide.append(_site_file_issue(code_or_text, label=label))
+            continue
+        if key in ("duplicate_titles", "duplicate_descriptions") and c.get("duplicate_groups"):
+            dup_meta: dict[str, tuple[str, int]] = {}
+            for g in c["duplicate_groups"]:
+                g_text = g.get("text") or ""
+                g_count = int(g.get("count") or len(g.get("urls") or []))
+                for u in g.get("urls") or []:
+                    dup_meta[u] = (g_text, g_count)
+            seen: set[str] = set()
+            for u in list(dup_meta.keys()) + list(urls):
+                if u in seen:
+                    continue
+                seen.add(u)
+                meta = dup_meta.get(u)
+                if meta:
+                    pages_issues[u].append(_seo_issue(key, label=label, shared_text=meta[0], shared_count=meta[1]))
+                else:
+                    pages_issues[u].append(_seo_issue(key, label=label))
+            continue
+        for u in urls:
+            pages_issues[u].append(_seo_issue(key, label=label, legacy_links=(key == "links")))
+
+    for sig in payload.get("geo", {}).get("signals", []):
+        if not sig.get("measured"):
+            continue
+        sig_key = sig.get("key") or ""
+        sig_label = sig.get("label") or sig_key
+        for item in sig.get("items") or []:
+            issue = _geo_issue(sig_key, sig_label, item)
+            url = item.get("url")
+            if url:
+                pages_issues[url].append(issue)
+            else:
+                site_wide.append(issue)
+
+    return _assemble_page_views(pages_issues, site_wide)
 
 
 # ── The month ─────────────────────────────────────────────────────────────────
@@ -453,11 +948,15 @@ def build(db: Session, client: Client) -> dict[str, Any] | None:
     info = _crawl_info(db, client)
     if info is None:
         return None
+    seo_payload, seo_findings = _seo_with_findings(db, client, info["date"])
+    geo_payload, geo_items = _geo_with_items(db, client)
+    page_views = _build_page_views(seo_payload, seo_findings, geo_payload, geo_items)
     return {
         "crawl": {"date": info["date"].isoformat(), "pages": info["pages"], "limit": info["limit"], "hit_limit": info["hit_limit"]},
-        "seo": seo_health(db, client, info["date"]),
-        "geo": geo_readiness(db, client),
+        "seo": seo_payload,
+        "geo": geo_payload,
         "weights": {"seo": SEO_WEIGHTS, "geo": GEO_WEIGHTS},
+        **page_views,
     }
 
 
@@ -491,6 +990,19 @@ def _items_lack_advice(payload: dict[str, Any] | None) -> bool:
     return any("problem" not in i for sig in (payload or {}).get("geo", {}).get("signals", []) for i in sig.get("items") or [])
 
 
+def _payload_needs_upgrade(payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return True
+    if _items_lack_advice(payload):
+        return True
+    keys = {c.get("key") for c in payload.get("seo", {}).get("checks", [])}
+    if "titles" in keys or "descriptions" in keys:
+        return True
+    if "by_page" not in payload or "site_wide" not in payload:
+        return True
+    return False
+
+
 def _issue_sets(payload: dict[str, Any] | None) -> dict[str, set[str]]:
     sets = {c["key"]: set(c["urls"]) for c in (payload or {}).get("seo", {}).get("checks", [])}
     for sig in (payload or {}).get("geo", {}).get("signals", []):
@@ -503,29 +1015,64 @@ def months(db: Session, client: Client) -> list[str]:
     return [m for (m,) in db.query(SiteHealthSnapshot.month).filter(SiteHealthSnapshot.client_id == client.id).order_by(SiteHealthSnapshot.month.desc())]
 
 
+def crawls(db: Session, client: Client) -> list[dict[str, Any]]:
+    """Stored crawl snapshots for this client, newest first."""
+    rows = (
+        db.query(SiteHealthSnapshot)
+        .filter(SiteHealthSnapshot.client_id == client.id)
+        .order_by(SiteHealthSnapshot.crawl_date.desc(), SiteHealthSnapshot.month.desc())
+        .all()
+    )
+    return [
+        {
+            "month": r.month,
+            "crawl_date": r.crawl_date.isoformat(),
+            "seo": (r.payload or {}).get("seo", {}).get("score"),
+            "geo": (r.payload or {}).get("geo", {}).get("score"),
+        }
+        for r in rows
+    ]
+
+
 def default_month(db: Session, client: Client) -> str | None:
     """The month of the crawl held now (or the newest scored month if the site has no crawl)."""
     info = _crawl_info(db, client)
     return _month_of(info["date"]) if info else next(iter(months(db, client)), None)
 
 
-def for_month(db: Session, client: Client, month: str, today: date | None = None) -> dict[str, Any] | None:
-    """The month's scores with the month before beside them, and what is new or fixed since."""
+def for_month(
+    db: Session,
+    client: Client,
+    month: str,
+    today: date | None = None,
+    compare_to: str | None = None,
+) -> dict[str, Any] | None:
+    """The month's scores with an earlier crawl/month beside them, and what is new or fixed since."""
     today = today or date.today()
     over = _last_day(month) < today
     row = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == month).one_or_none()
     info = _crawl_info(db, client)
     # The crawl held now belongs to one month. While that month is running its row follows each look; once it is over the row is kept as it was.
-    # A month saved before items said what is wrong and how to fix it is written again from the same crawl, so it reads the same as the rest.
-    if info is not None and _month_of(info["date"]) == month and (row is None or not over or _items_lack_advice(row.payload)):
+    # A month saved before Phase 2 fields existed is rebuilt from the same crawl when that crawl is still active.
+    if info is not None and _month_of(info["date"]) == month and (row is None or not over or _payload_needs_upgrade(row.payload)):
         record(db, client)
     row = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == month).one_or_none()
     if row is None:
         return None
     y, m = int(month[:4]), int(month[5:7])
-    prev_month = f"{y - (m == 1):04d}-{(m - 2) % 12 + 1:02d}"
-    prev = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == prev_month).one_or_none()
+    default_prev = f"{y - (m == 1):04d}-{(m - 2) % 12 + 1:02d}"
+    target_prev = compare_to if compare_to and compare_to != month else default_prev
+    prev = db.query(SiteHealthSnapshot).filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month == target_prev).one_or_none()
+    if prev is None and compare_to is None:
+        prev = (
+            db.query(SiteHealthSnapshot)
+            .filter(SiteHealthSnapshot.client_id == client.id, SiteHealthSnapshot.month < month)
+            .order_by(SiteHealthSnapshot.month.desc())
+            .first()
+        )
     payload = row.payload
+    if "by_page" not in payload or "site_wide" not in payload:
+        payload = {**payload, **_synthesize_by_page_from_payload(payload)}
     changes = []
     if prev is not None:
         now_sets, was_sets = _issue_sets(payload), _issue_sets(prev.payload)
@@ -540,6 +1087,6 @@ def for_month(db: Session, client: Client, month: str, today: date | None = None
     locked = over
     return {
         **payload, "month": month, "locked": locked, "crawl_date": row.crawl_date.isoformat(),
-        "previous": {"month": prev_month, "seo": prev.payload["seo"]["score"], "geo": prev.payload["geo"]["score"], "crawl_date": prev.crawl_date.isoformat()} if prev is not None else None,
+        "previous": {"month": prev.month, "seo": prev.payload["seo"]["score"], "geo": prev.payload["geo"]["score"], "crawl_date": prev.crawl_date.isoformat()} if prev is not None else None,
         "changes": changes,
     }

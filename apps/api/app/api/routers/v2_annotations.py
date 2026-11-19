@@ -23,7 +23,7 @@ router = APIRouter(prefix="/v2/annotations", tags=["v2-annotations"])
 
 TYPE_LABELS = {
     "growth_action": "Growth action", "event": "Event or trade show", "content_published": "New content", "content_updated": "Content change", "technical_change": "Technical change",
-    "website_change": "Website change", "conversion_change": "Conversion change", "campaign_change": "Campaign change", "algorithm_event": "Search update", "manual_note": "Note",
+    "website_change": "Website change", "conversion_change": "Conversion change", "campaign_change": "Campaign change", "algorithm_event": "Search update", "visibility_check": "Visibility check", "manual_note": "Note",
 }
 
 
@@ -70,15 +70,16 @@ def list_completed(
     return {"manual_types": [{"key": k, "label": TYPE_LABELS[k]} for k in MANUAL_TYPES], "entries": out, "counts": {"total": len(out), "from_plan": sum(1 for e in out if e["from_plan"]), "improved": sum(1 for e in out if e["result"] == "improved")}, "types": TYPE_LABELS}
 
 
-#: What a person can add by hand. Everything but a plain note is followed for 28 days after its date, like work marked done on the plan.
-MANUAL_TYPES = ["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "manual_note"]
+#: What a person can add by hand. Everything other than a plain note or visibility check is followed for 28 days after its date, like work marked done on the plan.
+MANUAL_TYPES = ["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "visibility_check", "manual_note"]
 
 
 class NoteIn(BaseModel):
     date: date
     description: str = Field(min_length=3, max_length=2000)
+    notes: str | None = Field(default=None, max_length=4000)
     page: str | None = Field(default=None, max_length=2048)
-    type: Literal["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "manual_note"] = "manual_note"
+    type: Literal["event", "campaign_change", "website_change", "technical_change", "algorithm_event", "visibility_check", "manual_note"] = "manual_note"
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -88,9 +89,11 @@ def add_note(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    measured = payload.type != "manual_note"
+    measured = payload.type not in ("manual_note", "visibility_check")
     row = annotation_service.create_annotation(db, client, AnnotationCreate(
-        date=payload.date, annotation_type=payload.type, description=payload.description.strip(), page_url=payload.page or None,
+        date=payload.date, annotation_type=payload.type, description=payload.description.strip(),
+        notes=payload.notes.strip() if payload.notes and payload.notes.strip() else None,
+        page_url=payload.page or None,
         completed_at=payload.date if measured else None, measurement_start_date=payload.date if measured else None,
         measurement_end_date=payload.date + timedelta(days=28) if measured else None,
     ))

@@ -16,7 +16,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.bing_stats import FactBingQueryStat
@@ -69,11 +69,16 @@ def _google(db: Session, client: Client, keys: list[str], first: date, last: dat
 
 def _bing(db: Session, client: Client, keys: list[str], first: date, last: date) -> dict[str, dict]:
     """Weeks that start inside the month. Bing's weeks straddle month ends, so the edges are approximate."""
+    pos_impressions = case(
+        (FactBingQueryStat.avg_impression_position.isnot(None), FactBingQueryStat.impressions),
+        else_=0,
+    )
     rows = (
         db.query(
             FactBingQueryStat.query_key,
             func.sum(FactBingQueryStat.impressions),
             func.sum(FactBingQueryStat.clicks),
+            func.sum(pos_impressions),
             func.sum(FactBingQueryStat.avg_impression_position * FactBingQueryStat.impressions),
         )
         .filter(
@@ -86,12 +91,13 @@ def _bing(db: Session, client: Client, keys: list[str], first: date, last: date)
         .all()
     )
     out: dict[str, dict] = {}
-    for k, impressions, clicks, weighted in rows:
+    for k, impressions, clicks, pos_imp, weighted in rows:
         impressions = float(impressions or 0)
+        pos_imp = float(pos_imp or 0)
         out[key_of(k)] = {
             "impressions": impressions,
             "clicks": float(clicks or 0),
-            "position": round(float(weighted or 0) / impressions, 1) if impressions else None,
+            "position": round(float(weighted) / pos_imp, 1) if weighted is not None and pos_imp else None,
         }
     return out
 

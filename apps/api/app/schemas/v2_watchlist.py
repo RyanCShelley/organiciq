@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class WatchlistKeywordOut(BaseModel):
@@ -45,3 +45,44 @@ class WatchlistImportResponse(BaseModel):
     skipped: list[dict]
     warnings: list[dict]
     ignored_columns: list[str]
+
+
+class WatchlistKeywordAddRequest(BaseModel):
+    keyword: str = Field(min_length=1, max_length=400)
+    bucket_id: UUID | None = None
+    bucket_name: str | None = Field(default=None, max_length=160)
+    notes: str | None = None
+
+    @field_validator("keyword")
+    @classmethod
+    def _clean_keyword(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("Keyword cannot be blank.")
+        return cleaned
+
+    @field_validator("bucket_name")
+    @classmethod
+    def _clean_bucket_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split())
+        return cleaned or None
+
+    @field_validator("notes")
+    @classmethod
+    def _clean_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class WatchlistKeywordAddResponse(BaseModel):
+    id: UUID
+    keyword: str
+    keyword_key: str
+    bucket_id: UUID
+    bucket_name: str
+    created: bool
+    bucket_created: bool
