@@ -36,7 +36,7 @@ def test_the_first_lock_makes_version_one_and_fills_the_clients_baseline(client,
     version = body["version"]
     assert version["version"] == 1 and version["reason_code"] == "initial" and version["locked_by"] == admin_user.email
     assert version["status"] == "draft" and version["regime_start"] == "2025-12"
-    assert version["goal_monthly_leads"] < version["monthly_leads"]          # the low end of the range
+    assert version["goal_monthly_leads"] == version["monthly_leads"]         # starts from the typical baseline figure
 
     db.refresh(client_a)
     assert client_a.baseline_source == "baseline_series"
