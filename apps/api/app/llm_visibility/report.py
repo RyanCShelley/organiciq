@@ -37,8 +37,19 @@ def brand_check(rows: Iterable[Any]) -> dict[str, Any]:
         p = per_platform.setdefault(r.platform, {"answers": 0, "site_cited": 0})
         p["answers"] += 1
         p["site_cited"] += bool(r.url_cited)
-        q = per_prompt.setdefault(r.query_text, {"query": r.query_text, "topic_cluster": r.topic_cluster, "by_platform": {}})
+        q = per_prompt.setdefault(
+            r.query_text,
+            {"query": r.query_text, "topic_cluster": r.topic_cluster, "by_platform": {}, "by_platform_detail": {}},
+        )
         q["by_platform"][r.platform] = "Cited" if r.url_cited else "Not cited"
+        if r.url_cited and r.brand_mentioned:
+            q["by_platform_detail"][r.platform] = "Cited + Mentioned"
+        elif r.url_cited:
+            q["by_platform_detail"][r.platform] = "Cited"
+        elif r.brand_mentioned:
+            q["by_platform_detail"][r.platform] = "Mentioned"
+        else:
+            q["by_platform_detail"][r.platform] = "Not cited"
     return {
         "platforms": [{"platform": k, **v} for k, v in sorted(per_platform.items())],
         "prompts": sorted(per_prompt.values(), key=lambda q: (q["topic_cluster"] or "", q["query"])),

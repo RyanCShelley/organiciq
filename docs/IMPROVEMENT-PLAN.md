@@ -16,7 +16,7 @@ Last updated: 2026-11-18
 - [x] **Baseline goal floor** (`apps/api/app/services/growth_calculator.py`, `apps/api/app/services/baseline_series.py`, `apps/api/app/services/lead_goals.py`):
   - Goal starts from the typical figure and never sits below the baseline (e.g., `21 → 19`), including home screen next-checkpoint goals.
   - *Note:* Revisit and re-run the `TRAFFIC_DECLINE_12MO = 12.8` assumption (originally derived from GA4 MCP + Claude analysis; verify AI Overviews impact).
-- [ ] **3-Pillar Baseline Snapshot** (Visibility + Traffic + Leads):
+- [x] **3-Pillar Baseline Snapshot** (Visibility + Traffic + Leads):
   - Expand `BaselineVersion.snapshot` to capture starting Visibility (GSC/Bing/Watchlist/SoV/LLM/Site Health), Traffic (GA4 channels + top pages), and Leads, with 30-day avg + 90-day total and CSV export.
 
 ### LLM Visibility UX & Schedule
@@ -27,7 +27,7 @@ Last updated: 2026-11-18
 - [x] **Prompt search**: Add a quick search/filter box to filter prompts across Prompt Details and Query Summary.
 - [x] **Query summary**: Show ranking/presence clearly per area/platform (`#rank` formatting).
 - [x] **Overview tab**: Add a Share of Voice summary card/section on the Overview tab (it is an overview metric).
-- [ ] **Verify weekly schedule**: Confirm `enqueue_due_llm_runs` (`LLM_RUN_INTERVAL_DAYS = 7` in `apps/api/app/services/daily_sync.py`) is firing reliably for worked clients in production.
+- [x] **Verify weekly schedule**: Confirm `enqueue_due_llm_runs` (`LLM_RUN_INTERVAL_DAYS = 7` in `apps/api/app/services/daily_sync.py`) is firing reliably for worked clients in production.
 
 ### Onboarding & Job Cleanup
 - [x] **Remove SE Ranking AI search leftovers** from onboarding/connections (`apps/web-v2/app/(app)/[clientSlug]/settings/connections/actions.ts`).

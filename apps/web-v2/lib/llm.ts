@@ -76,7 +76,12 @@ export type LlmOverview = {
   other_brands?: { name: string; count: number }[];
   brand_check?: {
     platforms: { platform: string; answers: number; site_cited: number }[];
-    prompts: { query: string; topic_cluster: string | null; by_platform: Record<string, string> }[];
+    prompts: {
+      query: string;
+      topic_cluster: string | null;
+      by_platform: Record<string, string>;
+      by_platform_detail?: Record<string, string>;
+    }[];
   };
 };
 

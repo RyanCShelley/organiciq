@@ -45,6 +45,63 @@ export type Analysis = {
   source: { type: string; lead_events: string[]; notes: string[] };
 };
 
+export type WindowPair = { avg_30d: number; recent_30d: number; total_90d: number };
+
+export type PillarsSnapshot = {
+  window: { as_of: string; start_30d: string; start_90d: string };
+  visibility: {
+    gsc: {
+      clicks: WindowPair;
+      impressions: WindowPair;
+      ctr_30d_pct: number | null;
+      ctr_90d_pct: number | null;
+      avg_position_30d: number | null;
+      avg_position_90d: number | null;
+    };
+    bing: {
+      clicks: WindowPair;
+      impressions: WindowPair;
+      avg_position_30d: number | null;
+      avg_position_90d: number | null;
+    };
+    watchlist: {
+      tracked_keywords: number;
+      paired_ai_prompts: number;
+      rankings_date: string | null;
+      ranked_keywords: number;
+      top_3: number;
+      top_10: number;
+      avg_position: number | null;
+    };
+    llm: {
+      run_date: string | null;
+      visibility_rate_pct: number | null;
+      mentions: number | null;
+      citations: number | null;
+      share_of_voice_pct: number | null;
+    };
+    site_health: {
+      month: string | null;
+      crawl_date: string | null;
+      seo_score: number | null;
+      geo_score: number | null;
+    };
+  };
+  traffic: {
+    total_sessions: WindowPair;
+    organic_sessions: WindowPair;
+    channels: Array<{ channel: string } & WindowPair>;
+    top_pages: Array<{ url: string } & WindowPair>;
+  };
+  leads: {
+    lead_events: string[];
+    total: WindowPair;
+    lead_rate_30d_pct: number | null;
+    lead_rate_90d_pct: number | null;
+    by_event: Array<{ event_name: string } & WindowPair>;
+  };
+};
+
 export type BaselineVersion = {
   version: number;
   status: string;
@@ -59,6 +116,7 @@ export type BaselineVersion = {
   monthly_organic_sessions: number | null;
   monthly_leads: number | null;
   goal_monthly_leads: number | null;
+  has_pillars?: boolean;
 };
 
 export type AnalysisResult = { ok: true; analysis: Analysis } | { ok: false; error: string };

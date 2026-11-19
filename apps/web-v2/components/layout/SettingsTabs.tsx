@@ -7,11 +7,11 @@ const TABS: readonly { label: string; path: string; href?: string }[] = [
   { label: "General", path: "" },
   { label: "Connections", path: "/connections" },
   { label: "Conversions & goals", path: "/conversions" },
-  { label: "Baseline & goals", path: "/baseline" },
   { label: "Content sources", path: "/content" },
   { label: "Watchlist import", path: "/watchlist" },
   { label: "Watchlist", path: "", href: "/watchlist" },
   { label: "Competitors", path: "/competitors" },
+  { label: "Baseline", path: "/baseline" },
   { label: "Advanced", path: "/advanced" },
   { label: "Team access", path: "/team" },
 ];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 
 import { addLlmPromptsAction, addSeenCompetitorAction, llmMonthResponsesAction, llmMonthSovAction, llmResponsesAction, seenCompetitorsAction, type SeenBrand, removeLlmPromptAction, saveLlmSettingsAction, startLlmRunAction, suggestLlmPromptsAction, type SuggestedGroup } from "@/app/(app)/[clientSlug]/llm/actions";
 import type { Client } from "@/lib/api";
@@ -179,39 +179,84 @@ function Overview({ client, data }: { client: Client; data: LlmOverview }) {
           </p>
           <ul className="mt-3 flex flex-wrap gap-3">
             {data.brand_check.platforms.map((p) => (
-              <li key={p.platform} className="rounded-lg bg-[var(--bg)] px-3 py-2 text-sm">
-                <span className="font-semibold">{p.platform}</span> cited the site in {p.site_cited} of {p.answers}
+              <li key={p.platform} className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm">
+                <EngineIcon platform={p.platform} className="h-4 w-4 shrink-0" />
+                <span>
+                  <span className="font-semibold">{p.platform}</span> cited the site in {p.site_cited} of {p.answers}
+                </span>
               </li>
             ))}
           </ul>
           <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => setShowBrandPrompts((v) => !v)}
-              aria-expanded={showBrandPrompts}
-              className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
-            >
-              {showBrandPrompts ? "Hide brand-check prompts" : `Show ${data.brand_check.prompts.length} brand-check prompts`}
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBrandPrompts((v) => !v)}
+                aria-expanded={showBrandPrompts}
+                className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
+              >
+                {showBrandPrompts ? "Hide brand-check matrix" : `Show ${data.brand_check.prompts.length} brand-check prompts`}
+              </button>
+              {showBrandPrompts ? (
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-secondary)]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#0B3B68]" /> Both (Cited + Mentioned)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#D8EAF8] border border-[#b4d4ef]" /> One (Cited or Mentioned)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[var(--bg)] border border-[var(--border)]" /> Neither
+                  </span>
+                </div>
+              ) : null}
+            </div>
             {showBrandPrompts ? (
-              <div className="mt-2 overflow-x-auto">
-                <table className="w-full min-w-[34rem] text-left text-sm">
-                  <tbody>
-                    {data.brand_check.prompts.map((q) => (
-                      <tr key={q.query} className="border-t border-[var(--border)] align-top">
-                        <td className="py-2 pr-3">{q.query}</td>
-                        {Object.entries(q.by_platform).map(([platform, result]) => (
-                          <td key={platform} className="px-2 py-2 text-xs">
-                            <span className={result === "Cited" ? "font-semibold text-green-700" : "text-[var(--text-tertiary)]"}>
-                              {platform}: {result.toLowerCase()}
-                            </span>
-                          </td>
+              (() => {
+                const bcPlatforms = data.brand_check.platforms.map((p) => p.platform).sort();
+                return (
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
+                    <table className="w-full min-w-[40rem] border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)]">
+                          <th className="px-3 py-2.5 font-semibold">Prompt</th>
+                          {bcPlatforms.map((platform) => (
+                            <th key={platform} className="w-28 border-l border-[var(--border)] px-3 py-2.5 text-center font-semibold">
+                              <span className="inline-flex items-center justify-center gap-1.5">
+                                <EngineIcon platform={platform} className="h-3.5 w-3.5 shrink-0" />
+                                <span>{platform}</span>
+                              </span>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.brand_check.prompts.map((q) => (
+                          <tr key={q.query} className="border-t border-[var(--border)]">
+                            <td className="px-3 py-2.5 text-sm text-[var(--text-primary)]">{q.query}</td>
+                            {bcPlatforms.map((platform) => {
+                              const status = q.by_platform_detail?.[platform] ?? q.by_platform[platform] ?? "Not cited";
+                              const isBoth = status === "Cited + Mentioned";
+                              const isOne = status === "Cited" || status === "Mentioned";
+                              const cellClass = isBoth
+                                ? "bg-[#0B3B68] text-white font-semibold"
+                                : isOne
+                                  ? "bg-[#D8EAF8] text-[#0B3B68] font-semibold"
+                                  : "bg-[var(--bg)]/60 text-[var(--text-tertiary)]";
+                              const label = isBoth ? "Cited + Mentioned" : isOne ? status : "–";
+                              return (
+                                <td key={platform} className={`border-l border-[var(--border)] px-2 py-2.5 text-center whitespace-nowrap ${cellClass}`}>
+                                  {label}
+                                </td>
+                              );
+                            })}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()
             ) : null}
           </div>
         </div>
@@ -544,126 +589,180 @@ function PromptsTab({ client, data, run }: { client: Client; data: LlmOverview; 
         <span className="text-xs text-[var(--text-tertiary)]">{prompts.length} of {grouped.size} prompts</span>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+        <span>Click any prompt row to read the full answers.</span>
+        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-xs bg-[#0B3B68]" /> Both (Cited + Mentioned)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-xs border border-[#b4d4ef] bg-[#D8EAF8]" /> One (Cited or Mentioned)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-xs border border-[var(--border)] bg-[var(--bg)]" /> Neither
+          </span>
+        </div>
+      </div>
+
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
 
-      <ul className="divide-y divide-[var(--border)]">
-        {prompts.map((g) => {
-          const isOpen = open === g.query;
-          const qSummary = queryByText.get(g.query);
-          const visibleAnswers = g.answers.filter((a) => platform === "all" || a.platform === platform);
-          const platformStatus: Array<{ platform: string; code: string; visible: boolean; title: string }> = rows
-            ? visibleAnswers
-                .slice()
-                .sort((a, b) => a.platform.localeCompare(b.platform))
-                .map((a) => {
-                  const code = a.visibility === "Cited + Mentioned" ? "C+M" : a.visibility === "Cited" ? "C" : a.visibility === "Mentioned" ? "M" : "—";
-                  const visible = Boolean(a.brand_mentioned || a.url_cited);
-                  const title = `${a.platform}: ${a.visibility}${a.brand_rank != null ? ` (#${a.brand_rank})` : ""}`;
-                  return { platform: a.platform, code, visible, title };
-                })
-            : Object.entries(qSummary?.by_platform ?? {})
-                .filter(([p]) => platform === "all" || p === platform)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([p, code]) => ({
-                  platform: p,
-                  code,
-                  visible: code !== "—",
-                  title: `${p}: ${code === "C+M" ? "Cited + Mentioned" : code === "C" ? "Cited" : code === "M" ? "Mentioned" : "Not visible"}`,
-                }));
-
-          return (
-            <li key={g.query} className="py-2.5">
-              <button
-                type="button"
-                onClick={() => setOpen(isOpen ? null : g.query)}
-                aria-expanded={isOpen}
-                className="flex w-full items-center justify-between gap-4 text-left"
-              >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.query}</span>
-                <span className="flex shrink-0 items-center gap-3 text-xs text-[var(--text-tertiary)] tabular-nums">
-                  <span className="hidden md:inline">{g.topic_cluster ?? "Uncategorized"}</span>
-                  <span className="flex items-center gap-1.5" aria-label="Engine visibility">
-                    {platformStatus.map((ps) => (
-                      <span
-                        key={ps.platform}
-                        title={ps.title}
-                        className={`relative inline-flex h-6 w-6 items-center justify-center rounded-full border ${
-                          ps.visible
-                            ? `border-[var(--border)] bg-white shadow-xs`
-                            : "border-transparent bg-[var(--bg)] opacity-25 grayscale"
-                        }`}
-                      >
-                        <EngineIcon platform={ps.platform} className="h-3.5 w-3.5" />
-                        {ps.visible ? (
-                          <span className="sr-only">{ps.title}</span>
-                        ) : null}
+      {(() => {
+        const visiblePlatforms = platform === "all" ? platforms : platforms.filter((p) => p === platform);
+        return (
+          <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+            <table className="w-full min-w-[46rem] border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] bg-[var(--bg)] text-[var(--text-secondary)]">
+                  <th className="px-3 py-2.5 font-semibold">Prompt</th>
+                  {visiblePlatforms.map((p) => (
+                    <th key={p} className="w-32 border-l border-[var(--border)] px-2 py-2.5 text-center font-semibold">
+                      <span className="inline-flex items-center justify-center gap-1.5">
+                        <EngineIcon platform={p} className="h-3.5 w-3.5 shrink-0" />
+                        <span>{p}</span>
                       </span>
-                    ))}
-                  </span>
-                  {qSummary?.avg_brand_rank != null ? <span className="w-6 text-right font-semibold text-[var(--text-secondary)]">#{qSummary.avg_brand_rank}</span> : <span className="w-6 text-right">–</span>}
-                  <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
-                </span>
-              </button>
-              {isOpen ? (
-                <div className="mt-3 space-y-3 border-l-2 border-[var(--brand-teal)]/40 pl-3">
-                  {qSummary ? (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]">
-                      <span>Score: <strong>{qSummary.score}/{qSummary.max_score}</strong></span>
-                      <span>Avg rank: <strong>{qSummary.avg_brand_rank != null ? `#${qSummary.avg_brand_rank}` : "–"}</strong></span>
-                      {qSummary.top_competitors.length > 0 ? (
-                        <span>Named most often: {qSummary.top_competitors.map((c) => `${c.name} (${c.count})`).join(", ")}</span>
+                    </th>
+                  ))}
+                  <th className="w-16 border-l border-[var(--border)] px-2 py-2.5 text-center font-semibold">Avg rank</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prompts.map((g) => {
+                  const isOpen = open === g.query;
+                  const qSummary = queryByText.get(g.query);
+                  const visibleAnswers = g.answers.filter((a) => platform === "all" || a.platform === platform);
+                  const answerByPlatform = new Map(visibleAnswers.map((a) => [a.platform, a]));
+                  const ranks = visibleAnswers.map((a) => a.brand_rank).filter((r): r is number => r != null);
+                  const avgRank =
+                    ranks.length > 0
+                      ? Math.round((ranks.reduce((sum, r) => sum + r, 0) / ranks.length) * 10) / 10
+                      : qSummary?.avg_brand_rank ?? null;
+
+                  return (
+                    <Fragment key={g.query}>
+                      <tr
+                        onClick={() => setOpen(isOpen ? null : g.query)}
+                        className="cursor-pointer border-t border-[var(--border)] transition-colors hover:bg-[var(--bg)]/40"
+                      >
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span aria-hidden="true" className="text-[var(--text-tertiary)]">{isOpen ? "▾" : "▸"}</span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-[var(--text-primary)]">{g.query}</div>
+                              <div className="text-[11px] text-[var(--text-tertiary)]">{g.topic_cluster ?? "Uncategorized"}</div>
+                            </div>
+                          </div>
+                        </td>
+                        {visiblePlatforms.map((p) => {
+                          const ans = answerByPlatform.get(p);
+                          const code = qSummary?.by_platform[p];
+                          const status = ans
+                            ? ans.brand_mentioned && ans.url_cited
+                              ? "Cited + Mentioned"
+                              : ans.url_cited
+                                ? "Cited"
+                                : ans.brand_mentioned
+                                  ? "Mentioned"
+                                  : "Not visible"
+                            : code === "C+M"
+                              ? "Cited + Mentioned"
+                              : code === "C"
+                                ? "Cited"
+                                : code === "M"
+                                  ? "Mentioned"
+                                  : "Not visible";
+                          const isBoth = status === "Cited + Mentioned";
+                          const isOne = status === "Cited" || status === "Mentioned";
+                          const cellClass = isBoth
+                            ? "bg-[#0B3B68] text-white font-semibold"
+                            : isOne
+                              ? "bg-[#D8EAF8] text-[#0B3B68] font-semibold"
+                              : "bg-[var(--bg)]/60 text-[var(--text-tertiary)]";
+                          const rankSuffix = ans?.brand_rank != null ? ` #${ans.brand_rank}` : "";
+                          return (
+                            <td
+                              key={p}
+                              className={`border-l border-[var(--border)] px-2 py-2.5 text-center whitespace-nowrap ${cellClass}`}
+                            >
+                              {isBoth || isOne ? `${status}${rankSuffix}` : "–"}
+                            </td>
+                          );
+                        })}
+                        <td className="border-l border-[var(--border)] px-2 py-2.5 text-center font-semibold tabular-nums text-[var(--text-secondary)]">
+                          {avgRank != null ? `#${avgRank}` : "–"}
+                        </td>
+                      </tr>
+                      {isOpen ? (
+                        <tr className="border-t border-[var(--border)] bg-[var(--bg)]/30">
+                          <td colSpan={visiblePlatforms.length + 2} className="p-4">
+                            <div className="space-y-3 border-l-2 border-[var(--brand-teal)]/40 pl-3">
+                              {qSummary ? (
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]">
+                                  <span>Score: <strong>{qSummary.score}/{qSummary.max_score}</strong></span>
+                                  <span>Avg rank: <strong>{qSummary.avg_brand_rank != null ? `#${qSummary.avg_brand_rank}` : "–"}</strong></span>
+                                  {qSummary.top_competitors.length > 0 ? (
+                                    <span>Named most often: {qSummary.top_competitors.map((c) => `${c.name} (${c.count})`).join(", ")}</span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {!rows && !error ? (
+                                <p className="text-xs text-[var(--text-secondary)]"><Spinner />Loading platform answers…</p>
+                              ) : null}
+                              {visibleAnswers
+                                .slice()
+                                .sort((a, b) => a.platform.localeCompare(b.platform))
+                                .map((r) => (
+                                  <div key={r.platform} className="rounded-lg border border-[var(--border)] bg-white p-3 text-sm">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 font-semibold">
+                                        <EngineIcon platform={r.platform} className={`h-4 w-4 ${engineColor(r.platform)}`} />
+                                        <span>{r.platform}</span>
+                                        {r.brand_rank != null ? <span className="text-xs font-normal text-[var(--text-secondary)]">Rank #{r.brand_rank}</span> : null}
+                                        {r.position && r.position !== "Not mentioned" ? <span className="text-xs font-normal text-[var(--text-tertiary)]">{r.position}</span> : null}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 text-xs font-semibold">
+                                        <span className={`rounded-full px-2 py-0.5 ${r.brand_mentioned ? "bg-green-100 text-green-800" : "bg-[var(--bg)] text-[var(--text-tertiary)]"}`}>
+                                          Mentioned: {r.brand_mentioned ? "Yes" : "No"}
+                                        </span>
+                                        <span className={`rounded-full px-2 py-0.5 ${r.url_cited ? "bg-blue-100 text-blue-800" : "bg-[var(--bg)] text-[var(--text-tertiary)]"}`}>
+                                          Cited: {r.url_cited ? "Yes" : "No"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    {r.error ? (
+                                      <p className="mt-2 text-xs text-red-800">{r.error}</p>
+                                    ) : (
+                                      <div className="mt-2 text-[var(--text-secondary)]">
+                                        {r.answer ? <Markdown text={r.answer} /> : <p className="text-xs text-[var(--text-tertiary)]">No answer was kept.</p>}
+                                      </div>
+                                    )}
+                                    {(r.competitors.length > 0 || r.other_brands.length > 0 || r.cited_urls.length > 0) ? (
+                                      <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+                                        {r.competitors.length ? `Competitors named: ${r.competitors.join(", ")}. ` : ""}
+                                        {r.other_brands.length ? `Other brands: ${r.other_brands.join(", ")}. ` : ""}
+                                        {r.cited_urls.length ? `Cited: ${r.cited_urls.join(", ")}` : ""}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ))}
+                            </div>
+                          </td>
+                        </tr>
                       ) : null}
-                    </div>
-                  ) : null}
-                  {!rows && !error ? (
-                    <p className="text-xs text-[var(--text-secondary)]"><Spinner />Loading platform answers…</p>
-                  ) : null}
-                  {visibleAnswers
-                    .slice()
-                    .sort((a, b) => a.platform.localeCompare(b.platform))
-                    .map((r) => (
-                      <div key={r.platform} className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 font-semibold">
-                            <EngineIcon platform={r.platform} className={`h-4 w-4 ${engineColor(r.platform)}`} />
-                            <span>{r.platform}</span>
-                            {r.brand_rank != null ? <span className="text-xs font-normal text-[var(--text-secondary)]">Rank #{r.brand_rank}</span> : null}
-                            {r.position && r.position !== "Not mentioned" ? <span className="text-xs font-normal text-[var(--text-tertiary)]">{r.position}</span> : null}
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs font-semibold">
-                            <span className={`rounded-full px-2 py-0.5 ${r.brand_mentioned ? "bg-green-100 text-green-800" : "bg-white text-[var(--text-tertiary)]"}`}>
-                              Mentioned: {r.brand_mentioned ? "Yes" : "No"}
-                            </span>
-                            <span className={`rounded-full px-2 py-0.5 ${r.url_cited ? "bg-blue-100 text-blue-800" : "bg-white text-[var(--text-tertiary)]"}`}>
-                              Cited: {r.url_cited ? "Yes" : "No"}
-                            </span>
-                          </div>
-                        </div>
-                        {r.error ? (
-                          <p className="mt-2 text-xs text-red-800">{r.error}</p>
-                        ) : (
-                          <div className="mt-2 text-[var(--text-secondary)]">
-                            {r.answer ? <Markdown text={r.answer} /> : <p className="text-xs text-[var(--text-tertiary)]">No answer was kept.</p>}
-                          </div>
-                        )}
-                        {(r.competitors.length > 0 || r.other_brands.length > 0 || r.cited_urls.length > 0) ? (
-                          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-                            {r.competitors.length ? `Competitors named: ${r.competitors.join(", ")}. ` : ""}
-                            {r.other_brands.length ? `Other brands: ${r.other_brands.join(", ")}. ` : ""}
-                            {r.cited_urls.length ? `Cited: ${r.cited_urls.join(", ")}` : ""}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-        {prompts.length === 0 ? (
-          <li className="py-4 text-center text-sm text-[var(--text-secondary)]">No prompts match your filters.</li>
-        ) : null}
-      </ul>
+                    </Fragment>
+                  );
+                })}
+                {prompts.length === 0 ? (
+                  <tr>
+                    <td colSpan={visiblePlatforms.length + 2} className="py-6 text-center text-sm text-[var(--text-secondary)]">
+                      No prompts match your filters.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -19,7 +19,7 @@ from app.schemas import (
     ClientOut,
     ClientUpdate,
 )
-from app.services import baseline_lock, baseline_series, clients as client_service, lead_conversions
+from app.services import baseline_lock, baseline_pillars, baseline_series, clients as client_service, lead_conversions
 
 from app.services.plan_allowances import resolve_plan_allowances
 
@@ -312,6 +312,62 @@ def get_baseline_version(
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such baseline version")
     return found
+
+
+@router.get("/{client_id}/baseline/pillars")
+def get_baseline_pillars(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    lead_event: Annotated[list[str] | None, Query()] = None,
+) -> dict:
+    """Live 3-pillar snapshot (Visibility, Traffic, Leads) with 30-day avg and 90-day total."""
+    client = _staff_client(db, user, client_id)
+    return baseline_pillars.build_pillars_snapshot(db, client, lead_events=lead_event)
+
+
+@router.get("/{client_id}/baseline/pillars/export.csv")
+def export_live_baseline_pillars(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    lead_event: Annotated[list[str] | None, Query()] = None,
+) -> Response:
+    """Export the live 3-pillar baseline snapshot as CSV."""
+    client = _staff_client(db, user, client_id)
+    pillars = baseline_pillars.build_pillars_snapshot(db, client, lead_events=lead_event)
+    csv_body = baseline_pillars.pillars_to_csv(pillars)
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{client.slug}-baseline-pillars.csv"'},
+    )
+
+
+@router.get("/{client_id}/baseline/versions/{version}/export.csv")
+def export_baseline_version_pillars(
+    client_id: UUID,
+    version: int,
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Export a locked baseline version's 3-pillar snapshot as CSV."""
+    client = _staff_client(db, user, client_id)
+    found = baseline_lock.get_version(db, client, version)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such baseline version")
+    pillars = (found.get("snapshot") or {}).get("pillars")
+    if not pillars:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This baseline version was locked before 3-pillar snapshots were recorded.",
+        )
+    csv_body = baseline_pillars.pillars_to_csv(pillars)
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{client.slug}-baseline-v{version}.csv"'},
+    )
 
 
 @router.get("/current/context", response_model=ClientOut)

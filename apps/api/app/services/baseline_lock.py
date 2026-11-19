@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.baseline import BaselineVersion
 from app.models.client import Client
 from app.schemas import BaselineLockRequest, ClientUpdate
-from app.services import baseline_series, clients as client_service, lead_conversions
+from app.services import baseline_pillars, baseline_series, clients as client_service, lead_conversions
 from app.services.decision_measurements import lead_rate_target
 
 INITIAL = "initial"
@@ -52,6 +52,7 @@ def _summary(row: BaselineVersion) -> dict[str, Any]:
         "lead_rate_pct": num(row.lead_rate_pct),
         "monthly_leads": num(row.monthly_leads),
         "goal_monthly_leads": num(row.goal_monthly_leads),
+        "has_pillars": bool((row.snapshot or {}).get("pillars")),
     }
 
 
@@ -180,6 +181,13 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
     window_end = baseline_series.month_end(window["to"])
     baseline, goal = result["baseline"], result["goal_basis"]
     source = result["source"]
+    pillars = baseline_pillars.build_pillars_snapshot(
+        db,
+        client,
+        as_of=request.as_of or window_end,
+        lead_events=source.get("lead_events") or None,
+    )
+    snapshot = {**result, "pillars": pillars}
     row = BaselineVersion(
         client_id=client.id,
         version=version,
@@ -201,7 +209,7 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         lead_rate_pct=Decimal(str(baseline["lead_rate_pct"])),
         monthly_leads=Decimal(str(baseline["monthly_leads"])),
         goal_monthly_leads=Decimal(str(goal["monthly_leads"])),
-        snapshot=result,
+        snapshot=snapshot,
     )
     db.add(row)
     db.flush()

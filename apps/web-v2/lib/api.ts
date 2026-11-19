@@ -29,7 +29,7 @@ function parseApiErrorBody(text: string): string {
 
 export async function apiFetch<T>(
   path: string,
-  options: { method?: string; body?: unknown; clientId?: string | null } = {},
+  options: { method?: string; body?: unknown; clientId?: string | null; rawText?: boolean } = {},
 ): Promise<T> {
   const session = await auth();
   const accessToken = await ensureApiAccessToken(session);
@@ -55,6 +55,7 @@ export async function apiFetch<T>(
     throw new ApiError(res.status, parseApiErrorBody(text) || res.statusText);
   }
   if (res.status === 204) return undefined as T;
+  if (options.rawText) return (await res.text()) as T;
   return (await res.json()) as T;
 }
 
