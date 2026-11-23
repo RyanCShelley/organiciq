@@ -115,6 +115,33 @@ const CHANNEL: Record<string, string[]> = {
   Conversion: ["Leads"],
   "SEO and conversion": ["Search", "Leads"],
 };
+const READY_CHECKS: Record<EngineKind, string[]> = {
+  visibility: [
+    "The live page, checklist, and change history",
+    "What searchers want (intent & SERP features)",
+    "Who ranks above you and People Also Ask",
+    "Your other pages that compete for this term",
+  ],
+  traffic: [
+    "The live page, checklist, and change history",
+    "Which searches on this page lost the most clicks",
+    "Whether search demand fell or rankings slipped",
+    "Indexability, canonical, and title/meta CTR signals",
+  ],
+  leads: [
+    "The live page, checklist, and change history",
+    "Conversion elements, CTAs, and form friction",
+    "In-content links to your conversion pages",
+    "Engagement and conversion rate against your site's norm",
+  ],
+};
+
+const LOADING_COPY: Record<EngineKind, string> = {
+  visibility: "Reading the page live and checking the results page…",
+  traffic: "Reading the page live and checking why traffic dropped…",
+  leads: "Reading the page live and checking conversion paths…",
+};
+
 const FOCUS_LABEL: Record<EngineKind, string> = {
   visibility: "Visibility",
   traffic: "Traffic",
@@ -2013,7 +2040,11 @@ export function EngineWorkbench({
                   {activeFocus === "visibility" ? "Pick a search to diagnose" : "Pick a page to diagnose"}
                 </h2>
                 <p className="mt-2 max-w-md text-[13px] text-[#4a5560]">
-                  The engine reads the page live, checks the results page, runs the page-type checklist, and orders recommended tasks for your{" "}
+                  {activeFocus === "visibility"
+                    ? "The engine reads the page live, checks the results page, runs the page-type checklist, and orders recommended tasks for your "
+                    : activeFocus === "traffic"
+                      ? "The engine reads the page live, checks which searches lost clicks, runs the page-type checklist, and orders recovery tasks for your "
+                      : "The engine reads the page live, checks conversion paths and CTAs, runs the page-type checklist, and orders conversion tasks for your "}
                   <strong className="text-[#0a0c0f]">{FOCUS_LABEL[activeFocus]}</strong> focus.
                 </p>
               </div>
@@ -2023,7 +2054,7 @@ export function EngineWorkbench({
                   className="h-[30px] w-[30px] animate-spin rounded-full border-[3px] border-[#e3e6e8]"
                   style={{ borderTopColor: TEAL }}
                 />
-                Reading the page live and checking the results page…
+                {LOADING_COPY[activeFocus]}
               </div>
             ) : bundle ? (
               diagnosed(current, bundle)
@@ -2070,12 +2101,7 @@ export function EngineWorkbench({
                     A diagnosis takes about 20 seconds and checks:
                   </p>
                   <ul className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-[13px] text-[#171a22] sm:grid-cols-2">
-                    {[
-                      "The live page, checklist, and change history",
-                      "What searchers want (intent & SERP features)",
-                      "Who ranks above you and People Also Ask",
-                      "Your other pages that compete for this term",
-                    ].map((item, idx) => (
+                    {READY_CHECKS[activeFocus].map((item, idx) => (
                       <li key={item} className="flex items-start gap-2">
                         <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[#223540] text-[11px] font-bold text-white">
                           {idx + 1}
