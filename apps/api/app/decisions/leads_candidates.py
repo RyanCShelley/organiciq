@@ -35,11 +35,11 @@ from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 LIST_SIZE = 20
-PAGE_MIN_SESSIONS = 50.0
+PAGE_MIN_SESSIONS = 10.0
 #: The all-pages table lists any page with this many organic sessions over the quarter, compared or not.
 ALL_PAGES_MIN_SESSIONS = 10.0
 ALL_PAGES_SIZE = 100
-STRONG_MIN_SESSIONS = 100.0
+STRONG_MIN_SESSIONS = 50.0
 WORST_SHARE = 0.25
 
 

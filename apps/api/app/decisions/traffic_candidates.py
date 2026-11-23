@@ -34,24 +34,24 @@ from app.models.ga4 import FactGa4Traffic
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 
 LIST_SIZE = 20
-SUDDEN_MIN_PRIOR = 100.0
+SUDDEN_MIN_PRIOR = 30.0
 SUDDEN_DROP = 0.30
-SLOW_MIN_BASELINE = 150.0
+SLOW_MIN_BASELINE = 50.0
 #: A unit's year-over-year retention must be no more than this fraction of the whole site's.
 SLOW_RELATIVE_RETENTION = 0.5
 #: The softer tests that keep a falling unit on the list as "possible".
-POSSIBLE_MIN_PRIOR = 30.0
+POSSIBLE_MIN_PRIOR = 10.0
 POSSIBLE_DROP = 0.20
-POSSIBLE_MIN_BASELINE = 50.0
+POSSIBLE_MIN_BASELINE = 15.0
 POSSIBLE_RELATIVE_RETENTION = 0.75
 #: A page needs this many organic sessions in the three months (now or a year ago) to be listed as a page.
-PAGE_MIN_SESSIONS = 30.0
+PAGE_MIN_SESSIONS = 10.0
 #: Pages that a bucket's searches reach: impressions over the three months for a search containing a term.
 BUCKET_PAGE_MIN_IMPRESSIONS = 5.0
 
 #: Every page that lost at least this many sessions a month (against the month before, or the monthly
 #: average of the same three months last year) is listed, biggest loss first, whatever the tests say.
-DROPPED_MIN_LOSS = 5.0
+DROPPED_MIN_LOSS = 2.0
 DROPPED_LIST_SIZE = 100
 
 ORGANIC = OrganicChannel.ORGANIC_SEARCH

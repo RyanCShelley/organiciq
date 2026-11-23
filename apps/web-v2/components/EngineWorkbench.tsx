@@ -384,9 +384,9 @@ export function EngineWorkbench({
         search: "",
         page: l.page,
         title: shortPage(l.page),
-        subtitle: `${num(l.sessions)} sessions · ${num(l.conversions)} ${nounPlural} (${(l.conversion_rate * 100).toFixed(1)}%)`,
+        subtitle: `${num(l.sessions)} sessions · ${num(l.conversions)} ${nounPlural} (${l.conversion_rate.toFixed(1)}%)`,
         rightMetric: `+${num(l.missed_conversions, 1)}`,
-        rightSubMetric: `${(l.conversion_rate * 100).toFixed(1)}% conv`,
+        rightSubMetric: `${l.conversion_rate.toFixed(1)}% conv`,
         tierKey: l.worst_conversion && l.worst_engagement ? "both" : l.worst_conversion ? "worst_conversion" : l.worst_engagement ? "worst_engagement" : "other",
         sortValue: l.missed_conversions,
         leadRow: l,
@@ -559,7 +559,7 @@ export function EngineWorkbench({
     })();
   }
 
-  /** Reads the page and the results page and builds the action. Also what "Read it now" runs: a build always tries the results page again. */
+  /** Reads the page and builds the diagnosis. Visibility uses the keyword/SERP growth-action pipeline; Traffic & Leads diagnose the page directly. */
   function diagnose(item: WorkbenchItem) {
     const key = item.key;
     setDiags((d) => ({
@@ -570,33 +570,48 @@ export function EngineWorkbench({
     setMessage(null);
     setFeedback(null);
     void (async () => {
-      const topic = await topicForAction(clientId, item.search, item.page);
-      if (!topic.ok) {
-        setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: null, error: topic.error } }));
-        return;
-      }
-      if (!topic.value.keyword) {
-        if (activeFocus === "traffic" || activeFocus === "leads") {
-          const fallbackRes = await diagnosePagesAction(clientId, activeFocus, [item.page]);
-          if (fallbackRes.ok && fallbackRes.results[0]) {
-            const fb = fallbackRes.results[0];
-            setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: fb, error: null } }));
-            if (fb.page_history) {
-              setHistoryByPage((prev) => ({
-                ...prev,
-                [fb.page]: { loading: false, data: fb.page_history ?? null, error: null },
-              }));
-            }
-            return;
-          }
-          const fbErr = fallbackRes.ok ? `${topic.value.source}, so there is no topic to diagnose it under.` : fallbackRes.error;
-          setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: null, error: fbErr } }));
+      if (activeFocus === "traffic" || activeFocus === "leads") {
+        const res = await diagnosePagesAction(clientId, activeFocus, [item.page]);
+        if (!res.ok || !res.results[0]) {
+          const err = res.ok ? "The page could not be diagnosed." : res.error;
+          setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: null, error: err } }));
           return;
         }
-        setDiags((d) => ({
-          ...d,
-          [key]: { loading: false, bundle: null, fallback: null, error: `${topic.value.source}, so there is no topic to diagnose it under.` },
-        }));
+        const fb = res.results[0];
+        setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: fb, error: null } }));
+        const fbParts = [
+          ...fb.prescriptions.map((p) => ({ id: p.action_id, steps: p.steps, core: true })),
+          ...fb.suggestions.map((s) => ({ id: s.id, steps: s.steps, core: true })),
+        ];
+        setApproved((a) => {
+          const next = { ...a };
+          fbParts.forEach((p) => {
+            const k = `${key}|${p.id}`;
+            next[k] = a[k] ?? p.core;
+          });
+          return next;
+        });
+        setStepTexts((s) => {
+          const next = { ...s };
+          fbParts.forEach((p) => {
+            const k = `${key}|${p.id}`;
+            if (next[k] === undefined) next[k] = p.steps.join("\n");
+          });
+          return next;
+        });
+        if (fb.page_history) {
+          setHistoryByPage((prev) => ({
+            ...prev,
+            [fb.page]: { loading: false, data: fb.page_history ?? null, error: null },
+          }));
+        }
+        return;
+      }
+
+      const topic = await topicForAction(clientId, item.search, item.page);
+      if (!topic.ok || !topic.value.keyword) {
+        const why = topic.ok ? `${topic.value.source}, so there is no topic to diagnose it under.` : topic.error;
+        setDiags((d) => ({ ...d, [key]: { loading: false, bundle: null, fallback: null, error: why } }));
         return;
       }
       const built = await buildGrowthActionAction(
@@ -987,7 +1002,7 @@ export function EngineWorkbench({
       const nounPlural = leads?.noun.plural ?? "conversions";
       return (
         <span>
-          {num(l.sessions)} sessions · {num(l.conversions)} {nounPlural} ({(l.conversion_rate * 100).toFixed(1)}%) · +{num(l.missed_conversions, 1)} missed
+          {num(l.sessions)} sessions · {num(l.conversions)} {nounPlural} ({l.conversion_rate.toFixed(1)}%) · +{num(l.missed_conversions, 1)} missed
         </span>
       );
     }
@@ -1521,6 +1536,8 @@ export function EngineWorkbench({
   function fallbackDiagnosed(item: WorkbenchItem, fb: Diagnosis) {
     const checklist = fb.context?.checklist ?? [];
     const neededChecklist = checklist.filter((x) => x.status === "needed").length;
+    const effectiveFocus: EngineKind = fb.focus ?? activeFocus;
+    const effectiveStyleNotes = styleNotes ?? fb.context?.style_notes;
     const histEntry = historyByPage[fb.page];
     const effectiveHistory = histEntry?.data ?? fb.page_history ?? null;
     const historyCount =
@@ -1528,6 +1545,81 @@ export function EngineWorkbench({
       (effectiveHistory?.tasks.length ?? 0) +
       (effectiveHistory?.annotations.length ?? 0);
     const mergedPriorRejections = sessionRejections[item.page] ?? [];
+    const already = inPlan(item.page);
+
+    const fbParts: (GrowthPart & { uid?: string })[] = [
+      ...fb.prescriptions.map((p) => ({
+        id: p.action_id,
+        name: p.title,
+        title: p.title,
+        why: p.why,
+        steps: p.steps,
+        evidence: p.evidence,
+        core: true,
+        confirmed_by_rule: true,
+        role: "primary" as const,
+      })),
+      ...fb.suggestions.map((s) => ({
+        id: s.id,
+        name: s.title,
+        title: s.title,
+        why: s.why,
+        steps: s.steps,
+        evidence: s.evidence,
+        core: true,
+        confirmed_by_rule: false,
+        role: "supporting" as const,
+        needs_to_confirm: s.needs_to_confirm,
+      })),
+      ...customParts,
+    ];
+    const fbChosen = fbParts.filter((p) => approved[partStateKey(item.key, p)]);
+
+    function addPageDiagToPlan() {
+      if (fbChosen.length === 0) return;
+      const steps: string[] = [];
+      fbChosen.forEach((p, i) => {
+        const sk = partStateKey(item.key, p);
+        const raw = stepTexts[sk] ?? p.steps.join("\n");
+        steps.push(`# ${i + 1}. ${p.name}`);
+        steps.push(
+          ...raw
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean),
+        );
+      });
+      const focusWord = FOCUS_LABEL[effectiveFocus];
+      const draft: TaskDraft = {
+        kind: "growth_action",
+        rule_id: fbChosen[0]?.id ?? "PD",
+        search: "",
+        page: item.page,
+        title: `${focusWord}: ${shortPage(item.page)}`,
+        why: fbChosen.map((p) => p.why).filter(Boolean).join(" ") || `${focusWord} diagnosis for ${shortPage(item.page)}.`,
+        steps,
+        done_when: "Every selected step above is live on the page.",
+        metric: effectiveFocus === "traffic" ? "Organic sessions in GA4" : "Organic conversions and engagement in GA4",
+        effort_min: null,
+        evidence: fbChosen.flatMap((p) => p.evidence),
+        parts: fbChosen.map((p) => ({
+          id: p.custom ? "CUSTOM" : p.id,
+          name: p.name,
+          ...(p.custom ? { custom: true } : {}),
+        })),
+      };
+      setMessage(null);
+      setFeedback(null);
+      start(async () => {
+        const r = await confirmTaskAction(clientId, month, draft);
+        if (r.ok) {
+          onTaskChange(r.value);
+          setFeedback("Added to this month's plan.");
+        } else {
+          setMessage(r.error);
+        }
+      });
+    }
 
     return (
       <>
@@ -1536,27 +1628,61 @@ export function EngineWorkbench({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
-                  Page diagnosis
+                  {FOCUS_LABEL[effectiveFocus]} diagnosis
                 </span>
-                <Pill t="ok">Focus: {FOCUS_LABEL[fb.focus ?? activeFocus]}</Pill>
+                <Pill t="ok">Focus: {FOCUS_LABEL[effectiveFocus]}</Pill>
                 {fb.context?.page_type?.name ? <Pill t="info">{fb.context.page_type.name}</Pill> : null}
               </div>
               <h2 className="mt-1 font-[var(--font-heading)] text-[22px] font-bold text-[#0a0c0f]">
                 {shortPage(item.page)}
               </h2>
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[#4a5560]">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full px-2.5 py-[3px] font-semibold text-white"
+                  style={{ background: DARK }}
+                  title="This diagnosis and its tasks stay on this page"
+                >
+                  <LockIcon />
+                  {shortPage(item.page)}
+                </span>
                 {itemMetricsLine(item)}
               </div>
             </div>
             <div className="flex flex-none flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setRejectOpen((o) => !o)}
-                disabled={pending}
-                className="cursor-pointer rounded-full border border-[oklch(0.88_0.06_25)] bg-white px-4 py-2 text-[13px] font-semibold text-[oklch(0.48_0.17_25)] hover:bg-[oklch(0.965_0.025_25)] disabled:opacity-50"
-              >
-                {rejectOpen ? "Cancel reject" : "Reject"}
-              </button>
+              {!already ? (
+                <button
+                  type="button"
+                  onClick={() => setRejectOpen((o) => !o)}
+                  disabled={pending}
+                  className="cursor-pointer rounded-full border border-[oklch(0.88_0.06_25)] bg-white px-4 py-2 text-[13px] font-semibold text-[oklch(0.48_0.17_25)] hover:bg-[oklch(0.965_0.025_25)] disabled:opacity-50"
+                >
+                  {rejectOpen ? "Cancel reject" : "Reject"}
+                </button>
+              ) : null}
+
+              {already ? (
+                <span
+                  className="rounded-full px-[18px] py-2 text-[13px] font-semibold"
+                  style={{ background: "#e6f7f5", color: "#00665f" }}
+                >
+                  In the {monthName} plan ✓
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={addPageDiagToPlan}
+                  disabled={pending || fbChosen.length === 0 || full}
+                  className="cursor-pointer rounded-full px-[18px] py-2 text-[13px] font-semibold text-white disabled:cursor-not-allowed"
+                  style={{ background: pending || fbChosen.length === 0 || full ? "#c5cdd2" : DARK }}
+                >
+                  {pending
+                    ? "Adding…"
+                    : full
+                      ? `${monthName} plan is full`
+                      : `Add ${fbChosen.length} task${fbChosen.length === 1 ? "" : "s"} to plan`}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => diagnose(item)}
@@ -1569,7 +1695,11 @@ export function EngineWorkbench({
 
           <div className="mt-3.5 flex flex-wrap gap-1 border-t border-[#f1f2f3]">
             {[
-              { key: "tasks" as Tab, label: "Findings & steps", badge: <Pill t="info">{fb.prescriptions.length + fb.suggestions.length}</Pill> },
+              {
+                key: "tasks" as Tab,
+                label: "Recommended tasks",
+                badge: fbParts.length ? <Pill t="ok">{fbChosen.length}/{fbParts.length}</Pill> : null,
+              },
               {
                 key: "checklist" as Tab,
                 label: "Page checklist",
@@ -1602,6 +1732,17 @@ export function EngineWorkbench({
         </div>
 
         <div className="space-y-4 px-7 py-5">
+          {message ? (
+            <p role="alert" className="rounded-xl border px-4 py-3 text-[13px]" style={toneStyle("miss")}>
+              {message}
+            </p>
+          ) : null}
+          {feedback ? (
+            <p className="rounded-xl border px-4 py-3 text-[13px]" style={toneStyle("ok")}>
+              {feedback}
+            </p>
+          ) : null}
+
           {rejectOpen ? (
             <RejectForm
               reasons={rejectionReasons}
@@ -1615,9 +1756,32 @@ export function EngineWorkbench({
 
           {tab === "tasks" ? (
             <>
-              <div className="rounded-xl border border-[#ececec] bg-white p-4 text-[13px] text-[#4a5560]">
-                No Search Console query data was found for this page, so it was diagnosed directly from the page and {FOCUS_LABEL[activeFocus].toLowerCase()} metrics.
-              </div>
+              <StyleNotesBanner styleNotes={effectiveStyleNotes} clientSlug={clientSlug} compact />
+
+              {fb.focus_order_reason ? (
+                <div className="rounded-xl border border-[#ececec] bg-white px-4 py-2.5 text-xs text-[#4a5560]">
+                  <strong className="text-[#0a0c0f]">Ordered for {FOCUS_LABEL[effectiveFocus]}:</strong> {fb.focus_order_reason}
+                </div>
+              ) : null}
+
+              {checklist.length > 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ececec] bg-white px-4 py-2.5 text-xs">
+                  <span className="text-[#4a5560]">
+                    <strong className="text-[#0a0c0f]">{fb.context?.page_type?.name ?? "Page"} checklist:</strong>{" "}
+                    {neededChecklist > 0
+                      ? `${neededChecklist} needed before publishing`
+                      : "All checks clear"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTab("checklist")}
+                    className="cursor-pointer font-semibold text-[#00857b] hover:underline"
+                  >
+                    View {checklist.length} checklist items →
+                  </button>
+                </div>
+              ) : null}
+
               {fb.observations.length > 0 ? (
                 <div className="rounded-xl border border-[#ececec] bg-white p-4">
                   <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">What the page shows</div>
@@ -1633,24 +1797,67 @@ export function EngineWorkbench({
                   </ul>
                 </div>
               ) : null}
-              {[...fb.prescriptions, ...fb.suggestions.map((s) => ({ ...s, action_id: s.id }))].map((act) => (
-                <div key={act.action_id} className="rounded-xl border border-[#ececec] bg-white px-[18px] py-4">
-                  <div className="font-[var(--font-heading)] text-[15px] font-bold text-[#0a0c0f]">{act.title}</div>
-                  <p className="mt-1 text-[13px] text-[#4a5560]">{act.why}</p>
-                  {act.steps.length > 0 ? (
-                    <div className="mt-3 space-y-2 border-t border-[#f1f2f3] pt-3 text-[13px]">
-                      {act.steps.map((step, idx) => (
-                        <div key={idx} className="flex items-start gap-2.5 text-[#171a22]">
-                          <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[#223540] text-[11px] font-bold text-white">
-                            {idx + 1}
-                          </span>
-                          <span>{step}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+
+              {fbParts.length > 0 ? (
+                <ul className="space-y-2.5">{fbParts.map((p) => taskCard(p, false, item))}</ul>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[#d3d7d9] bg-white px-4 py-4 text-[13px] text-[#7a838c]">
+                  No specific issues were flagged from this read. You can still add a custom step below.
                 </div>
-              ))}
+              )}
+
+              {addingCustom ? (
+                <div className="space-y-3 rounded-xl border border-[#bfe9e4] bg-white p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#00665f]">
+                    Add a custom step
+                  </div>
+                  <input
+                    type="text"
+                    value={customTitle}
+                    onChange={(e) => setCustomTitle(e.target.value)}
+                    placeholder="Step title"
+                    className="w-full rounded-[10px] border border-[#e3e6e8] bg-white px-3 py-2 text-[13px] text-[#171a22] placeholder:text-[#7a838c] focus:border-[#00a99d] focus:outline-none"
+                  />
+                  <textarea
+                    value={customBody}
+                    onChange={(e) => setCustomBody(e.target.value)}
+                    rows={3}
+                    placeholder="Instructions (one step per line)"
+                    className="w-full rounded-[10px] border border-[#e3e6e8] bg-white px-3 py-2 text-[13px] text-[#171a22] placeholder:text-[#7a838c] focus:border-[#00a99d] focus:outline-none"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={addCustomStep}
+                      disabled={!customTitle.trim()}
+                      className="cursor-pointer rounded-full bg-[#223540] px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Add step to plan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddingCustom(false);
+                        setCustomTitle("");
+                        setCustomBody("");
+                      }}
+                      className="cursor-pointer rounded-full border border-[#d3d7d9] bg-white px-4 py-1.5 text-xs font-semibold text-[#4a5560]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setAddingCustom(true)}
+                    className="cursor-pointer rounded-full border border-[#d3d7d9] bg-white px-4 py-1.5 text-xs font-semibold text-[#223540] hover:border-[#00a99d] hover:bg-[#e6f7f5]"
+                  >
+                    + Add custom step
+                  </button>
+                </div>
+              )}
             </>
           ) : null}
 
@@ -1659,7 +1866,7 @@ export function EngineWorkbench({
               items={checklist}
               pageTypeName={fb.context?.page_type?.name}
               pageTypeKey={fb.context?.page_type?.type}
-              focus={fb.focus ?? activeFocus}
+              focus={effectiveFocus}
             />
           ) : null}
 
