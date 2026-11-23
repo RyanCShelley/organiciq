@@ -22,8 +22,8 @@ from app.models.seranking import FactSerKeyword, FactSerpFeature
 
 logger = logging.getLogger("organiciq.serp_features")
 
-#: The spec's figure: the top targets per client, monthly.
-DEFAULT_LIMIT = 20
+#: The spec's figure: the top targets per client, monthly (tracked + untracked GSC opportunities).
+DEFAULT_LIMIT = 30
 
 #: A SERP older than this is not evidence about today's SERP.
 STALE_AFTER_DAYS = 45
@@ -60,6 +60,8 @@ def _page_one_queries(db: Session, client: Client, *, limit: int) -> list[str]:
     sets barely overlapping — 2 of SMA's 334 pages had a SERP for the query
     they draw — so T-2 could not fire however many credits were spent.
     """
+    if limit <= 0:
+        return []
     from datetime import timedelta
 
     from app.models.gsc import FactGscPage, FactGscQueryPage
@@ -119,18 +121,84 @@ def _page_one_queries(db: Session, client: Client, *, limit: int) -> list[str]:
     return out
 
 
+def _untracked_gsc_opportunities(
+    db: Session, client: Client, *, exclude: set[str], limit: int
+) -> list[str]:
+    """High-impression position 2..20 GSC queries not in KeywordTarget, FactSerKeyword, or WatchlistKeyword."""
+    if limit <= 0:
+        return []
+    from app.decisions import visibility_candidates as vc
+    from app.models.gsc import FactGscQueryPage
+    from app.models.watchlist import WatchlistKeyword
+
+    end = date.today()
+    start = end - timedelta(days=27)
+    tracked_keys = set(exclude)
+    tracked_keys |= {
+        (k or "").strip().lower()
+        for (k,) in db.query(KeywordTarget.keyword).filter(KeywordTarget.client_id == client.id)
+        if k
+    }
+    tracked_keys |= {
+        (k or "").strip().lower()
+        for (k,) in db.query(FactSerKeyword.keyword).filter(FactSerKeyword.client_id == client.id)
+        if k
+    }
+    tracked_keys |= {
+        (k or "").strip().lower()
+        for (k,) in db.query(WatchlistKeyword.keyword).filter(WatchlistKeyword.client_id == client.id)
+        if k
+    }
+    brand = vc.brand_keys(client)
+
+    q_norm = func.lower(func.trim(FactGscQueryPage.query))
+    rows = (
+        db.query(
+            q_norm,
+            func.min(FactGscQueryPage.query),
+            func.coalesce(func.sum(FactGscQueryPage.impressions), 0),
+            func.coalesce(func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions), 0),
+        )
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(q_norm)
+        .order_by(func.sum(FactGscQueryPage.impressions).desc())
+        .all()
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    for norm_q, raw_q, imp, weighted in rows:
+        imp_f = float(imp or 0)
+        if imp_f < 25:
+            continue
+        pos = float(weighted or 0) / imp_f
+        if not (2.0 <= pos <= 20.0):
+            continue
+        term = (raw_q or norm_q or "").strip()
+        key = term.lower()
+        if not term or key in tracked_keys or key in seen or vc.is_brand(key, brand):
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def terms_to_pull(db: Session, client: Client, *, limit: int = DEFAULT_LIMIT) -> list[str]:
     """The terms worth spending a credit on.
 
     Two readers want different keys and both have to be served. T-2 looks up
     the SERP by the query a page actually draws, from Search Console; V-5
-    looks it up by the declared target term. Pulling only the second left
-    T-2 unable to fire at all.
-
-    Page-one queries come first: those are measured demand on pages close
-    enough to win a feature. Declared targets follow, then tracked terms by
-    volume. Capped, because this is money.
+    looks it up by the declared target term. In addition, high-impression
+    untracked GSC queries (position 2–20) receive dedicated slots so SERP
+    intelligence extends beyond declared/tracked keywords.
     """
+    if limit <= 0:
+        return []
     seen: set[str] = set()
     out: list[str] = []
 
@@ -139,6 +207,10 @@ def terms_to_pull(db: Session, client: Client, *, limit: int = DEFAULT_LIMIT) ->
         if key not in seen:
             seen.add(key)
             out.append(term)
+
+    untracked_reserve = max(1, limit // 4) if limit >= 8 else 0
+    tracked_cap = max(1, limit - untracked_reserve)
+    deferred: list[str] = []
 
     for row in (
         db.query(KeywordTarget)
@@ -149,9 +221,10 @@ def terms_to_pull(db: Session, client: Client, *, limit: int = DEFAULT_LIMIT) ->
         key = term.lower()
         if term and key not in seen:
             seen.add(key)
-            out.append(term)
-        if len(out) >= limit:
-            return out
+            if len(out) < tracked_cap:
+                out.append(term)
+            else:
+                deferred.append(term)
 
     for row in (
         db.query(FactSerKeyword)
@@ -162,10 +235,26 @@ def terms_to_pull(db: Session, client: Client, *, limit: int = DEFAULT_LIMIT) ->
         key = term.lower()
         if term and key not in seen:
             seen.add(key)
-            out.append(term)
+            if len(out) < tracked_cap:
+                out.append(term)
+            else:
+                deferred.append(term)
+
+    if len(out) < limit:
+        for term in _untracked_gsc_opportunities(db, client, exclude=seen, limit=limit - len(out)):
+            key = term.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(term)
+            if len(out) >= limit:
+                break
+
+    for term in deferred:
         if len(out) >= limit:
             break
-    return out
+        out.append(term)
+
+    return out[:limit]
 
 
 def pull(

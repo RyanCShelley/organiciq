@@ -18,13 +18,60 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.decisions import action_context as ac
+from app.decisions import serp_intent
 from app.decisions.catalog import PageFacts, _mentions
-from app.decisions.ctr_curve import expected_ctr_percent
+from app.decisions.ctr_curve import MIN_RECOVERABLE_CLICKS, expected_ctr_percent
 from app.ingestion.crawler.parse import ParsedPage
 from app.services.target_signals import _is_question
 
 #: A form with this many fields or more counts as long.
 FRICTION_FORM_FIELDS = 6
+
+FOCUS_ORDER_REASONS: dict[str, str] = {
+    "visibility": "Ordered for Visibility: search intent match, AI answerability, searched phrasing, FAQs, and winner gaps come first.",
+    "traffic": "Ordered for Traffic: click-through (meta/title), traffic recovery, engagement opening, and high-impact SEO terms come first.",
+    "leads": "Ordered for Leads: conversion path, CTA, and friction fixes come first, followed by engagement, CTR, and content.",
+}
+
+_FOCUS_RANK: dict[str, tuple[str, ...]] = {
+    "leads": (
+        "F-1", "L-S2", "L-S1", "L-",
+        "P-1",
+        "MC-1", "S-5", "T-1",
+        "IM-1", "S-1", "S-2", "FQ-1", "A-1", "S-3", "S-4", "S-6", "W-", "V-",
+    ),
+    "traffic": (
+        "MC-1", "S-5", "T-1", "T-S1", "T-S2", "P-1", "IM-1", "S-1",
+        "A-1", "S-2", "FQ-1", "S-3", "S-4", "S-6", "W-", "V-",
+        "L-S1", "L-S2", "L-", "F-1",
+    ),
+    "visibility": (
+        "IM-1", "A-1", "S-1", "S-2", "FQ-1", "W-", "V-",
+        "MC-1", "S-5", "T-1", "P-1", "S-3", "S-4", "S-6",
+        "T-S", "L-", "F-1",
+    ),
+}
+
+
+def _focus_priority(item_id: str, focus: str) -> int:
+    if item_id == "TI-1":
+        return -1
+    order = _FOCUS_RANK.get(focus) or _FOCUS_RANK["visibility"]
+    for idx, key in enumerate(order):
+        if key.endswith("-") or key == "T-S":
+            if item_id.startswith(key):
+                return idx
+        elif item_id == key:
+            return idx
+    return len(order)
+
+
+def order_by_focus(items: list[dict[str, Any]], focus: str | None) -> list[dict[str, Any]]:
+    """Return `items` sorted stably by `focus` (`visibility`, `traffic`, `leads`)."""
+    if not items or not focus or focus not in _FOCUS_RANK:
+        return list(items)
+    return sorted(items, key=lambda item: _focus_priority(str(item.get("id") or item.get("action_id") or ""), focus))
 
 _STOP = frozenset("a an and are as at be by for from how in is it of on or the to what when where which who why with your".split())
 
@@ -101,6 +148,53 @@ def _opening_item(search: str, parsed: ParsedPage, why: str, evidence: list[str]
     )
 
 
+def _meta_clicks_item(
+    search: str,
+    parsed: ParsedPage,
+    *,
+    impressions: int,
+    clicks: int,
+    position: float,
+    actual: float,
+    expected: float,
+    recoverable: float,
+    page_queries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """MC-1: rewrite the title tag and meta description for clicks across page 1–2."""
+    title_now = parsed.title or ""
+    desc_now = parsed.description or ""
+    top_qs = [
+        q["query"]
+        for q in sorted(page_queries, key=lambda r: -int(r.get("impressions") or 0))
+        if q.get("query")
+    ][:3]
+    steps = [
+        f"Title now ({len(title_now)} chars, target ≤60): “{title_now or '(none)'}”.",
+        f"Meta description now ({len(desc_now)} chars, target 150–160): “{desc_now or '(none)'}”.",
+        f"CTR benchmark gap: {actual:.1f}% actual vs {expected:.1f}% expected at position {position:.1f} (~{recoverable:.0f} recoverable clicks).",
+    ]
+    if top_qs:
+        steps.append("Top queries bringing impressions here: " + ", ".join(f"“{q}”" for q in top_qs) + ".")
+    elif search:
+        steps.append(f"Primary search bringing impressions here: “{search}”.")
+    steps.extend([
+        "Rewrite the title tag (≤60 chars) to front-load the main searched term and a concrete differentiator true of this page.",
+        "Rewrite the meta description (150–160 chars) to answer what the searcher gets on this page and end with a clear reason to click.",
+    ])
+    return _item(
+        "MC-1",
+        "Rewrite the meta for clicks",
+        (
+            f"At position {position:.1f} with {impressions:,} impressions, click-through is {actual:.1f}% against "
+            f"{expected:.1f}% expected (~{recoverable:.0f} clicks left on the table). Rewriting both the title tag and "
+            "meta description can win more clicks without waiting for a ranking jump."
+        ),
+        steps,
+        "Whether SERP features (AI answers, shopping, ads) push organic results down, and testing whether the rewritten snippet lifts CTR over the next 28 days.",
+        [f"{impressions:,} impressions, {clicks:,} clicks at position {position:.1f}"],
+    )
+
+
 def suggest(
     *,
     search: str,
@@ -109,6 +203,11 @@ def suggest(
     parsed: ParsedPage,
     facts: PageFacts,
     evidence: dict[str, Any],
+    intent: dict[str, Any] | None = None,
+    page_type: dict[str, Any] | None = None,
+    fit: dict[str, Any] | None = None,
+    serp_questions: list[str] | None = None,
+    focus: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """`{suggestions: [...], skipped: [{id, name, reason}]}`."""
     out: list[dict[str, Any]] = []
@@ -116,9 +215,29 @@ def suggest(
     wanted = _tokens(search)
     page_queries = evidence.get("page_queries") or []
 
+    # Intent & page-type gating when intent was read from a SERP.
+    suppressed: dict[str, str] = {}
+    if intent and ac.is_read(intent):
+        kind_type = (page_type or {}).get("type") or ac.OTHER
+        kind_name = (page_type or {}).get("name") or "page"
+        if fit and fit.get("level") == ac.LOW:
+            msg = f"Not recommended here: {fit['why']} Work for this search belongs on the kind of page that ranks for it."
+            for pid in ("A-1", "P-1", "S-1", "S-3", "S-2"):
+                suppressed[pid] = msg
+        else:
+            if intent.get("primary") in (serp_intent.TRANSACTIONAL, serp_intent.LOCAL, serp_intent.NAVIGATIONAL) and kind_type not in ac.INFORMATIONAL_PAGES:
+                target_label = "page whose type is not established" if kind_type == ac.OTHER else kind_name.lower()
+                msg = f"Not added: the search is {intent['name'].lower()}, so an explanation at the top of a {target_label} does not serve it."
+                suppressed["A-1"] = msg
+                suppressed["P-1"] = msg
+            if kind_type in (ac.PRODUCT, ac.CATEGORY) and "A-1" not in suppressed:
+                suppressed["A-1"] = f"Not added: a {kind_name.lower()} opens with what is for sale, and a question answered at the top displaces that."
+
     # A-1: the AI platforms answered this search's paired prompt without citing the site.
     llm = evidence.get("llm")
-    if llm and llm.get("ok"):
+    if "A-1" in suppressed:
+        skipped.append({"id": "A-1", "name": "Answer the paired question at the top", "reason": suppressed["A-1"]})
+    elif llm and llm.get("ok"):
         answer = _answer_item(search, parsed, llm)
         if answer:
             out.append(answer)
@@ -154,7 +273,9 @@ def suggest(
         and q["impressions"] >= 20
     ]
     missing = [q for q in related if not _mentions(q["query"], parsed.title) and not _mentions(q["query"], parsed.h1)][:3]
-    if missing:
+    if "S-1" in suppressed:
+        skipped.append({"id": "S-1", "name": "Use the phrasing people actually search", "reason": suppressed["S-1"]})
+    elif missing:
         slug = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1].replace("-", " ").lower()
         steps = [
             f"“{q['query']}”: {q['impressions']:,} impressions at position {q['position']}, in neither the title nor the main heading."
@@ -179,12 +300,15 @@ def suggest(
             )
         )
 
-    # S-5: top-three position, enough impressions, click-through under the benchmark.
+    # S-5 / MC-1: underperforming CTR across page 1-2, deduped cleanly.
     impressions, clicks, position = row["impressions"], row["clicks"], float(row["position"])
-    if position <= 3.5 and impressions >= 100:
+    s5_emitted = False
+    if 1 <= position <= 20 and impressions >= 100:
         actual = clicks / impressions * 100
         expected = expected_ctr_percent(position)
-        if actual < 0.9 * expected:
+        expected_clicks = impressions * expected / 100
+        recoverable = max(0.0, expected_clicks - clicks)
+        if position <= 3.5 and actual < 0.9 * expected and not evidence.get("prefer_mc1"):
             out.append(
                 _item(
                     "S-5",
@@ -200,9 +324,30 @@ def suggest(
                     [f"{impressions:,} impressions, {clicks:,} clicks"],
                 )
             )
+            s5_emitted = True
+        elif not s5_emitted and (
+            (actual < 0.9 * expected and (position > 3.5 or evidence.get("prefer_mc1")))
+            or (evidence.get("ctr_opportunity") and recoverable >= MIN_RECOVERABLE_CLICKS)
+        ):
+            out.append(
+                _meta_clicks_item(
+                    search,
+                    parsed,
+                    impressions=impressions,
+                    clicks=clicks,
+                    position=position,
+                    actual=actual,
+                    expected=expected,
+                    recoverable=recoverable,
+                    page_queries=page_queries,
+                )
+            )
 
     # P-1: ranks on the first page but click-through is under the benchmark (the top three are S-5's, the snippet).
-    if 3.5 < position <= 10.5 and impressions >= 100:
+    if "P-1" in suppressed:
+        if 3.5 < position <= 10.5 and impressions >= 100:
+            skipped.append({"id": "P-1", "name": "Rewrite the opening", "reason": suppressed["P-1"]})
+    elif 3.5 < position <= 10.5 and impressions >= 100:
         actual = clicks / impressions * 100
         expected = expected_ctr_percent(position)
         if actual < 0.9 * expected:
@@ -216,7 +361,10 @@ def suggest(
             )
 
     # S-3: nothing on the page an answer engine can lift whole.
-    if facts.sections and not any(s.extractable for s in facts.sections):
+    if "S-3" in suppressed:
+        if facts.sections and not any(s.extractable for s in facts.sections):
+            skipped.append({"id": "S-3", "name": "Give an answer engine something to lift", "reason": suppressed["S-3"]})
+    elif facts.sections and not any(s.extractable for s in facts.sections):
         out.append(
             _item(
                 "S-3",
@@ -231,22 +379,42 @@ def suggest(
             )
         )
 
-    # S-2: an FAQ built from questions people really ask. (An existing FAQ without markup is V-7.)
-    if not facts.has_faq_section:
-        questions = [q for q in page_queries if _is_question(q["query"])][:5]
-        if questions:
+    # S-2: an FAQ built from DataForSEO People Also Ask + GSC question queries.
+    raw_paa = list(serp_questions if serp_questions is not None else (evidence.get("serp_questions") or []))
+    existing_faq_qs = {" ".join(q.lower().split()) for q in (facts.faq_questions or ())}
+    combined_questions: list[dict[str, str]] = []
+    seen_q: set[str] = set()
+    for q in raw_paa:
+        norm = " ".join(str(q).lower().split())
+        if norm and norm not in seen_q:
+            seen_q.add(norm)
+            if not facts.has_faq_section or norm not in existing_faq_qs:
+                combined_questions.append({"question": str(q), "label": f"“{q}” (People also ask, on the results page)"})
+    for q in page_queries:
+        if _is_question(q.get("query") or ""):
+            norm = " ".join(q["query"].lower().split())
+            if norm and norm not in seen_q:
+                seen_q.add(norm)
+                if not facts.has_faq_section or (raw_paa and norm not in existing_faq_qs):
+                    combined_questions.append({"question": q["query"], "label": f"“{q['query']}” ({int(q.get('impressions') or 0):,} impressions)"})
+    combined_questions = combined_questions[:5]
+
+    if "S-2" in suppressed:
+        skipped.append({"id": "S-2", "name": "Add a short FAQ", "reason": suppressed["S-2"]})
+    elif not facts.has_faq_section:
+        if combined_questions:
             out.append(
                 _item(
                     "S-2",
                     "Add a short FAQ from real questions",
-                    "The page has no FAQ, and it already gets impressions for questions people type.",
-                    [f"“{q['query']}” ({q['impressions']:,} impressions)" for q in questions]
+                    "The page has no FAQ, and real questions show up in Search Console and People Also Ask.",
+                    [item["label"] for item in combined_questions]
                     + [
                         "Answer each in one to three sentences on the page, in the words you would use to a customer.",
                         "Then mark the FAQ up as FAQPage so search engines can read it as questions and answers.",
                     ],
-                    "Whether an AI answer or featured snippet appears for these questions. Not pulled yet.",
-                    [f"{len(questions)} question-shaped searches for this page"],
+                    "Whether an AI answer or featured snippet appears for these questions." if not raw_paa else "Review each question against what this page actually covers before publishing.",
+                    [f"{len(combined_questions)} real question(s) from People Also Ask and Search Console"],
                 )
             )
         else:
@@ -257,6 +425,26 @@ def suggest(
                     "reason": "No question-shaped search shows for this page, so there is nothing real to base an FAQ on.",
                 }
             )
+    elif raw_paa and combined_questions:
+        out.append(
+            _item(
+                "S-2",
+                "Add missing People Also Ask questions to the FAQ",
+                "The page already has an FAQ, but People Also Ask raises questions it does not appear to answer yet.",
+                [item["label"] for item in combined_questions]
+                + [
+                    "Answer each in one to three sentences in the page's existing FAQ, using only facts true of this page.",
+                    "Keep FAQPage markup in step if the page uses it.",
+                ],
+                "Check the existing FAQ wording to confirm these questions are not already covered under different phrasing.",
+                [f"{len(combined_questions)} unanswered question(s) from People Also Ask"],
+            )
+        )
+
+    # FQ-1: link to the site's existing FAQ page when present and not yet linked in content.
+    faq_link = evidence.get("faq_link")
+    if isinstance(faq_link, dict):
+        out.append(faq_link)
 
     # S-4: other pages on the same topic that could link here.
     crawl = evidence.get("crawl")
@@ -303,10 +491,10 @@ def suggest(
             }
         )
 
-    return {"suggestions": out, "skipped": skipped}
+    return {"suggestions": order_by_focus(out, focus), "skipped": skipped}
 
 
-def suggest_traffic(*, lost: list[dict[str, Any]], unit: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+def suggest_traffic(*, lost: list[dict[str, Any]], unit: dict[str, Any] | None, focus: str | None = None) -> dict[str, list[dict[str, Any]]]:
     """For a page whose organic sessions fell: which searches it lost, and whether rankings or demand moved."""
     out: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -318,7 +506,7 @@ def suggest_traffic(*, lost: list[dict[str, Any]], unit: dict[str, Any] | None) 
                 "reason": "No search with at least 20 impressions before lost clicks or impressions on this page, so the drop is not in the searches Search Console reports.",
             }
         )
-        return {"suggestions": out, "skipped": skipped}
+        return {"suggestions": order_by_focus(out, focus), "skipped": skipped}
 
     def line(x: dict[str, Any]) -> str:
         pos = x["position"]
@@ -359,11 +547,11 @@ def suggest_traffic(*, lost: list[dict[str, Any]], unit: dict[str, Any] | None) 
                 [f"{len(lost) - len(slipped)} of {len(lost)} searches kept their position"],
             )
         )
-    return {"suggestions": out, "skipped": skipped}
+    return {"suggestions": order_by_focus(out, focus), "skipped": skipped}
 
 
 def suggest_leads(
-    *, row: dict[str, Any] | None, site: dict[str, Any], path: dict[str, Any], parsed: ParsedPage, noun: str
+    *, row: dict[str, Any] | None, site: dict[str, Any], path: dict[str, Any], parsed: ParsedPage, noun: str, focus: str | None = None
 ) -> dict[str, list[dict[str, Any]]]:
     """For a page whose organic visitors convert or engage less than the site's own median."""
     out: list[dict[str, Any]] = []
@@ -476,4 +664,4 @@ def suggest_leads(
                 "reason": f"This page is at or above the site's median on both ({row['engagement_rate']}% engagement, {row['conversion_rate']}% conversion), so there is no gap to explain.",
             }
         )
-    return {"suggestions": out, "skipped": skipped}
+    return {"suggestions": order_by_focus(out, focus), "skipped": skipped}

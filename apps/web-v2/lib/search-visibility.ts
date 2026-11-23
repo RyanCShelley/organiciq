@@ -1,3 +1,5 @@
+import type { ActionContext, SerpOrganicResult } from "@/lib/engine";
+
 export type SvTerm = {
   term: string;
   key: string;
@@ -76,10 +78,20 @@ export type Sv = {
   };
 };
 
+export type SvSerp = {
+  pulled_on: string;
+  features: string[];
+  item_types: string[];
+  holders: Record<string, string[]>;
+  results: SerpOrganicResult[];
+  questions: string[];
+  reading: (ActionContext["intent"] & { search?: string; labels?: string[] }) | null;
+};
+
 export type SvDetail = {
   term: string;
   pages: { url: string; impressions: number; clicks: number; position: number | null }[];
   competitors: { domain: string; position: number; url: string | null }[];
   competitors_read_on: string | null;
-  serp: { pulled_on: string; features: string[]; holders: Record<string, unknown> } | null;
+  serp: SvSerp | null;
 };

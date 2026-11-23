@@ -155,6 +155,8 @@ class Client(Base):
     baseline_lead_rate_pct: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
     baseline_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     baseline_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Client voice, tone, and editorial style guidelines injected into AI drafts and recommendations.
+    style_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Frozen growth projection (3/6/9/12-month checkpoints) plus the inputs and
     # the date it was generated, so a stale set reads as stale.
     baseline_projection_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

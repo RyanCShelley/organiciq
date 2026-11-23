@@ -25,10 +25,14 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.decisions import action_context as ac
+from app.decisions import serp_intent
 from app.decisions.action_context import OUTCOME_NAMES, crawl_outcome
 from app.decisions.catalog import VISIBILITY_ACTIONS, PageFacts, SectionFacts, _mentions
+from app.decisions.checklists import checklist_for
 from app.decisions.ctr_curve import expected_ctr_percent
 from app.decisions.page_targets import LinkDonor
+from app.decisions.provisional import FOCUS_ORDER_REASONS, order_by_focus
 from app.decisions.provisional import suggest as provisional_suggest
 from app.decisions.provisional import _tokens, suggest_leads, suggest_traffic
 from app.decisions.slots import Prescription
@@ -378,18 +382,26 @@ def diagnose(
     client_domain: str,
     fetch: Callable[[str], Awaitable[Fetched]] = _fetch,
     evidence: dict[str, Any] | None = None,
+    focus: str | None = None,
+    signals: dict[str, Any] | None = None,
+    site_urls: list[str] | None = None,
+    style_notes: str | None = None,
+    page_history: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One (search, page) pair, read live. `row` carries the pair's numbers from the candidate list.
 
     `evidence` is what Search Console knows about the page (its other searches, competing pages,
     topical pages that could link to it). Without it, the unconfirmed suggestions are left out.
     """
+    active_focus = focus or "visibility"
     result: dict[str, Any] = {
         "search": search,
         "page": url,
         "position": row["position"],
         "impressions": row["impressions"],
         "clicks": row["clicks"],
+        "focus": active_focus,
+        "focus_order_reason": FOCUS_ORDER_REASONS.get(active_focus),
         "read": {"ok": False, "status": None, "error": None, "at": datetime.now(timezone.utc).isoformat()},
         "observations": [],
         "prescriptions": [],
@@ -397,6 +409,8 @@ def diagnose(
         "suggestions": [],
         "skipped_suggestions": [],
     }
+    if page_history is not None:
+        result["page_history"] = page_history
     try:
         fetched = read_page(url, client_domain, fetch)
     except PageUnreadable as exc:
@@ -448,32 +462,65 @@ def diagnose(
             )
         result["not_judged"].append({"action_id": action_id, "name": name, "reason": reason})
 
-    result["observations"] = observations(search, parsed, fetched, row)
-    if evidence is not None:
-        found = provisional_suggest(search=search, url=url, row=row, parsed=parsed, facts=facts, evidence=evidence)
-        result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
-        # A rule that fired already says it; the unconfirmed version of the same advice would repeat it.
-        if any(p["action_id"] == "V-4" for p in result["prescriptions"]):
-            result["suggestions"] = [g for g in result["suggestions"] if g["id"] != "S-4"]
-    result["page_facts"] = {
+    schema_types = sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type})
+    resolved_signals = signals if signals is not None else (evidence or {}).get("signals")
+    resolved_urls = site_urls if site_urls is not None else (evidence or {}).get("site_urls")
+    kind = ac.classify_page(url, schema_types=schema_types, title=parsed.title, h1=parsed.h1)
+    intent = (resolved_signals or {}).get("reading") or serp_intent.not_read()
+    fit = ac.compatibility(intent, kind)
+    template = ac.template_of(url, kind["type"], resolved_urls)
+    page_facts = {
         "title": facts.title,
         "description": facts.description,
         "h1": parsed.h1,
         "word_count": parsed.word_count,
-        "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
+        "schema_types": schema_types,
         # Words of the search the page does not use anywhere we read: its title, description, headings and the paragraph under each.
         "search_terms_missing": sorted(
             _tokens(search) - _tokens(" ".join([parsed.title or "", parsed.description or "", parsed.h1 or ""] + [f"{sec.heading} {sec.first_paragraph}" for sec in parsed.sections]))
         ),
         "has_faq": facts.has_faq_section or facts.has_faq_schema,
+        "conversion_elements": parsed.conversion_elements,
+        "contact_only_in_footer": parsed.contact_only_in_footer,
         # The page as an outline, for setting beside the pages that are winning for the term.
         "outline": {
             "title": parsed.title, "h1": parsed.h1, "word_count": parsed.word_count,
-            "sections": [{"heading": sec.heading, "text": " ".join(sec.first_paragraph.split())[:220], "has_table": sec.has_table, "has_list": sec.has_list} for sec in parsed.sections[:25]],
-            "schema_types": sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type}),
+            "sections": [{"heading": sec.heading, "text": " ".join(sec.first_paragraph.split())[:220], "has_table": sec.has_table, "has_list": sec.has_list, "has_stat": sec.has_stat} for sec in parsed.sections[:25]],
+            "schema_types": schema_types,
             "faq_questions": len(parsed.faq_questions), "faq_list": [" ".join(q.split())[:200] for q in parsed.faq_questions[:15]],
             "conversion_elements": parsed.conversion_elements,
         },
+    }
+    checklist = checklist_for(kind["type"], page_facts, focus=active_focus)
+
+    result["observations"] = observations(search, parsed, fetched, row)
+    if evidence is not None:
+        found = provisional_suggest(
+            search=search,
+            url=url,
+            row=row,
+            parsed=parsed,
+            facts=facts,
+            evidence=evidence,
+            intent=intent,
+            page_type=kind,
+            fit=fit,
+            serp_questions=(resolved_signals or {}).get("questions"),
+            focus=active_focus,
+        )
+        result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
+        # A rule that fired already says it; the unconfirmed version of the same advice would repeat it.
+        if any(p["action_id"] == "V-4" for p in result["prescriptions"]):
+            result["suggestions"] = [g for g in result["suggestions"] if g["id"] != "S-4"]
+    result["prescriptions"] = order_by_focus(result["prescriptions"], active_focus)
+    result["page_facts"] = page_facts
+    result["context"] = {
+        "intent": intent,
+        "page_type": kind,
+        "fit": fit,
+        "template": template,
+        "checklist": checklist,
+        "style_notes": style_notes,
     }
     return result
 
@@ -485,15 +532,17 @@ def diagnose_page(
     client_domain: str,
     fetch: Callable[[str], Awaitable[Fetched]] = _fetch,
     evidence: dict[str, Any],
+    signals: dict[str, Any] | None = None,
+    site_urls: list[str] | None = None,
+    style_notes: str | None = None,
+    page_history: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """A page picked from the Traffic or Leads list, read live.
-
-    There is no search to judge, so no catalog Visibility rule runs: the page is read, the facts that
-    make it a candidate are set beside it, and what is worth checking is listed, unconfirmed.
-    """
+    """A page picked from the Traffic or Leads list (or unsearched Visibility page), read live."""
     result: dict[str, Any] = {
-        "search": "(page)",
+        "search": evidence.get("search") or "(page)",
         "page": url,
+        "focus": focus,
+        "focus_order_reason": FOCUS_ORDER_REASONS.get(focus),
         "read": {"ok": False, "status": None, "error": None, "at": datetime.now(timezone.utc).isoformat()},
         "observations": [],
         "prescriptions": [],
@@ -502,6 +551,8 @@ def diagnose_page(
         "skipped_suggestions": [],
         "evidence": evidence.get("summary"),
     }
+    if page_history is not None:
+        result["page_history"] = page_history
     try:
         fetched = read_page(url, client_domain, fetch)
     except PageUnreadable as exc:
@@ -535,10 +586,107 @@ def diagnose_page(
     notes.append({"level": "note", "text": f"{parsed.word_count:,} words, {len(parsed.sections)} headed sections, {parsed.conversion_elements} conversion elements.", "how": f"Counted in the page's HTML after scripts and styles are removed. {received(fetched)}."})
     result["observations"] = notes
 
+    schema_types = sorted({b.schema_type for b in parsed.schema_blocks if b.schema_type})
+    resolved_signals = signals if signals is not None else evidence.get("signals")
+    resolved_urls = site_urls if site_urls is not None else evidence.get("site_urls")
+    kind = ac.classify_page(url, schema_types=schema_types, title=parsed.title, h1=parsed.h1)
+    intent = (resolved_signals or {}).get("reading") or serp_intent.not_read()
+    fit = ac.compatibility(intent, kind)
+    template = ac.template_of(url, kind["type"], resolved_urls)
+    facts = facts_from(url, parsed, evidence.get("crawl"))
+    outline_sections = [
+        {
+            "heading": sec.heading,
+            "text": " ".join(sec.first_paragraph.split())[:220],
+            "has_table": sec.has_table,
+            "has_list": sec.has_list,
+            "has_stat": sec.has_stat,
+        }
+        for sec in parsed.sections[:25]
+    ]
+    page_facts = {
+        "title": facts.title,
+        "description": facts.description,
+        "h1": parsed.h1,
+        "word_count": parsed.word_count,
+        "schema_types": schema_types,
+        "sections": outline_sections,
+        "has_faq": facts.has_faq_section or facts.has_faq_schema,
+        "conversion_elements": parsed.conversion_elements,
+        "contact_only_in_footer": parsed.contact_only_in_footer,
+        "outline": {
+            "title": parsed.title,
+            "h1": parsed.h1,
+            "word_count": parsed.word_count,
+            "sections": outline_sections,
+            "schema_types": schema_types,
+            "faq_questions": len(parsed.faq_questions),
+            "faq_list": [" ".join(q.split())[:200] for q in parsed.faq_questions[:15]],
+            "conversion_elements": parsed.conversion_elements,
+        },
+    }
+    checklist = checklist_for(kind["type"], page_facts, focus=focus)
+    result["page_facts"] = page_facts
+    result["context"] = {
+        "intent": intent,
+        "page_type": kind,
+        "fit": fit,
+        "template": template,
+        "checklist": checklist,
+        "style_notes": style_notes,
+    }
+
     if fetched.status < 400:
         if focus == "traffic":
             found = suggest_traffic(lost=evidence.get("lost") or [], unit=evidence.get("unit"))
+            suggestions = list(found["suggestions"])
+            skipped = list(found["skipped"])
+            if evidence.get("ctr_row"):
+                extra = provisional_suggest(
+                    search=evidence.get("search") or "",
+                    url=url,
+                    row=evidence["ctr_row"],
+                    parsed=parsed,
+                    facts=facts,
+                    evidence=evidence,
+                    intent=intent,
+                    page_type=kind,
+                    fit=fit,
+                    serp_questions=(resolved_signals or {}).get("questions"),
+                    focus=focus,
+                )
+                seen_ids = {s["id"] for s in suggestions}
+                suggestions.extend(s for s in extra["suggestions"] if s["id"] not in seen_ids)
+            elif isinstance(evidence.get("faq_link"), dict):
+                suggestions.append(evidence["faq_link"])
+            result["suggestions"], result["skipped_suggestions"] = order_by_focus(suggestions, focus), skipped
+        elif focus == "leads":
+            found = suggest_leads(
+                row=evidence.get("row"),
+                site=evidence.get("site") or {},
+                path=evidence.get("path") or {},
+                parsed=parsed,
+                noun=evidence.get("noun") or {"singular": "lead", "plural": "leads"},
+                focus=focus,
+            )
+            suggestions = list(found["suggestions"])
+            if isinstance(evidence.get("faq_link"), dict):
+                suggestions.append(evidence["faq_link"])
+            result["suggestions"], result["skipped_suggestions"] = order_by_focus(suggestions, focus), found["skipped"]
         else:
-            found = suggest_leads(row=evidence.get("row"), site=evidence.get("site") or {}, path=evidence.get("path") or {}, parsed=parsed, noun=evidence.get("noun") or {"singular": "lead", "plural": "leads"})
-        result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
+            row = evidence.get("ctr_row") or evidence.get("row") or {"position": 0, "impressions": 0, "clicks": 0}
+            found = provisional_suggest(
+                search=evidence.get("search") or "",
+                url=url,
+                row=row,
+                parsed=parsed,
+                facts=facts,
+                evidence=evidence,
+                intent=intent,
+                page_type=kind,
+                fit=fit,
+                serp_questions=(resolved_signals or {}).get("questions"),
+                focus=focus,
+            )
+            result["suggestions"], result["skipped_suggestions"] = found["suggestions"], found["skipped"]
     return result

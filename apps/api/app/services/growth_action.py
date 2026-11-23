@@ -22,14 +22,22 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.core.urls import url_variants
 from app.decisions import action_context as ac
 from app.decisions import serp_intent
 from app.decisions import visibility_candidates as vc
-from app.decisions.provisional import _opening, _tokens
+from app.decisions.checklists import checklist_for
+from app.decisions.faq_links import FAQ_PAGE_RE as _FAQ_PAGE
+from app.decisions.faq_links import FAQ_TITLE_RE as _FAQ_TITLE
+from app.decisions.faq_links import find_faq_page
+from app.decisions.provisional import FOCUS_ORDER_REASONS, _opening, _tokens, order_by_focus
 from app.models.client import Client
-from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlInternalLink, FactCrawlPageSnapshot
+from app.models.client_focus import ClientFocus
+from app.models.crawl import CRAWL_SOURCE_FIRST_PARTY, FactCrawlPageSnapshot
+from app.models.engine_task import INACTIVE_STATUSES
 from app.services import llm_evidence
 
 #: A page whose title already says the topic counts for this much more than its impressions alone.
@@ -40,7 +48,7 @@ PAGES_SHOWN = 50
 _TURNED_AWAY = frozenset({401, 403, 429, 503})
 #: Parts that join the bundle when the page read produces them, in the order they are listed.
 CORE = ("A-1", "S-1", "S-2", "V-7")
-EXTRAS = ("P-1", "S-5", "S-4")
+EXTRAS = ("MC-1", "P-1", "S-5", "S-4")
 #: Parts that are never selected for the person: offered, and theirs to add. FAQ markup is not a growth lever by default.
 NOT_DEFAULT = ("V-7",)
 #: Parts that a link count alone used to produce. Links are suggested by the internal link tool, on relatedness.
@@ -56,7 +64,9 @@ PART_NAMES = {
     "V-7": "Mark up the FAQ",
     "P-1": "Rewrite the opening",
     "S-5": "Reread the title and description",
+    "MC-1": "Rewrite the meta for clicks",
     "S-4": "Link here from related pages",
+    "FQ-1": "Link to the site's FAQ page",
     "V-4": "Add internal links",
     "IM-1": "Match the page to what the searcher wants",
     "TI-1": "Investigate crawler access",
@@ -64,7 +74,7 @@ PART_NAMES = {
 #: What kind of work each part is, and what it is for. No figure is forecast for any of them.
 ACTION_TYPES = {
     "A-1": "Optimize existing page", "S-1": "Optimize existing page", "S-2": "Optimize existing page", "P-1": "Optimize existing page", "S-5": "Optimize existing page",
-    "V-7": "Update structured data", "S-4": "Improve internal linking", "V-4": "Improve internal linking",
+    "MC-1": "Optimize existing page", "V-7": "Update structured data", "S-4": "Improve internal linking", "FQ-1": "Improve internal linking", "V-4": "Improve internal linking",
     "TI-1": "Investigate technical issue", "IM-1": "Optimize existing page",
 }
 BENEFITS = {
@@ -74,7 +84,9 @@ BENEFITS = {
     "V-7": ("SEO and AI visibility", "Markup lets a search engine read the questions and answers as such."),
     "P-1": ("SEO", "An opening that says what the page is about holds the searcher who clicked."),
     "S-5": ("SEO", "A clearer title and description can earn more of the clicks the page is already shown for."),
+    "MC-1": ("SEO", "A stronger title tag and meta description earn more of the clicks the page is already shown for across page 1–2."),
     "S-4": ("SEO", "Links from related pages tell the search engine this page matters for the topic."),
+    "FQ-1": ("SEO", "A link from a page on the topic helps both a reader and a search engine reach the questions answered elsewhere on the site."),
     "V-4": ("SEO", "Links from related pages tell the search engine this page matters for the topic."),
     "TI-1": ("Technical reliability", "Until our reader can fetch the page, nothing about it can be checked or measured."),
     "IM-1": ("SEO and conversion", "A page that does what the searcher came to do is the page a search engine wants to show for it."),
@@ -103,6 +115,13 @@ _MATCH: dict[str, dict[str, tuple[str, list[str]]]] = {
             "Put the way to book or enquire, and the price or how pricing works, where it can be seen without scrolling far.",
             "Show proof next to it: results, reviews, accreditations.",
         ]),
+        ac.LOCATION: ("book or visit this location", [
+            "Lead with the city/area served, services offered here, and immediate call or booking CTA.",
+            "Show address, hours, and local customer reviews above supporting copy.",
+        ]),
+        ac.HOMEPAGE: ("route directly to the main offer or enquiry", [
+            "State what the business offers and put the primary booking/shop CTA and top category/service links in the first screen.",
+        ]),
     },
     serp_intent.COMMERCIAL: {
         ac.CATEGORY: ("compare the options before choosing", [
@@ -117,6 +136,12 @@ _MATCH: dict[str, dict[str, tuple[str, list[str]]]] = {
         ac.SERVICE: ("judge this provider against the alternatives", [
             "Say what makes this service different, with proof: results, case studies, reviews.",
             "Answer the comparison questions a buyer has: scope, price range, timescale.",
+        ]),
+        ac.LOCATION: ("compare this local provider against alternatives", [
+            "Highlight local differentiators, service coverage, transparent scope/pricing expectations, and verified local reviews.",
+        ]),
+        ac.HOMEPAGE: ("understand why to choose this brand and explore key offers", [
+            "Lead with clear positioning, social proof, and direct links to top service or category comparison pages.",
         ]),
         ac.ARTICLE: ("compare the options before choosing", [
             "Structure the article as the comparison it is being read for: the options, the criteria, a verdict for each kind of buyer.",
@@ -142,8 +167,25 @@ _MATCH: dict[str, dict[str, tuple[str, list[str]]]] = {
             "Name the places the service is offered in the page's own text, and link to the location pages.",
             "Put the phone number and the way to book where they can be seen at once.",
         ]),
+        ac.CATEGORY: ("find these products nearby or available locally", [
+            "State local stock, pickup, or delivery coverage clearly and link to store/location details.",
+        ]),
         ac.HOMEPAGE: ("find and contact this business nearby", [
             "State what the business does and the area it serves in the first lines, with the address, hours and phone number in text.",
+        ]),
+    },
+    serp_intent.NAVIGATIONAL: {
+        ac.HOMEPAGE: ("reach the right section of this brand quickly", [
+            "Keep brand identity, primary CTA, and direct navigation links to core services/categories unmistakable above the fold.",
+        ]),
+        ac.SERVICE: ("confirm this is the official service page and take the next step", [
+            "Confirm the exact service name in the title and H1 and place the primary CTA above the fold.",
+        ]),
+        ac.LOCATION: ("get this location's contact details, hours, or directions", [
+            "Keep address, phone, hours, and booking link immediately visible at the top.",
+        ]),
+        ac.CATEGORY: ("reach the specific collection and browse items immediately", [
+            "Keep the collection heading concise above the product grid with working filters.",
         ]),
     },
 }
@@ -499,6 +541,39 @@ def _better_page(topic: dict[str, Any], chosen: dict[str, Any], fit: dict[str, A
     return {"url": best["url"], "fit": best["fit"], "impressions": best["impressions"], "why": best["fit_why"]}
 
 
+def active_focus(db: Session, client: Client, month: str | None = None) -> str:
+    """Resolve the active `ClientFocus` (`visibility`, `traffic`, `leads`) for `month` or current/latest month."""
+    if month:
+        try:
+            first = date(int(month[:4]), int(month[5:7]), 1)
+            row = (
+                db.query(ClientFocus.focus)
+                .filter(ClientFocus.client_id == client.id, ClientFocus.month == first)
+                .one_or_none()
+            )
+            if row and row[0] in FOCUS_ORDER_REASONS:
+                return row[0]
+        except (ValueError, TypeError):
+            pass
+    today_first = date.today().replace(day=1)
+    row = (
+        db.query(ClientFocus.focus)
+        .filter(ClientFocus.client_id == client.id, ClientFocus.month == today_first)
+        .one_or_none()
+    )
+    if row and row[0] in FOCUS_ORDER_REASONS:
+        return row[0]
+    latest = (
+        db.query(ClientFocus.focus)
+        .filter(ClientFocus.client_id == client.id)
+        .order_by(ClientFocus.month.desc())
+        .first()
+    )
+    if latest and latest[0] in FOCUS_ORDER_REASONS:
+        return latest[0]
+    return "visibility"
+
+
 def _duplicate(db: Session, client: Client, planned_month: str | None, keyword: str, page: str) -> str | None:
     if not planned_month:
         return None
@@ -506,9 +581,42 @@ def _duplicate(db: Session, client: Client, planned_month: str | None, keyword: 
 
     row = db.query(EngineTask.title).filter(
         EngineTask.client_id == client.id, EngineTask.month == planned_month, EngineTask.kind == "growth_action",
-        EngineTask.search == keyword, EngineTask.page_url == page, EngineTask.status != "dropped",
+        EngineTask.search == keyword, EngineTask.page_url == page, ~EngineTask.status.in_(INACTIVE_STATUSES),
     ).first()
     return row[0] if row else None
+
+
+def _prior_rejections(db: Session, client: Client, page: str) -> list[dict[str, Any]]:
+    from app.models.engine_task import EngineTask
+
+    urls = url_variants(page) or [page]
+    lower_urls = list({u.lower() for u in urls})
+    rows = (
+        db.query(EngineTask)
+        .filter(
+            EngineTask.client_id == client.id,
+            or_(EngineTask.page_url.in_(urls), func.lower(EngineTask.page_url).in_(lower_urls)),
+            EngineTask.status == "rejected",
+        )
+        .order_by(EngineTask.rejected_at.desc().nullslast(), EngineTask.confirmed_at.desc())
+        .limit(10)
+        .all()
+    )
+    return [
+        {
+            "id": str(t.id),
+            "month": t.month,
+            "search": t.search,
+            "rule_id": t.rule_id,
+            "title": t.title,
+            "rejection_reason": t.rejection_reason,
+            "rejection_reason_label": ac.REJECTION_REASONS.get(t.rejection_reason) if t.rejection_reason else None,
+            "rejection_note": t.rejection_note,
+            "rejected_by": t.rejected_by,
+            "rejected_at": t.rejected_at.isoformat() if t.rejected_at else None,
+        }
+        for t in rows
+    ]
 
 
 def build(
@@ -525,6 +633,7 @@ def build(
     planned_month: str | None = None,
     search: str | None = None,
     winners_for=None,
+    focus: str | None = None,
 ) -> dict[str, Any]:
     """Diagnose one page for one term and bundle what applies into one growth action.
 
@@ -583,14 +692,19 @@ def build(
     stopped = not read.get("ok") or bool(read.get("blocked"))
     if stopped:
         read = {**read, "evidence_source": "none", "outcome": read.get("outcome") or "other"}
+    resolved_focus = focus if focus in FOCUS_ORDER_REASONS else active_focus(db, client, planned_month or month)
+    style_notes = (getattr(client, "style_notes", None) or "").strip() or None
     kind = ac.classify_page(chosen["url"], schema_types=facts.get("schema_types"), title=facts.get("title") or chosen["title"], h1=facts.get("h1"))
     fit = ac.compatibility(intent, kind)
     template = ac.template_of(chosen["url"], kind["type"], list(site) if site is not None else None)
     evidence = _evidence(read, intent, template)
     duplicate = _duplicate(db, client, planned_month, topic["keyword"], chosen["url"])
+    prior_rejections = _prior_rejections(db, client, chosen["url"])
+    checklist = checklist_for(kind["type"], facts, focus=resolved_focus) if not stopped else []
 
     def finish(parts: list[dict[str, Any]], left_out: list[dict[str, str]], optional: list[dict[str, Any]], *, mismatch: bool, observations: list[dict[str, Any]], suggested: dict[str, Any] | None = None, held: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         held = held or []
+        parts = order_by_focus(parts, resolved_focus)
         for p in parts + optional + held:
             p.update(ac.scope_of(p["id"], template))
         for p in held:
@@ -605,11 +719,16 @@ def build(
             "intent": intent, "page_type": kind, "fit": fit, "template": template, "evidence": evidence, "validation": gate, "mismatch": mismatch,
             "action_types": list(dict.fromkeys(p["action_type"] for p in parts)),
             "benefits": list(dict.fromkeys(p["benefit"] for p in parts)),
+            "checklist": checklist,
+            "style_notes": style_notes,
+            "focus": resolved_focus,
         }
         context["winners"] = winners
         base = {
             "topic": topic, "keyword": topic["label"], "page": chosen["url"], "chosen": chosen, "search": search, "search_source": search_source,
-            "row": row, "context": context, "better_page": None if mismatch else _better_page(topic, chosen, fit), "suggested_page": suggested,
+            "row": row, "context": context, "checklist": checklist, "focus": resolved_focus, "focus_order_reason": FOCUS_ORDER_REASONS[resolved_focus],
+            "prior_rejections": prior_rejections,
+            "better_page": None if mismatch else _better_page(topic, chosen, fit), "suggested_page": suggested,
         }
         done = {"left_out": left_out, "optional": optional, "observations": observations, "opening": _opening_text(result), "held": held}
         if duplicate:
@@ -672,8 +791,9 @@ def build(
             barred[id_] = f"Held: {intent['name']}. This part depends on what the searcher wants, which has not been read."
     elif intent["primary"] in (serp_intent.TRANSACTIONAL, serp_intent.LOCAL, serp_intent.NAVIGATIONAL) and kind["type"] not in ac.INFORMATIONAL_PAGES:
         # Someone here to buy, book or reach a site is not helped by an answer or a rewritten opening built for a reader.
+        target_label = "page whose type is not established" if kind["type"] == ac.OTHER else kind["name"].lower()
         for id_ in ("A-1", "P-1"):
-            barred[id_] = f"Not added: the search is {intent['name'].lower()}, so an explanation at the top of a {kind['name'].lower()} does not serve it."
+            barred[id_] = f"Not added: the search is {intent['name'].lower()}, so an explanation at the top of a {target_label} does not serve it."
     if read_intent and no_top_answer and "A-1" not in barred:
         barred["A-1"] = f"Not added: a {kind['name'].lower()} opens with what is for sale, and a question answered at the top displaces that. A brief clarification in the page's description is offered below instead."
     if claim_risk and "S-1" not in barred:
@@ -694,6 +814,10 @@ def build(
             parts.append(_part(id_, found[id_], core=False))
     for id_ in EXTRAS:
         if id_ in found and id_ not in fired and id_ not in barred:
+            if id_ == "S-5" and ("MC-1" in {p["id"] for p in parts} or "T-1" in fired):
+                continue
+            if id_ == "MC-1" and ("T-1" in fired or "S-5" in fired):
+                continue
             parts.append(_part(id_, found[id_], core=False))
     for extra in extra_suggestions or []:
         parts.append(_part(extra["id"], extra, core=False))
@@ -701,8 +825,8 @@ def build(
     # What the winners do that this page does not, only from pages that were read. A gap the comparison observed in
     # them becomes a part; one it only inferred is offered, not selected.
     inferred: list[dict[str, Any]] = []
+    asked = [] if "S-2" in barred else _questions_asked(signals, page_evidence, prompt)
     if winners_for and facts.get("outline"):
-        asked = [] if "S-2" in barred else _questions_asked(signals, page_evidence, prompt)
         winners = winners_for(search, intent, chosen["url"], kind["name"], facts["outline"], asked)
         for n, gap in enumerate((winners.get("comparison") or {}).get("gaps") or [], start=1):
             (parts if gap["basis"] == "observed" else inferred).append(_gap_part(n, gap, read_intent))
@@ -746,6 +870,44 @@ def build(
         idx = next((i for i, p in enumerate(parts) if p["id"] not in ("A-1", "S-1", *_LEADS)), len(parts))
         parts.insert(idx, _questions_part(checked, has_faq))
         have.add("S-2")
+    elif not checked and "S-2" not in have and "S-2" not in barred:
+        # Fallback when winners_for or outline is absent: still surface DataForSEO PAA + GSC questions.
+        existing_faq_qs = {
+            " ".join(str(q).lower().split())
+            for q in ((facts.get("outline") or {}).get("faq_list") or [])
+        }
+        seen_asked: set[str] = set()
+        fallback_items: list[dict[str, Any]] = []
+        for item in asked:
+            if item.get("source") not in ("people_also_ask", "search_console"):
+                continue
+            norm = " ".join(str(item.get("question") or "").lower().split())
+            if not norm or norm in seen_asked or (has_faq and norm in existing_faq_qs):
+                continue
+            seen_asked.add(norm)
+            fallback_items.append(
+                {
+                    "question": item["question"],
+                    "source": item["source"],
+                    "source_name": (
+                        "People also ask, on the results page"
+                        if item["source"] == "people_also_ask"
+                        else "a search this page shows for"
+                    ),
+                    "detail": item.get("detail"),
+                    "why": "",
+                }
+            )
+        if fallback_items:
+            idx = next((i for i, p in enumerate(parts) if p["id"] not in ("A-1", "S-1", *_LEADS)), len(parts))
+            parts.insert(
+                idx,
+                _questions_part(
+                    {"checked": len(fallback_items), "missing": fallback_items[:5]},
+                    has_faq,
+                ),
+            )
+            have.add("S-2")
     if "S-2" not in have and has_faq and "S-2" not in barred:
         left_out.append({"id": "S-2", "name": PART_NAMES["S-2"], "reason": (
             f"The page already has an FAQ, and it answers all {checked['checked']} of the questions found for this search." if checked
@@ -848,37 +1010,9 @@ def _questions_part(checked: dict[str, Any], has_faq: bool) -> dict[str, Any]:
     }
 
 
-_FAQ_PAGE = re.compile(r"(^|[/\-_])(faqs?|frequently[-_]asked[-_]questions)([/\-_.]|$)", re.I)
-_FAQ_TITLE = re.compile(r"\b(faqs?|frequently asked questions)\b", re.I)
-
-
 def _faq_page_link(db: Session, client: Client, site: dict[str, str] | None, page: str) -> dict[str, Any] | None:
-    """A part that links this page to the site's FAQ page, when the crawl holds one and no in-content link to it from this page.
-
-    The FAQ page is one whose address says so; a title alone is not enough, since articles are often titled as FAQs.
-    """
-    from urllib.parse import urlsplit
-
-    if not site:
-        return None
-    found = sorted((u for u, title in site.items() if u != page and _FAQ_PAGE.search(urlsplit(u).path) and (_FAQ_TITLE.search(title or "") or not title)), key=len)
-    if not found:
-        return None
-    target = found[0]
-    linked = db.query(FactCrawlInternalLink.id).filter(
-        FactCrawlInternalLink.client_id == client.id, FactCrawlInternalLink.source == CRAWL_SOURCE_FIRST_PARTY,
-        FactCrawlInternalLink.from_url == page, FactCrawlInternalLink.to_url == target, FactCrawlInternalLink.in_content.is_(True),
-    ).first()
-    if linked:
-        return None
-    return {
-        "id": "FQ-1", "name": "Link to the site's FAQ page", "core": False, "confirmed_by_rule": False,
-        "title": "Link to the site's FAQ page",
-        "why": "The site has an FAQ page, and the crawl found no link to it in this page's content. Someone with a question this page does not answer has nowhere to go from here.",
-        "steps": [f"The FAQ page: {target}", "Link to it from this page's FAQ, or from the point where a reader is most likely to have a further question.", "Use link text that says what is there, such as “See all frequently asked questions”."],
-        "evidence": [f"FAQ page in the site crawl: {target}", "No in-content link from this page to it in the crawl."],
-        "action_type": "Improve internal linking", "benefit": "SEO", "benefit_why": "A link from a page on the topic helps both a reader and a search engine reach the questions answered elsewhere on the site.",
-    }
+    """A part that links this page to the site's FAQ page, when the crawl holds one and no in-content link to it from this page."""
+    return find_faq_page(db, client, site, page)
 
 
 def _opening_text(result: dict[str, Any]) -> str | None:
@@ -911,6 +1045,8 @@ def draft(bundle: dict[str, Any], month: str) -> dict[str, Any]:
             evidence.append(f"Consumer need ({need['basis']}): {need['name']}. {need['evidence']}")
         evidence.append(f"Crawl status: {ctx['evidence']['crawl_status_name']}. {ctx['evidence']['summary']}")
         evidence.extend(f"Unverified: {line}" for line in ctx["evidence"]["unverified"])
+        if ctx.get("style_notes"):
+            evidence.append(f"Client tone & style notes: {ctx['style_notes']}")
     names = ", ".join(p["name"].lower() for p in parts)
     if investigation:
         title = f"Investigate crawler access: /{path}"

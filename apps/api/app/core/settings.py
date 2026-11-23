@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     serp_pull_hour_utc: int = 15
     #: Terms per client per month. The cost is this times the number of
     #: clients whose Search Console data makes the result actionable.
-    serp_pull_limit: int = 20
+    serp_pull_limit: int = 30
     #: The monthly engine run. On this day of the month it runs the month
     #: before — Search Console lags about three days, so by the fifth the
     #: previous month has closed out.

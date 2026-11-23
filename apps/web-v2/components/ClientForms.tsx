@@ -110,6 +110,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
   const [sheet, setSheet] = useState(client.account_sheet_url ?? "");
   const [mode, setMode] = useState<"execution" | "consulting">(client.service_mode ?? "execution");
   const [group, setGroup] = useState(client.group_name ?? "");
+  const [styleNotes, setStyleNotes] = useState(client.style_notes ?? "");
   const tier = tiers.find((t) => t.id === tierId);
 
   return (
@@ -129,6 +130,7 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
             business_model: model || null,
             start_date: start || null,
             account_sheet_url: sheet.trim() || null,
+            style_notes: styleNotes.trim() || null,
           }),
         );
       }}
@@ -199,6 +201,20 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
               Open account record ↗
             </a>
           ) : null}
+        </div>
+        <div className="mt-4">
+          <Field
+            label="Tone & style notes"
+            hint="Decision Engine, CTR, and Content Optimizer drafts follow these notes (voice, spelling, banned phrases, compliance rules, or formatting preferences)."
+          >
+            <textarea
+              value={styleNotes}
+              onChange={(e) => setStyleNotes(e.target.value)}
+              rows={4}
+              placeholder="e.g. Direct, plain language; Australian English; never promise guaranteed outcomes."
+              className="w-full rounded-[10px] border border-[#e3e6e8] bg-white px-3 py-2 text-sm text-[#171a22] placeholder:text-[#7a838c] focus:outline-none focus:ring-2 focus:ring-[var(--brand-teal)]"
+            />
+          </Field>
         </div>
         {tier ? (
           <p className="mt-4 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">

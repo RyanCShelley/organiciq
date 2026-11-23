@@ -9,21 +9,25 @@ are used, and an operator who confirms more is told they are over it, not stoppe
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
+from app.core.urls import normalize_url, url_variants
+from app.decisions.action_context import REJECTION_REASONS
 from app.integrations import teamwork
 from app.models.client import Client
-from app.models.engine_task import EngineTask
+from app.models.engine_task import INACTIVE_STATUSES, EngineTask
 from app.services.monthly_review import parse_month
 from app.services import part_done, part_tools, month_work, task_results, task_verify, teamwork_subtasks, teamwork_sync
 from app.services.plan_allowances import resolve_plan_allowances
@@ -36,6 +40,16 @@ COUNTED = ("confirmed", "sent", "shipped")
 class PartIn(BaseModel):
     id: str = Field(default="", max_length=16)
     name: str = Field(min_length=1, max_length=200)
+    custom: bool = False
+
+
+class TaskPartUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default="", max_length=16)
+    name: str = Field(min_length=1, max_length=200)
+    status: Literal["open", "done"] | None = None
+    custom: bool | None = None
 
 
 class TaskIn(BaseModel):
@@ -55,13 +69,43 @@ class TaskIn(BaseModel):
     parts: list[PartIn] = []
 
 
+class TaskRejectIn(BaseModel):
+    month: str | None = None
+    kind: Literal["prescription", "suggestion", "growth_action"] = "growth_action"
+    rule_id: str = Field(default="GA", min_length=1, max_length=16)
+    search: str = Field(default="(page)", min_length=1, max_length=400)
+    page: str = Field(min_length=1, max_length=2048)
+    title: str | None = Field(default=None, max_length=500)
+    why: str | None = None
+    steps: list[str] = []
+    parts: list[PartIn] = []
+    rejection_reason: str = Field(min_length=1, max_length=32)
+    rejection_note: str | None = Field(default=None, max_length=2000)
+
+
 class TaskUpdate(BaseModel):
     assignee_email: str | None = None
     due: date | None = None
-    status: Literal["confirmed", "shipped", "dropped"] | None = None
+    status: Literal["confirmed", "shipped", "dropped", "rejected"] | None = None
+    rejection_reason: str | None = Field(default=None, max_length=32)
+    rejection_note: str | None = Field(default=None, max_length=2000)
+    steps: list[str] | None = None
+    parts: list[TaskPartUpdate] | None = None
     #: Distinguishes "leave it" from "clear it" for the two optional fields.
     clear_assignee: bool = False
     clear_due: bool = False
+
+
+def _validate_rejection_reason(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    key = reason.strip()
+    if key not in REJECTION_REASONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid rejection_reason '{reason}'. Expected one of: {', '.join(REJECTION_REASONS)}.",
+        )
+    return key
 
 
 def _out(task: EngineTask) -> dict:
@@ -90,6 +134,11 @@ def _out(task: EngineTask) -> dict:
         "teamwork_subtasks": len(task.teamwork_subtasks or {}),
         "shipped_at": task.shipped_at.isoformat() if task.shipped_at else None,
         "check_on": task.check_on.isoformat() if task.check_on else None,
+        "rejection_reason": task.rejection_reason,
+        "rejection_reason_label": REJECTION_REASONS.get(task.rejection_reason) if task.rejection_reason else None,
+        "rejection_note": task.rejection_note,
+        "rejected_by": task.rejected_by,
+        "rejected_at": task.rejected_at.isoformat() if task.rejected_at else None,
     }
 
 
@@ -103,7 +152,24 @@ def _month(value: str) -> str:
 
 def _pages_used(rows) -> int:
     """Growth actions are sold by the page: however many tasks a page has, it is one."""
-    return len({r.page_url for r in rows if r.status in COUNTED})
+    return len({normalize_url(r.page_url) or r.page_url for r in rows if r.status in COUNTED})
+
+
+def _find_task(db: Session, client: Client, month: str, rule_id: str, search: str, page_url: str) -> EngineTask | None:
+    urls = url_variants(page_url) or [page_url]
+    lower_urls = list({u.lower() for u in urls})
+    return (
+        db.query(EngineTask)
+        .filter(
+            EngineTask.client_id == client.id,
+            EngineTask.month == month,
+            EngineTask.rule_id == rule_id,
+            EngineTask.search == search,
+            or_(EngineTask.page_url.in_(urls), func.lower(EngineTask.page_url).in_(lower_urls)),
+        )
+        .order_by(EngineTask.confirmed_at.desc())
+        .first()
+    )
 
 
 def _allowance(client: Client, used: int) -> dict:
@@ -189,17 +255,7 @@ def confirm_task(
     """Confirm a prescription or suggestion as a task. Confirming the same one twice returns the first."""
     month = _month(payload.month)
     search = " ".join(payload.search.lower().split())
-    task = (
-        db.query(EngineTask)
-        .filter(
-            EngineTask.client_id == client.id,
-            EngineTask.month == month,
-            EngineTask.rule_id == payload.rule_id,
-            EngineTask.search == search,
-            EngineTask.page_url == payload.page,
-        )
-        .one_or_none()
-    )
+    task = _find_task(db, client, month, payload.rule_id, search, payload.page)
     created = task is None
     if task is None:
         task = EngineTask(
@@ -207,20 +263,164 @@ def confirm_task(
             page_url=payload.page, confirmed_by=user.email,
         )
         db.add(task)
-    elif task.status == "dropped":
-        # Confirming again after dropping it brings it back, as a fresh yes from whoever says it.
-        task.status, task.confirmed_by, task.confirmed_at = "confirmed", user.email, datetime.now(timezone.utc)
+    elif task.status in INACTIVE_STATUSES:
+        # Confirming again after dropping or rejecting brings it back, preserving "sent" if already pushed to Teamwork.
+        task.status = "sent" if task.teamwork_task_id else "confirmed"
+        task.confirmed_by, task.confirmed_at = user.email, datetime.now(timezone.utc)
+        task.shipped_at = None
+        task.rejection_reason = None
+        task.rejection_note = None
+        task.rejected_by = None
+        task.rejected_at = None
         created = True
     if created:
         task.title, task.why, task.steps = payload.title, payload.why, list(payload.steps)
         task.done_when, task.metric, task.effort_min = payload.done_when, payload.metric, payload.effort_min
         task.evidence = list(payload.evidence)
-        task.parts = [{"id": p.id, "name": p.name, "status": "open"} for p in payload.parts] or [{**p, "status": "open"} for p in part_tools.from_steps(task.steps)]
+        task.parts = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "status": "open",
+                **({"custom": True} if (p.custom or p.id == "CUSTOM") else {}),
+            }
+            for p in payload.parts
+        ] or [{**p, "status": "open"} for p in part_tools.from_steps(task.steps)]
         task_verify.capture_before(db, client, task)  # the page as the crawl last saw it, to compare the live page with later
     db.commit()
     db.refresh(task)
     used = _pages_used(db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month).all())
     return {"created": created, "task": _out(task), "allowance": _allowance(client, used)}
+
+
+@router.post("/reject")
+def reject_task(
+    payload: TaskRejectIn,
+    client: Annotated[Client, Depends(require_client)],
+    user: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Record a reviewer rejection with one of the 8 structured reasons, directly from Workbench/Diagnose or Plan."""
+    reason = _validate_rejection_reason(payload.rejection_reason)
+    month = _month(payload.month or datetime.now(timezone.utc).strftime("%Y-%m"))
+    search = " ".join(payload.search.lower().split()) or "(page)"
+    task = _find_task(db, client, month, payload.rule_id, search, payload.page)
+    now = datetime.now(timezone.utc)
+    if task is None:
+        task = EngineTask(
+            client_id=client.id,
+            month=month,
+            kind=payload.kind,
+            rule_id=payload.rule_id,
+            search=search,
+            page_url=payload.page,
+            title=payload.title or f"Rejected {payload.rule_id} on {payload.page}",
+            why=payload.why,
+            steps=list(payload.steps),
+            parts=[
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "status": "open",
+                    **({"custom": True} if (p.custom or p.id == "CUSTOM") else {}),
+                }
+                for p in payload.parts
+            ],
+            confirmed_by=user.email,
+        )
+        db.add(task)
+    else:
+        if task.parts:
+            part_done.set_all(db, client, task, False, user.email)
+        part_done.remove_all(db, client, task)
+        if payload.title:
+            task.title = payload.title
+        if payload.why is not None:
+            task.why = payload.why
+        if payload.steps:
+            task.steps = list(payload.steps)
+        if payload.parts:
+            task.parts = [
+                {
+                    "id": p.id or ("CUSTOM" if p.custom else ""),
+                    "name": p.name,
+                    "status": "open",
+                    **({"custom": True} if (p.custom or p.id == "CUSTOM") else {}),
+                }
+                for p in payload.parts
+            ]
+    task.status = "rejected"
+    task.shipped_at = None
+    task.rejection_reason = reason
+    task.rejection_note = (payload.rejection_note or "").strip() or None
+    task.rejected_by = user.email
+    task.rejected_at = now
+    db.commit()
+    db.refresh(task)
+    return _out(task)
+
+
+def _merge_parts(existing: list[dict], incoming: list[TaskPartUpdate], who: str | None = None) -> list[dict]:
+    def _part_id(pid: str | None, is_custom: bool | None) -> str:
+        raw = str(pid or "").strip()
+        if not raw and is_custom:
+            return "CUSTOM"
+        return raw
+
+    by_key = {
+        (_part_id(p.get("id"), p.get("custom")), str(p.get("name") or "").strip().lower()): p
+        for p in existing
+    }
+    now_iso = datetime.now(timezone.utc).isoformat()
+    out: list[dict] = []
+    for p in incoming:
+        pid = _part_id(p.id, p.custom)
+        name_key = p.name.strip().lower()
+        prev = by_key.get((pid, name_key))
+        if prev is None and pid == "CUSTOM":
+            prev = by_key.get(("", name_key))
+        item = dict(prev) if prev else {}
+        item["id"] = pid or _part_id(item.get("id"), item.get("custom") or p.custom)
+        item["name"] = p.name
+        was_done = item.get("status") == "done"
+        new_status = p.status or item.get("status") or "open"
+        item["status"] = new_status
+        if new_status == "done":
+            if not item.get("done_at"):
+                item["done_at"] = now_iso
+            if not item.get("done_by") and who:
+                item["done_by"] = who
+            item.pop("no_auto", None)
+        elif was_done and p.status == "open":
+            item["done_at"] = None
+            item["done_by"] = None
+            item["done_how"] = None
+            item["verified_at"] = None
+            item["verified_how"] = None
+            item["no_auto"] = True
+        if p.custom or item["id"] == "CUSTOM":
+            item["custom"] = True
+        out.append(item)
+    return out
+
+
+def _sync_parts_from_steps(existing: list[dict], steps: list[str]) -> list[dict]:
+    parsed = part_tools.from_steps(steps)
+    if not parsed:
+        return existing
+    by_name = {str(p.get("name") or "").strip().lower(): p for p in existing}
+    out: list[dict] = []
+    for p in parsed:
+        prev = by_name.get(p["name"].strip().lower())
+        if prev:
+            out.append(dict(prev))
+        else:
+            pid = p["id"] or "CUSTOM"
+            item: dict = {"id": pid, "name": p["name"], "status": "open"}
+            if pid == "CUSTOM":
+                item["custom"] = True
+            out.append(item)
+    return out
 
 
 @router.patch("/{task_id}")
@@ -232,6 +432,7 @@ def update_task(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
     task = _get(db, client, task_id)
+    reason = _validate_rejection_reason(payload.rejection_reason)
     if payload.clear_assignee:
         task.assignee_email = None
     elif payload.assignee_email is not None:
@@ -240,6 +441,14 @@ def update_task(
         task.due = None
     elif payload.due is not None:
         task.due = payload.due
+    if payload.status in ("dropped", "rejected", "confirmed") and task.parts:
+        part_done.set_all(db, client, task, False, user.email)
+    if payload.steps is not None:
+        task.steps = list(payload.steps)
+        if payload.parts is None:
+            task.parts = _sync_parts_from_steps(list(task.parts or []), task.steps)
+    if payload.parts is not None:
+        task.parts = _merge_parts(list(task.parts or []), payload.parts, who=user.email)
     if payload.status is not None:
         if payload.status == "confirmed" and task.teamwork_task_id:
             task.status = "sent"  # it already went to Teamwork; it cannot be unsent from here
@@ -247,11 +456,48 @@ def update_task(
             task.status = payload.status
         task.shipped_at = datetime.now(timezone.utc) if payload.status == "shipped" else None
         if payload.status == "shipped":
-            # Every part is done, and each writes its own annotation.
+            task.rejection_reason = None
+            task.rejection_note = None
+            task.rejected_by = None
+            task.rejected_at = None
+            # Clean any annotations for removed/shifted indices, then mark every part done.
+            part_done.sync_annotations(db, client, task, user.email)
             part_done.set_all(db, client, task, True, user.email)
             task_results.take_baseline(db, client, task)
-        elif task.parts:
-            part_done.set_all(db, client, task, False, user.email)
+        elif payload.status == "confirmed":
+            task.rejection_reason = None
+            task.rejection_note = None
+            task.rejected_by = None
+            task.rejected_at = None
+            if task.parts:
+                part_done.set_all(db, client, task, False, user.email)
+            part_done.remove_all(db, client, task)
+        elif payload.status in ("dropped", "rejected"):
+            if reason is not None:
+                task.rejection_reason = reason
+            if payload.rejection_note is not None:
+                task.rejection_note = payload.rejection_note.strip() or None
+            if payload.status == "rejected" or reason is not None:
+                task.rejected_by = user.email
+                task.rejected_at = datetime.now(timezone.utc)
+            if task.parts:
+                part_done.set_all(db, client, task, False, user.email)
+            part_done.remove_all(db, client, task)
+    else:
+        if reason is not None:
+            task.rejection_reason = reason
+            task.rejected_by = task.rejected_by or user.email
+            task.rejected_at = task.rejected_at or datetime.now(timezone.utc)
+        if payload.rejection_note is not None:
+            task.rejection_note = payload.rejection_note.strip() or None
+        if payload.steps is not None or payload.parts is not None:
+            if task.status in INACTIVE_STATUSES:
+                if task.parts:
+                    part_done.set_all(db, client, task, False, user.email)
+                part_done.remove_all(db, client, task)
+            else:
+                part_done.sync_annotations(db, client, task, user.email)
+                part_done._settle(db, client, task)
     db.commit()
     db.refresh(task)
     return _out(task)
@@ -306,8 +552,12 @@ def _description(task: EngineTask, client: Client) -> tuple[str, str]:
         record_url=f"{get_settings().web_v2_app_url.rstrip('/')}/{client.slug}/engine",
     )
     if task.steps and task.kind == "growth_action":
-        # Parts are headed by "# " lines; the steps under a heading are its checklist.
-        lines = [f"\n{step[2:]}" if step.startswith("# ") else f"  [ ] {step}" for step in task.steps]
+        # Parts are headed by "#" lines; the steps under a heading are its checklist.
+        lines = []
+        for step in task.steps:
+            stripped = step.strip()
+            heading = re.match(r"^#(?!#)\s*(.+)$", stripped)
+            lines.append(f"\n{heading.group(1).strip()}" if heading else f"  [ ] {step}")
         text += "\n\nChecklist" + "\n".join(lines)
     elif task.steps:
         text += "\n\nChecklist\n" + "\n".join(f"{i + 1}. {step}" for i, step in enumerate(task.steps))
@@ -334,11 +584,11 @@ def send_task(
     """Push the task to the client's Teamwork tasklist, with a subtask for each of its steps. Idempotent: a second press returns the first task
     and makes only the subtasks that are missing."""
     task = _get(db, client, task_id, lock=True)
+    if task.status in INACTIVE_STATUSES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This task was dropped or rejected. Confirm it again first.")
     subs = teamwork_subtasks.from_steps(task.steps or [], growth=task.kind == "growth_action")
     if task.teamwork_task_id and len(task.teamwork_subtasks or {}) >= min(len(subs), teamwork_subtasks.MAX_SUBTASKS):
         return _out(task)
-    if task.status == "dropped":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This task was dropped. Confirm it again first.")
     if not teamwork.configured():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Teamwork is not set up on this install, so the task can be copied but not sent.")
     assignee = teamwork_subtasks.assignee_id(task.assignee_email)

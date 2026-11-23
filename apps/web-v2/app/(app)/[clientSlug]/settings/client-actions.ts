@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { ApiError, apiFetch } from "@/lib/api";
+import { ApiError, apiFetch, type ClientUpdate } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
 
 function failure(error: unknown, fallback: string): ActionResult {
@@ -13,10 +13,20 @@ function failure(error: unknown, fallback: string): ActionResult {
 export async function updateClientAction(
   clientId: string,
   slug: string,
-  fields: Record<string, unknown>,
+  fields: ClientUpdate | Record<string, unknown>,
 ): Promise<ActionResult> {
   try {
-    await apiFetch(`/clients/${clientId}`, { method: "PATCH", body: fields });
+    const body =
+      "style_notes" in fields
+        ? {
+            ...fields,
+            style_notes:
+              typeof fields.style_notes === "string"
+                ? fields.style_notes.trim() || null
+                : (fields.style_notes ?? null),
+          }
+        : fields;
+    await apiFetch(`/clients/${clientId}`, { method: "PATCH", body });
     revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {

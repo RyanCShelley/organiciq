@@ -16,7 +16,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 
-STATUSES = ("confirmed", "sent", "shipped", "dropped")
+STATUSES = ("confirmed", "sent", "shipped", "dropped", "rejected")
+INACTIVE_STATUSES = ("dropped", "rejected")
 
 
 class EngineTask(Base):
@@ -61,3 +62,8 @@ class EngineTask(Base):
     #: What the same numbers were over the 28 days after, kept once measured so it never moves again.
     outcome: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Reviewer rejection feedback (when status is rejected or dropped with a reason).
+    rejection_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rejection_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rejected_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

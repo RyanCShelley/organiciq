@@ -34,7 +34,7 @@ logger = logging.getLogger("organiciq.task_verify")
 
 CHECK_DAYS = 45
 OPENING_CHANGED_BELOW = 0.85
-_NOUN = {"S-5": "title or description", "A-1": "opening", "P-1": "opening", "S-2": "FAQ", "V-7": "FAQ markup", "S-1": "reworded sentences", "V-4": "internal links", "S-4": "internal links"}
+_NOUN = {"S-5": "title or description", "MC-1": "title or description", "A-1": "opening", "P-1": "opening", "S-2": "FAQ", "V-7": "FAQ markup", "S-1": "reworded sentences", "V-4": "internal links", "S-4": "internal links"}
 
 
 def _opening(sections: list[Any]) -> str:
@@ -144,7 +144,7 @@ def _check_links(live: dict, before: dict | None, *, db: Session, client: Client
     return "not_live", "no link to this page has been confirmed live in the Inlink suggester since the action was confirmed"
 
 
-_CHECKS = {"S-5": _check_title, "A-1": _check_opening, "P-1": _check_opening, "S-2": _check_faq, "V-7": _check_markup, "S-1": _check_terms, "V-4": _check_links, "S-4": _check_links}
+_CHECKS = {"S-5": _check_title, "MC-1": _check_title, "A-1": _check_opening, "P-1": _check_opening, "S-2": _check_faq, "V-7": _check_markup, "S-1": _check_terms, "V-4": _check_links, "S-4": _check_links}
 
 
 def verdict_for(part: dict[str, Any], live: dict, *, text: str, db: Session, client: Client, task: EngineTask) -> Verdict:
@@ -238,7 +238,7 @@ def maybe_check_open(db: Session) -> bool:
     db.commit()
     since = now - timedelta(days=CHECK_DAYS)
     months = {now.strftime("%Y-%m"), (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")}
-    for task in db.query(EngineTask).filter(EngineTask.month.in_(months), EngineTask.status != "dropped", EngineTask.confirmed_at >= since).limit(300).all():
+    for task in db.query(EngineTask).filter(EngineTask.month.in_(months), ~EngineTask.status.in_(("dropped", "rejected")), EngineTask.confirmed_at >= since).limit(300).all():
         try:
             client = db.get(Client, task.client_id)
             if client is not None:

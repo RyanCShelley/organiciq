@@ -40,9 +40,10 @@ def _stored_intents(db: Session, client: Client, keyword: str) -> tuple[bool, li
     return (row is not None, list(row[0]) if row and row[0] else None)
 
 
-def _pull_intents(db: Session, client: Client, keyword: str, overview=dataforseo.keyword_overview) -> list[str] | None:
+def _pull_intents(db: Session, client: Client, keyword: str, overview=None) -> list[str] | None:
     from app.ingestion.seranking.pipeline_domain import resolve_source
 
+    overview = overview or dataforseo.keyword_overview
     source = resolve_source(client)
     rows = overview([keyword], source=source)
     if not rows:
@@ -66,8 +67,8 @@ def _watchlist_intents(db: Session, client: Client, keyword: str) -> list[str] |
     return [part.strip().lower() for part in str(row[0]).replace(",", "/").split("/") if part.strip()]
 
 
-def _pull_serp(db: Session, client: Client, keyword: str, fetch=dataforseo.fetch) -> FactSerpFeature:
-    features = fetch(keyword)
+def _pull_serp(db: Session, client: Client, keyword: str, fetch=None) -> FactSerpFeature:
+    features = (fetch or dataforseo.fetch)(keyword)
     # One row a day for a search: a pull made earlier today without its ranking results is filled in, not duplicated.
     today = db.query(FactSerpFeature).filter(FactSerpFeature.client_id == client.id, FactSerpFeature.pulled_on == date.today(), FactSerpFeature.keyword == keyword).first()
     if today is not None:
@@ -97,7 +98,7 @@ def _labels(db: Session, client: Client, keyword: str, pull: bool, overview) -> 
 
 
 def for_search(
-    db: Session, client: Client, search: str, *, pull: bool = True, overview=dataforseo.keyword_overview, fetch=dataforseo.fetch, ask=None,
+    db: Session, client: Client, search: str, *, pull: bool = True, overview=None, fetch=None, ask=None,
 ) -> dict[str, Any]:
     """`{reading, labels, questions}` for one search: the intent as read from its results page, the tools' labels for
     reference, and the "People also ask" questions the page showed.
@@ -152,3 +153,36 @@ def for_search(
         serp.reading = reading
         db.commit()
     return {"reading": reading, "labels": labels, "questions": list(serp.questions or [])}
+
+
+def serp_detail(
+    db: Session,
+    client: Client,
+    search: str,
+    *,
+    pull: bool = False,
+    overview=None,
+    fetch=None,
+    ask=None,
+) -> dict[str, Any]:
+    """Inspect or pull full stored DataForSEO SERP results, item_types, holders, questions, and reading."""
+    keyword = " ".join((search or "").lower().split())
+    signals = for_search(db, client, keyword, pull=pull, overview=overview, fetch=fetch, ask=ask)
+    serp = (
+        db.query(FactSerpFeature)
+        .filter(FactSerpFeature.client_id == client.id, func.lower(FactSerpFeature.keyword) == keyword)
+        .order_by(FactSerpFeature.pulled_on.desc())
+        .first()
+    ) if keyword else None
+    return {
+        "search": keyword,
+        "pulled_on": serp.pulled_on.isoformat() if serp else None,
+        "item_types": list(serp.item_types or []) if serp else [],
+        "features": list(serp.item_types or []) if serp else [],
+        "holders": serp.holders or {} if serp else {},
+        "results": list(serp.results or []) if serp else [],
+        "questions": list(serp.questions or []) if serp else [],
+        "reading": signals["reading"],
+        "labels": signals.get("labels") or [],
+        "configured": dataforseo.configured(),
+    }

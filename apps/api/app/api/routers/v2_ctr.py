@@ -78,6 +78,39 @@ def write_title(
     cap = get_settings().ask_monthly_cap_usd
     if float(model_spend.month_spend(db, client)) >= cap:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"This client has used its ${cap:.0f} for model questions this month. The limit resets on the 1st.")
-    row = ctr_titles.start(db, client, payload.url, payload.depth, payload.start, payload.end, user.email)
+    url = normalize_url(payload.url) or payload.url
+    row = ctr_titles.start(db, client, url, payload.depth, payload.start, payload.end, user.email)
     background.add_task(ctr_titles.run, row.id)
     return {"id": str(row.id)}
+
+
+@router.get("/title/{draft_id}")
+def get_title_draft(
+    draft_id: str,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Poll a single CTR title + meta description draft by id."""
+    from uuid import UUID as _UUID
+    from app.models.schema_tools import CtrTitleDraft
+
+    try:
+        uid = _UUID(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid draft id") from exc
+    row = db.query(CtrTitleDraft).filter(CtrTitleDraft.id == uid, CtrTitleDraft.client_id == client.id).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+    return {
+        "id": str(row.id),
+        "status": row.status,
+        "error": row.error,
+        "depth": row.depth,
+        "cost_usd": float(row.cost_usd or 0),
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "from": row.range_from,
+        "to": row.range_to,
+        **(row.payload or {}),
+    }

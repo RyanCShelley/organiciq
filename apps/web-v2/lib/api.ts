@@ -85,4 +85,34 @@ export type Client = {
   sitemap_url?: string | null;
   path_prefix?: string | null;
   crawl_page_limit?: number | null;
+  style_notes?: string | null;
+};
+
+export type ClientCreate = {
+  client_name: string;
+  domain: string;
+  tier_id?: string | null;
+  service_mode?: "execution" | "consulting";
+  group_name?: string | null;
+  slug?: string | null;
+  start_date?: string | null;
+  primary_market?: string | null;
+  business_model?: "lead_gen" | "ecommerce" | "both" | null;
+  timezone?: string;
+  monthly_lead_goal?: number | null;
+  brand_aliases?: string[];
+  competitor_domains?: string[];
+  account_sheet_url?: string | null;
+  service_reporting?: { organiciq: boolean; ad_accelerator: boolean } | null;
+  sitemap_url?: string | null;
+  path_prefix?: string | null;
+  crawl_page_limit?: number | null;
+  style_notes?: string | null;
+  status?: "active" | "paused" | "onboarding" | "archived";
+  [key: string]: unknown;
+};
+
+export type ClientUpdate = Partial<Omit<ClientCreate, "client_name" | "domain">> & {
+  client_name?: string;
+  domain?: string;
 };

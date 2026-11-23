@@ -1406,52 +1406,207 @@ export function SearchVisibility({
 
                 {detailLoading ? (
                   <div className="rounded-xl border border-[#ececec] bg-white p-4 text-xs text-[#7a838c]">
-                    Loading ranking pages and competitors…
+                    Loading ranking pages, competitors, and SERP snapshot…
                   </div>
-                ) : detail && (detail.pages.length > 0 || detail.competitors.length > 0) ? (
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    {detail.pages.length > 0 ? (
-                      <div className="rounded-xl border border-[#ececec] bg-white p-4">
-                        <div className="font-[var(--font-heading)] text-[14px] font-bold text-[#0a0c0f]">
-                          Ranking pages (Google)
-                        </div>
-                        <div className="mt-2 divide-y divide-[#f1f2f3]">
-                          {detail.pages.slice(0, 5).map((p) => (
-                            <div key={p.url} className="flex items-center justify-between gap-2 py-1.5 text-xs">
-                              <a
-                                href={p.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="truncate text-[#171a22] hover:text-[#00857b] hover:underline"
-                              >
-                                {shortPath(p.url)}
-                              </a>
-                              <span className="flex-none text-[#7a838c] tabular-nums">
-                                {p.position != null ? `#${p.position.toFixed(1)}` : "—"} · {p.clicks} clk
-                              </span>
+                ) : (
+                  <>
+                    {detail && (detail.pages.length > 0 || detail.competitors.length > 0) ? (
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        {detail.pages.length > 0 ? (
+                          <div className="rounded-xl border border-[#ececec] bg-white p-4">
+                            <div className="font-[var(--font-heading)] text-[14px] font-bold text-[#0a0c0f]">
+                              Ranking pages (Google)
                             </div>
-                          ))}
-                        </div>
+                            <div className="mt-2 divide-y divide-[#f1f2f3]">
+                              {detail.pages.slice(0, 5).map((p) => (
+                                <div key={p.url} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                                  <a
+                                    href={p.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="truncate text-[#171a22] hover:text-[#00857b] hover:underline"
+                                  >
+                                    {shortPath(p.url)}
+                                  </a>
+                                  <span className="flex-none text-[#7a838c] tabular-nums">
+                                    {p.position != null ? `#${p.position.toFixed(1)}` : "—"} · {p.clicks} clk
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {detail.competitors.length > 0 ? (
+                          <div className="rounded-xl border border-[#ececec] bg-white p-4">
+                            <div className="font-[var(--font-heading)] text-[14px] font-bold text-[#0a0c0f]">
+                              Top SERP competitors
+                            </div>
+                            <div className="mt-2 divide-y divide-[#f1f2f3]">
+                              {detail.competitors.slice(0, 5).map((c) => (
+                                <div key={`${c.domain}-${c.position}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                                  <span className="truncate font-medium text-[#171a22]">{c.domain}</span>
+                                  <span className="flex-none font-semibold text-[#4a5560] tabular-nums">#{c.position}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
 
-                    {detail.competitors.length > 0 ? (
+                    {detail ? (
                       <div className="rounded-xl border border-[#ececec] bg-white p-4">
-                        <div className="font-[var(--font-heading)] text-[14px] font-bold text-[#0a0c0f]">
-                          Top SERP competitors
-                        </div>
-                        <div className="mt-2 divide-y divide-[#f1f2f3]">
-                          {detail.competitors.slice(0, 5).map((c) => (
-                            <div key={`${c.domain}-${c.position}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
-                              <span className="truncate font-medium text-[#171a22]">{c.domain}</span>
-                              <span className="flex-none font-semibold text-[#4a5560] tabular-nums">#{c.position}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                              DataForSEO SERP snapshot
                             </div>
-                          ))}
+                            <div className="font-[var(--font-heading)] text-[15px] font-bold text-[#0a0c0f]">
+                              Live search results &amp; People Also Ask
+                            </div>
+                          </div>
+                          {detail.serp ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {detail.serp.reading?.read ? (
+                                <span className="rounded-full bg-[#e6f7f5] px-2.5 py-0.5 text-[11px] font-semibold text-[#00665f]">
+                                  Intent: {detail.serp.reading.name}
+                                </span>
+                              ) : null}
+                              <span className="rounded-full bg-[#f1f3f4] px-2.5 py-0.5 text-[11px] font-semibold text-[#4a5560]">
+                                Pulled {shortDate(detail.serp.pulled_on)}
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
+
+                        {(() => {
+                          const serp = detail.serp;
+                          const featureList = Array.from(
+                            new Set([...(serp?.features ?? []), ...(serp?.item_types ?? [])].filter(Boolean)),
+                          );
+                          const holderEntries = Object.entries(serp?.holders ?? {}).filter(
+                            ([, domains]) => Array.isArray(domains) && domains.length > 0,
+                          );
+                          const hasContent =
+                            Boolean(serp) &&
+                            (featureList.length > 0 ||
+                              holderEntries.length > 0 ||
+                              (serp?.questions.length ?? 0) > 0 ||
+                              (serp?.results.length ?? 0) > 0);
+
+                          if (!serp || !hasContent) {
+                            return (
+                              <div className="mt-3 rounded-[10px] border border-dashed border-[#d3d7d9] bg-[#f8f8f8] px-4 py-3 text-xs text-[#4a5560]">
+                                No DataForSEO SERP snapshot has been pulled for &ldquo;{selectedTerm.term}&rdquo; yet. Open it in the Decision engine to fetch live organic results, SERP features, and People Also Ask questions.
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="mt-3 space-y-3.5">
+                              {featureList.length > 0 ? (
+                                <div>
+                                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                                    SERP features
+                                  </div>
+                                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {featureList.map((f) => (
+                                      <span
+                                        key={f}
+                                        className="rounded-full bg-[#e6f7f5] px-2.5 py-0.5 text-[11px] font-semibold text-[#00665f]"
+                                      >
+                                        {f.replaceAll("_", " ")}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {holderEntries.length > 0 ? (
+                                <div>
+                                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                                    Feature holders
+                                  </div>
+                                  <div className="mt-1.5 flex flex-wrap gap-2">
+                                    {holderEntries.map(([feature, domains]) => (
+                                      <div
+                                        key={feature}
+                                        className="rounded-[10px] border border-[#ececec] bg-[#f8f8f8] px-3 py-1.5 text-xs"
+                                      >
+                                        <span className="font-semibold text-[#171a22]">
+                                          {feature.replaceAll("_", " ")}:
+                                        </span>{" "}
+                                        <span className="text-[#4a5560]">{domains.join(", ")}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {serp.questions.length > 0 ? (
+                                <div>
+                                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                                    People Also Ask ({serp.questions.length})
+                                  </div>
+                                  <ul className="mt-1.5 space-y-1.5">
+                                    {serp.questions.map((q) => (
+                                      <li
+                                        key={q}
+                                        className="flex items-start gap-2 rounded-[10px] border border-[#ececec] bg-[#f8f8f8] px-3 py-2 text-xs text-[#171a22]"
+                                      >
+                                        <span className="mt-0.5 rounded-full bg-[#e6f7f5] px-2 py-0 text-[10px] font-bold text-[#00665f]">
+                                          PAA
+                                        </span>
+                                        <span>{q}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+
+                              {serp.results.length > 0 ? (
+                                <div>
+                                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                                    Top organic results ({serp.results.length})
+                                  </div>
+                                  <div className="mt-1.5 overflow-hidden rounded-[10px] border border-[#ececec]">
+                                    {serp.results.slice(0, 10).map((r) => (
+                                      <div
+                                        key={`${r.rank}-${r.url}`}
+                                        className="flex items-start gap-3 border-b border-[#f1f2f3] bg-white px-3 py-2.5 text-xs last:border-b-0"
+                                      >
+                                        <span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[#223540] text-[10px] font-bold text-white tabular-nums">
+                                          {r.rank}
+                                        </span>
+                                        <div className="min-w-0 flex-1">
+                                          <a
+                                            href={r.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="font-semibold text-[#0a0c0f] hover:text-[#00857b] hover:underline"
+                                          >
+                                            {r.title || r.domain}
+                                          </a>
+                                          <div className="truncate text-[11px] text-[#7a838c]">
+                                            {r.domain} · {r.url}
+                                          </div>
+                                          {r.snippet ? (
+                                            <p className="mt-0.5 line-clamp-2 text-[11px] text-[#4a5560]">{r.snippet}</p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : null}
-                  </div>
-                ) : null}
+                  </>
+                )}
               </div>
             </div>
           ) : (

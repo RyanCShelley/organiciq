@@ -7,6 +7,7 @@ many subtasks are still to come.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,9 +72,11 @@ def from_steps(steps: list[str], *, growth: bool) -> list[Sub]:
                 subs.append(Sub(f"part-{len(subs) + 1}", part, "\n".join(f"[ ] {i}" for i in items) or part))
 
         for step in steps:
-            if step.startswith("# "):
+            stripped = step.strip()
+            heading = re.match(r"^#(?!#)\s*(.+)$", stripped)
+            if heading:
                 close()
-                part, items = step[2:].strip(), []
+                part, items = heading.group(1).strip(), []
             elif part:
                 items.append(step)
             else:  # steps before the first heading stand alone

@@ -80,13 +80,14 @@ def _rows(detail: dict[str, Any]) -> str:
     ) or "(no searches with enough data)"
 
 
-def _page_block(url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str) -> str:
+def _page_block(url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str, style_notes: str | None = None) -> str:
+    style_section = f"\n--- CLIENT TONE & STYLE NOTES ---\n{style_notes.strip()}\n" if (style_notes or "").strip() else ""
     return f"""--- PAGE ---
 Address: {url}
 Brand: {brand}
 Title: {detail.get("title") or "(none)"}
 Main heading: {spot["h1"] or "(not read)"}
-
+{style_section}
 --- THE SEARCHES THIS PAGE RANKS FOR ({start} to {end}, Search Console) ---
 {_rows(detail)}
 
@@ -95,11 +96,11 @@ Main heading: {spot["h1"] or "(not read)"}
 """
 
 
-RULES = """Say only what the page's own words support. No invented prices, awards, numbers, guarantees or claims. Plain wording, no filler, no hype."""
+RULES = """Say only what the page's own words support. No invented prices, awards, numbers, guarantees or claims. Plain wording, no filler, no hype. Honor any client tone & style notes above."""
 
 
-def build_prompt(kind: str, *, url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str, terms: list[str]) -> str:
-    page = _page_block(url, brand, detail, spot, text, start, end)
+def build_prompt(kind: str, *, url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str, terms: list[str], style_notes: str | None = None) -> str:
+    page = _page_block(url, brand, detail, spot, text, start, end, style_notes=style_notes)
     if kind == "opening":
         return f"""You are an editor rewriting ONLY the opening of one page, so the first lines answer what people searching for it want to know. The rest of the page stays as it is.
 
@@ -260,7 +261,8 @@ def run(run_id: UUID) -> None:
         from app.models.llm_visibility import ClientLlmSettings
 
         brand = (db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar() or client.client_name or "").strip()
-        prompt = build_prompt(row.kind, url=row.key, brand=brand, detail=detail, spot=spot, text=text, start=start_d.isoformat(), end=end.isoformat(), terms=missing_terms(detail, text))
+        style_notes = (getattr(client, "style_notes", None) or "").strip() or None
+        prompt = build_prompt(row.kind, url=row.key, brand=brand, detail=detail, spot=spot, text=text, start=start_d.isoformat(), end=end.isoformat(), terms=missing_terms(detail, text), style_notes=style_notes)
         reply, t_in, t_out = llm.call(row.depth, prompt, max_tokens=6000)
         parsed = llm.extract_json(reply)
         if not isinstance(parsed, dict):

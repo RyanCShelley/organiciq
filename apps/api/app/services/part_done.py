@@ -108,6 +108,65 @@ def _settle(db: Session, client: Client, task: EngineTask) -> None:
         task.status, task.shipped_at = ("sent" if task.teamwork_task_id else "confirmed"), None
 
 
+def remove_all(db: Session, client: Client, task: EngineTask) -> None:
+    """Remove every Annotation row tied to this task."""
+    db.query(Annotation).filter(
+        Annotation.client_id == client.id,
+        Annotation.engine_uid.like(f"task:{task.id}:%"),
+    ).delete(synchronize_session=False)
+
+
+def sync_annotations(db: Session, client: Client, task: EngineTask, who: str) -> None:
+    """Keep Annotation rows synchronized with `task.parts` indices and done states after edits, deletions, or reordering."""
+    parts = list(task.parts or [])
+    done_uids = {uid(task, i) for i, p in enumerate(parts) if p.get("status") == "done"}
+    existing_rows = (
+        db.query(Annotation)
+        .filter(
+            Annotation.client_id == client.id,
+            Annotation.engine_uid.like(f"task:{task.id}:%"),
+        )
+        .all()
+    )
+    by_uid = {row.engine_uid: row for row in existing_rows}
+    for key, row in list(by_uid.items()):
+        if key not in done_uids:
+            db.delete(row)
+            del by_uid[key]
+    db.flush()
+
+    today = datetime.now(ZoneInfo(client.timezone or "UTC")).date()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    changed = False
+    for i, part in enumerate(parts):
+        if part.get("status") != "done":
+            continue
+        if not part.get("done_at"):
+            part["done_at"] = now_iso
+            changed = True
+        if not part.get("done_by"):
+            part["done_by"] = who
+            changed = True
+        key = uid(task, i)
+        tool = part_tools.tool_for(str(part.get("id") or ""))
+        expected_kind, expected_action = _KIND.get(tool["key"] if tool else "", (AnnotationType.WEBSITE_CHANGE, None))
+        expected_desc = f"{part['name']} on {_path(task.page_url)}"
+        row = by_uid.get(key)
+        if row is None:
+            _write(db, client, task, i, part, today, who, verified=part.get("verified_how"))
+        elif (
+            row.description != expected_desc
+            or row.annotation_type != expected_kind
+            or row.growth_action != expected_action
+        ):
+            # Another part shifted into this index; recreate cleanly so stale manual notes/results do not leak across parts.
+            db.delete(row)
+            db.flush()
+            _write(db, client, task, i, part, today, who, verified=part.get("verified_how"))
+    if changed:
+        task.parts = [dict(p) for p in parts]
+
+
 def set_all(db: Session, client: Client, task: EngineTask, done: bool, who: str) -> None:
     """Marking the whole action shipped marks every part done; taking it back reopens them. Commits."""
     parts = parts_of(task)
@@ -117,6 +176,6 @@ def set_all(db: Session, client: Client, task: EngineTask, done: bool, who: str)
             part.update(status="done", done_at=datetime.now(timezone.utc).isoformat(), done_by=who)
             _write(db, client, task, i, part, today, who)
         elif not done and part.get("status") == "done":
-            part.update(status="open", done_at=None, done_by=None)
+            part.update(status="open", done_at=None, done_by=None, done_how=None, verified_at=None, verified_how=None)
             _remove(db, client, task, i)
     task.parts = parts

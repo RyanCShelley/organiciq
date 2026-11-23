@@ -21,9 +21,9 @@ TOOLS: dict[str, dict[str, str]] = {
 
 #: part id -> tool. A part not listed here has no tool.
 PART_TOOL = {
-    "S-5": "ctr", "T-1": "ctr",
+    "S-5": "ctr", "T-1": "ctr", "MC-1": "ctr",
     "A-1": "optimizer", "P-1": "optimizer", "S-1": "optimizer", "S-2": "optimizer",
-    "V-4": "inlinks", "S-4": "inlinks", "U-6": "inlinks",
+    "V-4": "inlinks", "S-4": "inlinks", "U-6": "inlinks", "FQ-1": "inlinks",
     "V-7": "schema", "V-3": "schema",
     "S-3": "refresh", "T-S1": "refresh", "T-S2": "refresh", "L-S1": "refresh",
     "U-1": "refresh", "U-2": "refresh", "U-3": "refresh", "U-5": "refresh",
@@ -42,10 +42,12 @@ _BY_NAME = {
     "mark up the faq": "V-7",
     "rewrite the opening": "P-1",
     "reread the title and description": "S-5",
+    "rewrite the meta for clicks": "MC-1",
     "link here from related pages": "S-4",
+    "link to the site's faq page": "FQ-1",
     "add internal links": "V-4",
 }
-_HEADING = re.compile(r"^#\s*(?:\d+\.\s*)?(.+)$")
+_HEADING = re.compile(r"^#(?!#)\s*(?:\d+\.\s*)?(.+)$")
 
 
 def tool_for(part_id: str) -> dict[str, str] | None:
@@ -80,5 +82,6 @@ def describe(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "tool_path": tool["path"] if tool else None, "tool_param": tool["param"] if tool else None, "tool_verb": tool["verb"] if tool else None, "tool_kind": tool.get("kind") if tool else None,
             "status": p.get("status") or "open", "done_at": p.get("done_at"), "done_by": p.get("done_by"), "done_how": p.get("done_how"),
             "verified_at": p.get("verified_at"), "verified_how": p.get("verified_how"), "last_check": p.get("last_check"), "auto": not p.get("no_auto"),
+            "custom": bool(p.get("custom") or p.get("id") == "CUSTOM"),
         })
     return out

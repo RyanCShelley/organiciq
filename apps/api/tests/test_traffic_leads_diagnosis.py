@@ -181,6 +181,6 @@ def test_the_page_route_reads_each_page_and_never_a_foreign_one(client, db, clie
 
 def test_the_page_route_checks_focus_and_count(client, db, client_a, admin_user):
     h = client_header(client_a.id, admin_user.email)
-    assert client.post("/v2/engine/diagnose-page", json={"focus": "visibility", "pages": ["x"]}, headers=h).status_code == 422
+    assert client.post("/v2/engine/diagnose-page", json={"focus": "bogus", "pages": ["x"]}, headers=h).status_code == 422
     assert client.post("/v2/engine/diagnose-page", json={"focus": "leads", "pages": [f"https://a/{i}" for i in range(6)]}, headers=h).status_code == 422
     assert client.post("/v2/engine/diagnose-page", json={"focus": "leads", "pages": []}, headers=h).status_code == 422

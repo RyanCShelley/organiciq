@@ -48,6 +48,8 @@ export type CtrDetail = {
 };
 
 export type CtrDepth = "quick" | "deep" | "deepest";
+export type CtrTitleOption = { title: string; length: number; too_long: boolean; why: string; serves: string[] };
+export type CtrDescriptionOption = { description: string; length: number; too_long: boolean; why: string; serves: string[] };
 export type CtrTitleDraft = {
   id: string;
   status: "running" | "done" | "failed";
@@ -60,9 +62,14 @@ export type CtrTitleDraft = {
   to: string;
   title_now?: string | null;
   title_now_length?: number | null;
+  description_now?: string | null;
+  description_now_length?: number | null;
   diagnosis?: string;
-  options?: { title: string; length: number; too_long: boolean; why: string; serves: string[] }[];
+  options?: CtrTitleOption[];
+  titles?: string[];
   recommended?: number;
+  descriptions?: CtrDescriptionOption[];
+  recommended_description?: number;
   searches_used?: number;
   page_read?: boolean;
   pattern?: string | null;

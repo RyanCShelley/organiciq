@@ -6,9 +6,11 @@ import { findClient } from "@/lib/clients";
 import {
   EMPTY_OVERVIEW,
   EMPTY_PLAN,
+  REJECTION_REASONS,
   type EngineKind,
   type EngineOverview,
   type LeadsCandidates,
+  type RejectionReasonsResponse,
   type TaskPlan,
   type TrafficCandidates,
   type VisibilityCandidates,
@@ -24,16 +26,16 @@ export default async function EnginePage({
   searchParams,
 }: {
   params: Promise<{ clientSlug: string }>;
-  searchParams: Promise<{ bucket?: string; show?: string }>;
+  searchParams: Promise<{ bucket?: string; show?: string; term?: string }>;
 }) {
   const { clientSlug } = await params;
-  const { bucket: requestedBucket, show } = await searchParams;
+  const { bucket: requestedBucket, show, term } = await searchParams;
   const client = await findClient(clientSlug);
   if (!client) notFound();
 
   const month = lastCompleteMonth();
   const workMonth = currentMonth();
-  const [focus, watchlist, plan, team] = await Promise.all([
+  const [focus, watchlist, plan, team, rejectionReasons] = await Promise.all([
     apiFetch<ClientFocus | null>(`/v2/focus/${workMonth}`, { clientId: client.id }),
     apiFetch<Watchlist>("/v2/watchlist", { clientId: client.id }),
     apiFetch<TaskPlan>(`/v2/engine/tasks?month=${workMonth}`, { clientId: client.id }).catch(() => EMPTY_PLAN),
@@ -45,14 +47,23 @@ export default async function EnginePage({
         .then((rows) => rows.filter((r) => r.is_active).map((r) => ({ email: r.email, name: r.name })))
         .catch(() => [] as { email: string; name: string | null }[]),
     ),
+    apiFetch<RejectionReasonsResponse>("/v2/engine/rejection-reasons")
+      .then((res) => (res.reasons?.length ? res.reasons : REJECTION_REASONS))
+      .catch(() => REJECTION_REASONS),
   ]);
 
-  // The bucket in the URL wins; otherwise the one chosen with the focus; otherwise the whole site.
+  // The bucket in the URL wins; a deep-linked ?term= defaults to site-wide when bucket is omitted; otherwise the focus bucket, otherwise whole site.
   const bucketId =
-    requestedBucket === "site" ? null : (requestedBucket ?? focus?.bucket_id ?? null);
-  // A tab in the URL wins; otherwise the focus chosen for this month.
+    requestedBucket === "site"
+      ? null
+      : (requestedBucket ?? (term ? null : (focus?.bucket_id ?? null)));
+  // A tab in the URL wins; a deep-linked ?term= opens Visibility; otherwise the focus chosen for this month.
   const kind: EngineKind | null =
-    show === "visibility" || show === "traffic" || show === "leads" ? show : (focus?.focus ?? null);
+    show === "visibility" || show === "traffic" || show === "leads"
+      ? show
+      : term
+        ? "visibility"
+        : (focus?.focus ?? null);
 
   let data: VisibilityCandidates | null = null;
   let traffic: TrafficCandidates | null = null;
@@ -84,7 +95,6 @@ export default async function EnginePage({
   }
 
   return (
-    <>
     <EngineScreen
       client={client}
       workMonth={workMonth}
@@ -99,7 +109,8 @@ export default async function EnginePage({
       plan={plan}
       team={team}
       error={error}
+      rejectionReasons={rejectionReasons}
+      initialTerm={term ?? null}
     />
-    </>
   );
 }

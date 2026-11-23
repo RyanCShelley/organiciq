@@ -33,6 +33,7 @@ from app.services.schema_pages import content_text
 logger = logging.getLogger("organiciq.ctr_titles")
 
 TITLE_LIMIT = 60
+DESCRIPTION_LIMIT = 160
 OPTIONS = 3
 STALE_MINUTES = 8
 EXCERPT_CHARS = 3500
@@ -65,7 +66,7 @@ def _h1(body: str) -> str:
         return ""
 
 
-def build_prompt(*, url: str, brand: str, detail: dict[str, Any], h1: str, content: str, pattern: dict[str, Any], start: str, end: str) -> str:
+def build_prompt(*, url: str, brand: str, detail: dict[str, Any], h1: str, content: str, pattern: dict[str, Any], start: str, end: str, style_notes: str | None = None) -> str:
     rows = "\n".join(
         f"- “{s['query']}”: position {s['position']}, {s['impressions']:,} impressions, {s['ctr']}% click-through"
         f" against {s['expected_ctr']}% expected" + (f", about {s['extra_clicks']} clicks to gain" if s["below"] else "")
@@ -74,15 +75,17 @@ def build_prompt(*, url: str, brand: str, detail: dict[str, Any], h1: str, conte
     ) or "(no searches with enough data)"
     suffix = f"Most of this site's titles end with “{pattern['suffix']}” after a separator." if pattern.get("suffix") else "The site's titles do not follow one clear ending."
     current = detail.get("title") or ""
-    return f"""You are an SEO copywriter improving the title tag of ONE page so it earns more clicks from the searches it already ranks for. The page's rankings stay as they are: you are improving how well the title matches and sells to the people searching.
+    desc_now = detail.get("description") or ""
+    style_block = f"\n--- CLIENT TONE & STYLE NOTES ---\n{style_notes.strip()}\n" if (style_notes or "").strip() else ""
+    return f"""You are an SEO copywriter improving the title tag and meta description of ONE page so it earns more clicks from the searches it already ranks for. The page's rankings stay as they are: you are improving how well the snippet matches and sells to the people searching.
 
 --- PAGE ---
 Address: {url}
 Brand: {brand}
 Title now ({len(current)} characters): {current or "(none)"}
-Meta description now: {detail.get("description") or "(none)"}
+Meta description now ({len(desc_now)} characters): {desc_now or "(none)"}
 Main heading: {h1 or "(not read)"}
-
+{style_block}
 --- THE SEARCHES THIS PAGE RANKS FOR ({start} to {end}, Search Console) ---
 Brand searches are left out on purpose. The benchmark is what a page at that position usually earns.
 {rows}
@@ -95,17 +98,18 @@ Brand searches are left out on purpose. The benchmark is what a page at that pos
 
 --- RULES ---
 1. Each title is {TITLE_LIMIT} characters or fewer, counting the brand ending if you keep one. Shorter is fine.
-2. Keep the main terms the page already ranks for, near the front. Do not drop a term that earns impressions.
-3. Make the searches that earn less than expected look answered: say what the page is (a product, a collection, a guide) in the searcher's own words, and give a reason to choose it.
-4. Say only what the page's content supports. No invented prices, discounts, awards, numbers or claims. No clickbait, no ALL CAPS, no repeated words.
-5. Keep the site's title pattern (the ending) where it fits within the limit; drop it only when that is the only way to fit the limit.
-6. Write three options that take different approaches (for example: lead with the exact searched term; lead with the benefit; lead with what the page is). Each must be a title someone could use as written.
-7. For each option, name the searches it serves (from the list above) and say in one sentence why it should earn more clicks.
-8. Start with a one or two sentence diagnosis of why the title now earns fewer clicks than its position should.
+2. Each meta description is {DESCRIPTION_LIMIT} characters or fewer (aim for 130–{DESCRIPTION_LIMIT}), written to pair naturally with the titles and give searchers a clear reason to click.
+3. Keep the main terms the page already ranks for, near the front. Do not drop a term that earns impressions.
+4. Make the searches that earn less than expected look answered: say what the page is (a product, a collection, a guide) in the searcher's own words, and give a reason to choose it.
+5. Say only what the page's content supports. No invented prices, discounts, awards, numbers or claims. No clickbait, no ALL CAPS, no repeated words. Honor any client tone & style notes above.
+6. Keep the site's title pattern (the ending) where it fits within the limit; drop it only when that is the only way to fit the limit.
+7. Write three title options ("options") and three meta description options ("descriptions") that take different approaches (for example: lead with the exact searched term; lead with the benefit; lead with what the page is). Each must be ready to use as written.
+8. For each option, name the searches it serves (from the list above) and say in one sentence why it should earn more clicks.
+9. Start with a one or two sentence diagnosis of why the snippet now earns fewer clicks than its position should.
 
 Respond with ONE JSON object, no prose before or after and no markdown fences, exactly this shape:
-{{"diagnosis": "...", "options": [{{"title": "...", "serves": ["search one", "search two"], "why": "..."}}], "recommended": 0}}
-"recommended" is the index (0 to 2) of the option you would use first.
+{{"diagnosis": "...", "options": [{{"title": "...", "serves": ["search one", "search two"], "why": "..."}}], "recommended": 0, "descriptions": [{{"description": "...", "serves": ["search one"], "why": "..."}}], "recommended_description": 0}}
+"recommended" and "recommended_description" are the indices (0 to 2) of the options you would use first.
 """
 
 
@@ -129,6 +133,35 @@ def clean_options(parsed: dict[str, Any], current: str | None) -> tuple[list[dic
         options.append({"title": title, "length": len(title), "too_long": len(title) > TITLE_LIMIT, "why": str(o.get("why") or "")[:400], "serves": [str(x)[:200] for x in (o.get("serves") or []) if x][:6]})
     options = options[:OPTIONS]
     index = next((i for i, o in enumerate(options) if o["title"] == recommended_title), 0)
+    return options, index
+
+
+def clean_descriptions(parsed: dict[str, Any], current: str | None) -> tuple[list[dict[str, Any]], int]:
+    """Cleaned meta description options, deduplicated and checked against the current description and length limit."""
+    seen = {" ".join((current or "").lower().split())}
+    options: list[dict[str, Any]] = []
+    recommended_desc = None
+    raw = parsed.get("descriptions") if isinstance(parsed.get("descriptions"), list) else []
+    rec = parsed.get("recommended_description")
+    for i, o in enumerate(raw):
+        if not isinstance(o, dict):
+            continue
+        desc = " ".join(str(o.get("description") or "").replace("“", '"').replace("”", '"').strip().strip('"').split())
+        key = desc.lower()
+        if not desc or key in seen:
+            continue
+        seen.add(key)
+        if rec == i:
+            recommended_desc = desc
+        options.append({
+            "description": desc,
+            "length": len(desc),
+            "too_long": len(desc) > DESCRIPTION_LIMIT,
+            "why": str(o.get("why") or "")[:400],
+            "serves": [str(x)[:200] for x in (o.get("serves") or []) if x][:6],
+        })
+    options = options[:OPTIONS]
+    index = next((i for i, o in enumerate(options) if o["description"] == recommended_desc), 0)
     return options, index
 
 
@@ -172,7 +205,11 @@ def run(draft_id: UUID) -> None:
 
         brand = (db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar() or client.client_name or "").strip()
         pattern = title_pattern(db, client)
-        prompt = build_prompt(url=row.url, brand=brand, detail=detail, h1=_h1(body), content=content_text(body), pattern=pattern, start=row.range_from, end=row.range_to)
+        style_notes = (getattr(client, "style_notes", None) or "").strip() or None
+        prompt = build_prompt(
+            url=row.url, brand=brand, detail=detail, h1=_h1(body), content=content_text(body),
+            pattern=pattern, start=row.range_from, end=row.range_to, style_notes=style_notes,
+        )
         reply, t_in, t_out = llm.call(row.depth, prompt, max_tokens=6000)
         parsed = llm.extract_json(reply)
         if not isinstance(parsed, dict):
@@ -180,9 +217,21 @@ def run(draft_id: UUID) -> None:
         options, recommended = clean_options(parsed, detail.get("title"))
         if not options:
             raise llm.ModelError("The model gave no usable title that differs from the one now. Run it again, or try a deeper setting.")
+        descriptions, recommended_description = clean_descriptions(parsed, detail.get("description"))
         row.payload = {
-            "title_now": detail.get("title"), "title_now_length": detail.get("title_length"), "diagnosis": str(parsed.get("diagnosis") or "")[:600],
-            "options": options, "recommended": recommended, "searches_used": len(detail["searches"]), "page_read": page_read, "pattern": pattern.get("suffix"),
+            "title_now": detail.get("title"),
+            "title_now_length": detail.get("title_length"),
+            "description_now": detail.get("description"),
+            "description_now_length": detail.get("description_length"),
+            "diagnosis": str(parsed.get("diagnosis") or "")[:600],
+            "options": options,
+            "titles": [o["title"] for o in options],
+            "recommended": recommended,
+            "descriptions": descriptions,
+            "recommended_description": recommended_description,
+            "searches_used": len(detail["searches"]),
+            "page_read": page_read,
+            "pattern": pattern.get("suffix"),
         }
         row.cost_usd, row.status = Decimal(str(llm.cost(row.depth, t_in, t_out))), "done"
         db.commit()

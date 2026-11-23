@@ -22,7 +22,7 @@ def _parts(task: EngineTask) -> list[dict[str, Any]]:
 
 
 def build(db: Session, client: Client, month: str) -> dict[str, Any]:
-    tasks = db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month, EngineTask.status != "dropped").order_by(EngineTask.confirmed_at).all()
+    tasks = db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month == month, ~EngineTask.status.in_(("dropped", "rejected"))).order_by(EngineTask.confirmed_at).all()
     tools: dict[str, dict[str, Any]] = {}
     total = done = seen = 0
     for task in tasks:

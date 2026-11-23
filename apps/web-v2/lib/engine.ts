@@ -64,17 +64,182 @@ export const EMPTY_OVERVIEW: EngineOverview = {
   advice: { level: "ok", headline: "", reasons: [], suggestions: [] },
 };
 
+export type RejectionReasonKey =
+  | "wrong_intent"
+  | "wrong_page_type"
+  | "wrong_target"
+  | "template_constraint"
+  | "insufficient_evidence"
+  | "crawl_misread"
+  | "duplicate"
+  | "low_value";
+
+export type RejectionReason = {
+  key: string;
+  label: string;
+};
+
+export type RejectionReasonsResponse = {
+  reasons: RejectionReason[];
+};
+
+export const REJECTION_REASONS: RejectionReason[] = [
+  { key: "wrong_intent", label: "Wrong search intent" },
+  { key: "wrong_page_type", label: "Wrong page type" },
+  { key: "wrong_target", label: "Wrong target URL" },
+  { key: "template_constraint", label: "Template constraint" },
+  { key: "insufficient_evidence", label: "Insufficient evidence" },
+  { key: "crawl_misread", label: "Incorrect crawl interpretation" },
+  { key: "duplicate", label: "Duplicate recommendation" },
+  { key: "low_value", label: "Low business value" },
+];
+
+export type ChecklistItem = {
+  id: string;
+  title: string;
+  why: string;
+  steps: string[];
+  action_type: string;
+  benefit: string;
+  status: "needed" | "done" | "check";
+  category: string;
+};
+
+export type CrawlChangeDiffSummary = {
+  previous_count: number;
+  current_count: number;
+  added_count: number;
+  removed_count: number;
+  added_samples: string[];
+  removed_samples: string[];
+};
+
+export type CrawlChangeItem = {
+  snapshot_date: string;
+  content_updated_on: string | null;
+  content_changed_on: string | null;
+  previous_replaced_on: string | null;
+  title: string | null;
+  meta_description: string | null;
+  word_count: number | null;
+  paragraphs_count: number;
+  previous_paragraphs_count: number;
+  diff_summary: CrawlChangeDiffSummary | null;
+};
+
+export type HistoryTaskItem = {
+  id: string;
+  month: string;
+  title: string;
+  status: TaskStatus | string;
+  kind: string;
+  rule_id: string;
+  search: string;
+  parts: { id: string; name: string; status: string }[];
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  sent_at: string | null;
+  shipped_at: string | null;
+  rejected_at: string | null;
+  rejected_by: string | null;
+  rejection_reason: string | null;
+  rejection_reason_label: string | null;
+  rejection_note: string | null;
+  created_at: string | null;
+};
+
+export type HistoryAnnotationItem = {
+  id: string;
+  date: string;
+  annotation_type: string;
+  description: string;
+  verified_how: string | null;
+  result: string | null;
+  notes: string | null;
+};
+
+export type PageHistory = {
+  page: string;
+  crawl_changes: CrawlChangeItem[];
+  tasks: HistoryTaskItem[];
+  annotations: HistoryAnnotationItem[];
+};
+
+export type SerpOrganicResult = {
+  rank: number;
+  url: string;
+  domain: string;
+  title: string;
+  snippet?: string;
+};
+
+export type SerpLookupResult = {
+  search: string;
+  pulled_on: string | null;
+  item_types: string[];
+  features: string[];
+  holders: Record<string, string[]>;
+  results: SerpOrganicResult[];
+  questions: string[];
+  reading: ActionContext["intent"] & { search?: string; labels?: string[] };
+  labels: string[];
+  configured: boolean;
+};
+
+export type PriorRejection = {
+  id: string;
+  month: string;
+  search: string;
+  rule_id: string;
+  title: string;
+  rejection_reason: string | null;
+  rejection_reason_label: string | null;
+  rejection_note: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+};
+
+export type PageFactsSummary = {
+  title: string | null;
+  description: string | null;
+  h1: string;
+  word_count: number;
+  schema_types: string[];
+  search_terms_missing?: string[];
+  has_faq: boolean;
+  conversion_elements: number;
+  contact_only_in_footer: boolean;
+  outline?: {
+    title: string | null;
+    h1: string;
+    word_count: number;
+    sections: { heading: string; text: string; has_table: boolean; has_list: boolean }[];
+    schema_types: string[];
+    faq_questions: number;
+    faq_list: string[];
+    conversion_elements: number;
+  };
+};
+
 export type Diagnosis = {
   search: string;
   page: string;
   position?: number;
   impressions?: number;
   clicks?: number;
+  focus?: EngineKind;
+  focus_order_reason?: string | null;
   read: {
     ok: boolean;
     status?: number | null;
     error?: string | null;
+    at?: string;
     final_url?: string;
+    outcome?: string;
+    outcome_name?: string;
+    evidence_source?: "live" | "crawl" | "none";
+    crawl_date?: string | null;
+    usable?: boolean;
     /** Set when the response was not the page (a host's bot check, or nothing readable): nothing is judged from it. */
     blocked?: string;
     /** "crawl" when the host blocked our reader and the page was read from the site crawl instead; the note says which crawl and what that means. */
@@ -116,11 +281,22 @@ export type Diagnosis = {
     evidence: string[];
   }[];
   skipped_suggestions: { id: string; name: string; reason: string }[];
+  context?: {
+    intent?: ActionContext["intent"];
+    page_type?: ActionContext["page_type"];
+    fit?: ActionContext["fit"];
+    template?: ActionContext["template"];
+    checklist?: ChecklistItem[];
+    style_notes?: string | null;
+  };
+  page_history?: PageHistory;
+  page_facts?: PageFactsSummary;
+  evidence?: unknown;
 };
 
-export type DiagnoseResult = { ok: true; results: Diagnosis[] } | { ok: false; error: string };
+export type DiagnoseResult = { ok: true; results: Diagnosis[]; month?: string; focus?: EngineKind } | { ok: false; error: string };
 
-export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped";
+export type TaskStatus = "confirmed" | "sent" | "shipped" | "dropped" | "rejected";
 
 /** One part of a growth action, with the tool that carries it out (none for a plain step). */
 export type TaskPart = {
@@ -137,6 +313,7 @@ export type TaskPart = {
   verified_how?: string | null;
   last_check?: { at: string; result: "live" | "not_live" | "unreadable" | "cannot"; note: string } | null;
   auto?: boolean;
+  custom?: boolean;
   status: "open" | "done";
   done_at: string | null;
   done_by: string | null;
@@ -158,6 +335,7 @@ export type EngineTask = {
   evidence: string[];
   status: TaskStatus;
   confirmed_by: string;
+  confirmed_at?: string | null;
   assignee_email: string | null;
   due: string | null;
   teamwork_task_id: string | null;
@@ -166,6 +344,11 @@ export type EngineTask = {
   parts?: TaskPart[];
   shipped_at?: string | null;
   check_on?: string | null;
+  rejection_reason?: string | null;
+  rejection_reason_label?: string | null;
+  rejection_note?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
 };
 
 export type Allowance = { monthly: number | null; used: number; over: boolean };
@@ -190,6 +373,13 @@ export const EMPTY_PLAN: TaskPlan = {
   teamwork: { configured: false, tasklist_id: null },
 };
 
+export type TaskPartInput = {
+  id: string;
+  name: string;
+  status?: "open" | "done";
+  custom?: boolean;
+};
+
 export type TaskDraft = {
   kind: "prescription" | "suggestion" | "growth_action";
   rule_id: string;
@@ -202,7 +392,21 @@ export type TaskDraft = {
   metric: string | null;
   effort_min: number | null;
   evidence: string[];
-  parts?: { id: string; name: string }[];
+  parts?: { id: string; name: string; custom?: boolean }[];
+};
+
+export type RejectTaskInput = {
+  month?: string;
+  kind?: "prescription" | "suggestion" | "growth_action";
+  rule_id?: string;
+  search?: string;
+  page: string;
+  title?: string;
+  why?: string | null;
+  steps?: string[];
+  parts?: { id: string; name: string; custom?: boolean }[];
+  rejection_reason: string;
+  rejection_note?: string;
 };
 
 export type TaskResult<T = EngineTask> = { ok: true; value: T; allowance?: Allowance } | { ok: false; error: string };
@@ -328,6 +532,9 @@ export type ActionContext = {
   winners?: Winners | null;
   action_types: string[];
   benefits: string[];
+  checklist?: ChecklistItem[];
+  style_notes?: string | null;
+  focus?: EngineKind;
 };
 
 export type TopicPages = {
@@ -359,10 +566,24 @@ export type GrowthPart = {
   /** Where the change lands: page-specific, template-wide, sitewide or new supporting content. */
   scope?: string;
   note?: string;
+  custom?: boolean;
+  tool?: string | null;
+  needs_to_confirm?: string;
+  confidence?: string;
+  classification?: string;
 };
 
 export type GrowthActionBundle =
-  | { ok: false; error: string; context?: ActionContext }
+  | {
+      ok: false;
+      error: string;
+      context?: ActionContext;
+      focus?: EngineKind;
+      focus_order_reason?: string | null;
+      checklist?: ChecklistItem[];
+      prior_rejections?: PriorRejection[];
+      page_history?: PageHistory;
+    }
   | {
       ok: true;
       keyword: string;
@@ -386,6 +607,13 @@ export type GrowthActionBundle =
       topic?: TopicPages;
       /** Another page of the site that suits the term better. Offered, never switched to. */
       better_page?: { url: string; fit: string; impressions: number; why: string } | null;
+      focus?: EngineKind;
+      focus_order_reason?: string | null;
+      checklist?: ChecklistItem[];
+      prior_rejections?: PriorRejection[];
+      page_history?: PageHistory;
+      observations?: { level: "problem" | "note" | "ok"; text: string; how?: string }[];
+      opening?: string | null;
     };
 
 export type CandidateTopic = { keyword: string | null; source: string; search?: string | null; pages: TopicPages | null };

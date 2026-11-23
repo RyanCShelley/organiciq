@@ -642,5 +642,13 @@ def term_detail(db: Session, client: Client, term: str, start: date, end: date) 
     feature = db.query(FactSerpFeature).filter(FactSerpFeature.client_id == client.id, fk == key).order_by(FactSerpFeature.pulled_on.desc()).first()
     return {
         "term": term, "pages": pages, "competitors": competitors, "competitors_read_on": newest.isoformat() if newest else None,
-        "serp": {"pulled_on": feature.pulled_on.isoformat(), "features": list(feature.item_types or []), "holders": feature.holders or {}} if feature else None,
+        "serp": {
+            "pulled_on": feature.pulled_on.isoformat(),
+            "features": list(feature.item_types or []),
+            "item_types": list(feature.item_types or []),
+            "holders": feature.holders or {},
+            "results": list(feature.results or []),
+            "questions": list(feature.questions or []),
+            "reading": feature.reading,
+        } if feature else None,
     }

@@ -1,19 +1,43 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Allowance, DiagnoseResult, Diagnosis, EngineTask, CandidateTopic, GrowthActionBundle, MonthWork, TaskDraft, TaskPlan, TaskResult } from "@/lib/engine";
+import type {
+  Allowance,
+  CandidateTopic,
+  DiagnoseResult,
+  Diagnosis,
+  EngineKind,
+  EngineTask,
+  GrowthActionBundle,
+  MonthWork,
+  PageHistory,
+  RejectTaskInput,
+  RejectionReason,
+  RejectionReasonsResponse,
+  SerpLookupResult,
+  TaskDraft,
+  TaskPartInput,
+  TaskPlan,
+  TaskResult,
+} from "@/lib/engine";
 
 export async function diagnoseAction(
   clientId: string,
   selections: { search: string; page: string }[],
+  focus?: EngineKind | null,
+  month?: string | null,
 ): Promise<DiagnoseResult> {
   try {
-    const body = await apiFetch<{ results: Diagnosis[] }>("/v2/engine/diagnose", {
+    const body = await apiFetch<{ month?: string; focus?: EngineKind; results: Diagnosis[] }>("/v2/engine/diagnose", {
       method: "POST",
       clientId,
-      body: { selections },
+      body: {
+        selections,
+        ...(focus ? { focus } : {}),
+        ...(month ? { month } : {}),
+      },
     });
-    return { ok: true, results: body.results };
+    return { ok: true, results: body.results, month: body.month, focus: body.focus };
   } catch (error) {
     return {
       ok: false,
@@ -24,6 +48,15 @@ export async function diagnoseAction(
 
 function failure(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof ApiError ? error.message : fallback };
+}
+
+export async function rejectionReasonsAction(): Promise<TaskResult<RejectionReason[]>> {
+  try {
+    const out = await apiFetch<RejectionReasonsResponse>("/v2/engine/rejection-reasons");
+    return { ok: true, value: out.reasons };
+  } catch (error) {
+    return failure(error, "The rejection reasons could not be loaded: the API did not answer.");
+  }
 }
 
 export async function confirmTaskAction(clientId: string, month: string, draft: TaskDraft): Promise<TaskResult> {
@@ -39,11 +72,28 @@ export async function confirmTaskAction(clientId: string, month: string, draft: 
   }
 }
 
+export async function rejectTaskAction(clientId: string, input: RejectTaskInput): Promise<TaskResult> {
+  try {
+    const task = await apiFetch<EngineTask>("/v2/engine/tasks/reject", {
+      method: "POST",
+      clientId,
+      body: input,
+    });
+    return { ok: true, value: task };
+  } catch (error) {
+    return failure(error, "The rejection could not be saved: the API did not answer.");
+  }
+}
+
 export async function updateTaskAction(
   clientId: string,
   id: string,
   patch: {
-    status?: "confirmed" | "shipped" | "dropped";
+    status?: "confirmed" | "shipped" | "dropped" | "rejected";
+    rejection_reason?: string;
+    rejection_note?: string;
+    steps?: string[];
+    parts?: TaskPartInput[];
     assignee_email?: string;
     due?: string;
     clear_assignee?: boolean;
@@ -78,16 +128,21 @@ export async function taskTextAction(clientId: string, id: string): Promise<Task
 
 export async function diagnosePagesAction(
   clientId: string,
-  focus: "traffic" | "leads",
+  focus: EngineKind | null,
   pages: string[],
+  month?: string | null,
 ): Promise<DiagnoseResult> {
   try {
-    const body = await apiFetch<{ results: Diagnosis[] }>("/v2/engine/diagnose-page", {
+    const body = await apiFetch<{ month?: string; focus?: EngineKind; results: Diagnosis[] }>("/v2/engine/diagnose-page", {
       method: "POST",
       clientId,
-      body: { focus, pages },
+      body: {
+        ...(focus ? { focus } : {}),
+        ...(month ? { month } : {}),
+        pages,
+      },
     });
-    return { ok: true, results: body.results };
+    return { ok: true, results: body.results, month: body.month, focus: body.focus };
   } catch (error) {
     return {
       ok: false,
@@ -112,18 +167,62 @@ export async function buildGrowthActionAction(
   clientId: string,
   keyword: string,
   page: string | null,
-  focus: "visibility" | "traffic" | "leads",
+  focus: EngineKind | null,
   candidatePage: string,
   search: string | null = null,
+  month?: string | null,
 ): Promise<GrowthActionBundle> {
   try {
     return await apiFetch<GrowthActionBundle>("/v2/engine/growth-action", {
       method: "POST",
       clientId,
-      body: { keyword, page, focus, candidate_page: candidatePage, search },
+      body: {
+        keyword,
+        page,
+        ...(focus ? { focus } : {}),
+        candidate_page: candidatePage,
+        search,
+        ...(month ? { month } : {}),
+      },
     });
   } catch (error) {
     return { ok: false, error: error instanceof ApiError ? error.message : "The page could not be read: the API did not answer." };
+  }
+}
+
+export async function pageHistoryAction(clientId: string, page: string): Promise<TaskResult<PageHistory>> {
+  try {
+    const value = await apiFetch<PageHistory>(`/v2/engine/page-history?page=${encodeURIComponent(page)}`, { clientId });
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "The page history could not be loaded: the API did not answer.");
+  }
+}
+
+export async function serpLookupAction(
+  clientId: string,
+  search: string,
+  pull = false,
+): Promise<TaskResult<SerpLookupResult>> {
+  try {
+    const query = new URLSearchParams({ search, pull: pull ? "true" : "false" });
+    const value = await apiFetch<SerpLookupResult>(`/v2/engine/serp?${query.toString()}`, { clientId });
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "The search results could not be loaded: the API did not answer.");
+  }
+}
+
+export async function pullSerpAction(clientId: string, search: string): Promise<TaskResult<SerpLookupResult>> {
+  try {
+    const value = await apiFetch<SerpLookupResult>("/v2/engine/serp/pull", {
+      method: "POST",
+      clientId,
+      body: { search },
+    });
+    return { ok: true, value };
+  } catch (error) {
+    return failure(error, "The search results could not be pulled: the API did not answer.");
   }
 }
 

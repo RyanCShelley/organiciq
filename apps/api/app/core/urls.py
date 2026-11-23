@@ -41,6 +41,33 @@ def normalize_url(raw: str) -> str:
     return urlunsplit((scheme, netloc, path, "", ""))
 
 
+def url_variants(raw: str) -> list[str]:
+    """Candidate URL representations (canonical, raw, trailing-slash, www, scheme) for DB matching."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    norm = normalize_url(text) or text
+    variants: set[str] = {text, norm}
+    for candidate in (text, norm):
+        if candidate.endswith("/"):
+            trimmed = candidate.rstrip("/")
+            if trimmed and trimmed not in ("http:", "https:"):
+                variants.add(trimmed)
+        elif "?" not in candidate and "#" not in candidate:
+            variants.add(f"{candidate}/")
+    parts = urlsplit(norm)
+    if parts.scheme in ("http", "https") and parts.netloc:
+        host = parts.netloc
+        hosts = {host, f"www.{host}" if not host.startswith("www.") else host[4:]}
+        path = parts.path or "/"
+        paths = {path, ""} if path == "/" else {path.rstrip("/"), f"{path.rstrip('/')}/"}
+        for scheme in ("https", "http"):
+            for h in hosts:
+                for p in paths:
+                    variants.add(f"{scheme}://{h}{p}")
+    return list(variants)
+
+
 def rewrite_url_host(raw_url: str, target_host: str) -> str:
     """Replace the URL host with target_host, preserving path/query/fragment."""
     host = (target_host or "").strip()

@@ -38,7 +38,7 @@ function PagePane({ client, url, from, to }: { client: Client; url: string; from
   const [d, setD] = useState<CtrDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<CtrDepth>("quick");
-  const [copied, setCopied] = useState<number | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const load = () => ctrPageAction(client.id, url, from, to).then((r) => (r.ok ? setD(r.value) : setError(r.error)));
   useEffect(() => {
@@ -61,65 +61,119 @@ function PagePane({ client, url, from, to }: { client: Client; url: string; from
       if (!r.ok) setError(r.error);
       else await load();
     });
-  const copy = (i: number, text: string) => {
+  const copy = (key: string, text: string) => {
     void navigator.clipboard.writeText(text).then(() => {
-      setCopied(i);
+      setCopied(key);
       setTimeout(() => setCopied(null), 1500);
     });
   };
   const draft = d?.title_draft;
+  const descriptionNow = draft?.description_now ?? d?.description ?? null;
+  const descriptionNowLen = draft?.description_now_length ?? d?.description_length ?? null;
   return (
     <div className="space-y-4 text-sm">
-      <p className="break-all font-semibold">{url}</p>
-      {error ? <p role="alert" className="font-semibold text-red-700">{error}</p> : null}
-      {!d && !error ? <p className="text-[var(--text-secondary)]"><Spinner />Reading the page…</p> : null}
+      <p className="break-all font-[var(--font-heading)] text-base font-bold text-[#0a0c0f]">{url}</p>
+      {error ? <p role="alert" className="rounded-xl border border-[oklch(0.88_0.06_25)] bg-[oklch(0.965_0.025_25)] px-3.5 py-2.5 text-xs font-semibold text-[oklch(0.48_0.17_25)]">{error}</p> : null}
+      {!d && !error ? <p className="text-[#4a5560]"><Spinner />Reading the page…</p> : null}
       {d ? (
         <>
-          <div className="rounded-lg bg-[var(--bg)] p-3 text-xs">
-            <div className="font-semibold">Title{d.title_length != null ? ` (${d.title_length} characters${d.title_length > 60 ? ", may be cut off" : ""})` : ""}</div>
-            <div className="mb-2">{d.title || <span className="text-[var(--text-tertiary)]">none found in the crawl</span>}</div>
-            <div className="font-semibold">Description{d.description_length != null ? ` (${d.description_length} characters${d.description_length > 160 ? ", may be cut off" : d.description_length < 70 ? ", short" : ""})` : ""}</div>
-            <div>{d.description || <span className="text-[var(--text-tertiary)]">none found in the crawl</span>}</div>
+          <div className="rounded-xl border border-[#ececec] bg-[#f8f8f8] p-3.5 text-xs">
+            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+              Current title{d.title_length != null ? ` · ${d.title_length}/60 chars${d.title_length > 60 ? " (may be cut off)" : ""}` : ""}
+            </div>
+            <div className="mt-1 mb-3 text-[13px] text-[#0a0c0f]">{d.title || <span className="text-[#7a838c]">none found in the crawl</span>}</div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+              Current meta description{descriptionNowLen != null ? ` · ${descriptionNowLen}/160 chars${descriptionNowLen > 160 ? " (may be cut off)" : descriptionNowLen < 70 ? " (short)" : ""}` : ""}
+            </div>
+            <div className="mt-1 text-[13px] text-[#0a0c0f]">{descriptionNow || <span className="text-[#7a838c]">none found in the crawl</span>}</div>
           </div>
 
-          <div className="space-y-2 rounded-lg border border-[var(--border)] p-3">
-            <h3 className="font-bold">Title tag options</h3>
-            <p className="text-xs text-[var(--text-tertiary)]">
-              The model reads the searches below, the page&apos;s own words and how this site&apos;s titles are written, and offers three titles. It is a draft: nothing is sent anywhere and it uses no page allowance.
-            </p>
+          <div className="space-y-3 rounded-xl border border-[#ececec] bg-white p-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">Snippet rewrite drafts</div>
+              <h3 className="mt-0.5 font-[var(--font-heading)] text-base font-bold text-[#0a0c0f]">Title tag &amp; meta description options</h3>
+              <p className="mt-1 text-xs text-[#4a5560]">
+                The model reads the searches below, the page&apos;s own words, how this site&apos;s titles are written, and any client tone &amp; style notes, then offers three title options and three meta description options. It is a draft: nothing is sent anywhere and it uses no page allowance.
+              </p>
+            </div>
             {d.model_ready ? (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="text-xs font-semibold">
+              <div className="flex flex-wrap items-end gap-2.5">
+                <label className="text-xs font-semibold text-[#171a22]">
                   How deep
-                  <select value={depth} onChange={(e) => setDepth(e.target.value as CtrDepth)} className="mt-1 block rounded-lg border border-[var(--border)] bg-white px-2 py-2 text-sm font-normal">
+                  <select value={depth} onChange={(e) => setDepth(e.target.value as CtrDepth)} className="mt-1 block rounded-[10px] border border-[#e3e6e8] bg-white px-3 py-2 text-sm font-normal text-[#171a22]">
                     {(Object.keys(DEPTH) as CtrDepth[]).map((k) => <option key={k} value={k}>{DEPTH[k]}</option>)}
                   </select>
                 </label>
-                <button type="button" onClick={write} disabled={pending || running} className="rounded-lg bg-[var(--brand-dark)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                  {pending || running ? <><Spinner />Writing…</> : draft?.status === "done" ? "Write again" : "Write title options"}
+                <button type="button" onClick={write} disabled={pending || running} className="cursor-pointer rounded-full bg-[#223540] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#00a99d] disabled:opacity-50">
+                  {pending || running ? <><Spinner />Writing…</> : draft?.status === "done" ? "Write again" : "Write title & meta options"}
                 </button>
               </div>
-            ) : <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">The model needs the Anthropic key on the API service.</p>}
-            {draft?.status === "failed" ? <p role="alert" className="text-xs font-semibold text-red-700">{draft.error}</p> : null}
+            ) : <p className="rounded-[10px] border border-[oklch(0.88_0.08_85)] bg-[oklch(0.97_0.045_85)] p-2.5 text-xs text-[oklch(0.42_0.1_65)]">The model needs the Anthropic key on the API service.</p>}
+            {draft?.status === "failed" ? <p role="alert" className="text-xs font-semibold text-[oklch(0.48_0.17_25)]">{draft.error}</p> : null}
             {draft?.status === "done" && draft.options ? (
-              <div className="space-y-2 pt-1">
-                {draft.diagnosis ? <p className="text-xs"><strong>Why the title earns less:</strong> {draft.diagnosis}</p> : null}
-                {draft.page_read === false ? <p className="text-xs text-amber-800">The page itself could not be read, so these come from its title, description and searches only.</p> : null}
-                <ol className="space-y-2">
-                  {draft.options.map((o, i) => (
-                    <li key={i} className="rounded-lg border border-[var(--border)] p-2">
-                      <div className="flex flex-wrap items-start gap-2">
-                        <div className="min-w-0 flex-1 font-semibold">{o.title}</div>
-                        <span className={`text-xs tabular-nums ${o.too_long ? "font-semibold text-amber-700" : "text-[var(--text-tertiary)]"}`}>{o.length} characters{o.too_long ? ", may be cut off" : ""}</span>
-                        <button type="button" onClick={() => copy(i, o.title)} className="rounded-lg border border-[var(--border)] bg-white px-2 py-0.5 text-xs font-semibold">{copied === i ? "Copied" : "Copy"}</button>
-                      </div>
-                      {draft.recommended === i ? <span className="mt-1 inline-block rounded bg-green-100 px-1.5 py-0.5 text-[0.7rem] font-semibold text-green-800">Start with this one</span> : null}
-                      <p className="mt-1 text-xs text-[var(--text-secondary)]">{o.why}</p>
-                      {o.serves.length > 0 ? <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">Serves: {o.serves.join(", ")}</p> : null}
-                    </li>
-                  ))}
-                </ol>
-                <p className="text-xs text-[var(--text-tertiary)]">{DEPTH[draft.depth]} · ${draft.cost_usd.toFixed(2)} · read {draft.searches_used} searches. Check each against the page before using it. After you change the title, add a note to the change log so the 28-day check below measures it.</p>
+              <div className="space-y-4 pt-1">
+                {draft.diagnosis ? (
+                  <p className="rounded-[10px] border border-[#ececec] bg-[#f8f8f8] px-3 py-2 text-xs text-[#171a22]">
+                    <strong>Why the snippet earns less:</strong> {draft.diagnosis}
+                  </p>
+                ) : null}
+                {draft.page_read === false ? <p className="text-xs text-[oklch(0.42_0.1_65)]">The page itself could not be read, so these come from its title, description and searches only.</p> : null}
+
+                <div>
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                    Title tag options (target ≤ 60 chars)
+                  </div>
+                  <ol className="space-y-2">
+                    {draft.options.map((o, i) => (
+                      <li key={i} className="rounded-[10px] border border-[#ececec] bg-[#f8f8f8] p-3">
+                        <div className="flex flex-wrap items-start gap-2">
+                          <div className="min-w-0 flex-1 font-semibold text-[#0a0c0f]">{o.title}</div>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${o.too_long ? "bg-[oklch(0.97_0.045_85)] text-[oklch(0.42_0.1_65)]" : "bg-[#f1f3f4] text-[#4a5560]"}`}>
+                            {o.length}/60 chars{o.too_long ? " · may be cut off" : ""}
+                          </span>
+                          <button type="button" onClick={() => copy(`title-${i}`, o.title)} className="cursor-pointer rounded-full border border-[#e3e6e8] bg-white px-3 py-0.5 text-xs font-semibold text-[#223540] hover:border-[#00a99d]">
+                            {copied === `title-${i}` ? "Copied ✓" : "Copy"}
+                          </button>
+                        </div>
+                        {draft.recommended === i ? <span className="mt-1.5 inline-block rounded-full bg-[#e6f7f5] px-2.5 py-0.5 text-[11px] font-semibold text-[#00665f]">Start with this one</span> : null}
+                        <p className="mt-1 text-xs text-[#4a5560]">{o.why}</p>
+                        {o.serves.length > 0 ? <p className="mt-0.5 text-xs text-[#7a838c]">Serves: {o.serves.join(", ")}</p> : null}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
+                    Meta description options (target ≤ 160 chars)
+                  </div>
+                  {draft.descriptions && draft.descriptions.length > 0 ? (
+                    <ol className="space-y-2">
+                      {draft.descriptions.map((o, i) => (
+                        <li key={i} className="rounded-[10px] border border-[#ececec] bg-[#f8f8f8] p-3">
+                          <div className="flex flex-wrap items-start gap-2">
+                            <div className="min-w-0 flex-1 text-[13px] font-medium text-[#0a0c0f]">{o.description}</div>
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${o.too_long ? "bg-[oklch(0.97_0.045_85)] text-[oklch(0.42_0.1_65)]" : "bg-[#e6f7f5] text-[#00665f]"}`}>
+                              {o.length}/160 chars{o.too_long ? " · over 160-char target" : " · fits"}
+                            </span>
+                            <button type="button" onClick={() => copy(`desc-${i}`, o.description)} className="cursor-pointer rounded-full border border-[#e3e6e8] bg-white px-3 py-0.5 text-xs font-semibold text-[#223540] hover:border-[#00a99d]">
+                              {copied === `desc-${i}` ? "Copied ✓" : "Copy"}
+                            </button>
+                          </div>
+                          {draft.recommended_description === i ? <span className="mt-1.5 inline-block rounded-full bg-[#e9fedc] px-2.5 py-0.5 text-[11px] font-semibold text-[#2f5a00]">Start with this one</span> : null}
+                          <p className="mt-1 text-xs text-[#4a5560]">{o.why}</p>
+                          {o.serves.length > 0 ? <p className="mt-0.5 text-xs text-[#7a838c]">Serves: {o.serves.join(", ")}</p> : null}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="rounded-[10px] border border-dashed border-[#d3d7d9] bg-[#f8f8f8] px-3 py-2.5 text-xs text-[#7a838c]">
+                      No meta description options were saved on this earlier draft. Click &ldquo;Write again&rdquo; to generate title and meta description rewrites together.
+                    </p>
+                  )}
+                </div>
+
+                <p className="text-xs text-[#7a838c]">{DEPTH[draft.depth]} · ${draft.cost_usd.toFixed(2)} · read {draft.searches_used} searches. Check each against the page before using it. After you change the title or description, add a note to the change log so the 28-day check below measures it.</p>
               </div>
             ) : null}
           </div>

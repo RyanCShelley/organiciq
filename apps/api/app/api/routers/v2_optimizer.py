@@ -34,7 +34,7 @@ def optimizer_queue(
     """The parts of this month's approved actions that this tool carries out, and what each change is."""
     today = date.today()
     months = {today.strftime("%Y-%m"), (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")}
-    tasks = db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month.in_(months), EngineTask.status != "dropped").order_by(EngineTask.month.desc()).all()
+    tasks = db.query(EngineTask).filter(EngineTask.client_id == client.id, EngineTask.month.in_(months), ~EngineTask.status.in_(("dropped", "rejected"))).order_by(EngineTask.month.desc()).all()
     queue = []
     for task in tasks:
         for part in part_tools.describe(task.parts or part_tools.from_steps(task.steps or [])):

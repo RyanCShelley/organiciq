@@ -111,6 +111,7 @@ class ClientCreate(BaseModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    style_notes: str | None = None
     baseline_projection_json: dict | None = None
     status: ClientStatus = ClientStatus.ONBOARDING
 
@@ -182,6 +183,7 @@ class ClientUpdate(BaseModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    style_notes: str | None = None
     baseline_projection_json: dict | None = None
     status: ClientStatus | None = None
 
@@ -244,6 +246,7 @@ class ClientOut(ORMModel):
     baseline_lead_rate_pct: float | None = None
     baseline_source: str | None = None
     baseline_notes: str | None = None
+    style_notes: str | None = None
     baseline_projection_json: dict | None = None
     status: ClientStatus
     created_at: DateTime

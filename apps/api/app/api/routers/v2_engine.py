@@ -14,9 +14,11 @@ from sqlalchemy.orm import Session
 from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
+from app.decisions import action_context as ac
 from app.decisions import leads_candidates, traffic_candidates, visibility_candidates
+from app.decisions.faq_links import faq_schema_urls, find_faq_page
 from app.models.client import Client
-from app.services import crawl_fallback, crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic, search_signals, winners
+from app.services import crawl_fallback, crawl_link_facts, data_freshness, growth_action, llm_evidence, page_diagnostic, page_history, search_signals, winners
 from app.services.memo import Memo
 
 #: Who is winning for a term and page, kept for an hour: reading the winners' pages and comparing them is the slow, paid part.
@@ -131,6 +133,7 @@ class Selection(BaseModel):
 
 class DiagnoseRequest(BaseModel):
     month: str | None = None
+    focus: Literal["visibility", "traffic", "leads"] | None = None
     selections: list[Selection] = Field(min_length=1, max_length=MAX_DIAGNOSED)
 
 
@@ -140,6 +143,76 @@ def _evidence(db: Session, client: Client, month: str, search: str, page: str) -
     found["llm"] = llm_evidence.for_search(db, client, search)
     found["brand_keys"] = visibility_candidates.brand_keys(client)
     return found
+
+
+def _top_nonbrand_search(db: Session, client: Client, month: str, page_url: str) -> str | None:
+    from sqlalchemy import func
+    from app.models.gsc import FactGscQueryPage
+
+    year, mon = int(month[:4]), int(month[5:7])
+    start, end = visibility_candidates.windows(date(year, mon, 1))["current"]
+    q = func.lower(func.trim(FactGscQueryPage.query))
+    rows = (
+        db.query(q, func.sum(FactGscQueryPage.impressions))
+        .filter(
+            FactGscQueryPage.client_id == client.id,
+            FactGscQueryPage.normalized_url == page_url,
+            FactGscQueryPage.date >= start,
+            FactGscQueryPage.date <= end,
+        )
+        .group_by(q)
+        .order_by(func.sum(FactGscQueryPage.impressions).desc())
+        .all()
+    )
+    brand = visibility_candidates.brand_keys(client)
+    for query_text, _ in rows:
+        if query_text and not visibility_candidates.is_brand(query_text, brand):
+            return query_text
+    return None
+
+
+@router.get("/rejection-reasons")
+def list_rejection_reasons(_: Annotated[AuthUser, Depends(require_sma_staff)]) -> dict:
+    """Return the 8 structured reviewer rejection reasons."""
+    return {"reasons": [{"key": k, "label": v} for k, v in ac.REJECTION_REASONS.items()]}
+
+
+@router.get("/page-history")
+def get_page_history(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    page: Annotated[str, Query(min_length=1, max_length=2048)],
+) -> dict:
+    """Aggregated crawl changes, Decision Engine tasks, and annotations for a single page URL."""
+    return page_history.for_page(db, client, page)
+
+
+@router.get("/serp")
+def get_serp_detail(
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+    search: Annotated[str, Query(min_length=1, max_length=400)],
+    pull: bool = False,
+) -> dict:
+    """Inspect (and optionally pull) DataForSEO SERP results, features, PAA questions, and intent reading."""
+    return search_signals.serp_detail(db, client, search, pull=pull)
+
+
+class SerpPullRequest(BaseModel):
+    search: str = Field(min_length=1, max_length=400)
+
+
+@router.post("/serp/pull")
+def pull_serp_detail(
+    payload: SerpPullRequest,
+    client: Annotated[Client, Depends(require_client)],
+    _: Annotated[AuthUser, Depends(require_sma_staff)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    """Pull wider DataForSEO SERP data on demand for any search (including untracked GSC queries)."""
+    return search_signals.serp_detail(db, client, payload.search, pull=True)
 
 
 @router.post("/diagnose")
@@ -160,6 +233,12 @@ def diagnose_selected(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    active_focus = payload.focus or growth_action.active_focus(db, client, _next_month(month))
+    style_notes = (getattr(client, "style_notes", None) or "").strip() or None
+    site_pages_map = growth_action.site_pages(db, client)
+    site_urls = list(site_pages_map) if site_pages_map is not None else None
+    faq_schemas = faq_schema_urls(db, client) if site_pages_map else set()
+
     results = []
     for pick in payload.selections:
         row = visibility_candidates.lookup_pair(db, client, month, pick.search, pick.page)
@@ -168,6 +247,7 @@ def diagnose_selected(
                 {
                     "search": pick.search,
                     "page": pick.page,
+                    "focus": active_focus,
                     "read": {"ok": False, "error": "That search and page are not in this client's Search Console data."},
                     "observations": [],
                     "prescriptions": [],
@@ -177,6 +257,11 @@ def diagnose_selected(
                 }
             )
             continue
+        ev = _evidence(db, client, month, row["search"], pick.page)
+        signals = search_signals.for_search(db, client, row["search"], pull=False)
+        faq_link = find_faq_page(db, client, site_pages_map, pick.page, schema_urls=faq_schemas)
+        if faq_link:
+            ev["faq_link"] = faq_link
         results.append(
             page_diagnostic.diagnose(
                 search=row["search"],
@@ -184,14 +269,19 @@ def diagnose_selected(
                 row=row,
                 client_domain=client.domain,
                 fetch=crawl_fallback.with_crawl(db, client),
-                evidence=_evidence(db, client, month, row["search"], pick.page),
+                evidence=ev,
+                focus=active_focus,
+                signals=signals,
+                site_urls=site_urls,
+                style_notes=style_notes,
+                page_history=page_history.for_page(db, client, pick.page),
             )
         )
-    return {"month": month, "results": results}
+    return {"month": month, "focus": active_focus, "results": results}
 
 
 class PageDiagnoseRequest(BaseModel):
-    focus: Literal["traffic", "leads"]
+    focus: Literal["visibility", "traffic", "leads"] | None = None
     month: str | None = None
     pages: list[str] = Field(min_length=1, max_length=MAX_DIAGNOSED)
 
@@ -200,6 +290,8 @@ def _page_evidence(db: Session, client: Client, month: str, focus: str, url: str
     """What a Traffic or Leads page's own suggestions are built from."""
     if focus == "traffic":
         return {"lost": traffic_candidates.queries_lost(db, client, month, url)}
+    if focus == "visibility":
+        return {}
     row = next((c for c in (leads or {}).get("candidates", []) if c["page"] == url), None)
     return {
         "row": row,
@@ -217,22 +309,73 @@ def diagnose_selected_pages(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    """Read each ticked Traffic or Leads page live and say what is worth checking on it."""
+    """Read each ticked page live and say what is worth checking on it."""
     month = payload.month or last_complete_month()
     try:
         parse_month(month)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
-    results = [
-        page_diagnostic.diagnose_page(
-            focus=payload.focus, url=url, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client),
-            evidence=_page_evidence(db, client, month, payload.focus, url, leads),
+    active_focus = payload.focus or growth_action.active_focus(db, client, _next_month(month))
+    style_notes = (getattr(client, "style_notes", None) or "").strip() or None
+    site_pages_map = growth_action.site_pages(db, client)
+    site_urls = list(site_pages_map) if site_pages_map is not None else None
+    faq_schemas = faq_schema_urls(db, client) if site_pages_map else set()
+
+    leads = leads_candidates.build(db, client, month, list_size=None) if active_focus == "leads" else None
+    results = []
+    for url in payload.pages:
+        top_search = _top_nonbrand_search(db, client, month, url)
+        signals = search_signals.for_search(db, client, top_search, pull=False) if top_search else None
+        faq_link = find_faq_page(db, client, site_pages_map, url, schema_urls=faq_schemas)
+        history = page_history.for_page(db, client, url)
+
+        if active_focus == "visibility" and top_search:
+            row = visibility_candidates.lookup_pair(db, client, month, top_search, url)
+            if row is not None:
+                ev = _evidence(db, client, month, row["search"], url)
+                if faq_link:
+                    ev["faq_link"] = faq_link
+                results.append(
+                    page_diagnostic.diagnose(
+                        search=row["search"],
+                        url=url,
+                        row=row,
+                        client_domain=client.domain,
+                        fetch=crawl_fallback.with_crawl(db, client),
+                        evidence=ev,
+                        focus=active_focus,
+                        signals=signals,
+                        site_urls=site_urls,
+                        style_notes=style_notes,
+                        page_history=history,
+                    )
+                )
+                continue
+
+        ev = _page_evidence(db, client, month, active_focus, url, leads)
+        if top_search:
+            ev["search"] = top_search
+            ctr_row = visibility_candidates.lookup_pair(db, client, month, top_search, url)
+            if ctr_row is not None:
+                ev["ctr_row"] = ctr_row
+                ev["page_queries"] = visibility_candidates.page_evidence(db, client, month, top_search, url).get("page_queries") or []
+        if faq_link:
+            ev["faq_link"] = faq_link
+        results.append(
+            page_diagnostic.diagnose_page(
+                focus=active_focus,
+                url=url,
+                client_domain=client.domain,
+                fetch=crawl_fallback.with_crawl(db, client),
+                evidence=ev,
+                signals=signals,
+                site_urls=site_urls,
+                style_notes=style_notes,
+                page_history=history,
+            )
         )
-        for url in payload.pages
-    ]
-    return {"month": month, "focus": payload.focus, "results": results}
+    return {"month": month, "focus": active_focus, "results": results}
 
 
 class GrowthActionRequest(BaseModel):
@@ -240,9 +383,8 @@ class GrowthActionRequest(BaseModel):
     keyword: str = Field(min_length=1, max_length=400)
     #: A page of the topic to use instead of the one the tool recommends.
     page: str | None = Field(default=None, max_length=2048)
-    #: Which list the candidate came from, and its page. When the page worked is the candidate's own, a Traffic or
-    #: Leads page's own suggestions join the action so they appear once.
-    focus: Literal["visibility", "traffic", "leads"] = "visibility"
+    #: Which list the candidate came from, and its page. Defaults to active ClientFocus if omitted.
+    focus: Literal["visibility", "traffic", "leads"] | None = None
     candidate_page: str | None = Field(default=None, max_length=2048)
     #: The search the person selected. The results page read, and everything built from it, is this search's and no other's.
     search: str | None = Field(default=None, max_length=400)
@@ -300,15 +442,16 @@ def build_growth_action(
 ) -> dict:
     """Read the page for the topic live and bundle what applies into one growth action, as a task draft."""
     month = _month_or_last(payload.month)
+    active_focus = payload.focus or growth_action.active_focus(db, client, _next_month(month))
     extras: list[dict] = []
-    if payload.focus != "visibility" and payload.candidate_page:
+    if active_focus != "visibility" and payload.candidate_page:
         topic = growth_action.topic_pages(db, client, month, payload.keyword)
         worked = payload.page or topic["recommended"]
         if worked == payload.candidate_page:
-            leads = leads_candidates.build(db, client, month, list_size=None) if payload.focus == "leads" else None
+            leads = leads_candidates.build(db, client, month, list_size=None) if active_focus == "leads" else None
             own = page_diagnostic.diagnose_page(
-                focus=payload.focus, url=worked, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client),
-                evidence=_page_evidence(db, client, month, payload.focus, worked, leads),
+                focus=active_focus, url=worked, client_domain=client.domain, fetch=crawl_fallback.with_crawl(db, client),
+                evidence=_page_evidence(db, client, month, active_focus, worked, leads),
             )
             extras = own.get("suggestions") or []
     bundle = growth_action.build(
@@ -329,7 +472,10 @@ def build_growth_action(
             (str(client.id), search, url, date.today().isoformat(), intent.get("serp_date")),
             lambda: winners.gather(db, client, search=search, intent=intent, page_url=url, page_type=page_type, own=own, questions=questions),
         ),
+        focus=active_focus,
     )
+    if bundle.get("page"):
+        bundle["page_history"] = page_history.for_page(db, client, bundle["page"])
     if bundle["ok"] and bundle["parts"]:
         bundle["draft"] = growth_action.draft(bundle, _next_month(month))
     return bundle
