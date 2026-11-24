@@ -161,13 +161,26 @@ def fail_stale_active_jobs(
     return stale
 
 
-#: Jobs that do not need to wait behind a long data pull, each on its own lane. The worker runs one job at a time per
-#: lane, in the order queued, and the lanes run side by side. An AI platform run talks to other companies' APIs and a
-#: site crawl talks to the client's own site; neither touches the Google or SE Ranking limits a pull is slow because of.
-#: Everything else (Search Console, GA4, SE Ranking, Bing) shares the main lane, where order still matters.
+#: Jobs that do not need to wait behind another provider's pull, each on its own lane. The worker runs one job at a
+#: time per lane, in the order queued, and the lanes run side by side. Each external API (Google Analytics, Search
+#: Console pages, Search Console queries, Bing, Google Ads, SE Ranking, AI platforms, site crawl) talks to an independent
+#: endpoint/table set, so running them concurrently cuts initial client pull time from sum-of-all to slowest-single.
 LANES: dict[str, frozenset[str]] = {
     "llm": frozenset({"llm_visibility"}),
     "crawl": frozenset({"site_crawl"}),
+    "ga4": frozenset({"ga4"}),
+    "gsc_pages": frozenset({"gsc_pages"}),
+    "gsc_queries": frozenset({"gsc_queries"}),
+    "bing": frozenset({"bing_query_stats"}),
+    "ads": frozenset({"google_ads"}),
+    "seranking": frozenset({
+        "se_ranking_search",
+        "se_ranking_ai",
+        "se_ranking_audit",
+        "se_ranking_domain_keywords",
+        "se_ranking_backlinks",
+        "se_ranking_ai_search",
+    }),
 }
 
 

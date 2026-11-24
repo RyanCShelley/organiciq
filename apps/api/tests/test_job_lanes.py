@@ -19,24 +19,40 @@ def test_each_lane_claims_only_its_own_jobs_oldest_first(db, client_a):
     queue(db, client_a, "llm_visibility", 20)
     queue(db, client_a, "site_crawl", 10)
     queue(db, client_a, "ga4", 5)
+    queue(db, client_a, "dataforseo_competitor_keywords", 2)
 
     assert jobs.claim_next_job(db, "llm").source == "llm_visibility"
     assert jobs.claim_next_job(db, "llm") is None
     assert jobs.claim_next_job(db, "crawl").source == "site_crawl"
-    assert jobs.claim_next_job(db, "main").source == "gsc_queries"
-    assert jobs.claim_next_job(db, "main").source == "ga4"
+    assert jobs.claim_next_job(db, "gsc_queries").source == "gsc_queries"
+    assert jobs.claim_next_job(db, "ga4").source == "ga4"
+    assert jobs.claim_next_job(db, "main").source == "dataforseo_competitor_keywords"
     assert jobs.claim_next_job(db, "main") is None
 
 
 def test_the_main_lane_never_takes_a_lane_job_even_when_it_is_the_oldest(db, client_a):
     queue(db, client_a, "llm_visibility", 90)
-    queue(db, client_a, "bing_query_stats", 1)
-    assert jobs.claim_next_job(db, "main").source == "bing_query_stats"
+    queue(db, client_a, "ga4", 80)
+    queue(db, client_a, "dataforseo_competitor_keywords", 1)
+    assert jobs.claim_next_job(db, "main").source == "dataforseo_competitor_keywords"
     assert jobs.claim_next_job(db, "main") is None
 
 
 def test_lane_of_names_the_lane(db):
-    assert [jobs.lane_of(s) for s in ("llm_visibility", "site_crawl", "gsc_pages", "ga4", "bing_query_stats")] == ["llm", "crawl", "main", "main", "main"]
+    assert [
+        jobs.lane_of(s)
+        for s in (
+            "llm_visibility",
+            "site_crawl",
+            "gsc_pages",
+            "gsc_queries",
+            "ga4",
+            "bing_query_stats",
+            "google_ads",
+            "se_ranking_search",
+            "dataforseo_competitor_keywords",
+        )
+    ] == ["llm", "crawl", "gsc_pages", "gsc_queries", "ga4", "bing", "ads", "seranking", "main"]
 
 
 def test_a_stop_request_ends_a_search_console_fetch_at_the_next_page(monkeypatch):
