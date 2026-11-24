@@ -12,7 +12,7 @@ import {
   lockBaselineAction,
   updateBaselineGoalAction,
 } from "@/app/(app)/[clientSlug]/settings/baseline/actions";
-import type { SetupState } from "@/components/SetupChecklist";
+import { resolveStepHref, type SetupState } from "@/components/SetupChecklist";
 import { SaveBar, inputClass } from "@/components/ui/form";
 import {
   REBASELINE_REASONS,
@@ -254,6 +254,17 @@ export function BaselineBuilder({
   const latestVersion = versions[0] ?? null;
   const suggestedGoal = analysis?.projection.suggested_monthly_lead_goal ?? goalState?.suggested ?? null;
 
+  const watchlistDone = Boolean(setup?.steps.find((s) => s.key === "watchlist")?.done);
+  const nextSetupStep = setup?.steps.find((s) => !s.done && !s.optional && s.key !== "baseline") ?? null;
+  const postLockCta = !watchlistDone
+    ? { href: `/${slug}/watchlist`, label: "Next: Build your keyword watchlist →" }
+    : nextSetupStep
+      ? {
+          href: resolveStepHref(slug, nextSetupStep, setup?.service_mode),
+          label: `Next: ${nextSetupStep.title} →`,
+        }
+      : { href: `/${slug}`, label: "View client overview →" };
+
   const lockWhy =
     openBlockers.length > 0
       ? "Check the blocker box(es) above first."
@@ -281,10 +292,10 @@ export function BaselineBuilder({
             ) : null}
           </div>
           <Link
-            href={`/${slug}/watchlist`}
+            href={postLockCta.href}
             className="rounded-lg bg-[var(--brand-teal)] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[var(--brand-teal-hover)]"
           >
-            Next: Build your keyword watchlist →
+            {postLockCta.label}
           </Link>
         </div>
       ) : null}
