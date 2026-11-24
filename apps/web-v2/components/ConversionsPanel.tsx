@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   loadGa4PagesAction,
@@ -23,7 +25,7 @@ import {
 
 type Row = { ticked: boolean; name: string; type: string; active: boolean };
 
-function useSaving() {
+function useSaving(onSuccess?: () => void) {
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +39,10 @@ function useSaving() {
       setSaved(false);
       startTransition(async () => {
         const result = await task();
-        if (result.ok) setSaved(true);
-        else setError(result.error);
+        if (result.ok) {
+          setSaved(true);
+          onSuccess?.();
+        } else setError(result.error);
       });
     },
   };
@@ -53,10 +57,12 @@ export function ConversionEvents({
   slug: string;
   events: EventCandidate[];
 }) {
-  const save = useSaving();
-  const [rows, setRows] = useState<Record<string, Row>>(() =>
+  const router = useRouter();
+  const save = useSaving(() => router.refresh());
+  const hasSavedDefinitions = events.some((e) => e.defined && e.active);
+  const buildRows = (list: EventCandidate[]): Record<string, Row> =>
     Object.fromEntries(
-      events.map((e) => [
+      list.map((e) => [
         e.event_name,
         {
           ticked: e.defined,
@@ -65,29 +71,52 @@ export function ConversionEvents({
           active: e.active ?? true,
         },
       ]),
-    ),
-  );
+    );
+  const [rows, setRows] = useState<Record<string, Row>>(() => buildRows(events));
   const [primary, setPrimary] = useState(events.find((e) => e.is_primary)?.event_name ?? "");
   const [showAutomatic, setShowAutomatic] = useState(false);
   const [query, setQuery] = useState("");
 
+  useEffect(() => {
+    setRows(buildRows(events));
+    setPrimary(events.find((e) => e.is_primary)?.event_name ?? "");
+  }, [events]);
+
+  const rowFor = (e: EventCandidate): Row =>
+    rows[e.event_name] ?? {
+      ticked: e.defined,
+      name: e.conversion_name ?? e.event_name,
+      type: e.conversion_type ?? "lead",
+      active: e.active ?? true,
+    };
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return events
-      .filter((e) => (showAutomatic || !e.automatic || rows[e.event_name]?.ticked))
+      .filter((e) => (showAutomatic || !e.automatic || (rows[e.event_name]?.ticked ?? e.defined)))
       .filter((e) => !q || e.event_name.toLowerCase().includes(q))
       .sort(
         (a, b) =>
-          Number(rows[b.event_name]?.ticked) - Number(rows[a.event_name]?.ticked) ||
+          Number(rows[b.event_name]?.ticked ?? b.defined) -
+            Number(rows[a.event_name]?.ticked ?? a.defined) ||
           Number(b.suggested) - Number(a.suggested) ||
           b.event_count - a.event_count,
       );
   }, [events, rows, showAutomatic, query]);
 
-  const ticked = events.filter((e) => rows[e.event_name]?.ticked);
+  const ticked = events.filter((e) => rows[e.event_name]?.ticked ?? e.defined);
 
   function patch(event: string, change: Partial<Row>) {
-    setRows((current) => ({ ...current, [event]: { ...current[event], ...change } }));
+    setRows((current) => {
+      const candidate = events.find((e) => e.event_name === event);
+      const base: Row = current[event] ?? {
+        ticked: candidate?.defined ?? false,
+        name: candidate?.conversion_name ?? event,
+        type: candidate?.conversion_type ?? "lead",
+        active: candidate?.active ?? true,
+      };
+      return { ...current, [event]: { ...base, ...change } };
+    });
     save.dirty();
   }
 
@@ -99,13 +128,16 @@ export function ConversionEvents({
           saveConversionDefinitionsAction(
             clientId,
             slug,
-            ticked.map((e) => ({
-              event_name: e.event_name,
-              conversion_name: rows[e.event_name].name.trim() || e.event_name,
-              conversion_type: rows[e.event_name].type,
-              is_primary: primary === e.event_name,
-              active: rows[e.event_name].active,
-            })),
+            ticked.map((e) => {
+              const row = rowFor(e);
+              return {
+                event_name: e.event_name,
+                conversion_name: row.name.trim() || e.event_name,
+                conversion_type: row.type,
+                is_primary: primary === e.event_name,
+                active: row.active,
+              };
+            }),
           ),
         );
       }}
@@ -140,7 +172,7 @@ export function ConversionEvents({
       ) : (
         <ul className="mt-4 divide-y divide-[var(--border)] text-sm">
           {shown.map((event) => {
-            const row = rows[event.event_name];
+            const row = rowFor(event);
             return (
               <li key={event.event_name} className="grid items-center gap-3 py-2 sm:grid-cols-[auto_1fr_auto]">
                 <input
@@ -211,6 +243,19 @@ export function ConversionEvents({
         </ul>
       )}
       <SaveBar pending={save.pending} saved={save.saved} error={save.error} />
+      {save.saved || hasSavedDefinitions ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--brand-teal)]/30 bg-[var(--brand-teal-soft)]/25 px-4 py-2.5 text-xs">
+          <span className="font-medium text-[var(--text-primary)]">
+            {save.saved ? "Conversion events saved." : "Conversion events configured."} Ready to review and lock your starting baseline.
+          </span>
+          <Link
+            href={`/${slug}/settings/baseline`}
+            className="font-semibold text-[var(--brand-teal)] hover:underline"
+          >
+            Next: Review &amp; lock baseline →
+          </Link>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -229,8 +274,17 @@ export function ConversionPages({
   patterns: CompletionPattern[];
 }) {
   const save = useSaving();
+  const [openOptional, setOpenOptional] = useState(false);
   const [rows, setRows] = useState<ConversionPage[]>(pages);
   const [patterns, setPatterns] = useState<CompletionPattern[]>(initialPatterns);
+
+  useEffect(() => {
+    setRows(pages);
+  }, [pages]);
+
+  useEffect(() => {
+    setPatterns(initialPatterns);
+  }, [initialPatterns]);
 
   function addPage(page: Ga4Page) {
     setRows((current) =>
@@ -253,97 +307,119 @@ export function ConversionPages({
   }
 
   return (
-    <div className="space-y-6">
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        save.run(() =>
-          saveConversionPagesAction(
-            clientId,
-            slug,
-            rows
-              .filter((r) => r.normalized_url.trim() && r.label.trim())
-              .map((r) => ({
-                normalized_url: r.normalized_url.trim(),
-                label: r.label.trim(),
-                stage: r.stage,
-                is_primary: r.is_primary,
-              })),
-          ),
-        );
-      }}
-      className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6"
-    >
-      <h2 className="text-sm font-semibold">Conversion pages</h2>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-        The pages a visitor lands on to convert: the contact page, a quote form, a booking page. The
-        engine sends internal links and calls to action there, and a page you declare beats its guess
-        from the address.
-      </p>
-
-      <ul className="mt-4 space-y-2">
-        {rows.map((row, index) => (
-          <li key={index} className="grid gap-2 sm:grid-cols-[2fr_1fr_auto_auto]">
-            <input
-              value={row.normalized_url}
-              onChange={(e) => patch(index, { normalized_url: e.target.value })}
-              placeholder="https://example.com/contact-us"
-              aria-label="Page address"
-              className={inputClass}
-            />
-            <input
-              value={row.label}
-              onChange={(e) => patch(index, { label: e.target.value })}
-              placeholder="Contact"
-              aria-label="Label"
-              className={inputClass}
-            />
-            <label className="flex items-center gap-1.5 text-sm">
-              <input
-                type="radio"
-                name="primary-page"
-                checked={row.is_primary}
-                onChange={() => patch(index, { is_primary: true })}
-              />
-              Primary
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                setRows((current) => current.filter((_, i) => i !== index));
-                save.dirty();
-              }}
-              className="text-xs font-semibold text-red-700 hover:underline"
-            >
-              Remove
-            </button>
-          </li>
-        ))}
-        {rows.length === 0 ? <li className="text-sm text-[var(--text-tertiary)]">No conversion page yet.</li> : null}
-      </ul>
+    <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)]">
       <button
         type="button"
-        onClick={() => setRows((current) => [...current, { normalized_url: "", label: "", stage: null, is_primary: false }])}
-        className="mt-3 text-sm font-semibold text-[var(--brand-teal)] hover:underline"
+        onClick={() => setOpenOptional((v) => !v)}
+        aria-expanded={openOptional}
+        className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
       >
-        + Add a page
+        <div>
+          <span className="text-sm font-semibold text-[var(--text-primary)]">
+            Optional: Conversion &amp; thank-you pages
+          </span>
+          <span className="ml-2 text-xs text-[var(--text-secondary)]">
+            {rows.length} page{rows.length === 1 ? "" : "s"}, {patterns.length} thank-you pattern{patterns.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <span className="text-xs font-semibold text-[var(--brand-teal)]">
+          {openOptional ? "Hide" : "Configure"}
+        </span>
       </button>
-      <SaveBar pending={save.pending} saved={save.saved} error={save.error} />
-      <Ga4PagesPanel
-        clientId={clientId}
-        events={events}
-        onAdd={addPage}
-        added={new Set(rows.map((r) => r.normalized_url))}
-        tracked={patterns.map((p) => p.pattern)}
-        onTrack={async (pattern) => {
-          const next = [...patterns, { pattern, label: null }];
-          const result = await saveCompletionPatternsAction(clientId, slug, next);
-          if (result.ok) setPatterns(next);
-          return result;
-        }}
-      />
-    </form>
-    <CompletionCard clientId={clientId} slug={slug} patterns={patterns} onChange={setPatterns} />
+
+      {openOptional ? (
+        <div className="space-y-6 border-t border-[var(--border)] p-6">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              save.run(() =>
+                saveConversionPagesAction(
+                  clientId,
+                  slug,
+                  rows
+                    .filter((r) => r.normalized_url.trim() && r.label.trim())
+                    .map((r) => ({
+                      normalized_url: r.normalized_url.trim(),
+                      label: r.label.trim(),
+                      stage: r.stage,
+                      is_primary: r.is_primary,
+                    })),
+                ),
+              );
+            }}
+          >
+            <h2 className="text-sm font-semibold">Conversion pages</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              The pages a visitor lands on to convert: the contact page, a quote form, a booking page. The
+              engine sends internal links and calls to action there, and a page you declare beats its guess
+              from the address.
+            </p>
+
+            <ul className="mt-4 space-y-2">
+              {rows.map((row, index) => (
+                <li key={index} className="grid gap-2 sm:grid-cols-[2fr_1fr_auto_auto]">
+                  <input
+                    value={row.normalized_url}
+                    onChange={(e) => patch(index, { normalized_url: e.target.value })}
+                    placeholder="https://example.com/contact-us"
+                    aria-label="Page address"
+                    className={inputClass}
+                  />
+                  <input
+                    value={row.label}
+                    onChange={(e) => patch(index, { label: e.target.value })}
+                    placeholder="Contact"
+                    aria-label="Label"
+                    className={inputClass}
+                  />
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="radio"
+                      name="primary-page"
+                      checked={row.is_primary}
+                      onChange={() => patch(index, { is_primary: true })}
+                    />
+                    Primary
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRows((current) => current.filter((_, i) => i !== index));
+                      save.dirty();
+                    }}
+                    className="text-xs font-semibold text-red-700 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+              {rows.length === 0 ? <li className="text-sm text-[var(--text-tertiary)]">No conversion page yet.</li> : null}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setRows((current) => [...current, { normalized_url: "", label: "", stage: null, is_primary: false }])}
+              className="mt-3 text-sm font-semibold text-[var(--brand-teal)] hover:underline"
+            >
+              + Add a page
+            </button>
+            <SaveBar pending={save.pending} saved={save.saved} error={save.error} />
+            <Ga4PagesPanel
+              clientId={clientId}
+              events={events}
+              onAdd={addPage}
+              added={new Set(rows.map((r) => r.normalized_url))}
+              tracked={patterns.map((p) => p.pattern)}
+              onTrack={async (pattern) => {
+                const next = [...patterns, { pattern, label: null }];
+                const result = await saveCompletionPatternsAction(clientId, slug, next);
+                if (result.ok) setPatterns(next);
+                return result;
+              }}
+            />
+          </form>
+          <CompletionCard clientId={clientId} slug={slug} patterns={patterns} onChange={setPatterns} />
+        </div>
+      ) : null}
     </div>
   );
 }

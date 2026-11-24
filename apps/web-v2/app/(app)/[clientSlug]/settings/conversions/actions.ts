@@ -28,7 +28,9 @@ export async function saveConversionDefinitionsAction(
 ): Promise<ActionResult> {
   try {
     await apiFetch("/admin/conversion-definitions", { method: "PUT", clientId, body: definitions });
+    revalidatePath("/");
     revalidatePath(`/${slug}/settings/conversions`);
+    revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {
     return failure(error);
@@ -43,6 +45,7 @@ export async function saveConversionPagesAction(
   try {
     await apiFetch("/admin/conversion-pages", { method: "PUT", clientId, body: pages });
     revalidatePath(`/${slug}/settings/conversions`);
+    revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {
     return failure(error);
@@ -89,6 +92,7 @@ export async function saveCompletionPatternsAction(
   try {
     await apiFetch("/v2/conversions/completion-patterns", { method: "PUT", clientId, body: patterns });
     revalidatePath(`/${slug}/settings/conversions`);
+    revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {
     return failure(error);

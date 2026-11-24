@@ -7,7 +7,9 @@ why travels with the result, because a short plan has to show its shortfall:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
@@ -19,12 +21,20 @@ from app.decisions.content_gaps import (
     TermGap,
     content_words,
     fold_variants,
+    is_noise_query,
 )
 from app.models.client import Client
 from app.models.crawl import FactCrawlPageSnapshot
 from app.models.decision import KeywordTarget
 from app.models.seranking import FactSerKeyword, FactSerKeywordMetric
-from app.services.page_signals import brand_terms, is_navigational
+from app.models.watch_target import WatchTarget
+from app.services.page_signals import (
+    effective_brand_terms,
+    is_navigational,
+    is_rival_navigational,
+    rival_brand_term_groups,
+    rival_core_vocab_from_pages,
+)
 from app.services.serp_features import load as load_serp_features
 
 #: Indexable pages a crawl must have returned before its silence means
@@ -45,6 +55,8 @@ class GapScan:
     summary: dict[str, int] = field(default_factory=dict)
     #: Set when the scan could not run at all.
     blocked: str | None = None
+    #: Eligible unpriced GSC candidates awaiting volume data (never already rejected in FactSerKeywordMetric).
+    unpriced: tuple[Any, ...] = ()
 
     def explain_empty(self) -> str:
         if self.blocked:
@@ -54,6 +66,8 @@ class GapScan:
         if not tracked:
             return "No term is tracked for this client, so there is nothing to find a page for."
         parts = []
+        if s.get("excluded"):
+            parts.append(f"{s['excluded']} excluded")
         if s.get("mapped"):
             parts.append(f"{s['mapped']} mapped to a page")
         if s.get("covered"):
@@ -62,6 +76,8 @@ class GapScan:
             parts.append(f"{s['ranking']} already ranking")
         if s.get("brand"):
             parts.append(f"{s['brand']} brand queries")
+        if s.get("noise"):
+            parts.append(f"{s['noise']} navigational or utility noise")
         if s.get("no_metrics"):
             parts.append(f"{s['no_metrics']} without volume and difficulty")
         if s.get("small"):
@@ -103,46 +119,64 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
 
     tracked: dict[str, FactSerKeyword] = {}
     for row in db.query(FactSerKeyword).filter(FactSerKeyword.client_id == client.id, FactSerKeyword.is_tracked.is_(True)):
-        key = (row.keyword or "").strip().lower()
+        key = " ".join((row.keyword or "").lower().split())
         held = tracked.get(key)
         if key and (held is None or (row.checked_at or 0) > (held.checked_at or 0)):
             tracked[key] = row
     metrics = {
-        (row.keyword or "").strip().lower(): row
+        " ".join((row.keyword or "").lower().split()): row
         for row in db.query(FactSerKeywordMetric).filter(
             FactSerKeywordMetric.client_id == client.id
         )
     }
     targets = {
-        (row.keyword or "").strip().lower(): row
+        " ".join((row.keyword or "").lower().split()): row
         for row in db.query(KeywordTarget).filter(
             KeywordTarget.client_id == client.id,
             KeywordTarget.source.in_(("confirmed", "auto")),
         )
     }
     serp = load_serp_features(db, client)
-    brand = brand_terms(client)
+    brand = effective_brand_terms(db, client)
+    exact_rival, emd_rival = rival_brand_term_groups(db, client)
+    everywhere = frozenset().union(*page_words.values()) if page_words else frozenset()
+    rival_core_vocab = rival_core_vocab_from_pages(client, pages)
 
     summary = {
-        "tracked": len(tracked), "mapped": 0, "brand": 0, "ranking": 0,
-        "no_metrics": 0, "small": 0, "covered": 0, "gaps": 0,
+        "tracked": len(tracked), "excluded": 0, "mapped": 0, "brand": 0, "noise": 0,
+        "ranking": 0, "no_metrics": 0, "small": 0, "covered": 0, "gaps": 0,
         "pages_searched": len(pages),
     }
     gaps: list[TermGap] = []
-    from app.models.watch_target import WatchTarget
-    excluded_terms = {x.text.strip().lower() for x in db.query(WatchTarget).filter(
-        WatchTarget.client_id == client.id, WatchTarget.kind == "keyword", WatchTarget.state == "excluded")}
+    excluded_terms: set[str] = set()
+    for (text,) in db.query(WatchTarget.text).filter(
+        WatchTarget.client_id == client.id,
+        WatchTarget.kind == "keyword",
+        WatchTarget.state == "excluded",
+    ):
+        norm = " ".join((text or "").lower().split())
+        if norm:
+            excluded_terms.add(norm)
+        punct_norm = " ".join(re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split())
+        if punct_norm:
+            excluded_terms.add(punct_norm)
     for term, row in tracked.items():
-        if term in excluded_terms:
-            summary["excluded"] = summary.get("excluded", 0) + 1
+        punct_term = " ".join(re.sub(r"[^a-z0-9]+", " ", term.lower()).split())
+        if term in excluded_terms or punct_term in excluded_terms:
+            summary["excluded"] += 1
             continue
         target = targets.get(term)
         recorded_no_page = target is not None and not (target.target_url or "").strip()
         if target is not None and not recorded_no_page:
             summary["mapped"] += 1
             continue
-        if is_navigational(term, brand):
+        if is_navigational(term, brand) or is_rival_navigational(
+            term, exact_terms=exact_rival, emd_terms=emd_rival, core_vocab=rival_core_vocab
+        ):
             summary["brand"] += 1
+            continue
+        if is_noise_query(term, strict_platforms=False):
+            summary["noise"] += 1
             continue
         position = float(row.current_position or 0)
         if row.ranking_url and 0 < position <= 100:
@@ -158,7 +192,9 @@ def scan_term_gaps(db: Session, client: Client) -> GapScan:
             continue
 
         words = content_words(term)
-        everywhere = frozenset().union(*page_words.values()) if page_words else frozenset()
+        if not words:
+            summary["noise"] = summary.get("noise", 0) + 1
+            continue
         absent = tuple(sorted(words - everywhere))
         best = max((len(words & pw) / len(words) for pw in page_words.values()), default=0.0) if words else 0.0
         # A word the site never uses settles it: whatever else matches, the

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { updateClientAction } from "@/app/(app)/[clientSlug]/settings/client-actions";
 import { createClientAction } from "@/app/(app)/new-client/actions";
@@ -111,19 +111,34 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
   const [mode, setMode] = useState<"execution" | "consulting">(client.service_mode ?? "execution");
   const [group, setGroup] = useState(client.group_name ?? "");
   const [styleNotes, setStyleNotes] = useState(client.style_notes ?? "");
+  const consulting = mode === "consulting";
   const tier = tiers.find((t) => t.id === tierId);
+
+  useEffect(() => {
+    setService(serviceFromConfig(client.service_reporting));
+    setName(client.client_name);
+    setDomain(client.domain);
+    setTierId(client.tier_id);
+    setStatus(client.status);
+    setModel(client.business_model ?? "");
+    setStart(client.start_date ?? "");
+    setSheet(client.account_sheet_url ?? "");
+    setMode(client.service_mode ?? "execution");
+    setGroup(client.group_name ?? "");
+    setStyleNotes(client.style_notes ?? "");
+  }, [client]);
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        if (!service) return;
+        if (!consulting && !service) return;
         save.run(() =>
           updateClientAction(client.id, client.slug, {
             service_reporting: service ? configFromService(service) : client.service_reporting,
             client_name: name.trim(),
             domain: domain.trim(),
-            tier_id: tierId,
+            tier_id: consulting ? client.tier_id : tierId,
             service_mode: mode,
             group_name: group.trim(),
             status,
@@ -138,18 +153,22 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
     >
       <Card>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Agency services">
-            <ServiceSelect value={service} onChange={setService} />
-          </Field>
+          {consulting ? null : (
+            <Field label="Agency services">
+              <ServiceSelect value={service} onChange={setService} />
+            </Field>
+          )}
           <Field label="Company name" hint="Used for branding and AI-search prompts.">
             <input value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} />
           </Field>
           <Field label="Website URL / domain">
             <input value={domain} onChange={(e) => setDomain(e.target.value)} required className={inputClass} />
           </Field>
-          <Field label="OrganicIQ tier">
-            <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
-          </Field>
+          {consulting ? null : (
+            <Field label="OrganicIQ tier">
+              <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
+            </Field>
+          )}
           <Field label="How we work with this client">
             <ModeSelect value={mode} onChange={setMode} />
           </Field>
@@ -216,14 +235,14 @@ export function GeneralForm({ client, tiers }: { client: Client; tiers: Tier[] }
             />
           </Field>
         </div>
-        {tier ? (
+        {tier && !consulting ? (
           <p className="mt-4 rounded-lg bg-[var(--bg)] p-3 text-sm text-[var(--text-secondary)]">
             <span className="font-semibold text-[var(--text-primary)]">{tier.tier_name}</span> plan:{" "}
             {tier.growth_action_allowance} growth action{tier.growth_action_allowance === 1 ? "" : "s"} a
             month, watchlist checked {tier.watchlist_cadence.replace("_", "-")}.
           </p>
         ) : null}
-        <SaveBar pending={save.pending} saved={save.saved} error={save.error} disabled={!service && mode === "execution"} why="Choose the agency services first." />
+        <SaveBar pending={save.pending} saved={save.saved} error={save.error} disabled={!consulting && !service} why="Choose the agency services first." />
       </Card>
     </form>
   );
@@ -236,6 +255,14 @@ export function AdvancedForm({ client }: { client: Client }) {
   const [timezone, setTimezone] = useState(client.timezone);
   const [maxPages, setMaxPages] = useState(client.crawl_page_limit?.toString() ?? "");
   const [aliases, setAliases] = useState((client.brand_aliases ?? []).join("\n"));
+
+  useEffect(() => {
+    setFolder(client.path_prefix ?? "");
+    setMarket(client.primary_market ?? "United States");
+    setTimezone(client.timezone);
+    setMaxPages(client.crawl_page_limit?.toString() ?? "");
+    setAliases((client.brand_aliases ?? []).join("\n"));
+  }, [client]);
 
   return (
     <form
@@ -302,6 +329,9 @@ export function AdvancedForm({ client }: { client: Client }) {
 export function CompetitorsForm({ client }: { client: Client }) {
   const save = useSave();
   const [domains, setDomains] = useState((client.competitor_domains ?? []).join("\n"));
+  useEffect(() => {
+    setDomains((client.competitor_domains ?? []).join("\n"));
+  }, [client]);
   return (
     <form
       onSubmit={(event) => {
@@ -325,6 +355,9 @@ export function CompetitorsForm({ client }: { client: Client }) {
 export function SitemapForm({ client }: { client: Client }) {
   const save = useSave();
   const [url, setUrl] = useState(client.sitemap_url ?? "");
+  useEffect(() => {
+    setUrl(client.sitemap_url ?? "");
+  }, [client]);
   return (
     <form
       onSubmit={(event) => {
@@ -335,9 +368,9 @@ export function SitemapForm({ client }: { client: Client }) {
     >
       <Card title="Website sitemap">
         <p className="mb-4 text-sm text-[var(--text-secondary)]">
-          What the monthly site crawl reads. This is the whole website, separate from the blog feeds
-          below. Leave it blank and the crawler looks in robots.txt and the usual places. Set it
-          only if the site hides its sitemap somewhere unusual.
+          What the monthly site crawl reads for the whole website. Leave it blank and the crawler
+          looks in robots.txt and the usual places. Set it only if the site hides its sitemap
+          somewhere unusual.
         </p>
         <Field label="Sitemap URL (optional)">
           <input
@@ -357,7 +390,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [service, setService] = useState<ServiceValue | "">("");
+  const [service, setService] = useState<ServiceValue | "">("organiciq");
   const [name, setName] = useState("");
   const [domain, setDomain] = useState("");
   const [tierId, setTierId] = useState("");
@@ -365,6 +398,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
   const [model, setModel] = useState("");
   const [mode, setMode] = useState<"execution" | "consulting">("execution");
   const [group, setGroup] = useState("");
+  const [showMore, setShowMore] = useState(false);
   const consulting = mode === "consulting";
 
   return (
@@ -384,38 +418,27 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
             business_model: model || null,
             start_date: start || null,
           });
-          if (result.ok) router.push(`/${result.slug}/settings`);
+          if (result.ok) router.push(`/${result.slug}/settings/connections`);
           else setError(result.error);
         });
       }}
     >
       <Card>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="How we work with this client">
-            <ModeSelect value={mode} onChange={setMode} />
-          </Field>
-          <Field label="Group (optional)" hint="Sites of one company share a group, such as Flint.">
-            <input value={group} onChange={(e) => setGroup(e.target.value)} className={inputClass} />
-          </Field>
-          {consulting ? null : (
-            <>
-              <Field label="Agency services">
-                <ServiceSelect value={service} onChange={setService} />
-              </Field>
-              <Field label="OrganicIQ tier">
-                <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
-              </Field>
-            </>
-          )}
           <Field label="Company name" hint="Used for branding and AI-search prompts.">
             <input value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} />
           </Field>
           <Field label="Website URL / domain">
             <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" required className={inputClass} />
           </Field>
-          <Field label="Contract start date">
-            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} />
+          <Field label="How we work with this client">
+            <ModeSelect value={mode} onChange={setMode} />
           </Field>
+          {consulting ? null : (
+            <Field label="OrganicIQ tier">
+              <TierSelect tiers={tiers} value={tierId} onChange={setTierId} />
+            </Field>
+          )}
           <Field label="Business type" hint="Ecommerce clients are measured on orders and revenue.">
             <select value={model} onChange={(e) => setModel(e.target.value)} className={inputClass}>
               <option value="">Not set</option>
@@ -427,7 +450,37 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
             </select>
           </Field>
         </div>
-        <div className="mt-6 flex items-center gap-3">
+
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setShowMore((v) => !v)}
+            className="text-xs font-semibold text-[var(--brand-teal)] hover:underline"
+          >
+            {showMore
+              ? "Hide more options"
+              : consulting
+                ? "More options (group, start date)"
+                : "More options (group, start date, agency services)"}
+          </button>
+          {showMore ? (
+            <div className="mt-3 grid gap-4 rounded-lg border border-[var(--border)] bg-[var(--background)]/50 p-4 sm:grid-cols-3">
+              <Field label="Group (optional)" hint="Sites of one company share a group, such as Flint.">
+                <input value={group} onChange={(e) => setGroup(e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Contract start date">
+                <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} />
+              </Field>
+              {consulting ? null : (
+                <Field label="Agency services">
+                  <ServiceSelect value={service} onChange={setService} />
+                </Field>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           <button
             type="submit"
             disabled={pending || (!consulting && (!service || !tierId))}
@@ -436,7 +489,7 @@ export function NewClientForm({ tiers }: { tiers: Tier[] }) {
             Add client
           </button>
           <span className="text-sm text-[var(--text-secondary)]">
-            The rest (sitemap, competitors, connections, conversions) is set up on the next screen.
+            Next: connect Search Console &amp; GA4 on the following screen.
           </span>
         </div>
         {error ? (

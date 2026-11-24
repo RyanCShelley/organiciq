@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { pullStatusAction, startPullAction, stopPullAction } from "@/app/(app)/admin/actions";
@@ -41,18 +43,30 @@ const reach = (s: PullSource) => (s.reach.startsWith("today") || s.from === s.to
 
 /** Pull every connected source for one client, and show where the pull stands. Admin only. */
 export function PullPanel({ clientId }: { clientId: string }) {
+  const { clientSlug } = useParams<{ clientSlug: string }>();
+  const router = useRouter();
   const [status, setStatus] = useState<PullStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const live = useRef(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevRunningRef = useRef(false);
+
+  const applyStatus = (next: PullStatus) => {
+    const wasRunning = prevRunningRef.current;
+    prevRunningRef.current = next.running;
+    setStatus(next);
+    if (wasRunning && !next.running) {
+      router.refresh();
+    }
+  };
 
   const load = async () => {
     const r = await pullStatusAction(clientId);
     if (!live.current) return;
     if (r.ok) {
       setError(null);
-      setStatus(r.value);
+      applyStatus(r.value);
       watch(r.value);
     } else setError(r.error);
   };
@@ -77,7 +91,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
       setError(null);
       const r = await startPullAction(clientId, force);
       if (r.ok) {
-        setStatus(r.value);
+        applyStatus(r.value);
         watch(r.value);
       } else setError(r.error);
     });
@@ -88,7 +102,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
       setError(null);
       const r = await stopPullAction(clientId);
       if (r.ok) {
-        setStatus(r.value);
+        applyStatus(r.value);
         watch(r.value);
       } else setError(r.error);
     });
@@ -110,6 +124,16 @@ export function PullPanel({ clientId }: { clientId: string }) {
             : status.sources.length
               ? "Pull data fetches whatever is missing or older than a day."
               : "Choose a site or property for at least one source below, then pull.";
+
+  const hasPulledCoreData = Boolean(
+    status &&
+      !status.running &&
+      status.sources.some(
+        (s) =>
+          (s.source === "ga4" || s.source === "gsc_pages" || s.source === "gsc_queries") &&
+          (s.state === "done" || s.state === "partial" || Boolean(s.finished_at)),
+      ),
+  );
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -166,6 +190,19 @@ export function PullPanel({ clientId }: { clientId: string }) {
             </li>
           ))}
         </ul>
+      ) : null}
+      {hasPulledCoreData && clientSlug ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--brand-teal)]/30 bg-[var(--brand-teal-soft)]/25 px-4 py-2.5 text-xs">
+          <span className="font-medium text-[var(--text-primary)]">
+            Data pulled — choose which GA4 events count as leads or orders.
+          </span>
+          <Link
+            href={`/${clientSlug}/settings/conversions`}
+            className="font-semibold text-[var(--brand-teal)] hover:underline"
+          >
+            Next: Set conversion events →
+          </Link>
+        </div>
       ) : null}
       {error ? <p role="alert" className="mt-2 text-sm font-semibold text-red-700">{error}</p> : null}
     </div>

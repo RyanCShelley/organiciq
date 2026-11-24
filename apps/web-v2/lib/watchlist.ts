@@ -33,3 +33,82 @@ export type ImportReport = {
 };
 
 export type ImportResult = { ok: true; report: ImportReport } | { ok: false; error: string };
+
+export type ActionResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; status?: number };
+
+export type WatchlistKeywordCreateInput = {
+  keyword: string;
+  bucket_id?: string | null;
+  bucket_name?: string | null;
+  volume?: number | null;
+  difficulty?: number | null;
+  intent?: string | null;
+  paired_ai_prompt?: string | null;
+  notes?: string | null;
+};
+
+export type WatchlistKeywordUpdateInput = {
+  keyword?: string;
+  bucket_id?: string | null;
+  bucket_name?: string | null;
+  volume?: number | null;
+  difficulty?: number | null;
+  intent?: string | null;
+  paired_ai_prompt?: string | null;
+  notes?: string | null;
+};
+
+export type WatchlistKeywordAddResponse = {
+  id: string;
+  keyword: string;
+  keyword_key: string;
+  bucket_id: string;
+  bucket_name: string;
+  created: boolean;
+  bucket_created: boolean;
+};
+
+export type WatchlistKeywordDetail = WatchlistKeyword & {
+  bucket_id: string;
+  bucket_name: string;
+  source: string;
+};
+
+export type WatchlistKeywordBulkAddResponse = {
+  results: WatchlistKeywordAddResponse[];
+  created_count: number;
+  existing_count: number;
+};
+
+export type WatchlistBucketDeleteResponse = {
+  deleted: boolean;
+  id: string;
+  deleted_keywords: number;
+  cleared_focuses: number;
+};
+
+export type WatchlistSuggestion = {
+  query: string;
+  key: string;
+  page: string | null;
+  impressions: number;
+  impressions_before: number;
+  impressions_change_pct: number | null;
+  clicks: number;
+  position: number | null;
+  position_before: number | null;
+  move: number | null;
+  ctr: number | null;
+  signals: string[];
+  relevance_note: string;
+};
+
+export type WatchlistSuggestionsResponse = {
+  gsc_connected: boolean;
+  has_gsc_data: boolean;
+  google_through: string | null;
+  days: number;
+  suggestions: WatchlistSuggestion[];
+};

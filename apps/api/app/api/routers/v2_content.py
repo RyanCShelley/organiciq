@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
@@ -20,6 +20,7 @@ from app.integrations import teamwork
 from app.models.schema_tools import ContentItem, ContentState
 from app.core.urls import normalize_url
 from app.services import content_briefs, content_calendar, content_prompts, content_gaps_view, content_refresh, model_spend
+from app.services.review_visibility import key_of
 
 router = APIRouter(prefix="/v2/content", tags=["v2 content"])
 
@@ -33,6 +34,21 @@ def _month(month: str) -> str:
     return month
 
 
+def _reject_nul_query(value: str | None, label: str = "Value") -> str | None:
+    if value is not None and "\x00" in value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{label} cannot contain NUL characters.",
+        )
+    return value
+
+
+def _reject_nul_value(value: str | None, label: str = "Value") -> str | None:
+    if value is not None and "\x00" in value:
+        raise ValueError(f"{label} cannot contain NUL characters.")
+    return value
+
+
 @router.get("/gaps")
 def gaps(
     client: Annotated[Client, Depends(require_client)],
@@ -41,6 +57,7 @@ def gaps(
     q: Annotated[str | None, Query(max_length=200)] = None,
     ignored: bool = False,
 ) -> dict:
+    _reject_nul_query(q, "Search query")
     return {**content_gaps_view.build(db, client, show_ignored=ignored, q=q), "calendar": content_calendar.index(db, client)["gap"], "can_edit": user.role in CONTENT_EDITOR_ROLES, "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 
@@ -51,6 +68,7 @@ def gap_brief(
     db: Annotated[Session, Depends(get_db)],
     term: Annotated[str, Query(min_length=1, max_length=300)],
 ) -> dict:
+    _reject_nul_query(term, "Search term")
     return {"draft": content_briefs.latest(db, client, "brief", term)}
 
 
@@ -71,6 +89,7 @@ def topic_detail(
     label: Annotated[str, Query(min_length=1, max_length=80)],
 ) -> dict:
     """One suggested topic opened: its searches with the data on file for each, the brief if one was written, and where it stands on the calendar."""
+    _reject_nul_query(label, "Topic label")
     found = content_briefs.topic_detail(db, client, label)
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That topic is not in the latest list. Reload the list.")
@@ -87,6 +106,7 @@ def refreshes(
     q: Annotated[str | None, Query(max_length=200)] = None,
     ignored: bool = False,
 ) -> dict:
+    _reject_nul_query(q, "Search query")
     return {**content_refresh.build(db, client, _month(month or content_briefs.last_complete_month()), show_ignored=ignored, q=q), "calendar": content_calendar.index(db, client)["refresh"], "can_edit": user.role in CONTENT_EDITOR_ROLES, "model_ready": bool(get_settings().anthropic_api_key.strip())}
 
 
@@ -98,6 +118,7 @@ def refresh_page(
     url: Annotated[str, Query(min_length=8, max_length=2048)],
     month: Annotated[str | None, Query()] = None,
 ) -> dict:
+    _reject_nul_query(url, "Page URL")
     month = _month(month or content_briefs.last_complete_month())
     url = normalize_url(url) or url
     return {**content_refresh.page_detail(db, client, month, url), "month": month, "plan": content_briefs.latest(db, client, "refresh", url)}
@@ -112,6 +133,7 @@ def refresh_search(
     month: Annotated[str | None, Query()] = None,
 ) -> dict:
     """A search two or more pages are shown for, opened: each page's numbers, month by month, and who has led it."""
+    _reject_nul_query(query, "Search query")
     found = content_refresh.competing_detail(db, client, _month(month or content_briefs.last_complete_month()), query)
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Search Console has no data for that search. Reload the list.")
@@ -122,6 +144,21 @@ class SetAside(BaseModel):
     area: Area
     key: str = Field(min_length=1, max_length=2048)
 
+    @field_validator("key")
+    @classmethod
+    def _no_nul_key(cls, value: str) -> str:
+        return _reject_nul_value(value, "Key") or ""
+
+
+def _state_key(area: Area, raw_key: str) -> str:
+    if area == "gap":
+        cleaned = key_of(raw_key)
+    else:
+        cleaned = (raw_key or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Key cannot be blank.")
+    return cleaned
+
 
 @router.post("/ignore")
 def ignore(
@@ -130,8 +167,21 @@ def ignore(
     user: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    if db.query(ContentState).filter(ContentState.client_id == client.id, ContentState.area == payload.area, ContentState.key == payload.key).first() is None:
-        db.add(ContentState(client_id=client.id, area=payload.area, key=payload.key, created_by=user.email))
+    norm_key = _state_key(payload.area, payload.key)
+    existing_keys = {
+        k
+        for (k,) in db.query(ContentState.key).filter(
+            ContentState.client_id == client.id,
+            ContentState.area == payload.area,
+        )
+    }
+    matched = (
+        any(key_of(k) == norm_key for k in existing_keys)
+        if payload.area == "gap"
+        else norm_key in existing_keys
+    )
+    if not matched:
+        db.add(ContentState(client_id=client.id, area=payload.area, key=norm_key, created_by=user.email))
         db.commit()
     return {"ok": True}
 
@@ -143,7 +193,22 @@ def restore(
     _: Annotated[AuthUser, Depends(require_sma_staff)],
     db: Annotated[Session, Depends(get_db)],
 ) -> dict:
-    db.query(ContentState).filter(ContentState.client_id == client.id, ContentState.area == payload.area, ContentState.key == payload.key).delete()
+    norm_key = _state_key(payload.area, payload.key)
+    if payload.area == "gap":
+        rows = (
+            db.query(ContentState)
+            .filter(ContentState.client_id == client.id, ContentState.area == payload.area)
+            .all()
+        )
+        for row in rows:
+            if key_of(row.key) == norm_key:
+                db.delete(row)
+    else:
+        db.query(ContentState).filter(
+            ContentState.client_id == client.id,
+            ContentState.area == payload.area,
+            ContentState.key == norm_key,
+        ).delete()
     db.commit()
     return {"ok": True}
 
@@ -151,6 +216,11 @@ def restore(
 class TopicSetAside(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     restore: bool = False
+
+    @field_validator("label")
+    @classmethod
+    def _no_nul_label(cls, value: str) -> str:
+        return _reject_nul_value(value, "Topic label") or ""
 
 
 @router.post("/topics/dismiss")
@@ -170,6 +240,11 @@ class DraftIn(BaseModel):
     key: str = Field(min_length=1, max_length=2048)
     depth: Literal["quick", "deep", "deepest"] = "quick"
     month: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def _no_nul_key(cls, value: str) -> str:
+        return _reject_nul_value(value, "Key") or ""
 
 
 @router.post("/draft", status_code=status.HTTP_202_ACCEPTED)
@@ -208,6 +283,11 @@ class CalendarIn(BaseModel):
     assignee_email: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=8000)
 
+    @field_validator("title", "target", "source_key", "assignee_email", "notes")
+    @classmethod
+    def _no_nul_fields(cls, value: str | None, info) -> str | None:
+        return _reject_nul_value(value, info.field_name)
+
 
 class CalendarPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
@@ -216,6 +296,11 @@ class CalendarPatch(BaseModel):
     clear_due: bool = False
     assignee_email: str | None = Field(default=None, max_length=255)
     notes: str | None = Field(default=None, max_length=8000)
+
+    @field_validator("title", "assignee_email", "notes")
+    @classmethod
+    def _no_nul_fields(cls, value: str | None, info) -> str | None:
+        return _reject_nul_value(value, info.field_name)
 
 
 def _item(db: Session, client: Client, item_id: UUID, lock: bool = False) -> ContentItem:

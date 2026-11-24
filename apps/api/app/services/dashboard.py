@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.services.lead_exclusions import not_excluded
 from app.models.client import Client
-from app.models.config import ConversionDefinition, OrganicChannel
+from app.models.config import OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
@@ -384,16 +384,12 @@ def _freshness(watermarks: dict[str, DataWatermark]) -> list[dict[str, Any]]:
 
 
 def _lead_event_names(db: Session, client_id: UUID) -> list[str]:
-    rows = (
-        db.query(ConversionDefinition.event_name)
-        .filter(
-            ConversionDefinition.client_id == client_id,
-            ConversionDefinition.active.is_(True),
-            ConversionDefinition.conversion_type == "lead",
-        )
-        .all()
-    )
-    return [row[0] for row in rows]
+    from app.services import lead_conversions
+
+    client = db.get(Client, client_id)
+    if client is not None:
+        return lead_conversions.active_conversion_events(db, client)
+    return lead_conversions.active_lead_events(db, client_id)
 
 
 def _sum_leads(

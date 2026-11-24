@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch, type Client } from "@/lib/api";
+import { invalidateClientsCache } from "@/lib/clients";
 
 export type CreateResult = { ok: true; slug: string } | { ok: false; error: string };
 
 export async function createClientAction(fields: Record<string, unknown>): Promise<CreateResult> {
   try {
     const created = await apiFetch<Client>("/clients", { method: "POST", body: fields });
+    invalidateClientsCache();
     revalidatePath("/", "layout");
     return { ok: true, slug: created.slug };
   } catch (error) {
@@ -35,6 +37,7 @@ export async function createSitesAction(group: string, mode: "execution" | "cons
       out.push({ line: `${site.name} (${site.domain})`, ok: false, error: error instanceof ApiError ? error.message : "The API did not answer." });
     }
   }
+  invalidateClientsCache();
   revalidatePath("/", "layout");
   return out;
 }

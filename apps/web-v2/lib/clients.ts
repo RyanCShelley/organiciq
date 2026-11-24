@@ -7,6 +7,11 @@ import { auth } from "@/lib/auth";
 const RECENT_MS = 20_000;
 const recent = new Map<string, { at: number; clients: Client[] }>();
 
+/** Clear the per-user recent client list cache after mutations so sibling routes never read stale client settings. */
+export function invalidateClientsCache(): void {
+  recent.clear();
+}
+
 /** The clients this person can see, fetched once per request and always current. The shell, the home page and the settings screens use this one. */
 export const getClients = cache(async () => {
   const clients = await apiFetch<Client[]>("/clients");

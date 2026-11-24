@@ -66,7 +66,8 @@ _SPELLING = {
     "theatre": "theater", "calibre": "caliber", "colour": "color",
     "behaviour": "behavior", "favour": "favor", "neighbour": "neighbor",
     "labour": "labor", "honour": "honor", "grey": "gray", "tyre": "tire",
-    "aluminium": "aluminum", "programme": "program", "cheque": "check",
+    "aluminium": "aluminum", "programme": "program", "programmes": "program",
+    "cheque": "check",
 }
 
 _ISE = re.compile(r"^(.{3,})is(ation|ations|e|ed|es|ing)$")
@@ -104,6 +105,154 @@ def content_words(text: str) -> frozenset[str]:
     # A single letter ("i beam", "vitamin d") is not a word to match on; it
     # showed up as the one word no page carried.
     return frozenset(_stem(w) for w in words if w not in drop and not (len(w) == 1 and w.isalpha()))
+
+
+#: Minimum non-generic domain stems a site must carry before topical overlap
+#: filtering applies; keeps sparse synthetic stubs in tests working.
+MIN_SITE_VOCAB = 6
+
+#: Generic search modifiers, boilerplate tokens, and cross-domain action
+#: verbs/nouns stripped from topical relevance comparisons (never from
+#: `content_words` coverage checks).
+_RAW_GENERIC_RELEVANCE_WORDS = (
+    "cost price pricing guide guides review reviews tip tips checklist checklists "
+    "template templates example examples sample samples free online cheap cheapest "
+    "affordable new old small large local good great better best "
+    "differ difference differences different compare comparison alternative alternatives "
+    "benefit benefits pro pros con cons mean meaning definition definitions "
+    "list lists idea ideas option options type types way ways step steps "
+    "tool tools faq faqs question questions blog article articles post posts "
+    "page pages home about contact info information overview summary "
+    "service services company companies filler "
+    "gallery galleries testimonial testimonials location locations quote quotes "
+    "request requests team teams our us "
+    "repair repairs repairing repaired clean cleaning cleaner cleaned "
+    "install installation installations installing installed "
+    "replace replacement replacements replacing replaced "
+    "maintain maintenance maintaining maintained "
+    "inspect inspection inspections inspecting inspected "
+    "check checking checked plan plans planning planned "
+    "test testing tests tested system systems program programs programme "
+    "solution solutions process processes processing processed "
+    "2020 2021 2022 2023 2024 2025 2026 2027 2028 2029 2030"
+)
+_GENERIC_RELEVANCE_WORDS = content_words(_RAW_GENERIC_RELEVANCE_WORDS) | frozenset(
+    (
+        "pric guid templat exampl sampl onlin larg altern definit articl "
+        "summari inform compar galleri testimoni locat quot instal replac "
+        "mainten solut"
+    ).split()
+)
+
+_SEARCH_OPERATOR_RE = re.compile(
+    r"\b(?:site|inurl|intitle|allintitle|filetype|ext|cache|related):"
+)
+_URL_OR_DOMAIN_RE = re.compile(
+    r"https?://|www\.|@|"
+    r"\b[a-z0-9-]+\.(?:com|org|edu|gov|biz|info|co\.uk|ca|au|io|co|ai|app|dev)\b|"
+    r"[a-z0-9-]+\.[a-z]{2,}/"
+)
+_AUTH_NOISE_RE = re.compile(
+    r"\b(?:login|log\s*in|logins|signin|sign\s*in|sign\s*on|signup|sign\s*up|"
+    r"log\s*out|sign\s*out|forgot\s+(?:my\s+|your\s+)?password|"
+    r"reset\s+(?:my\s+|your\s+)?password|password\s+reset|change\s+password|"
+    r"create\s+account|delete\s+account|close\s+account|my\s+account|account\s+login|"
+    r"(?:client|customer|patient|employee|member|student|staff|partner|vendor)\s+portal|"
+    r"wp-admin|wp-login|webmail)\b"
+)
+_JOB_NOISE_RE = re.compile(
+    r"\b(?:careers?|jobs|"
+    r"(?:now|currently|we\s+are|we're|is|are|who\s+is|who's|always|jobs?)\s+hiring|"
+    r"hiring\s+(?:now|today|immediately|near\s+me|fairs?|events?|bonuses?|managers?|process|trends?|freezes?)|"
+    r"job\s+(?:openings?|postings?|descriptions?|applications?)|"
+    r"apply\s+(?:now|online)|salar(?:y|ies)|hourly\s+wage|pay\s+scale|"
+    r"resumes?|glassdoor|indeed|ziprecruiter|simplyhired)\b"
+)
+_UTILITY_NOISE_RE = re.compile(
+    r"\b(?:customer\s+service|customer\s+support|"
+    r"tech(?:nical)?\s+support\s+(?:number|phone|chat|email)|"
+    r"help\s*desk\s+(?:number|phone|login)|phone\s+number|contact\s+number|"
+    r"toll\s+free|800\s+number|mailing\s+address|street\s+address|"
+    r"(?:store|business|opening|office)\s+hours|hours\s+of\s+operation|directions\s+to|"
+    r"unsubscribe|cancel\s+(?:membership|subscription|order)|"
+    r"track\s+(?:my\s+)?order|order\s+status|"
+    r"(?:return|refund|shipping|privacy|cookie)\s+policy|"
+    r"terms\s+(?:of\s+(?:service|use)|and\s+conditions))\b"
+)
+_FILE_NOISE_RE = re.compile(
+    r"\b(?:pdfs?|docx?|xlsx?|pptx?|csv|zip(?!\s+code)|exe|dmg|apk|epub|torrent|keygen|downloads?|"
+    r"(?:software|app|apps|program|programs|game|games|windows|mac|office|photoshop|adobe|autocad|"
+    r"full\s+version|serial|license|activation|patch|free)\s+crack(?:s|ed)?|"
+    r"crack(?:s|ed)?\s+(?:download|downloads|free|software|key|keys|serial|patch|keygen|torrent|"
+    r"version|apk|exe|dmg|zip|file|files)|"
+    r"cracked\s+(?:version|software|app|apps|apk|exe|dmg|game|games|download|downloads))\b"
+)
+_UGC_DIRECTORY_RE = re.compile(
+    r"\b(?:reddit|quora|wikipedia|wiki|yelp|bbb|better\s+business\s+bureau|"
+    r"trustpilot|mapquest|yellow\s+pages|craigslist|angi|angies\s+list|homeadvisor|thumbtack)\b"
+)
+_PLATFORM_TOKENS = (
+    "youtube", "tiktok", "facebook", "instagram", "twitter", "pinterest",
+    "linkedin", "amazon", "walmart", "ebay", "etsy", "chatgpt", "openai",
+    "gmail", "yahoo", "canva", "hubspot", "salesforce", "shopify",
+    "wordpress", "semrush", "ahrefs", "zoom", "slack",
+)
+_PLATFORM_RE = re.compile(rf"\b({'|'.join(_PLATFORM_TOKENS)})\b")
+_PLATFORM_MODIFIER_RE = re.compile(
+    r"\b(?:login|pricing|price|support|app|apps|alternatives?|vs|jobs|careers?|account|portal|download)\b"
+)
+
+
+def is_noise_query(
+    query: str | None,
+    *,
+    strict_platforms: bool = True,
+    allowed_words: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether a search query is navigational, utility, job, file, URL, or platform noise."""
+    q = " ".join((query or "").lower().split())
+    if not q or len(q) < 3 or len(q) > 120 or len(q.split()) > 10:
+        return True
+    if re.fullmatch(r"[\W\d_]+", q):
+        return True
+    if (
+        _SEARCH_OPERATOR_RE.search(q)
+        or _URL_OR_DOMAIN_RE.search(q)
+        or _AUTH_NOISE_RE.search(q)
+        or _JOB_NOISE_RE.search(q)
+        or _UTILITY_NOISE_RE.search(q)
+        or _FILE_NOISE_RE.search(q)
+        or _UGC_DIRECTORY_RE.search(q)
+    ):
+        return True
+    matched_platforms = set(_PLATFORM_RE.findall(q))
+    if matched_platforms:
+        if strict_platforms:
+            if any(not (content_words(p) <= allowed_words) for p in matched_platforms):
+                return True
+        elif _PLATFORM_MODIFIER_RE.search(q):
+            return True
+    return False
+
+
+def is_topically_relevant(
+    words: frozenset[str],
+    *,
+    core_vocab: frozenset[str],
+    min_vocab: int = MIN_SITE_VOCAB,
+) -> bool:
+    """Whether a query's non-generic words overlap the site's domain vocabulary."""
+    domain_vocab = frozenset(
+        w for w in (core_vocab - _GENERIC_RELEVANCE_WORDS) if not w.isdigit()
+    )
+    if len(domain_vocab) < min_vocab:
+        return True
+    query_domain = frozenset(
+        w for w in (words - _GENERIC_RELEVANCE_WORDS) if not w.isdigit()
+    )
+    if not query_domain:
+        return False
+    return bool(query_domain & domain_vocab)
 
 
 @dataclass(frozen=True)
@@ -484,21 +633,32 @@ def fold_variants(gaps: list) -> list:
     three slots for one subject.
     """
     ordered = sorted(gaps, key=lambda g: (-g.weight, g.term))
-    leads: list = []
+    leads: list[tuple[object, frozenset[str]]] = []
+    by_word: dict[str, list[int]] = {}
+    first_empty_lead: int | None = None
     folded: dict[str, list[tuple[str, float]]] = {}
     for gap in ordered:
         words = content_words(gap.term)
-        home = next(
-            (
-                lead
-                for lead in leads
-                if words and (words <= content_words(lead.term) or content_words(lead.term) <= words)
-            ),
-            None,
-        )
+        home = None
+        if words:
+            cand_indices = {idx for w in words for idx in by_word.get(w, ())}
+            for idx in sorted(cand_indices):
+                lead, lead_words = leads[idx]
+                if words <= lead_words or lead_words <= words:
+                    home = lead
+                    break
+        elif first_empty_lead is not None:
+            home = leads[first_empty_lead][0]
         if home is None:
-            leads.append(gap)
+            idx = len(leads)
+            leads.append((gap, words))
             folded[gap.term] = list(gap.also_covers)
+            if not words and first_empty_lead is None:
+                first_empty_lead = idx
+            for w in words:
+                by_word.setdefault(w, []).append(idx)
         else:
             folded[home.term].append((gap.term, gap.weight))
-    return [replace(lead, also_covers=tuple(folded[lead.term])) for lead in leads]
+            if gap.also_covers:
+                folded[home.term].extend(gap.also_covers)
+    return [replace(lead, also_covers=tuple(folded[lead.term])) for lead, _ in leads]

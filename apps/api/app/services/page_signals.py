@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from collections.abc import Iterable
 from datetime import date, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -44,7 +45,11 @@ from app.models.crawl import (
 )
 from app.models.ga4 import FactGa4Traffic
 from app.models.gsc import FactGscPage, FactGscQueryPage
+from app.models.llm_visibility import ClientLlmSettings
+from app.models.seranking import FactSerCompetitorKeyword
+from app.services.competitors import bare_domain
 from app.services.link_gaps import link_gaps
+from app.services.page_eligibility import PageType, classify_page_url
 from app.services.page_stage import confirmed_stages
 from app.services.conversion_stage import resolve as resolve_conversion_stage
 from app.services.serp_features import load as load_serp_features
@@ -62,6 +67,16 @@ MIN_PAGES_FOR_MEDIAN = 5
 
 #: Which offers suit a reader at each stage, matching the catalog's own rule.
 from app.decisions.catalog import STAGE_FIT  # noqa: E402
+from app.decisions.content_gaps import _GENERIC_RELEVANCE_WORDS, content_words
+
+#: Common 3-letter words/industry terms that should not be treated as standalone
+#: uncontextualized rival brands solely because a competitor owns `<word>.com`.
+_COMMON_SHORT_WORDS = frozenset(
+    "air seo pro law tax spa gas oil pet vet car gym diy web app ads pay fit "
+    "sun eco lab med art ink ice dog cat bus van cab bed box key map job top "
+    "new hot red bay sea sky hub net dev api sdk crm erp roi kpi ppc sem cro "
+    "buy now day one all out".split()
+)
 
 
 def rank_offers(
@@ -110,6 +125,29 @@ def rank_offers(
     return tuple(winners) if len(winners) == 1 else ()
 
 
+def _clean_brand_token(value: str | None) -> str:
+    return " ".join((value or "").replace("\u2019", "'").lower().split())
+
+
+def _valid_domain_host(raw: str | None) -> str:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return ""
+    domain = (
+        bare_domain(text)
+        .split("?", 1)[0]
+        .split("#", 1)[0]
+        .rsplit("@", 1)[-1]
+        .removeprefix("www.")
+    )
+    if not domain or domain.endswith(":"):
+        return ""
+    host = domain.split(":", 1)[0].strip(".")
+    if "." not in host or " " in host or not re.search(r"[a-z0-9]", host):
+        return ""
+    return host
+
+
 def brand_terms(client: Client) -> set[str]:
     """What a searcher types when they mean this site rather than the topic.
 
@@ -117,30 +155,411 @@ def brand_terms(client: Client) -> set[str]:
     the company name. A query carrying any of them is navigation.
     """
     terms: set[str] = set()
-    domain = (client.domain or "").strip().lower()
+    domain = _valid_domain_host(client.domain)
     if domain:
-        if "://" in domain:
-            domain = urlsplit(domain).netloc or domain
-        domain = domain.split("/")[0].removeprefix("www.")
-        if domain:
-            terms.add(domain)
-            bare = domain.split(".")[0]
-            if len(bare) > 3:
-                terms.add(bare)
-    name = (client.client_name or "").strip().lower()
-    if len(name) > 3:
+        terms.add(domain)
+        bare = domain.split(".")[0]
+        if len(bare) >= 4 or (
+            len(bare) == 3
+            and bare not in _COMMON_SHORT_WORDS
+            and bare not in _GENERIC_RELEVANCE_WORDS
+        ):
+            terms.add(bare)
+        spaced = _clean_brand_token(bare.replace("-", " ").replace("_", " "))
+        if len(spaced) >= 4 or (
+            len(spaced) == 3
+            and spaced not in _COMMON_SHORT_WORDS
+            and spaced not in _GENERIC_RELEVANCE_WORDS
+        ):
+            terms.add(spaced)
+    name = _clean_brand_token(client.client_name)
+    if len(name) >= 3:
         terms.add(name)
     # Other names the brand is searched by, entered by hand — the name and
     # the domain cannot say that ACCTek is also "acc technical services".
-    terms.update(str(a).strip().lower() for a in (client.brand_aliases or ()) if str(a).strip())
+    for alias in client.brand_aliases or ():
+        cleaned = _clean_brand_token(str(alias or ""))
+        if len(cleaned) >= 3:
+            terms.add(cleaned)
     return terms
 
 
+def effective_brand_terms(db: Session, client: Client) -> set[str]:
+    """Client brand terms plus any custom brand name/patterns configured for LLM tracking."""
+    terms = brand_terms(client)
+    settings = (
+        db.query(ClientLlmSettings)
+        .filter(ClientLlmSettings.client_id == client.id)
+        .first()
+    )
+    if settings is not None:
+        name = _clean_brand_token(settings.brand_name)
+        if len(name) >= 3:
+            terms.add(name)
+        for pattern in settings.brand_patterns or ():
+            cleaned = _clean_brand_token(str(pattern or ""))
+            if len(cleaned) >= 3:
+                terms.add(cleaned)
+    return terms
+
+
+_RIVAL_BRAND_INTENT_RE = re.compile(
+    r"\b(?:reviews?|ratings?|complaints?|vs|versus|alternatives?|login|log\s*in|"
+    r"signin|sign\s*in|scam|coupons?|promo|promos|pricing|price|hours|phone|"
+    r"address|contact|careers?|jobs|salary|portal|support)\b"
+)
+
+#: Multi-word geographic places stripped from EMD rival domains before checking
+#: whether any remaining token is an unknown brand/surname word.
+_GEO_PHRASE_RE = re.compile(
+    r"\b(?:"
+    r"new york|los angeles|san diego|san jose|san francisco|san antonio|"
+    r"san bernardino|san mateo|san marcos|san juan|"
+    r"fort worth|ft worth|fort lauderdale|ft lauderdale|fort myers|ft myers|"
+    r"fort wayne|ft wayne|fort collins|ft collins|"
+    r"tampa bay|palm bay|west palm beach|palm beach|palm coast|palm springs|"
+    r"boca raton|coral gables|coral springs|las vegas|salt lake city|salt lake|"
+    r"kansas city|oklahoma city|panama city|jersey city|new orleans|baton rouge|el paso|"
+    r"santa ana|santa clara|santa barbara|santa rosa|santa fe|santa monica|santa cruz|"
+    r"saint louis|st louis|saint petersburg|st petersburg|saint paul|st paul|"
+    r"saint augustine|st augustine|"
+    r"cape coral|port saint lucie|port st lucie|daytona beach|virginia beach|"
+    r"myrtle beach|long beach|huntington beach|miami beach|delray beach|"
+    r"pompano beach|boynton beach|vero beach|grand rapids|cedar rapids|"
+    r"little rock|sioux falls|west des moines|des moines|ann arbor|green bay|"
+    r"colorado springs|corpus christi|key west|winter park|winter haven|"
+    r"new haven|altamonte springs|lake worth|chula vista|overland park|"
+    r"garden grove|elk grove|orange county|"
+    r"north carolina|south carolina|north dakota|south dakota|"
+    r"new jersey|new mexico|new hampshire|new england|rhode island|west virginia|"
+    r"long island|northern virginia|british columbia|nova scotia|new brunswick|"
+    r"united states|united kingdom|"
+    r"central florida|south florida|north florida|"
+    r"east bay|south bay|bay area|tri state|twin cities|dc metro"
+    r")\b"
+)
+
+#: Unambiguous geographic tokens stemmed with `content_words()` (excluding
+#: surname-cities like henderson, jackson, madison, lincoln, taylor, clark,
+#: baker, flint, wilson, grant, franklin, hamilton, scott, kelly, ross).
+_GEO_SINGLE_WORDS = content_words(
+    "usa us uk canada australia england scotland ireland ontario quebec alberta "
+    "alabama alaska arizona arkansas california colorado connecticut delaware florida "
+    "georgia hawaii idaho illinois indiana iowa kansas kentucky louisiana maine "
+    "maryland massachusetts michigan minnesota mississippi missouri montana nebraska "
+    "nevada ohio oklahoma oregon pennsylvania tennessee texas utah vermont virginia "
+    "wisconsin wyoming "
+    "orlando tampa miami jacksonville sarasota clearwater gainesville tallahassee "
+    "pensacola ocala kissimmee bradenton naples lakeland deltona melbourne "
+    "syracuse nashville chicago phoenix dallas houston atlanta denver seattle boston "
+    "detroit portland philadelphia pittsburgh cleveland cincinnati columbus indianapolis "
+    "knoxville memphis louisville baltimore milwaukee albuquerque tucson fresno "
+    "sacramento omaha tulsa oakland minneapolis wichita honolulu anaheim anchorage "
+    "toledo durham reno buffalo richmond boise spokane tacoma charleston savannah "
+    "raleigh charlotte austin brooklyn manhattan queens bronx vegas "
+    "toronto vancouver montreal calgary ottawa edmonton winnipeg "
+    "sydney brisbane perth adelaide london manchester birmingham leeds glasgow "
+    "liverpool bristol edinburgh "
+    "county metro statewide nationwide"
+)
+
+
+_FT_GEO_RE = re.compile(r"\bft(?=\s+(?:worth|lauderdale|myers|wayne|collins)\b)")
+
+
+def _strip_possessives(value: str) -> str:
+    no_singular = re.sub(r"(?<=[a-z0-9])['’]s\b", "", value)
+    return re.sub(r"(?<=s)['’](?=$|[^a-z0-9])", "", no_singular)
+
+
+def _normalize_rival_text(value: str | None) -> str:
+    lowered = (value or "").lower()
+    spaced = re.sub(r"[-_/:.]+", " ", lowered)
+    cleaned = _clean_brand_token(_strip_possessives(spaced))
+    return _FT_GEO_RE.sub("fort", cleaned)
+
+
+def rival_vocab_words(text: str | None) -> frozenset[str]:
+    """Content words for rival-EMD matching, stripping multi-word geo phrases first."""
+    normalized = _normalize_rival_text(text)
+    if not normalized:
+        return frozenset()
+    return content_words(_GEO_PHRASE_RE.sub(" | ", normalized))
+
+
+_CHROME_PATHS = frozenset(
+    {
+        "/about",
+        "/about-us",
+        "/contact",
+        "/contact-us",
+        "/team",
+        "/our-team",
+        "/gallery",
+        "/photo-gallery",
+        "/testimonials",
+        "/client-testimonials",
+        "/locations",
+        "/service-areas",
+        "/service-areas-locations",
+        "/service-areas-and-locations",
+        "/quote",
+        "/request-a-quote",
+        "/get-a-quote",
+        "/careers",
+        "/jobs",
+        "/privacy",
+        "/privacy-policy",
+        "/terms",
+        "/terms-of-service",
+        "/terms-of-use",
+        "/cookie-policy",
+        "/login",
+        "/signin",
+        "/sign-in",
+        "/home",
+    }
+)
+
+_CHROME_TITLES = frozenset(
+    {
+        "home",
+        "homepage",
+        "home page",
+        "about",
+        "about us",
+        "contact",
+        "contact us",
+        "team",
+        "our team",
+        "gallery",
+        "photo gallery",
+        "testimonials",
+        "client testimonials",
+        "locations",
+        "service areas",
+        "service areas & locations",
+        "service areas and locations",
+        "quote",
+        "request a quote",
+        "get a quote",
+        "careers",
+        "jobs",
+        "privacy",
+        "privacy policy",
+        "terms",
+        "terms of service",
+        "terms of use",
+        "cookie policy",
+        "login",
+        "sign in",
+    }
+)
+
+_CHROME_LEAF_SEGMENTS = frozenset(p.lstrip("/") for p in _CHROME_PATHS)
+_CHROME_ANYWHERE_SEGMENTS = _CHROME_LEAF_SEGMENTS - frozenset(
+    {"locations", "service-areas", "home"}
+)
+_CHROME_PREFIX_RE = re.compile(
+    r"^(?:about-us|contact-us|our-team|photo-gallery|client-testimonials|"
+    r"request-a-quote|get-a-quote|careers|jobs|privacy-policy|"
+    r"terms-of-service|terms-of-use|cookie-policy|login|signin|sign-in)(?:-|$)"
+)
+_HOME_TITLE_SEGMENTS = frozenset({"home", "homepage", "home page"})
+_PAGE_EXT_RE = re.compile(r"\.(?:html?|php|aspx?|jsp)$")
+
+
+def is_substantive_page(url: str, row: FactCrawlPageSnapshot) -> bool:
+    """True when a crawled snapshot represents substantive content rather than site chrome."""
+    if (getattr(row, "page_type", None) or "").strip().lower() == PageType.UTILITY.value:
+        return False
+    if classify_page_url(url).page_type == PageType.UTILITY:
+        return False
+    path = (urlsplit(url).path or "/").lower().rstrip("/") or "/"
+    title = _clean_brand_token(row.title)
+    if title in _CHROME_TITLES:
+        return False
+    segments = [
+        _PAGE_EXT_RE.sub("", raw_seg)
+        for raw_seg in path.strip("/").split("/")
+        if raw_seg
+    ]
+    if path == "/" or segments == ["index"]:
+        if not title:
+            return False
+        title_segments = [
+            _clean_brand_token(seg)
+            for seg in re.split(r"[|—–:/]+|\s+-\s*|\s*-\s+", row.title or "")
+            if _clean_brand_token(seg)
+        ]
+        return not any(seg in _HOME_TITLE_SEGMENTS for seg in title_segments)
+    if segments and segments[-1] in _CHROME_LEAF_SEGMENTS:
+        return False
+    if any(seg in _CHROME_ANYWHERE_SEGMENTS or _CHROME_PREFIX_RE.match(seg) for seg in segments):
+        return False
+    return True
+
+
+def rival_core_vocab_from_pages(client: Client, pages: dict) -> frozenset[str]:
+    """Substantive crawl words plus primary market, stripping multi-word geo phrases."""
+    parts: list[str] = []
+    for url, row in pages.items():
+        if not is_substantive_page(url, row):
+            continue
+        headings = [
+            str(s.get("heading") or "") for s in (row.sections or []) if isinstance(s, dict)
+        ]
+        parts.extend([row.title or "", urlsplit(url).path, *headings])
+    if client.primary_market:
+        parts.append(str(client.primary_market))
+    return frozenset().union(*(rival_vocab_words(part) for part in parts if part))
+
+
+def _emd_words_non_brand(term: str, *, allowed_vocab: frozenset[str]) -> bool:
+    """True when an EMD spaced phrase contains only known domain or geo tokens."""
+    normalized = _normalize_rival_text(term)
+    stripped = _GEO_PHRASE_RE.sub(" ", normalized)
+    remaining_words = content_words(stripped)
+    return not remaining_words or remaining_words <= allowed_vocab
+
+
+def _rival_domain_term_groups(domains: Iterable[str]) -> tuple[set[str], set[str]]:
+    """Return (exact_terms, emd_spaced_terms) derived from competitor domains."""
+    exact_terms: set[str] = set()
+    emd_spaced_terms: set[str] = set()
+    for raw in domains:
+        domain = _valid_domain_host(raw)
+        if not domain:
+            continue
+        exact_terms.add(domain)
+        bare = domain.split(".")[0]
+        if len(bare) >= 4:
+            exact_terms.add(bare)
+        elif len(bare) == 3:
+            emd_spaced_terms.add(bare)
+        spaced = _clean_brand_token(bare.replace("-", " ").replace("_", " "))
+        if len(spaced) >= 4:
+            if spaced == bare:
+                exact_terms.add(spaced)
+            else:
+                emd_spaced_terms.add(spaced)
+    return exact_terms, emd_spaced_terms
+
+
+def rival_brand_terms_for_domains(domains: Iterable[str]) -> set[str]:
+    """Brand stems and domain names derived from a collection of competitor domains."""
+    exact_terms, emd_spaced_terms = _rival_domain_term_groups(domains)
+    return exact_terms | emd_spaced_terms
+
+
+def rival_brand_term_groups(
+    db: Session, client: Client, extra_domains: Iterable[str] = ()
+) -> tuple[set[str], set[str]]:
+    """Return (exact_terms, emd_spaced_terms) for competitor brand filtering."""
+    domains: set[str] = {
+        str(d) for d in (client.competitor_domains or ()) if str(d or "").strip()
+    }
+    domains.update(str(d) for d in extra_domains if str(d or "").strip())
+    domains.update(
+        str(d)
+        for (d,) in db.query(FactSerCompetitorKeyword.competitor_domain)
+        .filter(FactSerCompetitorKeyword.client_id == client.id)
+        .distinct()
+        if str(d or "").strip()
+    )
+    exact_terms, emd_spaced_terms = _rival_domain_term_groups(domains)
+
+    settings = (
+        db.query(ClientLlmSettings)
+        .filter(ClientLlmSettings.client_id == client.id)
+        .first()
+    )
+    if settings is not None and isinstance(settings.competitors, dict):
+        for comp_domain, info in settings.competitors.items():
+            dom_exact, dom_emd = _rival_domain_term_groups((str(comp_domain),))
+            exact_terms.update(dom_exact)
+            emd_spaced_terms.update(dom_emd)
+            if isinstance(info, dict):
+                candidates = [info.get("name"), *(info.get("patterns") or ())]
+                for raw in candidates:
+                    cleaned = _clean_brand_token(str(raw or ""))
+                    if len(cleaned) >= 3:
+                        exact_terms.add(cleaned)
+    emd_spaced_terms -= exact_terms
+    return exact_terms, emd_spaced_terms
+
+
+def rival_brand_terms(
+    db: Session, client: Client, extra_domains: Iterable[str] = ()
+) -> set[str]:
+    """Competitor brand terms from configured domains, DataForSEO rivals, and LLM settings."""
+    exact_terms, emd_spaced_terms = rival_brand_term_groups(
+        db, client, extra_domains=extra_domains
+    )
+    return exact_terms | emd_spaced_terms
+
+
 def is_navigational(query: str | None, terms: set[str]) -> bool:
-    text = (query or "").strip().lower()
+    text = _clean_brand_token(query)
+    if not text or not terms:
+        return False
+    stripped_text: str | None = None
+    for raw in terms:
+        term = _clean_brand_token(raw)
+        if not term:
+            continue
+        if re.search(rf"(?:^|[^a-z0-9]){re.escape(term)}(?:'s)?(?=$|[^a-z0-9])", text):
+            return True
+        if " " in term:
+            if stripped_text is None:
+                stripped_text = _clean_brand_token(_strip_possessives(text))
+            stripped_term = _clean_brand_token(_strip_possessives(term))
+            if stripped_term and re.search(
+                rf"(?:^|[^a-z0-9]){re.escape(stripped_term)}(?=$|[^a-z0-9])",
+                stripped_text,
+            ):
+                return True
+    return False
+
+
+def is_rival_navigational(
+    query: str | None,
+    *,
+    exact_terms: set[str],
+    emd_terms: set[str],
+    core_vocab: frozenset[str],
+    geo_vocab: frozenset[str] = _GEO_SINGLE_WORDS,
+) -> bool:
+    """Whether a query targets a rival brand rather than a geo/industry EMD phrase."""
+    if is_navigational(query, exact_terms):
+        return True
+    if not emd_terms:
+        return False
+    text = _clean_brand_token(query)
     if not text:
         return False
-    return any(term in text for term in terms)
+    normalized_text = _normalize_rival_text(text)
+    stripped_text = _clean_brand_token(_GEO_PHRASE_RE.sub(" | ", normalized_text))
+    has_cue = bool(_RIVAL_BRAND_INTENT_RE.search(normalized_text))
+    allowed_vocab = core_vocab | geo_vocab
+    for term in emd_terms:
+        norm_term = _normalize_rival_text(term)
+        if not norm_term:
+            continue
+        target_text = normalized_text if _GEO_PHRASE_RE.search(norm_term) else stripped_text
+        if not is_navigational(target_text, {norm_term}):
+            continue
+        short_allowed = (
+            allowed_vocab | _GENERIC_RELEVANCE_WORDS | _COMMON_SHORT_WORDS
+            if " " not in norm_term and len(norm_term) <= 3
+            else allowed_vocab
+        )
+        if _emd_words_non_brand(norm_term, allowed_vocab=short_allowed):
+            if has_cue:
+                return True
+        else:
+            return True
+    return False
 
 
 def _missing_features(row, domain: str | None) -> tuple[str, ...]:
@@ -447,9 +866,9 @@ def load_page_candidates(
         db, client.id, window=(start, today), prior=(prior_start, prior_end)
     )
     sessions = _sessions(db, client.id, start, today)
-    contested = _contested_terms(db, client.id, start, today, brand_terms(client))
-    stages = confirmed_stages(db, client.id)
     brand = brand_terms(client)
+    contested = _contested_terms(db, client.id, start, today, brand)
+    stages = confirmed_stages(db, client.id)
     # Read, never pulled: a page view that spends credits is one somebody
     # will refresh. `python -m app.pull_serp_features --apply` does the
     # spending, deliberately.

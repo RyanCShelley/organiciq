@@ -75,20 +75,46 @@ def spot_from_text(text: str) -> dict[str, Any]:
 
 
 def _rows(detail: dict[str, Any]) -> str:
-    return "\n".join(
-        f"- “{s['query']}”: position {s['position']}, {s['impressions']:,} impressions, {s['clicks']} clicks" for s in detail["searches"]
-    ) or "(no searches with enough data)"
+    lines = []
+    for s in detail["searches"]:
+        tag = " (target keyword)" if s.get("target") else ""
+        pos = s.get("position")
+        imp = s.get("impressions")
+        clk = s.get("clicks")
+        if pos is None or s.get("ad_hoc"):
+            suffix = tag or (" (target keyword)" if s.get("ad_hoc") else "")
+            lines.append(f"- “{s['query']}”{suffix}: no Search Console ranking data yet")
+        else:
+            lines.append(f"- “{s['query']}”{tag}: position {pos}, {int(imp or 0):,} impressions, {int(clk or 0)} clicks")
+    return "\n".join(lines) or "(no searches with enough data)"
 
 
-def _page_block(url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str, style_notes: str | None = None) -> str:
+def _page_block(
+    url: str,
+    brand: str,
+    detail: dict[str, Any],
+    spot: dict[str, Any],
+    text: str,
+    start: str,
+    end: str,
+    style_notes: str | None = None,
+    keyword: str | None = None,
+) -> str:
     style_section = f"\n--- CLIENT TONE & STYLE NOTES ---\n{style_notes.strip()}\n" if (style_notes or "").strip() else ""
+    clean_kw = " ".join((keyword or "").split())
+    target_line = f"\nTarget keyword: {clean_kw}" if clean_kw else ""
+    searches = detail.get("searches") or []
+    if searches and all(s.get("ad_hoc") for s in searches):
+        searches_header = f"--- TARGET KEYWORD (no Search Console data for {start} to {end}) ---"
+    else:
+        searches_header = f"--- THE SEARCHES THIS PAGE RANKS FOR ({start} to {end}, Search Console) ---"
     return f"""--- PAGE ---
 Address: {url}
 Brand: {brand}
 Title: {detail.get("title") or "(none)"}
-Main heading: {spot["h1"] or "(not read)"}
+Main heading: {spot["h1"] or "(not read)"}{target_line}
 {style_section}
---- THE SEARCHES THIS PAGE RANKS FOR ({start} to {end}, Search Console) ---
+{searches_header}
 {_rows(detail)}
 
 --- THE PAGE'S OWN WORDS (excerpt) ---
@@ -99,9 +125,25 @@ Main heading: {spot["h1"] or "(not read)"}
 RULES = """Say only what the page's own words support. No invented prices, awards, numbers, guarantees or claims. Plain wording, no filler, no hype. Honor any client tone & style notes above."""
 
 
-def build_prompt(kind: str, *, url: str, brand: str, detail: dict[str, Any], spot: dict[str, Any], text: str, start: str, end: str, terms: list[str], style_notes: str | None = None) -> str:
-    page = _page_block(url, brand, detail, spot, text, start, end, style_notes=style_notes)
+def build_prompt(
+    kind: str,
+    *,
+    url: str,
+    brand: str,
+    detail: dict[str, Any],
+    spot: dict[str, Any],
+    text: str,
+    start: str,
+    end: str,
+    terms: list[str],
+    style_notes: str | None = None,
+    keyword: str | None = None,
+) -> str:
+    clean_kw = " ".join((keyword or "").split()) or None
+    ad_hoc_only = bool(detail.get("searches")) and all(s.get("ad_hoc") for s in (detail.get("searches") or []))
+    page = _page_block(url, brand, detail, spot, text, start, end, style_notes=style_notes, keyword=clean_kw)
     if kind == "opening":
+        kw_focus = f' Focus especially on the target keyword “{clean_kw}”.' if clean_kw else ""
         return f"""You are an editor rewriting ONLY the opening of one page, so the first lines answer what people searching for it want to know. The rest of the page stays as it is.
 
 {page}
@@ -109,7 +151,7 @@ def build_prompt(kind: str, *, url: str, brand: str, detail: dict[str, Any], spo
 {spot["opening"] or "(no opening paragraph found)"}
 
 --- RULES ---
-1. Answer the main search in the first sentence, in the searcher's own words. Then say what the page offers and for whom.
+1. Answer the main search in the first sentence, in the searcher's own words. Then say what the page offers and for whom.{kw_focus}
 2. Keep it to 2 to 4 sentences, about the length of the opening now. Keep the page's voice.
 3. {RULES}
 4. Write two options that take different approaches. For each, name the searches it serves and say in one sentence why it answers them better.
@@ -118,11 +160,18 @@ Respond with ONE JSON object, no prose and no markdown fences:
 {{"diagnosis": "one or two sentences on why the opening now does not answer the searches", "options": [{{"text": "...", "serves": ["search"], "why": "..."}}]}}
 """
     if kind == "terms":
-        wanted = "\n".join(f"- {t}" for t in terms) or "(none missing: use the searches above)"
+        wanted = "\n".join(f"- {t}" for t in terms) or (
+            f"- {clean_kw} (already in page text; strengthen natural placement if helpful)" if clean_kw else "(none missing: use the searches above)"
+        )
+        terms_header = (
+            "--- TERMS TO WORK IN (target keyword whose words are thin or missing in its text) ---"
+            if ad_hoc_only
+            else "--- TERMS TO WORK IN (searches the page ranks for whose words are thin or missing in its text) ---"
+        )
         return f"""You are an editor working searched terms into ONE page without rewriting it. Find sentences already on the page and change only the words needed so a term reads naturally in them.
 
 {page}
---- TERMS TO WORK IN (searches the page ranks for whose words are thin or missing in its text) ---
+{terms_header}
 {wanted}
 
 --- RULES ---
@@ -136,7 +185,12 @@ Respond with ONE JSON object, no prose and no markdown fences:
 """
     known = "\n".join(f"- {q}" for q in spot["faq_questions"]) or "(none)"
     note = "The page already has an FAQ. Write only questions it does NOT already answer." if spot["has_faq"] else "The page has no FAQ yet."
-    return f"""You are writing the FAQ for ONE page from the searches it already ranks for, so the questions are the ones people actually ask.
+    faq_intro = (
+        "You are writing the FAQ for ONE page targeting the keyword above, so the questions are the ones people actually ask about it."
+        if ad_hoc_only
+        else "You are writing the FAQ for ONE page from the searches it already ranks for, so the questions are the ones people actually ask."
+    )
+    return f"""{faq_intro}
 
 {page}
 --- QUESTIONS THE PAGE ALREADY ANSWERS ---
@@ -202,8 +256,14 @@ def clean(kind: str, parsed: dict[str, Any], *, spot: dict[str, Any], text: str)
     return {"items": items, "markup": faq_markup(items) if items else "", "already_has_faq": spot["has_faq"]}
 
 
-def start(db: Session, client: Client, kind: str, url: str, depth: str, who: str, text: str | None = None) -> ContentModelRun:
-    row = ContentModelRun(client_id=client.id, kind=kind, key=url, depth=depth, status="running", created_by=who, payload={"input_text": text} if text else {})
+def start(db: Session, client: Client, kind: str, url: str, depth: str, who: str, text: str | None = None, keyword: str | None = None) -> ContentModelRun:
+    clean_kw = " ".join((keyword or "").replace("\x00", "").split())[:300].strip() or None
+    payload: dict[str, Any] = {}
+    if text:
+        payload["input_text"] = text
+    if clean_kw:
+        payload["keyword"] = clean_kw
+    row = ContentModelRun(client_id=client.id, kind=kind, key=url, depth=depth, status="running", created_by=who, payload=payload)
     db.add(row)
     db.commit()
     return row
@@ -233,9 +293,21 @@ def run(run_id: UUID) -> None:
         end = date.today()
         start_d = end - timedelta(days=RANGE_DAYS)
         detail = ctr_optimizer.page_detail(db, client, row.key, start_d, end)
+        raw_payload = row.payload or {}
+        keyword = " ".join(str(raw_payload.get("keyword") or "").replace("\x00", "").split()) or None
+        searches = list(detail.get("searches") or [])
+        if keyword:
+            kw_key = " ".join(keyword.lower().split())
+            match = next((s for s in searches if " ".join(str(s.get("query") or "").lower().split()) == kw_key), None)
+            if match is not None:
+                flagged = {**match, "target": True}
+                searches = [flagged, *[s for s in searches if s is not match]]
+            else:
+                searches = [{"query": keyword, "impressions": 0, "clicks": 0, "position": None, "ad_hoc": True, "target": True}, *searches]
+            detail = {**detail, "searches": searches}
         if not detail["searches"]:
             raise RuntimeError("This page has no searches with enough data in the last 90 days, so there is nothing to write from.")
-        pasted = ((row.payload or {}).get("input_text") or "").strip()
+        pasted = (raw_payload.get("input_text") or "").strip()
         source = {"kind": "pasted", "note": f"Text pasted by {row.created_by}. Nothing was read from the site."}
         if pasted:
             body, text, spot = "", pasted, spot_from_text(pasted)
@@ -262,7 +334,7 @@ def run(run_id: UUID) -> None:
 
         brand = (db.query(ClientLlmSettings.brand_name).filter(ClientLlmSettings.client_id == client.id).scalar() or client.client_name or "").strip()
         style_notes = (getattr(client, "style_notes", None) or "").strip() or None
-        prompt = build_prompt(row.kind, url=row.key, brand=brand, detail=detail, spot=spot, text=text, start=start_d.isoformat(), end=end.isoformat(), terms=missing_terms(detail, text), style_notes=style_notes)
+        prompt = build_prompt(row.kind, url=row.key, brand=brand, detail=detail, spot=spot, text=text, start=start_d.isoformat(), end=end.isoformat(), terms=missing_terms(detail, text), style_notes=style_notes, keyword=keyword)
         reply, t_in, t_out = llm.call(row.depth, prompt, max_tokens=6000)
         parsed = llm.extract_json(reply)
         if not isinstance(parsed, dict):
@@ -270,7 +342,10 @@ def run(run_id: UUID) -> None:
         result = clean(row.kind, parsed, spot=spot, text=text)
         if not any(result.get(k) for k in ("options", "edits", "items")):
             raise llm.ModelError("The model gave nothing that can be used as written. Run it again, or try a deeper setting.")
-        row.payload = {**result, "url": row.key, "source": source, "searches_used": len(detail["searches"]), "from": start_d.isoformat(), "to": end.isoformat()}
+        final_payload = {**result, "url": row.key, "source": source, "searches_used": len(detail["searches"]), "from": start_d.isoformat(), "to": end.isoformat()}
+        if keyword:
+            final_payload["keyword"] = keyword
+        row.payload = final_payload
         row.cost_usd, row.status = Decimal(str(llm.cost(row.depth, t_in, t_out))), "done"
         db.commit()
     except Exception as exc:  # noqa: BLE001 - the failure is the result; the screen shows it

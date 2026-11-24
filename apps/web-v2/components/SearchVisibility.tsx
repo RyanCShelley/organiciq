@@ -6,12 +6,15 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   addWatchlistKeywordAction,
+  removeWatchlistKeywordAction,
   termDetailAction,
 } from "@/app/(app)/[clientSlug]/search-visibility/actions";
 import { VisibilityCheckDrawer } from "@/components/VisibilityCheckDrawer";
 import type { Client } from "@/lib/api";
 import { presets } from "@/lib/bi";
 import type { Sv, SvDetail, SvTerm, SvWeek } from "@/lib/search-visibility";
+
+type SvTermWithId = SvTerm & { id?: string };
 
 type ViewMode = "overview" | "terms";
 type ChartMetric = "clicks" | "pos";
@@ -372,6 +375,8 @@ export function SearchVisibility({
   const [addedHeroes, setAddedHeroes] = useState<Record<string, boolean>>({});
   const [addingHeroKey, setAddingHeroKey] = useState<string | null>(null);
   const [removedKeys, setRemovedKeys] = useState<Record<string, boolean>>({});
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [checkDrawerOpen, setCheckDrawerOpen] = useState(false);
   const [checkLogged, setCheckLogged] = useState(false);
   const [detail, setDetail] = useState<SvDetail | null>(null);
@@ -446,18 +451,46 @@ export function SearchVisibility({
   const handleAddHero = async (queryText: string, key: string) => {
     setAddingHeroKey(key);
     const defaultBucketId = data?.buckets[0]?.id ?? null;
-    const res = await addWatchlistKeywordAction(client.id, {
-      keyword: queryText,
-      bucket_id: defaultBucketId,
-      bucket_name: defaultBucketId ? null : "General",
-    });
+    const res = await addWatchlistKeywordAction(
+      client.id,
+      {
+        keyword: queryText,
+        bucket_id: defaultBucketId,
+        bucket_name: defaultBucketId ? null : "General",
+      },
+      client.slug,
+    );
     setAddingHeroKey(null);
     if (res.ok) {
       setAddedHeroes((prev) => ({ ...prev, [key]: true }));
+      router.refresh();
     }
   };
 
+  const handleRemoveTerm = async (term: SvTermWithId) => {
+    setRemoveError(null);
+    if (!term.id) {
+      setRemovedKeys((prev) => ({ ...prev, [term.key]: true }));
+      return;
+    }
+    setRemovingKey(term.key);
+    setRemovedKeys((prev) => ({ ...prev, [term.key]: true }));
+    const res = await removeWatchlistKeywordAction(client.id, term.id, client.slug);
+    setRemovingKey(null);
+    if (!res.ok) {
+      setRemovedKeys((prev) => {
+        const next = { ...prev };
+        delete next[term.key];
+        return next;
+      });
+      setRemoveError(res.error);
+      return;
+    }
+    router.refresh();
+  };
+
   const openTerm = (termKey: string) => {
+    setRemoveError(null);
     setSelectedTermKey(termKey);
     setView("terms");
   };
@@ -1211,7 +1244,10 @@ export function SearchVisibility({
                     <button
                       key={t.key}
                       type="button"
-                      onClick={() => setSelectedTermKey(t.key)}
+                      onClick={() => {
+                        setRemoveError(null);
+                        setSelectedTermKey(t.key);
+                      }}
                       style={selected ? { boxShadow: "inset 3px 0 0 #00a99d" } : undefined}
                       className={`grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_62px_62px_56px] items-center gap-2 border-b border-[#f1f2f3] px-4 py-2.5 text-left transition-colors ${
                         selected ? "bg-[#eef8f7]" : "bg-white hover:bg-[#f8f8f8]"
@@ -1318,11 +1354,17 @@ export function SearchVisibility({
                   </Link>
                   <button
                     type="button"
-                    onClick={() => setRemovedKeys((prev) => ({ ...prev, [selectedTerm.key]: true }))}
-                    className="cursor-pointer text-xs font-semibold text-[#7a838c] hover:text-[#171a22]"
+                    disabled={removingKey === selectedTerm.key}
+                    onClick={() => handleRemoveTerm(selectedTerm as SvTermWithId)}
+                    className="cursor-pointer text-xs font-semibold text-[#7a838c] hover:text-[#171a22] disabled:opacity-50"
                   >
-                    Remove from watchlist
+                    {removingKey === selectedTerm.key ? "Removing…" : "Remove from watchlist"}
                   </button>
+                  {removeError ? (
+                    <p role="alert" className="text-right text-xs font-medium text-red-700">
+                      {removeError}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 

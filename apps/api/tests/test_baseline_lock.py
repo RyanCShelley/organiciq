@@ -216,7 +216,7 @@ def test_dropping_an_event_switches_it_off_it_does_not_delete_it_and_other_types
     db.add_all(
         [
             ConversionDefinition(client_id=client_a.id, event_name="grade_submit", conversion_name="Grade", conversion_type="lead", active=True),
-            ConversionDefinition(client_id=client_a.id, event_name="phone_call", conversion_name="Call", conversion_type="call", active=True),
+            ConversionDefinition(client_id=client_a.id, event_name="purchase", conversion_name="Purchase", conversion_type="ecommerce", active=True),
         ]
     )
     db.commit()
@@ -227,7 +227,7 @@ def test_dropping_an_event_switches_it_off_it_does_not_delete_it_and_other_types
     assert _ga4_lock(client, headers, client_a.id, lead_events=["generate_lead"], sync_lead_conversions=True).status_code == 200
     rows = _definitions(db, client_a)
     assert rows["grade_submit"].active is False                     # kept, switched off
-    assert rows["phone_call"].active is True and rows["phone_call"].conversion_type == "call"
+    assert rows["purchase"].active is True and rows["purchase"].conversion_type == "ecommerce"
     assert rows["generate_lead"].active is True and rows["generate_lead"].is_primary is True
 
 

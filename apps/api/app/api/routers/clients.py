@@ -253,7 +253,7 @@ def set_lead_conversions(
     client = _staff_client(db, user, client_id)
     changes = lead_conversions.sync(db, client.id, payload.lead_events)
     db.commit()
-    return {"changes": changes, "lead_events": lead_conversions.active_lead_events(db, client.id)}
+    return {"changes": changes, "lead_events": lead_conversions.active_conversion_events(db, client)}
 
 
 @router.post("/{client_id}/baseline/goal")

@@ -16,33 +16,75 @@ export type Checkpoint = {
   monthly_leads: number;
 };
 
+export type Projection = {
+  plan: "launch" | "lift" | "lead" | string;
+  plan_label: string;
+  baseline_monthly_sessions: number;
+  baseline_monthly_leads: number;
+  baseline_lead_rate_pct: number;
+  suggested_monthly_lead_goal: number;
+  goal_horizon_months: number;
+  checkpoints: Checkpoint[];
+  disclaimer: string;
+};
+
 export type SeriesMonth = {
   month: string;
   sessions: number;
-  organic_sessions: number;
+  organic_sessions: number | null;
   leads: number;
-  lead_rate_pct: number;
+  lead_rate_pct: number | null;
   in_window: boolean;
+  by_event: Record<string, number>;
 };
 
+export type AnalysisSource =
+  | { type: "ga4"; lead_events: string[]; notes: string[] }
+  | { type: "csv"; skipped_rows: string[] };
+
 export type Analysis = {
-  status: string;
-  window: { from: string; to: string; months: number; regime_start: string | null; suggested_regime_start: string | null };
-  baseline: { monthly_sessions: number; monthly_organic_sessions: number; lead_rate_pct: number; monthly_leads: number };
-  ranges: Record<string, Range | string>;
-  goal_basis: { monthly_sessions: number; monthly_leads: number; lead_rate_pct: number; basis: string };
-  projection: {
-    plan_label: string;
-    suggested_monthly_lead_goal: number;
-    goal_horizon_months: number;
-    checkpoints: Checkpoint[];
-    disclaimer: string;
+  method_version: string;
+  status: "provisional" | "draft" | string;
+  parameters: {
+    half_life_months: number;
+    sessions_window_months: number;
+    lead_rate_window_months: number;
+    plan: string;
   };
+  window: {
+    from: string;
+    to: string;
+    months: number;
+    regime_start: string | null;
+    regime_start_source: "given" | "none" | string;
+    suggested_regime_start: string | null;
+  };
+  baseline: {
+    monthly_sessions: number;
+    monthly_organic_sessions: number | null;
+    lead_rate_pct: number;
+    monthly_leads: number;
+  };
+  ranges: {
+    monthly_sessions: Range;
+    monthly_organic_sessions: Range | null;
+    lead_rate_pct: Range;
+    monthly_leads: Range;
+    note: string;
+  };
+  goal_basis: { monthly_sessions: number; monthly_leads: number; lead_rate_pct: number; basis: string };
+  references: {
+    mean_leads_last_3_months: number;
+    mean_leads_last_12_months: number;
+    pooled_lead_rate_pct_window: number;
+  };
+  projection: Projection;
+  projection_point?: Projection;
   series: SeriesMonth[];
   flags: Flag[];
-  blockers: unknown[];
+  blockers: string[];
   can_lock: boolean;
-  source: { type: string; lead_events: string[]; notes: string[] };
+  source: AnalysisSource;
 };
 
 export type WindowPair = { avg_30d: number; recent_30d: number; total_90d: number };
@@ -109,14 +151,42 @@ export type BaselineVersion = {
   reason_note: string | null;
   locked_by: string;
   locked_at: string | null;
+  method_version?: string | null;
+  source_type?: string | null;
+  regime_start?: string | null;
   window_from: string;
   window_to: string;
   lead_events: string[];
+  acknowledged?: string[];
   monthly_sessions: number | null;
   monthly_organic_sessions: number | null;
+  lead_rate_pct?: number | null;
   monthly_leads: number | null;
   goal_monthly_leads: number | null;
   has_pillars?: boolean;
+};
+
+export type BaselineGoalState = {
+  current: number | null;
+  suggested: number | null;
+  version: number | null;
+  target_lead_rate_pct: number | null;
+};
+
+export type BaselineEventsResponse = {
+  events: Array<{ name: string; total: number; first_month: string | null; last_month: string | null }>;
+  defaults: string[];
+  locked: { version: number; events: string[] } | null;
+  goal: BaselineGoalState;
+};
+
+export type BaselineLockResponse = {
+  version: BaselineVersion;
+  lead_conversions_changed: { add: string[]; remove: string[]; keep?: string[] } | null;
+  monthly_lead_goal: number;
+  suggested_monthly_lead_goal: number;
+  goal_set_by_lock: boolean;
+  target_lead_rate_pct: number | null;
 };
 
 export type AnalysisResult = { ok: true; analysis: Analysis } | { ok: false; error: string };

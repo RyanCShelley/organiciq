@@ -356,6 +356,20 @@ class BaselineLockRequest(BaseModel):
     #: screen, alerts and results count, when they differ from what is set now.
     sync_lead_conversions: bool = False
 
+    @field_validator("source", "regime_start", "reason_code", "reason_note")
+    @classmethod
+    def _reject_nul_strings(cls, value: str | None, info) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError(f"{info.field_name} cannot contain NUL characters.")
+        return value
+
+    @field_validator("lead_events", "acknowledged")
+    @classmethod
+    def _reject_nul_lists(cls, values: list[str], info) -> list[str]:
+        if any("\x00" in item for item in values):
+            raise ValueError(f"{info.field_name} cannot contain NUL characters.")
+        return values
+
 
 class BaselineResetRequest(BaseModel):
     """Wipe baselines and goals. `confirm` must be exactly RESET."""
@@ -371,6 +385,13 @@ class BaselineGoalRequest(BaseModel):
 
 class BaselineLeadConversionsRequest(BaseModel):
     lead_events: list[str] = Field(min_length=1)
+
+    @field_validator("lead_events")
+    @classmethod
+    def _reject_nul_lead_events(cls, values: list[str]) -> list[str]:
+        if any("\x00" in item for item in values):
+            raise ValueError("lead_events cannot contain NUL characters.")
+        return values
 
 
 class IntegrationCreate(BaseModel):

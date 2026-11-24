@@ -1,6 +1,7 @@
 "use server";
 
 import { ApiError, apiFetch } from "@/lib/api";
+import { invalidateClientsCache } from "@/lib/clients";
 import { revalidatePath } from "next/cache";
 
 import type { DeletePreview, PullStatus } from "@/lib/admin";
@@ -25,6 +26,9 @@ export async function deleteClientAction(clientId: string, confirmName: string):
       method: "DELETE",
       body: { confirm_name: confirmName },
     });
+    invalidateClientsCache();
+    revalidatePath("/");
+    revalidatePath("/admin");
     return { ok: true, value };
   } catch (error) {
     return failure(error, "The client could not be deleted: the API did not answer.");

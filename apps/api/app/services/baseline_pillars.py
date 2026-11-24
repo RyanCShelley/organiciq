@@ -24,7 +24,7 @@ from app.models.llm_visibility import LlmResponse, LlmRun
 from app.models.seranking import FactSerRanking
 from app.models.site_health import SiteHealthSnapshot
 from app.models.watchlist import WatchlistKeyword
-from app.services import lead_conversions
+from app.services import lead_conversions, lead_exclusions
 
 
 def _pair(val_30d: float, val_90d: float) -> dict[str, float]:
@@ -294,6 +294,7 @@ def _leads_pillar(
             FactGa4Event.event_name.in_(events),
             FactGa4Event.date >= start_90d,
             FactGa4Event.date <= end_date,
+            lead_exclusions.not_excluded(db, client_id),
         )
         .group_by(FactGa4Event.event_name, FactGa4Event.date)
         .all()
@@ -331,7 +332,7 @@ def build_pillars_snapshot(
     end_date = as_of or date.today()
     start_30d = end_date - timedelta(days=29)
     start_90d = end_date - timedelta(days=89)
-    events = lead_events if lead_events is not None else lead_conversions.active_lead_events(db, client.id)
+    events = lead_events if lead_events is not None else lead_conversions.active_conversion_events(db, client)
 
     traffic = _traffic_pillar(db, client.id, start_30d, start_90d, end_date)
     leads = _leads_pillar(

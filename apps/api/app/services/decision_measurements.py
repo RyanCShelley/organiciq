@@ -7,7 +7,6 @@ from datetime import date, timedelta
 
 from sqlalchemy import func
 
-from app.models.config import ConversionDefinition
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.seranking import FactSerKeyword, FactSerRanking
 from app.services.lead_goals import current_lead_goal
@@ -123,9 +122,9 @@ def measure(db, client, *, end: date):
                 "observed_on": observed if usable else None,
                 "mentioned": observation.get("brand_mentioned") if usable else None,
                 "cited": observation.get("brand_cited") if usable else None})
-    events = [row.event_name for row in db.query(ConversionDefinition).filter(
-        ConversionDefinition.client_id == client.id, ConversionDefinition.active.is_(True),
-        ConversionDefinition.conversion_type == "lead")]
+    from app.services import lead_conversions
+
+    events = lead_conversions.active_conversion_events(db, client)
     leads = None
     if events and current["total"] is not None:
         # Absence of event rows is not proof of zero. An event sync has to

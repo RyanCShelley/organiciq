@@ -35,6 +35,7 @@ async function save(
   try {
     await apiFetch(path, { method, body, clientId });
     revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {
     return { ok: false, error: message(error, DID_NOT_ANSWER) };
@@ -47,6 +48,7 @@ async function pullAfterSave(clientId: string, slug: string, sources: string[], 
   try {
     await apiFetch("/v2/connections/pull", { method: "POST", clientId, body: { sources } });
     revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}`, "layout");
   } catch {
     /* the Pull data button is still there */
   }
@@ -190,6 +192,7 @@ export async function addAdsAccountAction(clientId: string, slug: string, custom
       /* the connection card shows why the pull failed */
     }
     revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}`, "layout");
     revalidatePath(`/${slug}/ads`);
   }
   return result;
@@ -214,6 +217,7 @@ export async function pullAdsAction(clientId: string, slug: string): Promise<{ o
     return { ok: false, error: message(error, DID_NOT_ANSWER) };
   } finally {
     revalidatePath(`/${slug}/settings/connections`);
+    revalidatePath(`/${slug}`, "layout");
     revalidatePath(`/${slug}/ads`);
   }
 }

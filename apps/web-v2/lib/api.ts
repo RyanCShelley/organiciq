@@ -20,7 +20,25 @@ function parseApiErrorBody(text: string): string {
   try {
     const body = JSON.parse(text) as { detail?: unknown };
     if (typeof body.detail === "string") return body.detail;
-    if (Array.isArray(body.detail)) return "Request failed";
+    if (Array.isArray(body.detail) && body.detail.length > 0) {
+      const msgs = body.detail
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object" && "msg" in item) {
+            const msg = String((item as { msg: unknown }).msg);
+            const loc = Array.isArray((item as { loc?: unknown[] }).loc)
+              ? (item as { loc: unknown[] }).loc
+                  .filter((p) => p !== "body" && p !== "query")
+                  .join(".")
+              : "";
+            return loc ? `${loc}: ${msg}` : msg;
+          }
+          return null;
+        })
+        .filter((m): m is string => Boolean(m));
+      if (msgs.length > 0) return msgs.join("; ");
+      return "Request failed";
+    }
   } catch {
     // keep raw text
   }

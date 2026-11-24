@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 
 import { optimizerDraftAction, optimizerPageAction } from "@/app/(app)/[clientSlug]/content-optimizer/actions";
 import { AskModel, card, num, shortPage } from "@/components/content/parts";
+import { Field, inputClass } from "@/components/ui/form";
 import { Spinner } from "@/components/ui/Spinner";
 import type { Client } from "@/lib/api";
 import type { ContentDepthChoice } from "@/lib/content";
@@ -24,10 +25,20 @@ function Source({ d }: { d: OptDraft }) {
   return <p className={`rounded-lg p-2 text-xs ${d.source.kind === "live" ? "bg-[var(--bg)] text-[var(--text-secondary)]" : "bg-amber-50 text-amber-900"}`}><span className="font-semibold">Where the page text came from.</span> {d.source.note}</p>;
 }
 
+function TargetKeywordBanner({ keyword }: { keyword?: string | null }) {
+  if (!keyword) return null;
+  return (
+    <p className="break-words rounded-lg bg-[var(--bg)] p-2 text-xs text-[var(--text-secondary)]">
+      <span className="font-semibold">Target keyword:</span> {keyword}
+    </p>
+  );
+}
+
 function Result({ d }: { d: OptDraft }) {
   if (d.kind === "opening")
     return (
       <div className="space-y-3 text-sm">
+        <TargetKeywordBanner keyword={d.keyword} />
         {d.diagnosis ? <p className="text-[var(--text-secondary)]">{d.diagnosis}</p> : null}
         <div><div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">The opening now</div><p className="mt-1 rounded-lg bg-[var(--bg)] p-3">{d.before || "No opening paragraph found."}</p></div>
         {(d.options ?? []).map((o, i) => (
@@ -42,6 +53,7 @@ function Result({ d }: { d: OptDraft }) {
   if (d.kind === "terms")
     return (
       <div className="space-y-3 text-sm">
+        <TargetKeywordBanner keyword={d.keyword} />
         {(d.edits ?? []).map((e, i) => (
           <div key={i} className="rounded-lg border border-[var(--border)] p-3">
             <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Edit {i + 1}{e.terms.length ? ` · ${e.terms.join(", ")}` : ""}</span><Copy text={e.after} /></div>
@@ -55,6 +67,7 @@ function Result({ d }: { d: OptDraft }) {
     );
   return (
     <div className="space-y-3 text-sm">
+      <TargetKeywordBanner keyword={d.keyword} />
       {d.already_has_faq ? <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">The page already has an FAQ, so these are questions it does not answer yet.</p> : null}
       {(d.items ?? []).map((it, i) => (
         <div key={i} className="rounded-lg border border-[var(--border)] p-3">
@@ -77,12 +90,21 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
   const [error, setError] = useState<string | null>(null);
   const [depth, setDepth] = useState<ContentDepthChoice>("quick");
   const [pasted, setPasted] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [touchedKeyword, setTouchedKeyword] = useState(false);
   const [pending, start] = useTransition();
   const load = useCallback(async () => {
     const r = await optimizerPageAction(client.id, url);
     if (r.ok) { setPage(r.value); setError(null); } else setError(r.error);
   }, [client.id, url]);
   useEffect(() => { setPage(null); load(); }, [load]);
+  useEffect(() => {
+    setError(null);
+    setTouchedKeyword(false);
+  }, [kind]);
+  useEffect(() => {
+    if (!touchedKeyword) setKeyword(page?.drafts[kind]?.keyword ?? "");
+  }, [page, kind, touchedKeyword]);
   const draft = page?.drafts[kind] ?? null;
   const running = draft?.status === "running";
   useEffect(() => {
@@ -90,7 +112,19 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
     const t = setInterval(load, 2500);
     return () => clearInterval(t);
   }, [running, load]);
-  const write = () => start(async () => { const r = await optimizerDraftAction(client.id, url, kind, depth, pasted); if (r.ok) await load(); else setError(r.error); });
+  const write = () => {
+    const kw = keyword.trim();
+    if (page && page.searches_total === 0 && !kw) {
+      setError("Enter a target keyword below. This page has no Search Console searches in the last 90 days.");
+      return;
+    }
+    setError(null);
+    start(async () => {
+      const r = await optimizerDraftAction(client.id, url, kind, depth, pasted, kw || undefined);
+      if (r.ok) await load();
+      else setError(r.error);
+    });
+  };
   return (
     <section className={`${card} space-y-4 p-5`}>
       <div>
@@ -103,13 +137,54 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
         <>
           <div role="tablist" className="flex flex-wrap gap-2">
             {(Object.keys(queueKinds) as OptKind[]).map((k) => (
-              <button key={k} type="button" role="tab" aria-selected={k === kind} onClick={() => onKind(k)} className={`rounded-full border px-3 py-1 text-sm font-semibold ${k === kind ? "border-[var(--brand-dark)] bg-[var(--brand-dark)] text-white" : "border-[var(--border)] bg-white"}`}>
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={k === kind}
+                onClick={() => {
+                  setError(null);
+                  setTouchedKeyword(false);
+                  onKind(k);
+                }}
+                className={`rounded-full border px-3 py-1 text-sm font-semibold ${k === kind ? "border-[var(--brand-dark)] bg-[var(--brand-dark)] text-white" : "border-[var(--border)] bg-white"}`}
+              >
                 {queueKinds[k].label}
               </button>
             ))}
           </div>
-          <p className="text-sm text-[var(--text-secondary)]">{queueKinds[kind].does} It works from the {num(page.searches_total)} {page.searches_total === 1 ? "search" : "searches"} this page earns in the last 90 days (Search Console) and the page&apos;s own words. Nothing is sent to the site.</p>
+          {page.searches_total === 0 ? (
+            <p className="text-sm text-[var(--text-secondary)]">
+              {queueKinds[kind].does} This page has 0 searches in positions 1–20 over the last 90 days (Search Console). Enter a target keyword below to run a one-off optimization without Search Console history or a watchlist entry. Nothing is sent to the site.
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--text-secondary)]">
+              {queueKinds[kind].does} It works from the {num(page.searches_total)} {page.searches_total === 1 ? "search" : "searches"} this page earns in the last 90 days (Search Console) and the page&apos;s own words, or a target keyword if you enter one. Nothing is sent to the site.
+            </p>
+          )}
+          <Field
+            label={page.searches_total === 0 ? "Target keyword (required for one-off optimization)" : "Target keyword (optional)"}
+            hint="Works for any page—even without Search Console history or a watchlist entry."
+          >
+            <input
+              type="text"
+              value={keyword}
+              onChange={(e) => {
+                setKeyword(e.target.value);
+                setTouchedKeyword(true);
+                if (error) setError(null);
+              }}
+              maxLength={300}
+              placeholder="e.g. emergency plumbing repair"
+              className={inputClass}
+            />
+          </Field>
           <AskModel ready={page.model_ready} depth={depth} onDepth={setDepth} busy={pending || running} again={draft?.status === "done"} label={queueKinds[kind].label} onRun={write} />
+          {running && draft?.keyword ? (
+            <p className="break-words text-xs text-[var(--text-secondary)]">
+              Writing for target keyword <span className="font-semibold">“{draft.keyword}”</span>…
+            </p>
+          ) : null}
           {draft?.status === "failed" ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{draft.error}</p> : null}
           {draft?.status === "failed" && /paste/i.test(draft.error ?? "") ? <p className="text-xs text-[var(--text-secondary)]">Paste the page&apos;s text below, then write again.</p> : null}
           <details open={draft?.status === "failed" && /paste/i.test(draft.error ?? "")} className="text-sm">
@@ -120,9 +195,13 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
           {draft?.status === "done" ? <><Source d={draft} /><Result d={draft} /></> : null}
           <details className="text-sm">
             <summary className="cursor-pointer font-semibold">The searches it works from</summary>
-            <ul className="mt-2 divide-y divide-[var(--border)]">
-              {page.searches.map((s) => <li key={s.query} className="flex justify-between gap-3 py-1"><span>{s.query}</span><span className="tabular-nums text-[var(--text-secondary)]">position {s.position} · {num(s.impressions)} impressions · {s.clicks} clicks</span></li>)}
-            </ul>
+            {page.searches.length === 0 ? (
+              <p className="mt-2 text-[var(--text-secondary)]">No Search Console searches in positions 1–20 over the last 90 days. Enter a target keyword above for a one-off optimization.</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-[var(--border)]">
+                {page.searches.map((s) => <li key={s.query} className="flex justify-between gap-3 py-1"><span>{s.query}</span><span className="tabular-nums text-[var(--text-secondary)]">position {s.position} · {num(s.impressions)} impressions · {s.clicks} clicks</span></li>)}
+              </ul>
+            )}
           </details>
         </>
       ) : null}
@@ -130,23 +209,66 @@ function PagePanel({ client, url, kind, onKind, queueKinds }: { client: Client; 
   );
 }
 
+function validateOptimizerUrlInput(raw: string): string | null {
+  const value = raw.trim();
+  if (!value || value.length < 8) {
+    return "Enter a valid page URL (at least 8 characters, e.g. https://example.com/page).";
+  }
+  const schemeMatch = value.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+  if (schemeMatch && !/^https?:\/\//i.test(value) && !/^[^/:]+:\d+(?:[/?#]|$)/.test(value)) {
+    return "Enter an http:// or https:// page URL.";
+  }
+  try {
+    const parsed = new URL(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value) ? value : `https://${value}`);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname.includes(".")) {
+      return "Enter a valid public http:// or https:// page URL.";
+    }
+  } catch {
+    return "Enter a valid page URL (e.g. https://example.com/page).";
+  }
+  return null;
+}
+
 export function ContentOptimizer({ client, data, error }: { client: Client; data: OptQueue | null; error: string | null }) {
   const params = useSearchParams();
   const [url, setUrl] = useState<string | null>(params.get("page"));
   const [kind, setKind] = useState<OptKind>((["opening", "terms", "faq"] as const).find((k) => k === params.get("kind")) ?? "opening");
   const [typed, setTyped] = useState(params.get("page") ?? "");
+  const [urlError, setUrlError] = useState<string | null>(null);
   const kinds = data?.kinds ?? { opening: { label: "Rewrite the opening", does: "" }, terms: { label: "Work in these terms", does: "" }, faq: { label: "Write the FAQ", does: "" } };
   return (
     <section className="max-w-4xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold">Content optimizer</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Small changes to a page that do not need a full refresh: a new opening, terms worked in where they read naturally, an FAQ. Each is written from the searches the page earns and its own words.</p>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Small changes to a page that do not need a full refresh: a new opening, terms worked in where they read naturally, an FAQ. Each is written from the searches the page earns (or a target keyword you enter) and its own words.</p>
       </header>
       {error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
-      <form className="flex flex-wrap gap-2 text-sm" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) setUrl(typed.trim()); }}>
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="The page's full address" aria-label="Page address" className="min-w-[20rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-2" />
+      <form
+        className="flex flex-wrap gap-2 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const err = validateOptimizerUrlInput(typed);
+          if (err) {
+            setUrlError(err);
+            return;
+          }
+          setUrlError(null);
+          setUrl(typed.trim());
+        }}
+      >
+        <input
+          value={typed}
+          onChange={(e) => {
+            setTyped(e.target.value);
+            if (urlError) setUrlError(null);
+          }}
+          placeholder="The page's full address"
+          aria-label="Page address"
+          className="min-w-[20rem] flex-1 rounded-lg border border-[var(--border)] bg-white px-3 py-2"
+        />
         <button type="submit" className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 font-semibold">Open</button>
       </form>
+      {urlError ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{urlError}</p> : null}
       {url ? <PagePanel key={url} client={client} url={url} kind={kind} onKind={setKind} queueKinds={kinds} /> : null}
       {data ? (
         <section className={`${card} p-5`}>

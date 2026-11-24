@@ -20,14 +20,21 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.client import Client
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
+
+INT4_MAX = 2_147_483_647
+KEYWORD_MAX_LENGTH = 400
+BUCKET_NAME_MAX_LENGTH = 160
+INTENT_MAX_LENGTH = 120
 
 #: Normalised header -> field.
 _ALIASES: dict[str, str] = {
@@ -72,7 +79,10 @@ def _number(raw: str) -> int | None:
     cleaned = raw.replace(",", "").replace(" ", "")
     if not cleaned:
         return None
-    return int(round(float(cleaned)))
+    val = float(cleaned)
+    if not math.isfinite(val):
+        raise ValueError("not a finite number")
+    return int(round(val))
 
 
 @dataclass
@@ -95,7 +105,11 @@ class ParseResult:
 
 
 def parse_watchlist_csv(csv_text: str) -> ParseResult:
-    rows = list(csv.reader(io.StringIO(csv_text.lstrip("﻿"))))
+    cleaned_csv = csv_text.replace("\x00", "").lstrip("﻿")
+    try:
+        rows = list(csv.reader(io.StringIO(cleaned_csv)))
+    except csv.Error as exc:
+        raise ValueError(f"Could not read CSV: {exc}") from exc
 
     header_at = None
     for index, row in enumerate(rows[:10]):
@@ -131,12 +145,21 @@ def parse_watchlist_csv(csv_text: str) -> ParseResult:
     for offset, row in enumerate(rows[header_at + 1 :], start=header_at + 2):
         if not any(c.strip() for c in row):
             continue
-        keyword = cell(row, "keyword")
+        keyword = " ".join(cell(row, "keyword").split())
         if not keyword:
             result.skipped.append({"line": offset, "reason": "no keyword"})
             continue
+        if len(keyword) > KEYWORD_MAX_LENGTH or len(_key(keyword)) > KEYWORD_MAX_LENGTH:
+            result.skipped.append(
+                {
+                    "line": offset,
+                    "keyword": keyword[:80],
+                    "reason": f"keyword exceeds {KEYWORD_MAX_LENGTH} characters",
+                }
+            )
+            continue
 
-        topic = cell(row, "topic")
+        topic = " ".join(cell(row, "topic").split())
         inherited = False
         if not topic:
             if not last_topic:
@@ -146,6 +169,15 @@ def parse_watchlist_csv(csv_text: str) -> ParseResult:
                 continue
             topic, inherited = last_topic, True
         else:
+            if len(topic) > BUCKET_NAME_MAX_LENGTH or len(_key(topic)) > BUCKET_NAME_MAX_LENGTH:
+                result.skipped.append(
+                    {
+                        "line": offset,
+                        "keyword": keyword,
+                        "reason": f"topic exceeds {BUCKET_NAME_MAX_LENGTH} characters",
+                    }
+                )
+                continue
             last_topic = topic
 
         values: dict[str, Any] = {}
@@ -155,9 +187,18 @@ def parse_watchlist_csv(csv_text: str) -> ParseResult:
                 continue
             try:
                 number = _number(raw)
-            except ValueError:
+            except (ValueError, OverflowError):
                 result.warnings.append(
                     {"line": offset, "keyword": keyword, "reason": f"{name} {raw!r} is not a number"}
+                )
+                continue
+            if name == "volume" and number is not None and not 0 <= number <= INT4_MAX:
+                result.warnings.append(
+                    {
+                        "line": offset,
+                        "keyword": keyword,
+                        "reason": f"volume {number} is outside 0 to {INT4_MAX}",
+                    }
                 )
                 continue
             if name == "difficulty" and number is not None and not 0 <= number <= 100:
@@ -168,7 +209,21 @@ def parse_watchlist_csv(csv_text: str) -> ParseResult:
             values[name] = number
         for name in ("intent", "prompt", "notes"):
             raw = cell(row, name)
-            if raw:
+            if not raw:
+                continue
+            if name == "intent":
+                cleaned_intent = " ".join(raw.split())
+                if len(cleaned_intent) > INTENT_MAX_LENGTH:
+                    result.warnings.append(
+                        {
+                            "line": offset,
+                            "keyword": keyword,
+                            "reason": f"intent exceeds {INTENT_MAX_LENGTH} characters",
+                        }
+                    )
+                    continue
+                values[name] = cleaned_intent
+            else:
                 values[name] = raw
 
         key = _key(keyword)
@@ -208,7 +263,7 @@ def import_watchlist(
         k.keyword_key: k
         for k in db.query(WatchlistKeyword).filter(WatchlistKeyword.client_id == client.id).all()
     }
-    next_order = max((b.sort_order for b in buckets.values()), default=-1) + 1
+    next_order = min(max((b.sort_order for b in buckets.values()), default=-1) + 1, INT4_MAX)
 
     new_buckets: dict[str, WatchlistBucket] = {}
     created = updated = unchanged = inherited = 0
@@ -218,30 +273,69 @@ def import_watchlist(
         bucket_key = _key(row.topic)
         bucket = buckets.get(bucket_key) or new_buckets.get(bucket_key)
         if bucket is None:
-            bucket = WatchlistBucket(
+            candidate_bucket = WatchlistBucket(
                 client_id=client.id, name=row.topic, name_key=bucket_key, sort_order=next_order
             )
-            next_order += 1
-            new_buckets[bucket_key] = bucket
+            next_order = min(next_order + 1, INT4_MAX)
             if not dry_run:
-                db.add(bucket)
-                db.flush()
-
-        existing = keywords.get(_key(row.keyword))
-        if existing is None:
-            created += 1
-            if not dry_run:
-                db.add(
-                    WatchlistKeyword(
-                        client_id=client.id,
-                        bucket_id=bucket.id,
-                        keyword=row.keyword,
-                        keyword_key=_key(row.keyword),
-                        source=source,
-                        **{_COLUMN_OF_FIELD[k]: v for k, v in row.values.items()},
+                try:
+                    with db.begin_nested():
+                        db.add(candidate_bucket)
+                        db.flush()
+                    bucket = candidate_bucket
+                    new_buckets[bucket_key] = bucket
+                except IntegrityError:
+                    winner_bucket = (
+                        db.query(WatchlistBucket)
+                        .filter(
+                            WatchlistBucket.client_id == client.id,
+                            WatchlistBucket.name_key == bucket_key,
+                        )
+                        .one_or_none()
                     )
+                    if winner_bucket is None:
+                        raise
+                    bucket = winner_bucket
+                    buckets[bucket_key] = bucket
+            else:
+                bucket = candidate_bucket
+                new_buckets[bucket_key] = bucket
+
+        kw_key = _key(row.keyword)
+        existing = keywords.get(kw_key)
+        if existing is None:
+            if not dry_run:
+                candidate_kw = WatchlistKeyword(
+                    client_id=client.id,
+                    bucket_id=bucket.id,
+                    keyword=row.keyword,
+                    keyword_key=kw_key,
+                    source=source,
+                    **{_COLUMN_OF_FIELD[k]: v for k, v in row.values.items()},
                 )
-            continue
+                try:
+                    with db.begin_nested():
+                        db.add(candidate_kw)
+                        db.flush()
+                    keywords[kw_key] = candidate_kw
+                    created += 1
+                    continue
+                except IntegrityError:
+                    winner_kw = (
+                        db.query(WatchlistKeyword)
+                        .filter(
+                            WatchlistKeyword.client_id == client.id,
+                            WatchlistKeyword.keyword_key == kw_key,
+                        )
+                        .one_or_none()
+                    )
+                    if winner_kw is None:
+                        raise
+                    existing = winner_kw
+                    keywords[kw_key] = existing
+            else:
+                created += 1
+                continue
 
         changed = False
         if not dry_run and existing.bucket_id != bucket.id:

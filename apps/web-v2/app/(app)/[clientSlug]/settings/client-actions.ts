@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch, type ClientUpdate } from "@/lib/api";
 import type { ActionResult } from "@/lib/client-settings";
+import { invalidateClientsCache } from "@/lib/clients";
 
 function failure(error: unknown, fallback: string): ActionResult {
   return { ok: false, error: error instanceof ApiError ? error.message : fallback };
@@ -27,6 +28,8 @@ export async function updateClientAction(
           }
         : fields;
     await apiFetch(`/clients/${clientId}`, { method: "PATCH", body });
+    invalidateClientsCache();
+    revalidatePath("/");
     revalidatePath(`/${slug}`, "layout");
     return { ok: true };
   } catch (error) {

@@ -13,6 +13,7 @@ export type OptDraft = {
   created_at: string | null;
   /** Where the page text came from: read live, the site crawl (our reader was blocked), or text a person pasted. */
   source?: { kind: "live" | "crawl" | "pasted"; note: string };
+  keyword?: string | null;
   searches_used?: number;
   from?: string;
   to?: string;

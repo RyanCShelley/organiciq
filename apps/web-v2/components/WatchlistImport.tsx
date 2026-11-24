@@ -6,7 +6,17 @@ import { useState, useTransition } from "react";
 import { importWatchlistAction } from "@/app/(app)/[clientSlug]/watchlist/actions";
 import type { ImportReport } from "@/lib/watchlist";
 
-export function WatchlistImport({ clientId, slug }: { clientId: string; slug: string }) {
+export function WatchlistImport({
+  clientId,
+  slug,
+  embedded = false,
+  onImported,
+}: {
+  clientId: string;
+  slug: string;
+  embedded?: boolean;
+  onImported?: (report: ImportReport) => void;
+}) {
   const router = useRouter();
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
@@ -24,14 +34,21 @@ export function WatchlistImport({ clientId, slug }: { clientId: string; slug: st
         return;
       }
       setReport(result.report);
-      if (!dryRun) router.refresh();
+      if (!dryRun) {
+        router.refresh();
+        onImported?.(result.report);
+      }
     });
   }
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-      <h2 className="text-sm font-semibold">Import from CSV</h2>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">
+    <div
+      className={
+        embedded ? "space-y-4" : "rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6"
+      }
+    >
+      {!embedded ? <h2 className="text-sm font-semibold">Import from CSV</h2> : null}
+      <p className={`${embedded ? "" : "mt-1 "}text-sm text-[var(--text-secondary)]`}>
         Export the Watchlist tab as CSV. Rows are added or updated by keyword; nothing is deleted
         and blank cells never erase what is stored.
       </p>

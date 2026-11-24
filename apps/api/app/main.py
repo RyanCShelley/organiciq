@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, clients, decisions, integrations, jobs, oauth_google, seranking, v2_admin, v2_ads, v2_annotations, v2_ask, v2_bi, v2_connections, v2_consulting, v2_content, v2_conversions, v2_ctr, v2_engine, v2_feeds, v2_focus, v2_inlinks, v2_llm, v2_optimizer, v2_review, v2_schema, v2_search_visibility, v2_site_health, v2_tasks, v2_watchlist
+from app.api.routers import admin, auth, clients, decisions, integrations, jobs, oauth_google, seranking, v2_admin, v2_ads, v2_annotations, v2_ask, v2_bi, v2_connections, v2_consulting, v2_content, v2_conversions, v2_ctr, v2_engine, v2_focus, v2_inlinks, v2_llm, v2_optimizer, v2_overview, v2_review, v2_schema, v2_search_visibility, v2_site_health, v2_tasks, v2_watchlist
 from app.core.settings import get_settings
 
 logger = logging.getLogger("organiciq.api")
@@ -131,7 +131,6 @@ app.include_router(v2_ads.router)
 app.include_router(v2_connections.router)
 app.include_router(v2_conversions.router)
 app.include_router(v2_engine.router)
-app.include_router(v2_feeds.router)
 app.include_router(v2_focus.router)
 app.include_router(v2_llm.router)
 app.include_router(v2_ask.router)
@@ -147,3 +146,4 @@ app.include_router(v2_schema.router)
 app.include_router(v2_search_visibility.router)
 app.include_router(v2_site_health.router)
 app.include_router(v2_tasks.router)
+app.include_router(v2_overview.router)

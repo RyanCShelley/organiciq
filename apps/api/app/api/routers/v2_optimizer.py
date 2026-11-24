@@ -3,22 +3,37 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.client_scope import require_client
 from app.core.db import get_db
 from app.core.security import AuthUser, require_sma_staff
 from app.core.settings import get_settings
-from app.core.urls import normalize_url
+from app.core.urls import normalize_url, public_host_or_error
 from app.models.client import Client
 from app.models.engine_task import EngineTask
 from app.services import content_optimizer, ctr_optimizer, model_spend, part_tools
 
 router = APIRouter(prefix="/v2/optimizer", tags=["v2-optimizer"])
+
+
+def _validate_optimizer_url(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Enter a page URL.")
+    if "\x00" in text:
+        raise ValueError("Page URL cannot contain NUL characters.")
+    err = public_host_or_error(text)
+    if err:
+        raise ValueError(f"Page URL {err}.")
+    norm = normalize_url(text)
+    if not norm:
+        raise ValueError("Page URL is not valid.")
+    return norm
 
 
 def _ready() -> bool:
@@ -51,7 +66,10 @@ def optimizer_page(
     url: Annotated[str, Query(min_length=8, max_length=2048)],
 ) -> dict:
     """One page: the searches the model will work from, and the latest result of each kind of change."""
-    url = normalize_url(url) or url
+    try:
+        url = _validate_optimizer_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     end = date.today()
     detail = ctr_optimizer.page_detail(db, client, url, end - timedelta(days=content_optimizer.RANGE_DAYS), end)
     return {
@@ -66,6 +84,29 @@ class DraftIn(BaseModel):
     depth: Literal["quick", "deep", "deepest"] = "quick"
     #: The page's text, pasted by a person when the site cannot be read.
     text: str | None = Field(default=None, max_length=60000)
+    #: Optional target keyword for one-off optimization (works even without GSC data).
+    keyword: str | None = Field(default=None, max_length=300)
+
+    @field_validator("url")
+    @classmethod
+    def _clean_url(cls, value: str) -> str:
+        return _validate_optimizer_url(value)
+
+    @field_validator("text")
+    @classmethod
+    def _clean_text(cls, value: str | None) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError("Page text cannot contain NUL characters.")
+        return value
+
+    @field_validator("keyword", mode="before")
+    @classmethod
+    def _clean_keyword(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return " ".join(value.replace("\x00", "").split()) or None
+        return value
 
 
 @router.post("/draft", status_code=status.HTTP_202_ACCEPTED)
@@ -82,6 +123,15 @@ def write_draft(
     cap = get_settings().ask_monthly_cap_usd
     if float(model_spend.month_spend(db, client)) >= cap:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"This client has used its ${cap:.0f} for model questions this month. The limit resets on the 1st.")
-    row = content_optimizer.start(db, client, payload.kind, normalize_url(payload.url) or payload.url, payload.depth, user.email, payload.text)
+    row = content_optimizer.start(
+        db,
+        client,
+        payload.kind,
+        normalize_url(payload.url) or payload.url,
+        payload.depth,
+        user.email,
+        payload.text,
+        keyword=payload.keyword,
+    )
     background.add_task(content_optimizer.run, row.id)
     return {"id": str(row.id)}

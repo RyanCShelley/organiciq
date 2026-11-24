@@ -21,7 +21,7 @@ What it clears
   Synced data (it is pulled again): Search Console, GA4, SE Ranking, crawl, Bing and SERP-feature facts, the
     staging tables, sync jobs and watermarks, and the derived tables built from them.
   Set up in the tool (it is entered again): baselines and goals, conversion events and pages, completion patterns,
-    feeds, the watchlist and the monthly focus, AI visibility prompts, settings and runs, Decision Engine tasks,
+    the watchlist and the monthly focus, AI visibility prompts, settings and runs, Decision Engine tasks,
     actions and records, thresholds, overrides, excluded pages, page stages, keyword targets, topics and decisions,
     and the old watch targets.
 
@@ -69,13 +69,15 @@ SYNCED = (
 )
 SETUP = (
     "llm_responses", "llm_runs", "engine_tasks", "engine_actions", "client_focuses", "watchlist_keywords",
-    "watchlist_buckets", "client_llm_prompts", "client_llm_settings", "client_feeds", "client_completion_patterns",
+    "watchlist_buckets", "client_llm_prompts", "client_llm_settings", "client_completion_patterns",
     "client_conversion_pages", "conversion_definitions", "lead_exclusions", "baseline_versions", "monthly_records", "decision_thresholds",
     "constraint_overrides", "excluded_pages", "client_page_stages", "keyword_targets", "watch_targets",
     "decisions", "topics",
 )
 #: Never touched.
 KEPT = ("integrations", "client_bing_sites", "user_clients", "annotations", "copilot_conversations", "ask_data_log", "ask_scope_state","client_schema_concepts", "schema_page_reports", "client_schema_ignores", "ctr_title_drafts", "inlink_states", "content_states", "content_model_runs", "content_items", "client_ads_accounts", "consulting_profiles", "consulting_recommendations", "consulting_recommendation_events", "consulting_reports")
+#: Retired tables kept in migrated DBs by additive-only migrations; cleared when present so legacy rows never block client purge.
+RETIRED = ("client_feeds",)
 #: Annotations point at decisions and topics, which are deleted, so the links go and the notes stay.
 UNLINK_ANNOTATIONS = "update annotations set decision_id = null, topic_id = null where client_id = :c"
 
@@ -99,7 +101,7 @@ def _client(db: Session, *, slug: str | None, client_id: str | None) -> Any:
 def check_every_table_is_classified(db: Session) -> None:
     """Fail if a table with client_id is in none of the lists, so a table added later is decided, not guessed."""
     inspector = inspect(db.get_bind())
-    known = set(SYNCED) | set(SETUP) | set(KEPT)
+    known = set(SYNCED) | set(SETUP) | set(KEPT) | set(RETIRED)
     held = {t for t in inspector.get_table_names() if "client_id" in {c["name"] for c in inspector.get_columns(t)}}
     unknown = sorted(held - known)
     if unknown:
@@ -113,20 +115,32 @@ def count(db: Session, table: str, client_id: UUID) -> int:
 def plan(db: Session, client: Any) -> dict[str, dict[str, int]]:
     """How many rows each table holds for this client, by what would happen to them."""
     check_every_table_is_classified(db)
+    existing = set(inspect(db.get_bind()).get_table_names())
+    clear_setup = {t: (count(db, t, client.id) if t in existing else 0) for t in SETUP}
+    for t in RETIRED:
+        if t in existing:
+            rows = count(db, t, client.id)
+            if rows:
+                clear_setup[t] = rows
     return {
-        "clear_synced": {t: count(db, t, client.id) for t in SYNCED},
-        "clear_setup": {t: count(db, t, client.id) for t in SETUP},
-        "kept": {t: count(db, t, client.id) for t in KEPT},
+        "clear_synced": {t: (count(db, t, client.id) if t in existing else 0) for t in SYNCED},
+        "clear_setup": clear_setup,
+        "kept": {t: (count(db, t, client.id) if t in existing else 0) for t in KEPT},
     }
 
 
 def apply(db: Session, client: Any) -> dict[str, int]:
     """Delete the synced and set-up data for one client. The caller commits."""
     check_every_table_is_classified(db)
+    existing = set(inspect(db.get_bind()).get_table_names())
     deleted: dict[str, int] = {}
     # Notes outlive the decisions and topics they pointed at.
-    db.execute(text(UNLINK_ANNOTATIONS), {"c": str(client.id)})
-    for table in SETUP[:SETUP.index("decisions")] + SYNCED + SETUP[SETUP.index("decisions"):]:
+    if "annotations" in existing:
+        db.execute(text(UNLINK_ANNOTATIONS), {"c": str(client.id)})
+    retired = tuple(t for t in RETIRED if t in existing)
+    for table in SETUP[:SETUP.index("decisions")] + retired + SYNCED + SETUP[SETUP.index("decisions"):]:
+        if table not in existing:
+            continue
         result = db.execute(text(f'delete from "{table}" where client_id = :c'), {"c": str(client.id)})
         if result.rowcount:
             deleted[table] = result.rowcount

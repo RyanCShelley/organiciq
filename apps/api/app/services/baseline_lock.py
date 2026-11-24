@@ -113,12 +113,21 @@ def goal_state(db: Session, client: Client) -> dict[str, Any]:
     )
     suggested = None
     if newest is not None:
-        suggested = int(newest.snapshot.get("projection", {}).get("suggested_monthly_lead_goal", 0)) or None
+        raw_suggested = ((newest.snapshot or {}).get("projection") or {}).get("suggested_monthly_lead_goal")
+        if raw_suggested is not None:
+            suggested = int(raw_suggested) or None
     return {"current": client.monthly_lead_goal, "suggested": suggested, "version": newest.version if newest else None,
             "target_lead_rate_pct": lead_rate_target(db, client.id)}
 
 
 def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequest) -> dict[str, Any]:
+    client = (
+        db.query(Client)
+        .filter(Client.id == client.id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
     result = baseline_series.build_result(
         db,
         client,

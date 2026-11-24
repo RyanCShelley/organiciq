@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.decisions.content_gaps import content_words
+from app.decisions.content_gaps import content_words, is_noise_query
 from app.decisions.visibility_candidates import brand_keys, is_brand
 from app.models.annotation import Annotation
 from app.models.bing_stats import FactBingQueryStat
@@ -25,6 +25,11 @@ from app.models.gsc import FactGscQueryPage
 from app.models.seranking import FactSerCompetitorKeyword, FactSerRanking, FactSerpFeature
 from app.models.watchlist import WatchlistBucket, WatchlistKeyword
 from app.services import google_updates
+from app.services.page_signals import (
+    is_rival_navigational,
+    rival_brand_term_groups,
+    rival_core_vocab_from_pages,
+)
 from app.services.review_visibility import MIN_IMPRESSIONS_FOR_POSITION, _bing, _google, key_of
 
 #: Sources further apart than this many positions are said to disagree.
@@ -75,13 +80,29 @@ def band(position: float | None) -> str:
 
 def watchlist_terms(db: Session, client: Client, bucket_id: str | None = None) -> list[dict[str, Any]]:
     q = (
-        db.query(WatchlistKeyword.keyword, WatchlistKeyword.volume, WatchlistBucket.id, WatchlistBucket.name)
+        db.query(
+            WatchlistKeyword.id,
+            WatchlistKeyword.keyword,
+            WatchlistKeyword.volume,
+            WatchlistBucket.id,
+            WatchlistBucket.name,
+        )
         .join(WatchlistBucket, WatchlistBucket.id == WatchlistKeyword.bucket_id)
         .filter(WatchlistKeyword.client_id == client.id)
     )
     if bucket_id:
         q = q.filter(WatchlistBucket.id == bucket_id)
-    return [{"term": k, "key": key_of(k), "volume": v, "bucket_id": str(bid), "bucket": name} for k, v, bid, name in q.order_by(WatchlistBucket.sort_order, WatchlistKeyword.keyword)]
+    return [
+        {
+            "id": str(kid),
+            "term": k,
+            "key": key_of(k),
+            "volume": v,
+            "bucket_id": str(bid),
+            "bucket": name,
+        }
+        for kid, k, v, bid, name in q.order_by(WatchlistBucket.sort_order, WatchlistKeyword.keyword)
+    ]
 
 
 def _ser(db: Session, client: Client, keys: list[str], start: date, end: date) -> dict[str, dict]:
@@ -228,10 +249,24 @@ def _weekly(
     return weeks, dict(per_term), series_map
 
 
-def _unsung_heroes(
-    db: Session, client: Client, start: date, end: date, ps: date, pe: date
+def _like_escape(token: str) -> str:
+    escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def gsc_keyword_suggestions(
+    db: Session,
+    client: Client,
+    start: date,
+    end: date,
+    ps: date,
+    pe: date,
+    *,
+    limit: int = UNSUNG_HEROES_SHOWN,
+    search: str | None = None,
+    strict: bool = True,
 ) -> list[dict[str, Any]]:
-    """Surface relevant, non-brand, high-impression or rising GSC queries not currently on the watchlist."""
+    """Surface relevant, non-brand GSC queries not currently on the watchlist using SQL aggregation."""
     watch_rows = (
         db.query(WatchlistKeyword.keyword, WatchlistKeyword.keyword_key)
         .filter(WatchlistKeyword.client_id == client.id)
@@ -247,6 +282,7 @@ def _unsung_heroes(
             FactCrawlPageSnapshot.title,
             FactCrawlPageSnapshot.normalized_url,
             FactCrawlPageSnapshot.sections,
+            FactCrawlPageSnapshot.page_type,
         )
         .filter(
             FactCrawlPageSnapshot.client_id == client.id,
@@ -279,57 +315,120 @@ def _unsung_heroes(
     )
     site_tokens = watchlist_tokens | crawl_tokens
     b_keys = brand_keys(client)
+    exact_rival, emd_rival = rival_brand_term_groups(db, client)
+    rival_pages = {r.normalized_url: r for r in crawl_rows if r.normalized_url}
+    rival_core_vocab = rival_core_vocab_from_pages(client, rival_pages)
 
-    q_norm = func.lower(func.trim(FactGscQueryPage.query))
+    search_clean = " ".join((search or "").lower().split())
+    search_tokens = search_clean.split() if search_clean else []
+    min_impressions = UNSUNG_MIN_IMPRESSIONS if strict else 1
+
+    q_key = func.trim(func.regexp_replace(func.lower(FactGscQueryPage.query), r"\s+", " ", "g"))
+
+    by_page_filters: list[Any] = [
+        FactGscQueryPage.client_id == client.id,
+        FactGscQueryPage.date >= start,
+        FactGscQueryPage.date <= end,
+    ]
+    if all_watch_keys and len(all_watch_keys) <= 2000:
+        by_page_filters.append(~q_key.in_(all_watch_keys))
+    for tok in search_tokens:
+        by_page_filters.append(q_key.like(_like_escape(tok), escape="\\"))
+
+    by_page = (
+        db.query(
+            q_key.label("q_key"),
+            FactGscQueryPage.normalized_url.label("page_url"),
+            func.min(FactGscQueryPage.query).label("raw_q"),
+            func.sum(FactGscQueryPage.impressions).label("page_imp"),
+            func.sum(FactGscQueryPage.clicks).label("page_clk"),
+            func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions).label(
+                "page_weighted"
+            ),
+        )
+        .filter(*by_page_filters)
+        .group_by(q_key, FactGscQueryPage.normalized_url)
+        .cte("by_page")
+    )
+
+    ranked_pages = (
+        db.query(
+            by_page.c.q_key,
+            by_page.c.page_url,
+            by_page.c.raw_q,
+            by_page.c.page_imp,
+            by_page.c.page_clk,
+            by_page.c.page_weighted,
+            func.row_number()
+            .over(
+                partition_by=by_page.c.q_key,
+                order_by=[
+                    by_page.c.page_imp.desc(),
+                    func.coalesce(by_page.c.page_url, "").desc(),
+                ],
+            )
+            .label("rn"),
+        )
+        .cte("ranked_pages")
+    )
+
+    sum_imp = func.sum(ranked_pages.c.page_imp)
     now_rows = (
         db.query(
-            q_norm,
-            FactGscQueryPage.normalized_url,
-            func.min(FactGscQueryPage.query),
-            func.sum(FactGscQueryPage.impressions),
-            func.sum(FactGscQueryPage.clicks),
-            func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+            ranked_pages.c.q_key,
+            func.max(case((ranked_pages.c.rn == 1, ranked_pages.c.page_url), else_=None)).label(
+                "best_page"
+            ),
+            func.max(case((ranked_pages.c.rn == 1, ranked_pages.c.raw_q), else_=None)).label(
+                "raw_q"
+            ),
+            sum_imp.label("imp"),
+            func.sum(ranked_pages.c.page_clk).label("clk"),
+            func.sum(ranked_pages.c.page_weighted).label("weighted"),
         )
-        .filter(
-            FactGscQueryPage.client_id == client.id,
-            FactGscQueryPage.date >= start,
-            FactGscQueryPage.date <= end,
-        )
-        .group_by(q_norm, FactGscQueryPage.normalized_url)
+        .group_by(ranked_pages.c.q_key)
+        .having(sum_imp >= min_impressions)
+        .order_by(sum_imp.desc())
         .all()
     )
 
-    now_agg: dict[str, dict[str, Any]] = {}
-    for norm_q, page_url, raw_q, imp, clk, weighted in now_rows:
+    candidates: dict[str, dict[str, Any]] = {}
+    for norm_q, best_page, raw_q, imp, clk, weighted in now_rows:
         k = key_of(norm_q)
-        if not k or k in all_watch_keys or is_brand(k, b_keys):
+        if (
+            not k
+            or k in all_watch_keys
+            or is_brand(k, b_keys)
+            or is_noise_query(k, strict_platforms=True, allowed_words=site_tokens)
+            or is_rival_navigational(
+                k,
+                exact_terms=exact_rival,
+                emd_terms=emd_rival,
+                core_vocab=rival_core_vocab,
+            )
+        ):
             continue
         imp_f = float(imp or 0)
         clk_f = float(clk or 0)
         weighted_f = float(weighted or 0)
-        cur = now_agg.get(k)
-        if cur is None:
-            now_agg[k] = {
+        existing_cand = candidates.get(k)
+        if existing_cand is None:
+            candidates[k] = {
                 "query": raw_q or k,
                 "impressions": imp_f,
                 "clicks": clk_f,
                 "weighted": weighted_f,
-                "best_page": page_url,
-                "best_page_imp": imp_f,
+                "best_page": best_page,
+                "_best_imp": imp_f,
             }
         else:
-            cur["impressions"] += imp_f
-            cur["clicks"] += clk_f
-            cur["weighted"] += weighted_f
-            if (imp_f, page_url or "") > (cur["best_page_imp"], cur["best_page"] or ""):
-                cur["best_page"] = page_url
-                cur["best_page_imp"] = imp_f
-                if raw_q:
-                    cur["query"] = raw_q
-
-    candidates = {
-        k: v for k, v in now_agg.items() if v["impressions"] >= UNSUNG_MIN_IMPRESSIONS
-    }
+            existing_cand["impressions"] += imp_f
+            existing_cand["clicks"] += clk_f
+            existing_cand["weighted"] += weighted_f
+            if imp_f > existing_cand["_best_imp"]:
+                existing_cand["query"] = raw_q or k
+                existing_cand["best_page"] = best_page
+                existing_cand["_best_imp"] = imp_f
     if not candidates:
         return []
 
@@ -345,29 +444,35 @@ def _unsung_heroes(
     )
     prev_agg: dict[str, dict[str, float]] = {}
     if has_prior_gsc:
-        prev_rows = (
-            db.query(
-                q_norm,
-                func.sum(FactGscQueryPage.impressions),
-                func.sum(FactGscQueryPage.clicks),
-                func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+        cand_keys = list(candidates.keys())
+        for offset in range(0, len(cand_keys), 2000):
+            chunk = cand_keys[offset : offset + 2000]
+            prev_rows = (
+                db.query(
+                    q_key,
+                    func.sum(FactGscQueryPage.impressions),
+                    func.sum(FactGscQueryPage.clicks),
+                    func.sum(FactGscQueryPage.average_position * FactGscQueryPage.impressions),
+                )
+                .filter(
+                    FactGscQueryPage.client_id == client.id,
+                    FactGscQueryPage.date >= ps,
+                    FactGscQueryPage.date <= pe,
+                    q_key.in_(chunk),
+                )
+                .group_by(q_key)
+                .all()
             )
-            .filter(
-                FactGscQueryPage.client_id == client.id,
-                FactGscQueryPage.date >= ps,
-                FactGscQueryPage.date <= pe,
-            )
-            .group_by(q_norm)
-            .all()
-        )
-        for norm_q, imp, clk, weighted in prev_rows:
-            k = key_of(norm_q)
-            if k not in candidates:
-                continue
-            cur = prev_agg.setdefault(k, {"impressions": 0.0, "clicks": 0.0, "weighted": 0.0})
-            cur["impressions"] += float(imp or 0)
-            cur["clicks"] += float(clk or 0)
-            cur["weighted"] += float(weighted or 0)
+            for norm_q, imp, clk, weighted in prev_rows:
+                k = key_of(norm_q)
+                if k not in candidates:
+                    continue
+                cur = prev_agg.setdefault(
+                    k, {"impressions": 0.0, "clicks": 0.0, "weighted": 0.0}
+                )
+                cur["impressions"] += float(imp or 0)
+                cur["clicks"] += float(clk or 0)
+                cur["weighted"] += float(weighted or 0)
 
     heroes: list[dict[str, Any]] = []
     for k, now in candidates.items():
@@ -402,14 +507,14 @@ def _unsung_heroes(
             and (imp - imp_before) >= UNSUNG_RISING_DELTA
             and (imp_change_pct or 0.0) >= UNSUNG_RISING_PCT
         ) or (move is not None and move >= UNSUNG_RISING_POS_MOVE)
-        if not (is_high or is_new or is_rising):
+        if strict and not (is_high or is_new or is_rising):
             continue
 
         q_tokens = content_words(k)
         watch_hits = sorted(q_tokens & watchlist_tokens)
         crawl_hits = sorted(q_tokens & crawl_tokens)
         has_overlap = bool(watch_hits or crawl_hits)
-        if not has_overlap and site_tokens:
+        if strict and not has_overlap and site_tokens:
             if not (
                 len(q_tokens) >= 2
                 and imp >= UNSUNG_FALLBACK_MIN_IMPRESSIONS
@@ -436,8 +541,12 @@ def _unsung_heroes(
             relevance_note = f"Matches site content ({', '.join(crawl_hits[:3])})"
         elif is_high:
             relevance_note = "High-impression non-brand search"
-        else:
+        elif is_rising:
             relevance_note = "Rising non-brand search"
+        elif is_new:
+            relevance_note = "New non-brand search"
+        else:
+            relevance_note = "Matching Search Console query"
 
         score = (2.0 if has_overlap else 1.0) * (
             imp
@@ -467,7 +576,23 @@ def _unsung_heroes(
     heroes.sort(key=lambda item: (-item["_score"], -item["impressions"], item["key"]))
     for item in heroes:
         item.pop("_score", None)
-    return heroes[:UNSUNG_HEROES_SHOWN]
+    return heroes[:limit]
+
+
+def _unsung_heroes(
+    db: Session, client: Client, start: date, end: date, ps: date, pe: date
+) -> list[dict[str, Any]]:
+    """Surface relevant, non-brand, high-impression or rising GSC queries not currently on the watchlist."""
+    return gsc_keyword_suggestions(
+        db,
+        client,
+        start,
+        end,
+        ps,
+        pe,
+        limit=UNSUNG_HEROES_SHOWN,
+        strict=True,
+    )
 
 
 def _disagreement(google: float | None, bing: float | None, ser: float | None) -> str | None:

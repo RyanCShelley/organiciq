@@ -1,6 +1,8 @@
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 _LANDING_SENTINELS = {"(not set)", "(not provided)", "(none)", ""}
+_SCHEME_PREFIX_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):")
 
 
 def normalize_url(raw: str) -> str:
@@ -19,18 +21,21 @@ def normalize_url(raw: str) -> str:
     if "://" not in value:
         value = f"https://{value}"
 
-    parts = urlsplit(value)
-    scheme = (parts.scheme or "https").lower()
-    if scheme not in {"http", "https"}:
-        scheme = "https"
+    try:
+        parts = urlsplit(value)
+        scheme = (parts.scheme or "https").lower()
+        if scheme not in {"http", "https"}:
+            scheme = "https"
 
-    host = (parts.hostname or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
+        host = (parts.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
 
-    netloc = host
-    if parts.port and parts.port not in {80, 443}:
-        netloc = f"{host}:{parts.port}"
+        netloc = host
+        if parts.port and parts.port not in {80, 443}:
+            netloc = f"{host}:{parts.port}"
+    except ValueError:
+        return ""
 
     path = parts.path or "/"
     if path != "/" and path.endswith("/"):
@@ -46,6 +51,11 @@ def url_variants(raw: str) -> list[str]:
     text = (raw or "").strip()
     if not text:
         return []
+    try:
+        parts = urlsplit(text if "://" in text else f"https://{text}")
+        _ = parts.port
+    except ValueError:
+        return []
     norm = normalize_url(text) or text
     variants: set[str] = {text, norm}
     for candidate in (text, norm):
@@ -55,7 +65,10 @@ def url_variants(raw: str) -> list[str]:
                 variants.add(trimmed)
         elif "?" not in candidate and "#" not in candidate:
             variants.add(f"{candidate}/")
-    parts = urlsplit(norm)
+    try:
+        parts = urlsplit(norm)
+    except ValueError:
+        return []
     if parts.scheme in ("http", "https") and parts.netloc:
         host = parts.netloc
         hosts = {host, f"www.{host}" if not host.startswith("www.") else host[4:]}
@@ -174,16 +187,30 @@ def public_host_or_error(value: str | None) -> str | None:
     request, because a name can resolve somewhere else later.
     """
     import ipaddress
+    import socket
 
     text = (value or "").strip()
     if not text:
         return None
-    parts = urlsplit(text if "://" in text else f"https://{text}")
+    if "\x00" in text:
+        return "is not a valid web address"
+    scheme_match = _SCHEME_PREFIX_RE.match(text)
+    if (
+        scheme_match
+        and "://" not in text
+        and not re.match(r"^[^/:]+:\d+(?:[/?#]|$)", text)
+    ):
+        return f"“{scheme_match.group(1).lower()}” is not a web address"
+    try:
+        parts = urlsplit(text if "://" in text else f"https://{text}")
+        host = (parts.hostname or "").lower().rstrip(".")
+        _ = parts.port
+    except ValueError:
+        return "is not a valid web address"
     if parts.scheme not in ("http", "https"):
         return f"“{parts.scheme}” is not a web address"
     if parts.username or parts.password:
         return "must not contain a username or password"
-    host = (parts.hostname or "").lower().rstrip(".")
     if not host:
         return "has no host"
     if host == "localhost" or host.endswith(_INTERNAL_SUFFIXES) or "." not in host and ":" not in host:
@@ -191,7 +218,15 @@ def public_host_or_error(value: str | None) -> str | None:
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
+        # Reject non-canonical / octal / hex / short IPv4 literals (e.g. 0177.0.0.1, 0x7f.0.0.1, 127.1, 08.0.0.1).
+        try:
+            socket.inet_aton(host)
+            return f"“{host}” is not a canonical public address"
+        except OSError:
+            pass
+        if re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}", host):
+            return f"“{host}” is not a canonical public address"
         return None
-    if not ip.is_global:
+    if not ip.is_global or ip.is_multicast:
         return f"{host} is a private or reserved address"
     return None

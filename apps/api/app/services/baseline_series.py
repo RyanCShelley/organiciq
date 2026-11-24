@@ -631,9 +631,10 @@ def series_from_ga4(
 
     from app.models.config import OrganicChannel
     from app.models.ga4 import FactGa4Event, FactGa4Traffic
-    from app.services.dashboard import _lead_event_names, _load_watermarks
+    from app.services import lead_conversions, lead_exclusions
+    from app.services.dashboard import _load_watermarks
 
-    names = list(lead_events) if lead_events else _lead_event_names(db, client.id)
+    names = list(lead_events) if lead_events else lead_conversions.active_conversion_events(db, client)
     if not names:
         raise ValueError("Declare at least one lead conversion event before building a baseline.")
     watermark = _load_watermarks(db, client.id).get("ga4")
@@ -671,6 +672,7 @@ def series_from_ga4(
             FactGa4Event.date >= start,
             FactGa4Event.date <= through,
             FactGa4Event.event_name.in_(names),
+            lead_exclusions.not_excluded(db, client.id),
         )
         .group_by(event_col, FactGa4Event.event_name)
         .all()
@@ -753,7 +755,7 @@ def lead_event_candidates(db: Any, client: Any, *, months: int = 24) -> dict[str
     from sqlalchemy import func
 
     from app.models.ga4 import FactGa4Event
-    from app.services.dashboard import _lead_event_names
+    from app.services import lead_conversions
 
     rows = (
         db.query(
@@ -787,7 +789,7 @@ def lead_event_candidates(db: Any, client: Any, *, months: int = 24) -> dict[str
             }
             for name, total, first, last in rows
         ],
-        "defaults": _lead_event_names(db, client.id),
+        "defaults": lead_conversions.active_conversion_events(db, client),
         # What the newest locked baseline counted, so a drift from the lead
         # conversions the rest of the tool uses can be shown.
         "locked": {"version": newest[1], "events": newest[0]} if newest else None,

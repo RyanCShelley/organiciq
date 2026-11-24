@@ -3,8 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError, apiFetch } from "@/lib/api";
-import type { Analysis, AnalysisResult, PillarsSnapshot } from "@/lib/baseline";
-import type { ActionResult } from "@/lib/client-settings";
+import { invalidateClientsCache } from "@/lib/clients";
+import type {
+  Analysis,
+  AnalysisResult,
+  BaselineGoalState,
+  BaselineLockResponse,
+  PillarsSnapshot,
+} from "@/lib/baseline";
 
 function message(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -15,8 +21,13 @@ export async function loadBaselineAction(
   events: string[],
   regimeStart: string,
   acknowledged: string[],
+  months = 24,
+  halfLifeMonths = 3,
 ): Promise<AnalysisResult> {
-  const params = new URLSearchParams({ months: "24" });
+  const params = new URLSearchParams({
+    months: String(months),
+    half_life_months: String(halfLifeMonths),
+  });
   for (const event of events) params.append("lead_event", event);
   for (const code of acknowledged) params.append("acknowledge", code);
   if (regimeStart) params.set("regime_start", regimeStart);
@@ -28,28 +39,84 @@ export async function loadBaselineAction(
   }
 }
 
+export async function loadBaselineCsvAction(
+  clientId: string,
+  csvText: string,
+  regimeStart: string,
+  acknowledged: string[],
+  halfLifeMonths = 3,
+): Promise<AnalysisResult> {
+  try {
+    const analysis = await apiFetch<Analysis>(`/clients/${clientId}/baseline/series`, {
+      method: "POST",
+      body: {
+        csv_text: csvText,
+        regime_start: regimeStart || null,
+        half_life_months: halfLifeMonths,
+        acknowledged,
+      },
+    });
+    return { ok: true, analysis };
+  } catch (error) {
+    return { ok: false, error: message(error, "Could not analyze CSV baseline.") };
+  }
+}
+
 export async function lockBaselineAction(
   clientId: string,
   slug: string,
   body: {
+    source?: "ga4" | "csv";
+    csv_text?: string | null;
+    months?: number;
+    half_life_months?: number;
     lead_events: string[];
     regime_start: string | null;
     acknowledged: string[];
     reason_code: string | null;
     reason_note: string | null;
     monthly_lead_goal: number | null;
+    target_lead_rate_pct?: number | null;
     sync_lead_conversions: boolean;
   },
-): Promise<ActionResult> {
+): Promise<{ ok: true; data: BaselineLockResponse } | { ok: false; error: string }> {
   try {
-    await apiFetch(`/clients/${clientId}/baseline/lock`, {
+    const data = await apiFetch<BaselineLockResponse>(`/clients/${clientId}/baseline/lock`, {
       method: "POST",
-      body: { source: "ga4", months: 24, half_life_months: 3, ...body },
+      body: {
+        source: body.source ?? "ga4",
+        months: body.months ?? 24,
+        half_life_months: body.half_life_months ?? 3,
+        ...body,
+      },
     });
+    invalidateClientsCache();
+    revalidatePath("/");
     revalidatePath(`/${slug}/settings/baseline`);
-    return { ok: true };
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, data };
   } catch (error) {
     return { ok: false, error: message(error, "The baseline could not be locked: the API did not answer.") };
+  }
+}
+
+export async function updateBaselineGoalAction(
+  clientId: string,
+  slug: string,
+  monthlyLeadGoal: number,
+): Promise<{ ok: true; goal: BaselineGoalState } | { ok: false; error: string }> {
+  try {
+    const goal = await apiFetch<BaselineGoalState>(`/clients/${clientId}/baseline/goal`, {
+      method: "POST",
+      body: { monthly_lead_goal: monthlyLeadGoal },
+    });
+    invalidateClientsCache();
+    revalidatePath("/");
+    revalidatePath(`/${slug}/settings/baseline`);
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, goal };
+  } catch (error) {
+    return { ok: false, error: message(error, "Could not update the monthly goal.") };
   }
 }
 

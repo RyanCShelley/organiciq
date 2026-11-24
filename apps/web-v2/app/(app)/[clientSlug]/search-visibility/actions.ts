@@ -1,7 +1,18 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
+
 import { ApiError, apiFetch } from "@/lib/api";
 import type { SvDetail } from "@/lib/search-visibility";
+
+function revalidateWatchlistSearchRoutes(slug?: string) {
+  if (!slug) return;
+  revalidatePath(`/${slug}/search-visibility`);
+  revalidatePath(`/${slug}/watchlist`);
+  revalidatePath(`/${slug}/settings/watchlist`);
+  revalidatePath(`/${slug}/focus`);
+}
 
 export async function termDetailAction(clientId: string, term: string, from: string, to: string): Promise<{ ok: true; detail: SvDetail } | { ok: false; error: string }> {
   try {
@@ -15,6 +26,7 @@ export async function termDetailAction(clientId: string, term: string, from: str
 export async function addWatchlistKeywordAction(
   clientId: string,
   payload: { keyword: string; bucket_id?: string | null; bucket_name?: string | null; notes?: string | null },
+  slug?: string,
 ): Promise<
   | {
       ok: true;
@@ -40,11 +52,34 @@ export async function addWatchlistKeywordAction(
       created: boolean;
       bucket_created: boolean;
     }>("/v2/watchlist/keywords", { method: "POST", clientId, body: payload });
+    revalidateWatchlistSearchRoutes(slug);
     return { ok: true, result };
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       error: error instanceof ApiError ? error.message : "The keyword could not be added: the API did not answer.",
+    };
+  }
+}
+
+export async function removeWatchlistKeywordAction(
+  clientId: string,
+  keywordId: string,
+  slug?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await apiFetch<void>(`/v2/watchlist/keywords/${encodeURIComponent(keywordId)}`, {
+      method: "DELETE",
+      clientId,
+    });
+    revalidateWatchlistSearchRoutes(slug);
+    return { ok: true };
+  } catch (error) {
+    unstable_rethrow(error);
+    return {
+      ok: false,
+      error: error instanceof ApiError ? error.message : "The keyword could not be removed: the API did not answer.",
     };
   }
 }
