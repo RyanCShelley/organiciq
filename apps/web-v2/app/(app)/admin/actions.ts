@@ -43,9 +43,13 @@ export async function pullStatusAction(clientId: string): Promise<Result<PullSta
   }
 }
 
-export async function startPullAction(clientId: string, force = false): Promise<Result<PullStatus>> {
+export async function startPullAction(clientId: string, force = false, sources?: string[]): Promise<Result<PullStatus>> {
   try {
-    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull${force ? "?force=true" : ""}`, { method: "POST" }) };
+    const params = new URLSearchParams();
+    if (force) params.set("force", "true");
+    if (sources && sources.length > 0) params.set("sources", sources.join(","));
+    const qs = params.toString();
+    return { ok: true, value: await apiFetch<PullStatus>(`/v2/admin/clients/${clientId}/pull${qs ? `?${qs}` : ""}`, { method: "POST" }) };
   } catch (error) {
     return failure(error, "The pull could not be started: the API did not answer.");
   }

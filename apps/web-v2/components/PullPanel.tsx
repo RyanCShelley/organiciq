@@ -86,10 +86,10 @@ export function PullPanel({ clientId }: { clientId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
-  const begin = (force = false) =>
+  const begin = (force = false, sources?: string[]) =>
     start(async () => {
       setError(null);
-      const r = await startPullAction(clientId, force);
+      const r = await startPullAction(clientId, force, sources);
       if (r.ok) {
         applyStatus(r.value);
         watch(r.value);
@@ -159,7 +159,7 @@ export function PullPanel({ clientId }: { clientId: string }) {
               {status.stopping ? <><Spinner />Stopping…</> : "Stop pull"}
             </button>
           ) : null}
-          {status && !status.running && status.up_to_date ? (
+          {status && !status.running && status.sources.length > 0 && status.jobs_done > 0 ? (
             <button type="button" onClick={() => begin(true)} disabled={pending} className="text-xs font-semibold text-[var(--text-secondary)] underline disabled:opacity-40">
               Pull everything again
             </button>
@@ -179,13 +179,25 @@ export function PullPanel({ clientId }: { clientId: string }) {
                 <span className="font-semibold">{s.label}</span>
                 <span className="ml-2 text-xs text-[var(--text-tertiary)]">{reach(s)}</span>
               </div>
-              <div className="text-xs">
-                <span className={`font-semibold ${STATE[s.state].cls}`}>{s.state === "running" || s.state === "stopping" ? <Spinner /> : null}{STATE[s.state].text}</span>
-                {(s.state === "running" || s.state === "stopping") && s.stage ? ` · ${s.stage}` : ""}
-                {(s.state === "running" || s.state === "stopping") && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
-                {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
-                {s.finished_at && (s.state === "done" || s.state === "partial") ? ` · pulled ${ago(s.finished_at)}` : ""}
-                {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
+              <div className="flex items-center gap-3 text-xs">
+                <div>
+                  <span className={`font-semibold ${STATE[s.state].cls}`}>{s.state === "running" || s.state === "stopping" ? <Spinner /> : null}{STATE[s.state].text}</span>
+                  {(s.state === "running" || s.state === "stopping") && s.stage ? ` · ${s.stage}` : ""}
+                  {(s.state === "running" || s.state === "stopping") && s.running_seconds != null ? ` · running ${elapsed(s.running_seconds)}` : ""}
+                  {s.rows != null && (s.state === "done" || s.state === "partial") ? ` · ${num(s.rows)} rows` : ""}
+                  {s.finished_at && (s.state === "done" || s.state === "partial") ? ` · pulled ${ago(s.finished_at)}` : ""}
+                  {s.error ? <div className="mt-0.5 text-red-700">{s.error}</div> : null}
+                </div>
+                {s.state !== "queued" && s.state !== "running" && s.state !== "stopping" ? (
+                  <button
+                    type="button"
+                    onClick={() => begin(true, [s.source])}
+                    disabled={pending}
+                    className="rounded border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--background)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  >
+                    {s.state === "done" || s.state === "partial" ? "Re-pull" : "Pull"}
+                  </button>
+                ) : null}
               </div>
             </li>
           ))}

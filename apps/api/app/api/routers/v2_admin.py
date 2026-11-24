@@ -299,12 +299,14 @@ def start_pull(
     user: Annotated[AuthUser, Depends(require_sma_admin)],
     db: Annotated[Session, Depends(get_db)],
     force: bool = False,
+    sources: str | None = None,
 ) -> dict:
-    """Queue a pull of what is missing: sources never pulled, failed, or older than a day. force pulls everything."""
+    """Queue a pull of what is missing: sources never pulled, failed, or older than a day. force pulls everything (or only `sources`)."""
     client = _client(db, client_id)
     if not data_pull.pull_plan(db, client):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing is connected yet. Connect a data source in Settings first.")
-    queued = data_pull.queue_pull(db, client, force=force)
+    only = {s.strip() for s in sources.split(",") if s.strip()} if sources else None
+    queued = data_pull.queue_pull(db, client, force=force, only=only)
     logger.info("Pull started for %s by %s%s: %s", client.client_name, user.email, " (forced)" if force else "", ", ".join(queued) or "nothing missing")
     return {"queued": queued, **data_pull.pull_status(db, client)}
 
