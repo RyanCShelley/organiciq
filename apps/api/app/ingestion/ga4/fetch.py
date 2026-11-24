@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from uuid import UUID
 
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_path_prefix
 from app.ingestion.ga4.client import run_report
 from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
 from app.models.ga4 import StagingGa4Event, StagingGa4Traffic
@@ -79,6 +81,25 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
     token = access_token_for_client(db, job.client_id)
     property_id = integration.external_property_id or ""
 
+    from app.models.client import Client
+    client = db.get(Client, job.client_id)
+    scope = normalize_path_prefix(client.path_prefix if client else None)
+    dimension_filter = (
+        {
+            "filter": {
+                "fieldName": "landingPage",
+                "stringFilter": {
+                    "matchType": "FULL_REGEXP",
+                    "value": f"^(https?://[^/]+)?{re.escape(scope)}(/.*|\\?.*)?$",
+                    "caseSensitive": False,
+                },
+            }
+        }
+        if scope
+        else None
+    )
+    filter_kw = {"dimension_filter": dimension_filter} if dimension_filter else {}
+
     traffic_rows = run_report(
         access_token=token,
         property_id=property_id,
@@ -86,6 +107,7 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         end_date=job.end_date,
         dimensions=["date", "landingPage", "sessionSource", "sessionMedium"],
         metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions", "userEngagementDuration"],
+        **filter_kw,
     )
     event_rows = run_report(
         access_token=token,
@@ -94,23 +116,22 @@ def fetch_ga4(db: Session, job: SyncJob) -> tuple[int, int]:
         end_date=job.end_date,
         dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "eventName"],
         metrics=["eventCount"],
+        **filter_kw,
     )
 
     # Service reporting is opt-in per client. Existing whole-site report grain
     # stays unchanged, so native dimensions cannot restate baseline inputs.
-    from app.models.client import Client
-    client = db.get(Client, job.client_id)
     native_traffic, native_events = [], []
-    native_enabled = client.service_reporting is not None
+    native_enabled = client is not None and client.service_reporting is not None
     if native_enabled:
         native_traffic = run_report(access_token=token, property_id=property_id,
             start_date=job.start_date, end_date=job.end_date,
             dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "sessionDefaultChannelGroup"],
-            metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions"])
+            metrics=["sessions", "activeUsers", "screenPageViews", "engagedSessions"], **filter_kw)
         native_events = run_report(access_token=token, property_id=property_id,
             start_date=job.start_date, end_date=job.end_date,
             dimensions=["date", "landingPage", "sessionSource", "sessionMedium", "eventName", "sessionDefaultChannelGroup"],
-            metrics=["eventCount"])
+            metrics=["eventCount"], **filter_kw)
         if not (getattr(native_traffic, "complete", False) and getattr(native_events, "complete", False)):
             raise ValueError("Native GA4 channel reports were not verified complete")
         _validate_report_rows(native_traffic, dimensions=5, metrics=4)

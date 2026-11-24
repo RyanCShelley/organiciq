@@ -335,3 +335,82 @@ def test_run_ga4_job_succeeds_when_path_scoped_client_has_zero_in_scope_rows(db,
     assert result.records_fetched == 1
     assert result.records_written == 0
     assert result.error_message is None
+
+
+def test_gsc_query_sends_server_side_page_prefix_filter(monkeypatch):
+    from app.ingestion.gsc import client as gsc_client
+
+    seen: list[dict] = []
+
+    class Resp:
+        def json(self):
+            return {"rows": []}
+
+    def fake_post(_client, _url, *, headers=None, json=None, description=""):
+        seen.append(json)
+        return Resp()
+
+    monkeypatch.setattr(gsc_client, "post_json", fake_post)
+    monkeypatch.setattr(gsc_client, "check_stop", lambda: None)
+
+    list(
+        gsc_client.query_search_analytics(
+            access_token="t",
+            site_url="sc-domain:robinsonheli.com",
+            start_date=TODAY,
+            end_date=TODAY,
+            dimensions=["date", "query", "page"],
+            page_prefix="/unmanned",
+        )
+    )
+    assert len(seen) == 1
+    assert seen[0]["dimensionFilterGroups"] == [
+        {
+            "filters": [
+                {
+                    "dimension": "page",
+                    "operator": "includingRegex",
+                    "expression": r"^https?://[^/]+/unmanned(?:/|\?|$)",
+                }
+            ]
+        }
+    ]
+
+
+def test_ga4_fetch_sends_server_side_landing_page_filter(db, client_a, monkeypatch):
+    from app.ingestion.ga4 import fetch as ga4_fetch
+    from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
+
+    _scoped(db, client_a)
+    existing = db.query(Integration).filter(Integration.client_id == client_a.id, Integration.provider == IntegrationProvider.GA4).one_or_none()
+    if existing is None:
+        db.add(
+            Integration(
+                client_id=client_a.id,
+                provider=IntegrationProvider.GA4,
+                external_property_id="properties/538003044",
+                connection_status=ConnectionStatus.CONNECTED,
+            )
+        )
+    else:
+        existing.external_property_id = "properties/538003044"
+        existing.connection_status = ConnectionStatus.CONNECTED
+    db.commit()
+    job = _job(db, client_a.id, "ga4")
+
+    seen_filters: list[dict | None] = []
+
+    def fake_run_report(*, dimension_filter=None, **_kwargs):
+        seen_filters.append(dimension_filter)
+        return []
+
+    monkeypatch.setattr(ga4_fetch, "client_has_google_credentials", lambda *_args: True)
+    monkeypatch.setattr(ga4_fetch, "access_token_for_client", lambda *_args: "tok")
+    monkeypatch.setattr(ga4_fetch, "run_report", fake_run_report)
+
+    ga4_fetch.fetch_ga4(db, job)
+    assert len(seen_filters) == 2
+    for f in seen_filters:
+        assert f["filter"]["fieldName"] == "landingPage"
+        assert f["filter"]["stringFilter"]["matchType"] == "FULL_REGEXP"
+        assert "/unmanned" in f["filter"]["stringFilter"]["value"]

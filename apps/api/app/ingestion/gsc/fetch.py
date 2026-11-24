@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
+from app.core.urls import normalize_path_prefix
 from app.ingestion.google_credentials import access_token_for_client, client_has_google_credentials
 from app.ingestion.gsc.client import query_search_analytics
 from app.models.client import Client
@@ -115,6 +116,8 @@ def fetch_gsc_pages(db: Session, job: SyncJob) -> int:
     integration = _load_gsc_integration(db, job.client_id)
     token = access_token_for_client(db, job.client_id)
     site_urls = gsc_site_urls_for_integration(integration)
+    client = db.get(Client, job.client_id)
+    scope = normalize_path_prefix(client.path_prefix if client else None)
     lean = _is_lean(db, job)
     # Lean leaves out country and device: nothing reads them, and a page already has one row per day without them.
     dimensions = ["date", "page"] if lean else ["date", "page", "country", "device"]
@@ -128,6 +131,7 @@ def fetch_gsc_pages(db: Session, job: SyncJob) -> int:
             start_date=job.start_date,
             end_date=job.end_date,
             dimensions=dimensions,
+            **({"page_prefix": scope} if scope else {}),
         )
 
         def staged(rows=rows, site_url=site_url):
@@ -197,6 +201,8 @@ def fetch_gsc_queries(db: Session, job: SyncJob) -> int:
     integration = _load_gsc_integration(db, job.client_id)
     token = access_token_for_client(db, job.client_id)
     site_urls = gsc_site_urls_for_integration(integration)
+    client = db.get(Client, job.client_id)
+    scope = normalize_path_prefix(client.path_prefix if client else None)
     lean = _is_lean(db, job)
 
     db.query(StagingGscQueryPage).filter(StagingGscQueryPage.job_id == job.id).delete()
@@ -217,6 +223,7 @@ def fetch_gsc_queries(db: Session, job: SyncJob) -> int:
                 start_date=window_start,
                 end_date=window_end,
                 dimensions=dimensions,
+                **({"page_prefix": scope} if scope else {}),
             )
 
             def staged(rows=rows, site_url=site_url, dimensions=dimensions, dated=dated, window_start=window_start):

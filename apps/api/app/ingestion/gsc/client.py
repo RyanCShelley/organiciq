@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import date
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -34,6 +35,7 @@ def query_search_analytics(
     end_date: date,
     dimensions: list[str],
     row_limit: int = 25000,
+    page_prefix: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Paginate Search Analytics until exhausted, yielding rows as each page arrives.
 
@@ -57,6 +59,18 @@ def query_search_analytics(
                 # day is overwritten.
                 "dataState": "all",
             }
+            if page_prefix and "page" in dimensions:
+                body["dimensionFilterGroups"] = [
+                    {
+                        "filters": [
+                            {
+                                "dimension": "page",
+                                "operator": "includingRegex",
+                                "expression": f"^https?://[^/]+{re.escape(page_prefix)}(?:/|\\?|$)",
+                            }
+                        ]
+                    }
+                ]
             res = post_json(
                 client,
                 url,
