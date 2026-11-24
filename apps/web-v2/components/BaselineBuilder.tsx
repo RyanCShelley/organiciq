@@ -96,6 +96,8 @@ export function BaselineBuilder({
   const [pillars, setPillars] = useState<PillarsSnapshot | null>(null);
   const [showTopPages, setShowTopPages] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPillars, setShowPillars] = useState(false);
+  const [showVersions, setShowVersions] = useState(versions.length > 1);
   const [exportError, setExportError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -344,7 +346,16 @@ export function BaselineBuilder({
                 {latestVersion.lead_events.length ? ` · Events: ${latestVersion.lead_events.join(", ")}` : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {latestVersion.has_pillars ? (
+                <button
+                  type="button"
+                  onClick={() => handleExportCsv(latestVersion.version)}
+                  className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold hover:bg-[var(--background)]"
+                >
+                  Export CSV
+                </button>
+              ) : null}
               {!open ? (
                 <button
                   type="button"
@@ -434,163 +445,231 @@ export function BaselineBuilder({
         </div>
       ) : null}
 
-      {/* Modeled Baseline & 12-Month Growth Projections */}
-      {analysis ? (
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-base font-semibold">Modeled Baseline &amp; 12-Month Projection</h2>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    analysis.status === "provisional"
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-[var(--brand-teal-soft)] text-[var(--brand-dark)]"
-                  }`}
-                >
-                  {analysis.status}
-                </span>
-                <span className="rounded-full bg-[var(--background)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-secondary)]">
-                  {analysis.projection.plan_label} plan
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Evaluated {analysis.window.from} to {analysis.window.to} ({analysis.window.months} month
-                {analysis.window.months === 1 ? "" : "s"})
-                {analysis.window.regime_start ? ` · Regime start ${analysis.window.regime_start}` : ""}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              accent
-              label="Modeled sessions / mo"
-              primary={fmt(analysis.baseline.monthly_sessions)}
-              secondary={`Range: ${fmt(analysis.ranges.monthly_sessions.low)} – ${fmt(analysis.ranges.monthly_sessions.high)}`}
-              footnote={`±${analysis.ranges.monthly_sessions.pct}% typical band`}
-            />
-            <StatCard
-              label="Modeled organic / mo"
-              primary={fmt(analysis.baseline.monthly_organic_sessions)}
-              secondary={
-                analysis.ranges.monthly_organic_sessions
-                  ? `Range: ${fmt(analysis.ranges.monthly_organic_sessions.low)} – ${fmt(analysis.ranges.monthly_organic_sessions.high)}`
-                  : undefined
-              }
-              footnote={
-                analysis.ranges.monthly_organic_sessions
-                  ? `±${analysis.ranges.monthly_organic_sessions.pct}% typical band`
-                  : "Organic split unavailable"
-              }
-            />
-            <StatCard
-              label={`${noun.singular[0].toUpperCase()}${noun.singular.slice(1)} rate`}
-              primary={`${fmt(analysis.baseline.lead_rate_pct, 2)}%`}
-              secondary={`Range: ${fmt(analysis.ranges.lead_rate_pct.low, 2)}% – ${fmt(analysis.ranges.lead_rate_pct.high, 2)}%`}
-              footnote={`±${analysis.ranges.lead_rate_pct.pct}% typical band`}
-            />
-            <StatCard
-              accent
-              label={`Modeled ${noun.plural} / mo`}
-              primary={fmt(analysis.baseline.monthly_leads, 1)}
-              secondary={`Range: ${fmt(analysis.ranges.monthly_leads.low, 1)} – ${fmt(analysis.ranges.monthly_leads.high, 1)}`}
-              footnote={analysis.ranges.note}
-            />
-          </div>
-
-          {/* 12-Month Growth Projection Checkpoints */}
-          <div className="space-y-3 border-t border-[var(--border)] pt-5">
+      {/* Step-by-Step Review & Lock Flow (only shown during initial setup or Re-baseline) */}
+      {formVisible && analysis ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[var(--brand-teal)]/30 bg-[var(--brand-teal-soft)]/20 px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-                  {analysis.projection.goal_horizon_months}-Month Growth Projection ({analysis.projection.plan_label})
-                </h3>
-                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{analysis.projection.disclaimer}</p>
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  {isFirst ? "Set your starting baseline in 3 steps" : `Re-baseline workflow (v${versions.length + 1})`}
+                </h2>
+                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                  Review your starting data, check the 12-month model, and lock a benchmark so future progress is measured cleanly.
+                </p>
               </div>
-              <div className="rounded-lg border border-[var(--brand-teal)]/30 bg-[var(--brand-teal-soft)]/25 px-3 py-1.5 text-xs">
-                Suggested monthly goal:{" "}
-                <strong className="tabular-nums text-[var(--text-primary)]">
-                  {analysis.projection.suggested_monthly_lead_goal}/mo
-                </strong>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+                <span className="rounded-full bg-white px-2.5 py-1 border border-[var(--border)]">1. Verify data</span>
+                <span aria-hidden="true">→</span>
+                <span className="rounded-full bg-white px-2.5 py-1 border border-[var(--border)]">2. Review projection</span>
+                <span aria-hidden="true">→</span>
+                <span className="rounded-full bg-white px-2.5 py-1 border border-[var(--border)]">3. Lock baseline</span>
               </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-5">
-              {analysis.projection.checkpoints.map((cp) => (
-                <StatCard
-                  key={cp.month}
-                  accent={cp.month === analysis.projection.goal_horizon_months}
-                  label={cp.label}
-                  primary={`${fmt(cp.monthly_leads, 1)} ${noun.plural}`}
-                  secondary={`${fmt(cp.monthly_sessions)} sessions`}
-                  footnote={`${fmt(cp.lead_rate_pct, 2)}% rate`}
-                />
-              ))}
             </div>
           </div>
 
-          {/* Flags: Blockers, Warnings, Info */}
-          {blockerFlags.length > 0 ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-red-800">Review required before locking</h3>
-                {hasRegimeBreakBlocker && suggestedRegime && regimeStart !== suggestedRegime ? (
-                  <button
-                    type="button"
-                    onClick={() => applySuggestedRegime(suggestedRegime)}
-                    className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800"
-                  >
-                    Use suggested start ({suggestedRegime})
-                  </button>
+          {/* Step 1: Verify your starting data & flags */}
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--brand-teal)]">
+                  Step 1 of 3
+                </div>
+                <h3 className="text-base font-semibold">Verify your starting data</h3>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  Confirm we&apos;re counting the right {noun.plural} events and a clean historical window before locking.
+                </p>
+              </div>
+              <Link
+                href={`/${slug}/settings/conversions`}
+                className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--background)]"
+              >
+                Edit conversion events
+              </Link>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-xs">
+                <div className="font-semibold text-[var(--text-tertiary)] uppercase tracking-wide text-[11px]">
+                  Evaluated window
+                </div>
+                <div className="mt-1 font-semibold text-[var(--text-primary)]">
+                  {analysis.window.from} to {analysis.window.to} ({analysis.window.months} month
+                  {analysis.window.months === 1 ? "" : "s"})
+                </div>
+                {analysis.window.regime_start ? (
+                  <div className="mt-0.5 text-[var(--text-secondary)]">Regime start: {analysis.window.regime_start}</div>
                 ) : null}
               </div>
-              <ul className="space-y-2 text-sm text-red-800">
-                {blockerFlags.map((flag) => (
-                  <li key={flag.code} className="flex items-start justify-between gap-3">
-                    <span>{flag.message}</span>
-                    <label className="flex shrink-0 items-center gap-1.5 text-xs font-medium">
-                      <input
-                        type="checkbox"
-                        checked={acknowledged.includes(flag.code)}
-                        onChange={(e) =>
-                          setAcknowledged((current) =>
-                            e.target.checked
-                              ? current.includes(flag.code)
-                                ? current
-                                : [...current, flag.code]
-                              : current.filter((c) => c !== flag.code),
-                          )
-                        }
-                      />
-                      I have checked this
-                    </label>
-                  </li>
-                ))}
-              </ul>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-xs">
+                <div className="font-semibold text-[var(--text-tertiary)] uppercase tracking-wide text-[11px]">
+                  Counted GA4 {noun.plural} events
+                </div>
+                <div className="mt-1 font-semibold text-[var(--text-primary)]">
+                  {events.length > 0 ? events.join(", ") : "None selected"}
+                </div>
+              </div>
             </div>
-          ) : null}
 
-          {warningFlags.length > 0 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3.5 text-xs text-amber-950 space-y-1">
-              <div className="font-semibold">Warnings</div>
-              <ul className="list-disc pl-4 space-y-1">
-                {warningFlags.map((flag) => (
-                  <li key={flag.code}>{flag.message}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+            {/* Flags: Blockers, Warnings, Info */}
+            {blockerFlags.length > 0 ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-semibold text-red-800">Review required before locking</h4>
+                  {hasRegimeBreakBlocker && suggestedRegime && regimeStart !== suggestedRegime ? (
+                    <button
+                      type="button"
+                      onClick={() => applySuggestedRegime(suggestedRegime)}
+                      className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800"
+                    >
+                      Use suggested start ({suggestedRegime})
+                    </button>
+                  ) : null}
+                </div>
+                <ul className="space-y-2 text-sm text-red-800">
+                  {blockerFlags.map((flag) => (
+                    <li key={flag.code} className="flex items-start justify-between gap-3">
+                      <span>{flag.message}</span>
+                      <label className="flex shrink-0 items-center gap-1.5 text-xs font-medium">
+                        <input
+                          type="checkbox"
+                          checked={acknowledged.includes(flag.code)}
+                          onChange={(e) =>
+                            setAcknowledged((current) =>
+                              e.target.checked
+                                ? current.includes(flag.code)
+                                  ? current
+                                  : [...current, flag.code]
+                                : current.filter((c) => c !== flag.code),
+                            )
+                          }
+                        />
+                        I have checked this
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
-          {infoFlags.length > 0 ? (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3.5 text-xs text-[var(--text-secondary)] space-y-1">
-              <div className="font-semibold text-[var(--text-primary)]">Notes</div>
-              <ul className="list-disc pl-4 space-y-1">
-                {infoFlags.map((flag) => (
-                  <li key={flag.code}>{flag.message}</li>
-                ))}
-              </ul>
+            {warningFlags.length > 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3.5 text-xs text-amber-950 space-y-1">
+                <div className="font-semibold">Warnings</div>
+                <ul className="list-disc pl-4 space-y-1">
+                  {warningFlags.map((flag) => (
+                    <li key={flag.code}>{flag.message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {infoFlags.length > 0 ? (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3.5 text-xs text-[var(--text-secondary)] space-y-1">
+                <div className="font-semibold text-[var(--text-primary)]">Notes</div>
+                <ul className="list-disc pl-4 space-y-1">
+                  {infoFlags.map((flag) => (
+                    <li key={flag.code}>{flag.message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Step 2: Modeled Baseline & 12-Month Growth Projections */}
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--brand-teal)]">
+                  Step 2 of 3
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-semibold">Modeled Baseline &amp; 12-Month Projection</h3>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      analysis.status === "provisional"
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-[var(--brand-teal-soft)] text-[var(--brand-dark)]"
+                    }`}
+                  >
+                    {analysis.status}
+                  </span>
+                  <span className="rounded-full bg-[var(--background)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-secondary)]">
+                    {analysis.projection.plan_label} plan
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  Your starting benchmark weights recent months more heavily, then projects realistic 12-month growth.
+                </p>
+              </div>
             </div>
-          ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                accent
+                label="Modeled sessions / mo"
+                primary={fmt(analysis.baseline.monthly_sessions)}
+                secondary={`Range: ${fmt(analysis.ranges.monthly_sessions.low)} – ${fmt(analysis.ranges.monthly_sessions.high)}`}
+                footnote={`±${analysis.ranges.monthly_sessions.pct}% typical band`}
+              />
+              <StatCard
+                label="Modeled organic / mo"
+                primary={fmt(analysis.baseline.monthly_organic_sessions)}
+                secondary={
+                  analysis.ranges.monthly_organic_sessions
+                    ? `Range: ${fmt(analysis.ranges.monthly_organic_sessions.low)} – ${fmt(analysis.ranges.monthly_organic_sessions.high)}`
+                    : undefined
+                }
+                footnote={
+                  analysis.ranges.monthly_organic_sessions
+                    ? `±${analysis.ranges.monthly_organic_sessions.pct}% typical band`
+                    : "Organic split unavailable"
+                }
+              />
+              <StatCard
+                label={`${noun.singular[0].toUpperCase()}${noun.singular.slice(1)} rate`}
+                primary={`${fmt(analysis.baseline.lead_rate_pct, 2)}%`}
+                secondary={`Range: ${fmt(analysis.ranges.lead_rate_pct.low, 2)}% – ${fmt(analysis.ranges.lead_rate_pct.high, 2)}%`}
+                footnote={`±${analysis.ranges.lead_rate_pct.pct}% typical band`}
+              />
+              <StatCard
+                accent
+                label={`Modeled ${noun.plural} / mo`}
+                primary={fmt(analysis.baseline.monthly_leads, 1)}
+                secondary={`Range: ${fmt(analysis.ranges.monthly_leads.low, 1)} – ${fmt(analysis.ranges.monthly_leads.high, 1)}`}
+                footnote={analysis.ranges.note}
+              />
+            </div>
+
+            {/* 12-Month Growth Projection Checkpoints */}
+            <div className="space-y-3 border-t border-[var(--border)] pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                    {analysis.projection.goal_horizon_months}-Month Growth Projection ({analysis.projection.plan_label})
+                  </h4>
+                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{analysis.projection.disclaimer}</p>
+                </div>
+                <div className="rounded-lg border border-[var(--brand-teal)]/30 bg-[var(--brand-teal-soft)]/25 px-3 py-1.5 text-xs">
+                  Suggested monthly goal:{" "}
+                  <strong className="tabular-nums text-[var(--text-primary)]">
+                    {analysis.projection.suggested_monthly_lead_goal}/mo
+                  </strong>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-5">
+                {analysis.projection.checkpoints.map((cp) => (
+                  <StatCard
+                    key={cp.month}
+                    accent={cp.month === analysis.projection.goal_horizon_months}
+                    label={cp.label}
+                    primary={`${fmt(cp.monthly_leads, 1)} ${noun.plural}`}
+                    secondary={`${fmt(cp.monthly_sessions)} sessions`}
+                    footnote={`${fmt(cp.lead_rate_pct, 2)}% rate`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -632,6 +711,9 @@ export function BaselineBuilder({
           }}
         >
           <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--brand-teal)]">
+              Step 3 of 3
+            </div>
             <h2 className="text-sm font-semibold">{isFirst ? "Confirm monthly goal & lock baseline" : "Create a new baseline"}</h2>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               Saves the modeled baseline and 3-pillar snapshot as version {versions.length + 1}. Locked baselines never change.
@@ -712,7 +794,8 @@ export function BaselineBuilder({
         </form>
       ) : null}
 
-      {/* Advanced options & monthly series (collapsed by default) */}
+      {/* Advanced options & monthly series (collapsed by default, only shown when reviewing/locking or in CSV mode) */}
+      {(formVisible || sourceMode === "csv") ? (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
         <button
           type="button"
@@ -900,13 +983,49 @@ export function BaselineBuilder({
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      {/* 3-Pillar Current Snapshot: Visibility -> Traffic -> Conversions */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold">3-Pillar Snapshot</h2>
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+      {/* 3-Pillar Current Snapshot (collapsible reference view) */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+          <button
+            type="button"
+            onClick={() => setShowPillars((v) => !v)}
+            aria-expanded={showPillars}
+            className="flex flex-1 items-center justify-between gap-3 text-left"
+          >
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Current 3-Pillar Snapshot</h2>
+              <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                {pillars
+                  ? `30d avg: ${fmt(pillars.visibility.gsc.clicks.avg_30d)} GSC clicks · ${fmt(pillars.traffic.organic_sessions.avg_30d)} organic sessions · ${fmt(pillars.leads.total.avg_30d)} ${noun.plural}`
+                  : "Current 30d/90d snapshot across Visibility, Traffic, and Conversions"}
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-[var(--brand-teal)]">
+              {showPillars ? "Hide" : "Show"}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportCsv()}
+            disabled={!pillars}
+            className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold hover:bg-[var(--background)] disabled:opacity-50"
+          >
+            Export CSV
+          </button>
+        </div>
+
+        {exportError ? <p role="alert" className="px-6 pb-3 text-xs text-red-700">{exportError}</p> : null}
+        {loadError && !missingGa4Sessions ? (
+          <p role="alert" className="mx-6 mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+            {loadError}
+          </p>
+        ) : null}
+
+        {showPillars ? (
+          <div className="border-t border-[var(--border)] p-6 space-y-6">
+            <p className="text-xs text-[var(--text-secondary)]">
               Current 30d/90d snapshot across Visibility, Traffic, and {noun.plural}
               {events.length > 0 ? (
                 <>
@@ -926,28 +1045,10 @@ export function BaselineBuilder({
                 </>
               ) : null}
             </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleExportCsv()}
-            disabled={!pillars}
-            className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold hover:bg-[var(--background)] disabled:opacity-50"
-          >
-            Export CSV
-          </button>
-        </div>
-
-        {exportError ? <p role="alert" className="text-xs text-red-700">{exportError}</p> : null}
-        {loadError && !missingGa4Sessions ? (
-          <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
-            {loadError}
-          </p>
-        ) : null}
-
-        {!pillars ? (
-          <p className="text-sm text-[var(--text-secondary)]">Loading 3-pillar snapshot…</p>
-        ) : (
-          <div className="space-y-6">
+            {!pillars ? (
+              <p className="text-sm text-[var(--text-secondary)]">Loading 3-pillar snapshot…</p>
+            ) : (
+              <div className="space-y-6">
             {/* Step 1: Visibility */}
             <section className="space-y-2.5">
               <div className="flex items-baseline justify-between">
@@ -1111,17 +1212,34 @@ export function BaselineBuilder({
                 ))}
               </div>
             </section>
+              </div>
+            )}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Locked Versions */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-        <h2 className="text-sm font-semibold">Locked Versions</h2>
-        {versions.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--text-tertiary)]">Nothing locked yet.</p>
-        ) : (
-          <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
+      {versions.length > 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+          <button
+            type="button"
+            onClick={() => setShowVersions((v) => !v)}
+            aria-expanded={showVersions}
+            className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+          >
+            <div>
+              <h2 className="text-sm font-semibold">Locked Versions ({versions.length})</h2>
+              <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+                Historical baseline snapshots and CSV exports
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-[var(--brand-teal)]">
+              {showVersions ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showVersions ? (
+            <div className="border-t border-[var(--border)] p-6">
+              <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-[var(--border)] bg-[var(--background)] text-[var(--text-secondary)]">
                 <tr>
@@ -1184,9 +1302,11 @@ export function BaselineBuilder({
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-      </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
