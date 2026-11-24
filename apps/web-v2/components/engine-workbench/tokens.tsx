@@ -67,6 +67,7 @@ export function StyleNotesBanner({
   clientSlug: string;
   compact?: boolean;
 }) {
+  const [showNotes, setShowNotes] = useState(false);
   const clean = (styleNotes ?? "").trim();
   if (!clean) {
     return (
@@ -98,14 +99,24 @@ export function StyleNotesBanner({
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#7a838c]">
           Client tone &amp; style notes
         </span>
-        <Link
-          href={`/${clientSlug}/settings`}
-          className="text-xs font-semibold text-[#00857b] hover:underline"
-        >
-          Edit in Settings →
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowNotes((v) => !v)}
+            aria-expanded={showNotes}
+            className="text-xs font-semibold text-[#00857b] hover:underline"
+          >
+            {showNotes ? "Hide" : "Show"}
+          </button>
+          <Link
+            href={`/${clientSlug}/settings`}
+            className="text-xs font-semibold text-[#00857b] hover:underline"
+          >
+            Edit in Settings →
+          </Link>
+        </div>
       </div>
-      <p className="mt-1 whitespace-pre-line text-[13px] text-[#171a22]">{clean}</p>
+      {showNotes ? <p className="mt-2 whitespace-pre-line text-[13px] text-[#171a22]">{clean}</p> : null}
     </div>
   );
 }
