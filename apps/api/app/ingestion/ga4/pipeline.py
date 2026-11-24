@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.ingestion.ga4.fetch import fetch_ga4
 from app.ingestion.ga4.publish import publish_ga4
 from app.ingestion.staging_cleanup import purge_staging_for_job
+from app.models.client import Client
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.integration import ConnectionStatus, Integration, IntegrationProvider
 from app.models.job import DataWatermark, SyncJob, SyncJobStatus, ValidationStatus
@@ -125,7 +126,10 @@ def run_ga4_job(db: Session, job: SyncJob) -> SyncJob:
         dates = [d for d in [max_traffic, max_events] if d is not None]
         max_date = max(dates) if dates else None
 
-        if max_date is None and job.records_fetched == 0:
+        client = db.query(Client).filter(Client.id == job.client_id).one_or_none()
+        is_path_scoped_empty = client is not None and bool(client.path_prefix) and job.records_written == 0
+
+        if max_date is None and (job.records_fetched == 0 or is_path_scoped_empty):
             job.validation_status = ValidationStatus.PASSED
             job.fact_watermark = job.end_date
             job.status = SyncJobStatus.SUCCESSFUL

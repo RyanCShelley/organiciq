@@ -300,3 +300,38 @@ def test_an_unscoped_client_keeps_search_console_s_own_daily_totals(db, client_a
     row = db.query(FactGscDaily).filter(FactGscDaily.client_id == client_a.id).one()
     assert row.impressions == Decimal("10000")
     assert row.average_position == Decimal("20")
+
+
+def test_run_ga4_job_succeeds_when_path_scoped_client_has_zero_in_scope_rows(db, client_a, monkeypatch):
+    """A shared GA4 property may return parent-site rows on days the scoped subfolder had zero traffic."""
+    from app.ingestion.ga4 import pipeline as ga4_pipeline
+    from app.models.job import SyncJobStatus
+
+    _scoped(db, client_a)
+    job = _job(db, client_a.id, "ga4")
+
+    def fake_fetch(db_session, sync_job):
+        db_session.add(
+            StagingGa4Traffic(
+                job_id=sync_job.id,
+                client_id=sync_job.client_id,
+                raw={},
+                date=TODAY,
+                landing_page="/helicopters/r44",
+                session_source="google",
+                session_medium="organic",
+                sessions=Decimal("12"),
+                active_users=Decimal("10"),
+                views=Decimal("15"),
+            )
+        )
+        db_session.commit()
+        return (1, 0)
+
+    monkeypatch.setattr(ga4_pipeline, "fetch_ga4", fake_fetch)
+
+    result = ga4_pipeline.run_ga4_job(db, job)
+    assert result.status == SyncJobStatus.SUCCESSFUL
+    assert result.records_fetched == 1
+    assert result.records_written == 0
+    assert result.error_message is None
