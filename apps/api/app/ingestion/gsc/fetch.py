@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -85,8 +85,8 @@ def lean_windows(start: date, end: date) -> tuple[tuple[date, date], list[tuple[
     return daily, months
 
 
-def _stage(db: Session, model: type, rows: Iterator[dict]) -> int:
-    """Insert staged rows in chunks as they arrive: one compiled statement, and never more than a chunk in memory."""
+def _stage(db: Session, model: type, rows: Iterator[dict], *, job: SyncJob | None = None) -> int:
+    """Insert staged rows in chunks as they arrive and heartbeat the job so large pulls are not mistaken for stuck."""
     written = 0
     chunk: list[dict] = []
     for row in rows:
@@ -95,9 +95,15 @@ def _stage(db: Session, model: type, rows: Iterator[dict]) -> int:
             db.execute(insert(model), chunk)
             written += len(chunk)
             chunk = []
+            if job is not None:
+                db.query(SyncJob).filter(SyncJob.id == job.id).update({"updated_at": datetime.now(timezone.utc)})
+            db.commit()
     if chunk:
         db.execute(insert(model), chunk)
         written += len(chunk)
+        if job is not None:
+            db.query(SyncJob).filter(SyncJob.id == job.id).update({"updated_at": datetime.now(timezone.utc)})
+        db.commit()
     return written
 
 
@@ -239,6 +245,6 @@ def fetch_gsc_queries(db: Session, job: SyncJob) -> int:
                         "average_position": _metric(row, "position"),
                     }
 
-            written += _stage(db, StagingGscQueryPage, staged())
+            written += _stage(db, StagingGscQueryPage, staged(), job=job)
     db.commit()
     return written

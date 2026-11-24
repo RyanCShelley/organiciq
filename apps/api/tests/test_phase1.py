@@ -136,7 +136,7 @@ def test_job_for_different_source_allowed(client, admin_user, client_a):
 
 def test_worker_marks_seranking_ai_failed_without_project(db, client_a):
     from app.models.job import SyncJob, SyncJobStatus
-    from app.services.jobs import claim_next_job, process_job
+    from app.services.jobs import claim_next_job, lane_of, process_job
 
     start, end = date_window(7)
     job = SyncJob(
@@ -149,7 +149,7 @@ def test_worker_marks_seranking_ai_failed_without_project(db, client_a):
     db.add(job)
     db.commit()
 
-    claimed = claim_next_job(db)
+    claimed = claim_next_job(db, lane_of(job.source))
     assert claimed is not None
     assert claimed.status == SyncJobStatus.FETCHING
 
@@ -160,7 +160,7 @@ def test_worker_marks_seranking_ai_failed_without_project(db, client_a):
 
 def test_worker_routes_seranking_search(db, client_a):
     from app.models.job import SyncJob, SyncJobStatus
-    from app.services.jobs import claim_next_job, process_job
+    from app.services.jobs import claim_next_job, lane_of, process_job
 
     start, end = date_window(7)
     job = SyncJob(
@@ -173,7 +173,7 @@ def test_worker_routes_seranking_search(db, client_a):
     db.add(job)
     db.commit()
 
-    claimed = claim_next_job(db)
+    claimed = claim_next_job(db, lane_of(job.source))
     processed = process_job(db, claimed)
     assert processed.status == SyncJobStatus.FAILED
     assert "se ranking project is not selected" in (processed.error_message or "").lower()

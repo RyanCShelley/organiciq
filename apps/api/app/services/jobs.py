@@ -130,7 +130,8 @@ def fail_stale_active_jobs(
     )
     for job in running:
         anchor = _as_utc(job.started_at) or _as_utc(job.updated_at) or _as_utc(job.created_at)
-        if anchor is None or anchor > running_cutoff:
+        cutoff = now - timedelta(minutes=max_age_minutes * 3 if job.source == "gsc_queries" else max_age_minutes)
+        if anchor is None or anchor > cutoff:
             continue
         job.status = SyncJobStatus.FAILED
         job.error_message = (
