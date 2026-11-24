@@ -46,7 +46,7 @@ def unit(current, previous, cur3, ly3):
 
 @pytest.mark.parametrize(
     "current,previous,sudden",
-    [(70, 100, True), (71, 100, False), (0, 100, True), (30, 99, False), (60, 80, False)],
+    [(70, 100, True), (71, 100, False), (0, 100, True), (10, 29, False), (20, 30, True), (60, 80, False)],
 )
 def test_sudden_needs_a_drop_of_30_percent_on_100_or_more_sessions(current, previous, sudden):
     assert tc.judge(unit(current, previous, 0, 0), None)["sudden"] is sudden
@@ -61,7 +61,7 @@ def test_slow_bleed_is_measured_against_the_site_not_against_zero():
 
 
 def test_slow_bleed_needs_a_150_session_baseline_otherwise_it_is_only_possible():
-    small = tc.judge(unit(5, 5, 10, 100), site_ratio=0.9)
+    small = tc.judge(unit(5, 5, 4, 40), site_ratio=0.9)
     assert small["slow_bleed"] is False and small["possible"] is True
     assert small["at_stake"] > 0
 
@@ -230,12 +230,12 @@ def build_site(db, client_a):
         "https://shop.example/ok6": (200, 140, 8),
         "https://shop.example/ok7": (200, 140, 8),
         "https://shop.example/leaky": (400, 120, 4),     # 1%, 30%: worst on both, plenty of sessions
-        "https://shop.example/leaky_small": (60, 18, 0), # 0%, 30%: worst on both, too few sessions
+        "https://shop.example/leaky_small": (40, 12, 0), # 0%, 30%: worst on both, too few sessions
         "https://shop.example/engaged_only": (200, 160, 1),  # 0.5%, 80%: low conversion but fine engagement
     }
     for url, (s, e, c) in pages.items():
         page_stats(db, client_a, url, s, e, c)
-    page_stats(db, client_a, "https://shop.example/tiny", 20, 1, 0)  # under 50 sessions: not listed, not in the norm
+    page_stats(db, client_a, "https://shop.example/tiny", 5, 1, 0)  # under 10 sessions: not listed, not in the norm
     db.commit()
     return pages
 
@@ -253,7 +253,7 @@ def test_missed_conversions_rank_pages_and_strong_needs_the_worst_quarter_on_bot
     leaky = by["leaky"]
     assert leaky["strength"] == "strong" and leaky["reason"] is None
     assert leaky["missed_conversions"] == round(400 * (0.04 - 0.01), 1) == 12.0
-    assert by["leaky_small"]["strength"] == "possible" and "only 60 sessions" in by["leaky_small"]["reason"]
+    assert by["leaky_small"]["strength"] == "possible" and "only 40 sessions" in by["leaky_small"]["reason"]
     assert by["engaged_only"]["strength"] == "possible" and "worst quarter of the site on conversion, but not on engagement" in by["engaged_only"]["reason"]
     assert "not in the worst quarter of the site on conversion or engagement" in by["great1"]["reason"]
     assert by["great1"]["missed_conversions"] == 0.0  # above the site's median: nothing missed
@@ -319,11 +319,11 @@ def test_ga4s_not_set_placeholder_is_never_listed_as_a_page(db, client_a):
 
 
 def test_a_sharp_drop_on_tiny_numbers_says_too_small_not_no_decline(db, client_a):
-    months(db, client_a, "https://shop.example/tiny", {(2026, 7): 40, (2026, 8): 25, (2026, 9): 10})
+    months(db, client_a, "https://shop.example/tiny", {(2026, 7): 15, (2026, 8): 8, (2026, 9): 2})
     months(db, client_a, "https://shop.example/steady", {(2026, 8): 40, (2026, 9): 40})
     db.commit()
     by = {c["key"]: c for c in tc.build(db, client_a, SEP)["candidates"] if c["level"] == "page"}
-    assert by["https://shop.example/tiny"]["reason"] == "too small to judge: 25 sessions the month before, 10 last month"
+    assert by["https://shop.example/tiny"]["reason"] == "too small to judge: 8 sessions the month before, 2 last month"
     assert "no decline flagged" in by["https://shop.example/steady"]["reason"]
 
 
@@ -332,12 +332,12 @@ def test_the_all_pages_table_includes_small_pages_and_says_they_were_not_compare
     build_site(db, client_a)
     out = lc.build(db, client_a, SEP)
     by = {r["page"].rsplit("/", 1)[-1]: r for r in out["all_pages"]}
-    assert by["tiny"]["compared"] is False and by["tiny"]["sessions"] == 20
+    assert "tiny" not in by
     assert by["leaky"]["compared"] is True
     # Biggest missed conversions first, and a page above the norm misses nothing.
     assert out["all_pages"][0]["page"].endswith("/leaky")
     assert by["great1"]["missed_conversions"] == 0.0
-    assert out["all_pages_total"] == 13
+    assert out["all_pages_total"] == 12
 
 
 def test_the_all_pages_table_respects_a_bucket_scope_and_the_organic_filter(db, client_a):
