@@ -504,3 +504,100 @@ def test_the_pull_covers_the_key_t2_reads(db: Session, client_a: Client):
     assert "what the page actually draws" in terms
     assert "declared term" in terms
     assert "a term we are nowhere for" not in terms
+
+
+def test_parse_extracts_ai_overview_and_fetch_ai_mode_works():
+    parsed = dataforseo.parse(
+        {
+            "keyword": "mineral sunscreen",
+            "item_types": ["ai_overview", "people_also_ask", "organic"],
+            "items": [
+                {
+                    "type": "ai_overview",
+                    "items": [{"markdown": "Mineral sunscreen uses zinc oxide to block UV rays."}],
+                    "references": [
+                        {"title": "AAD Guide", "url": "https://www.aad.org/sunscreen", "domain": "www.aad.org"},
+                        {"title": "Duplicate", "url": "https://www.aad.org/sunscreen", "domain": "www.aad.org"},
+                    ],
+                }
+            ],
+        }
+    )
+    assert parsed.ai_overview == {
+        "markdown": "Mineral sunscreen uses zinc oxide to block UV rays.",
+        "references": [{"title": "AAD Guide", "url": "https://www.aad.org/sunscreen", "domain": "aad.org"}],
+    }
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "ai_overview",
+                                        "markdown": "AI Mode recommends broad-spectrum zinc oxide.",
+                                        "references": [{"title": "FDA", "url": "https://fda.gov/spf", "domain": "fda.gov"}],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    ai_mode = dataforseo.fetch_ai_mode(
+        "mineral sunscreen",
+        config=dataforseo.DataForSeoConfig(login="l", password="p"),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert seen["url"] == dataforseo.AI_MODE_ENDPOINT
+    assert ai_mode == {
+        "markdown": "AI Mode recommends broad-spectrum zinc oxide.",
+        "references": [{"title": "FDA", "url": "https://fda.gov/spf", "domain": "fda.gov"}],
+    }
+
+
+def test_search_signals_stores_ai_overview_ai_mode_and_passes_to_serp_intent(
+    db: Session, client_a: Client, monkeypatch
+):
+    from app.decisions import serp_intent
+    from app.services import search_signals
+
+    _as_configured(monkeypatch)
+    captured_prompts: list[str] = []
+
+    def fake_fetch(_kw: str) -> dataforseo.SerpFeatures:
+        return dataforseo.SerpFeatures(
+            keyword="mineral sunscreen",
+            item_types=("ai_overview", "people_also_ask", "organic"),
+            organic=({"rank": 1, "url": "https://example.com/a", "domain": "example.com", "title": "Best SPF", "snippet": "Zinc SPF"},),
+            questions=("Is zinc oxide safe for kids?",),
+            ai_overview={"markdown": "Zinc oxide sits on top of skin.", "references": [{"title": "AAD", "url": "https://aad.org", "domain": "aad.org"}]},
+        )
+
+    def fake_ai_mode(_kw: str) -> dict | None:
+        raise dataforseo.DataForSeoError("AI Mode unavailable")
+
+    def fake_ask(prompt: str) -> str:
+        captured_prompts.append(prompt)
+        return '{"primary":"informational","secondary":"commercial","mixed":false,"confidence":"high","searcher_goal":"Compare safe mineral sunscreens","results":[{"rank":1,"content_type":"guide","content_style":"educational"}],"evidence":["PAA and AI Overview focus on zinc safety"],"uncertainty":null,"label_disagreement":null,"consumer_need":{"need":"reassure","basis":"observed","evidence":"PAA asks about kid safety"},"content_to_match":"Educational guide"}'
+
+    monkeypatch.setattr(dataforseo, "fetch_ai_mode", fake_ai_mode)
+    out = search_signals.for_search(db, client_a, "mineral sunscreen", overview=lambda k, source="us": [], fetch=fake_fetch, ask=fake_ask)
+    assert len(captured_prompts) == 1
+    assert "Is zinc oxide safe for kids?" in captured_prompts[0]
+    assert "Zinc oxide sits on top of skin." in captured_prompts[0]
+    assert out["ai_overview"]["markdown"] == "Zinc oxide sits on top of skin."
+    assert out["ai_mode"] is None
+    detail = search_signals.serp_detail(db, client_a, "mineral sunscreen", pull=False)
+    assert detail["ai_overview"]["markdown"] == "Zinc oxide sits on top of skin."
+    assert detail["questions"] == ["Is zinc oxide safe for kids?"]

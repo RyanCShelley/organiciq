@@ -27,6 +27,7 @@ import httpx
 logger = logging.getLogger("organiciq.dataforseo")
 
 ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
+AI_MODE_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/ai_mode/live/advanced"
 TIMEOUT_SECONDS = 90.0
 #: Labs answers a big domain slowly: a ranked-keywords request that filters and
 #: sorts a large site ran past 90 seconds in production. A request that times
@@ -84,6 +85,8 @@ class SerpFeatures:
     organic: tuple[dict, ...] = ()
     #: The "People also ask" questions shown on the page, in order. Empty when the page has none.
     questions: tuple[str, ...] = ()
+    #: The Google AI Overview summary & cited references when present (`{"markdown": str, "references": [...]}`).
+    ai_overview: dict | None = None
 
     def holds(self, feature: str, domain: str) -> bool:
         target = domain.strip().lower().removeprefix("www.")
@@ -126,6 +129,53 @@ ORGANIC_KEPT = 10
 QUESTIONS_KEPT = 8
 
 
+AI_TEXT_KEPT = 4000
+AI_REFS_KEPT = 12
+
+
+def _extract_ai_answer(items: list[dict]) -> dict | None:
+    """Extract AI Overview / AI Mode markdown text and deduplicated cited references from SERP items."""
+    chunks: list[str] = []
+    refs: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    def add_ref(ref: dict) -> None:
+        url = str(ref.get("url") or "").strip()
+        domain = str(ref.get("domain") or ref.get("source") or "").strip().lower().removeprefix("www.")
+        title = " ".join(str(ref.get("title") or "").split())[:200]
+        key = url or domain
+        if not key or key in seen_urls or len(refs) >= AI_REFS_KEPT:
+            return
+        seen_urls.add(key)
+        refs.append({"title": title, "url": url, "domain": domain})
+
+    def collect(node: dict) -> None:
+        md = str(node.get("markdown") or "").strip()
+        txt = str(node.get("text") or "").strip()
+        if md:
+            chunks.append(md)
+        elif txt:
+            chunks.append(txt)
+        for ref in node.get("references") or []:
+            if isinstance(ref, dict):
+                add_ref(ref)
+        for link in node.get("links") or []:
+            if isinstance(link, dict):
+                add_ref(link)
+        for child in node.get("items") or []:
+            if isinstance(child, dict):
+                collect(child)
+
+    for item in items:
+        if isinstance(item, dict) and item.get("type") == AI_OVERVIEW:
+            collect(item)
+
+    markdown = "\n\n".join(dict.fromkeys(chunks)).strip()[:AI_TEXT_KEPT]
+    if not markdown and not refs:
+        return None
+    return {"markdown": markdown, "references": refs}
+
+
 def parse(result: dict) -> SerpFeatures:
     """One SERP's features, from DataForSEO's own `item_types`."""
     item_types = tuple(
@@ -134,9 +184,8 @@ def parse(result: dict) -> SerpFeatures:
     holders: dict[str, list[str]] = {}
     organic: list[dict] = []
     questions: list[str] = []
-    for item in result.get("items") or []:
-        if not isinstance(item, dict):
-            continue
+    items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
+    for item in items:
         kind = item.get("type")
         if not isinstance(kind, str):
             continue
@@ -162,6 +211,7 @@ def parse(result: dict) -> SerpFeatures:
         holders={k: tuple(sorted(set(v))) for k, v in holders.items()},
         organic=tuple(organic),
         questions=tuple(questions),
+        ai_overview=_extract_ai_answer(items),
     )
 
 
@@ -269,6 +319,32 @@ def fetch(
     if not results:
         raise DataForSeoError(f"DataForSEO returned no SERP for “{keyword}”.")
     return parse(results[0])
+
+
+def fetch_ai_mode(
+    keyword: str,
+    *,
+    location_code: int = DEFAULT_LOCATION_CODE,
+    language_code: str = DEFAULT_LANGUAGE,
+    config: DataForSeoConfig | None = None,
+    client: httpx.Client | None = None,
+) -> dict | None:
+    """Pull Google AI Mode response & cited references for one query."""
+    if not keyword.strip():
+        raise DataForSeoError("An AI Mode pull needs a keyword.")
+    payload = [
+        {
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+        }
+    ]
+    task = _post_task(AI_MODE_ENDPOINT, payload, config=config, client=client)
+    results = task.get("result") or []
+    if not results:
+        return None
+    items = [item for item in (results[0].get("items") or []) if isinstance(item, dict)]
+    return _extract_ai_answer(items)
 
 
 # --- Labs: a domain's rankings and keyword market data -----------------------

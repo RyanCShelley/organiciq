@@ -67,18 +67,28 @@ def _watchlist_intents(db: Session, client: Client, keyword: str) -> list[str] |
     return [part.strip().lower() for part in str(row[0]).replace(",", "/").split("/") if part.strip()]
 
 
-def _pull_serp(db: Session, client: Client, keyword: str, fetch=None) -> FactSerpFeature:
+def _pull_serp(db: Session, client: Client, keyword: str, fetch=None, fetch_ai_mode=None) -> FactSerpFeature:
     features = (fetch or dataforseo.fetch)(keyword)
+    ai_overview = getattr(features, "ai_overview", None)
+    ai_mode = None
+    if fetch_ai_mode is not None or fetch is None:
+        try:
+            ai_mode = (fetch_ai_mode or dataforseo.fetch_ai_mode)(keyword)
+        except Exception:  # AI Mode is supplementary; never block the primary SERP pull.
+            logger.warning("DataForSEO AI Mode pull failed for %r", keyword, exc_info=True)
     # One row a day for a search: a pull made earlier today without its ranking results is filled in, not duplicated.
     today = db.query(FactSerpFeature).filter(FactSerpFeature.client_id == client.id, FactSerpFeature.pulled_on == date.today(), FactSerpFeature.keyword == keyword).first()
     if today is not None:
         today.item_types, today.holders, today.results, today.reading = list(features.item_types), {k: list(v) for k, v in features.holders.items()}, list(features.organic), None
         today.questions = list(features.questions)
+        today.ai_overview = ai_overview
+        today.ai_mode = ai_mode
         db.commit()
         return today
     row = FactSerpFeature(
         client_id=client.id, pulled_on=date.today(), keyword=keyword, item_types=list(features.item_types),
         holders={k: list(v) for k, v in features.holders.items()}, results=list(features.organic), questions=list(features.questions),
+        ai_overview=ai_overview, ai_mode=ai_mode,
     )
     db.add(row)
     db.commit()
@@ -140,19 +150,32 @@ def for_search(
         return {"reading": {**reading, "labels": labels, "search": keyword}, "labels": labels}
     # A reading kept before ranked results were listed in it is read again from the same pull: no new results page is bought.
     if serp.reading and serp.reading.get("read") is not None and (serp.reading.get("ranked") is not None or not pull):
-        return {"reading": {**serp.reading, "labels": labels, "search": keyword}, "labels": labels, "questions": list(serp.questions or [])}
+        return {
+            "reading": {**serp.reading, "labels": labels, "search": keyword},
+            "labels": labels,
+            "questions": list(serp.questions or []),
+            "ai_overview": serp.ai_overview,
+            "ai_mode": serp.ai_mode,
+        }
     if not pull:
         return {"reading": {**serp_intent.not_read("A results page is held for this search but has not been read yet. It is read when an action is built."), "labels": labels, "search": keyword}, "labels": labels}
     reading = serp_intent.read(
         keyword, item_types=list(serp.item_types or []), results=list(serp.results), serp_date=serp.pulled_on.isoformat(),
-        labels=labels, market=resolve_source(client), ask=ask,
+        labels=labels, questions=list(serp.questions or []), ai_overview=serp.ai_overview, ai_mode=serp.ai_mode,
+        market=resolve_source(client), ask=ask,
     )
     # Kept unless the model simply did not answer: a failure should be tried again, a real reading should not be paid for twice.
     reading["search"] = keyword
     if not (reading.get("uncertainty") or "").startswith("The results page could not be read"):
         serp.reading = reading
         db.commit()
-    return {"reading": reading, "labels": labels, "questions": list(serp.questions or [])}
+    return {
+        "reading": reading,
+        "labels": labels,
+        "questions": list(serp.questions or []),
+        "ai_overview": serp.ai_overview,
+        "ai_mode": serp.ai_mode,
+    }
 
 
 def serp_detail(
@@ -182,6 +205,8 @@ def serp_detail(
         "holders": serp.holders or {} if serp else {},
         "results": list(serp.results or []) if serp else [],
         "questions": list(serp.questions or []) if serp else [],
+        "ai_overview": serp.ai_overview if serp else None,
+        "ai_mode": serp.ai_mode if serp else None,
         "reading": signals["reading"],
         "labels": signals.get("labels") or [],
         "configured": dataforseo.configured(),

@@ -56,6 +56,15 @@ Features on the page (Google's element types, in the order they appear):
 Top organic results:
 {results}
 
+People Also Ask questions on the page:
+{questions}
+
+Google AI Overview:
+{ai_overview}
+
+Google AI Mode:
+{ai_mode}
+
 Keyword-tool labels (for reference only; they never decide, and may be wrong):
 {labels}
 
@@ -168,6 +177,23 @@ def _clean(raw: Any, *, item_types: list[str], serp_date: str | None, labels: li
     }
 
 
+def _format_ai_block(block: dict[str, Any] | None) -> str:
+    if not isinstance(block, dict):
+        return "(none held)"
+    md = " ".join(str(block.get("markdown") or "").split())[:1200]
+    refs = [
+        str(r.get("domain") or r.get("url") or "").strip()
+        for r in (block.get("references") or [])
+        if isinstance(r, dict) and (r.get("domain") or r.get("url"))
+    ]
+    parts = []
+    if md:
+        parts.append(md)
+    if refs:
+        parts.append(f"Cited sources: {', '.join(dict.fromkeys(refs[:8]))}")
+    return "\n".join(parts) or "(none held)"
+
+
 def read(
     search: str,
     *,
@@ -175,6 +201,9 @@ def read(
     results: list[dict[str, Any]] | None,
     serp_date: str | None = None,
     labels: list[str] | None = None,
+    questions: list[str] | None = None,
+    ai_overview: dict[str, Any] | None = None,
+    ai_mode: dict[str, Any] | None = None,
     market: str = "us",
     ask: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
@@ -195,8 +224,10 @@ def read(
     listed = "\n".join(
         f"{r.get('rank')}. {r.get('title') or '(no title)'}\n   {r.get('url')}\n   {r.get('snippet') or ''}".rstrip() for r in results[:10]
     )
+    paa_text = "\n".join(f"- {q}" for q in (questions or []) if str(q).strip()) or "(none held)"
     prompt = PROMPT.format(
         search=search, market=market, features=", ".join(item_types) or "(none)", results=listed,
+        questions=paa_text, ai_overview=_format_ai_block(ai_overview), ai_mode=_format_ai_block(ai_mode),
         labels=", ".join(labels) or "(none held)", types=", ".join(CONTENT_TYPES), styles=", ".join(CONTENT_STYLES),
     )
     try:
