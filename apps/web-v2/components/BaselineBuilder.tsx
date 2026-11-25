@@ -749,67 +749,71 @@ export function BaselineBuilder({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <label className="block text-sm">
+            <label className="flex flex-col text-sm">
               <span className="font-semibold">12-month monthly {noun.singular} goal</span>
-              <input
-                type="number"
-                min={0}
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder={
-                  suggestedGoal != null
-                    ? `Default: ${suggestedGoal} (12-mo projection)`
-                    : currentGoal != null
-                      ? `Current: ${currentGoal}`
-                      : "Uses 12-mo projection"
-                }
-                className={`${inputClass} mt-1`}
-              />
-              {suggestedGoal != null ? (
-                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
-                  Leave blank to use {suggestedGoal}/mo.
+              <div className="mt-auto pt-1">
+                <input
+                  type="number"
+                  min={0}
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
+                  placeholder={
+                    suggestedGoal != null
+                      ? `Default: ${suggestedGoal} (12-mo projection)`
+                      : currentGoal != null
+                        ? `Current: ${currentGoal}`
+                        : "Uses 12-mo projection"
+                  }
+                  className={inputClass}
+                />
+                <span className="mt-1 block min-h-[1rem] text-xs text-[var(--text-secondary)]">
+                  {suggestedGoal != null ? `Leave blank to use ${suggestedGoal}/mo.` : ""}
                 </span>
-              ) : null}
+              </div>
             </label>
-            <label className="block text-sm">
+            <label className="flex flex-col text-sm">
               <span className="font-semibold">12-month traffic goal (sessions/mo)</span>
-              <input
-                type="number"
-                min={0}
-                value={trafficGoal}
-                onChange={(e) => setTrafficGoal(e.target.value)}
-                placeholder={
-                  analysis.projection.suggested_monthly_traffic_goal != null
-                    ? `Default: ${analysis.projection.suggested_monthly_traffic_goal}`
-                    : "Optional"
-                }
-                className={`${inputClass} mt-1`}
-              />
-              {analysis.projection.suggested_monthly_traffic_goal != null ? (
-                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
-                  Leave blank to use {fmt(analysis.projection.suggested_monthly_traffic_goal)}/mo.
+              <div className="mt-auto pt-1">
+                <input
+                  type="number"
+                  min={0}
+                  value={trafficGoal}
+                  onChange={(e) => setTrafficGoal(e.target.value)}
+                  placeholder={
+                    analysis.projection.suggested_monthly_traffic_goal != null
+                      ? `Default: ${analysis.projection.suggested_monthly_traffic_goal}`
+                      : "Optional"
+                  }
+                  className={inputClass}
+                />
+                <span className="mt-1 block min-h-[1rem] text-xs text-[var(--text-secondary)]">
+                  {analysis.projection.suggested_monthly_traffic_goal != null
+                    ? `Leave blank to use ${fmt(analysis.projection.suggested_monthly_traffic_goal)}/mo.`
+                    : ""}
                 </span>
-              ) : null}
+              </div>
             </label>
-            <label className="block text-sm">
+            <label className="flex flex-col text-sm">
               <span className="font-semibold">12-month visibility goal (GSC + Bing impr/mo)</span>
-              <input
-                type="number"
-                min={0}
-                value={visibilityImpressionsGoal}
-                onChange={(e) => setVisibilityImpressionsGoal(e.target.value)}
-                placeholder={
-                  analysis.projection.suggested_monthly_visibility_impressions_goal != null
-                    ? `Default: ${analysis.projection.suggested_monthly_visibility_impressions_goal}`
-                    : "Optional"
-                }
-                className={`${inputClass} mt-1`}
-              />
-              {analysis.projection.suggested_monthly_visibility_impressions_goal != null ? (
-                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
-                  Leave blank to use {fmt(analysis.projection.suggested_monthly_visibility_impressions_goal)}/mo.
+              <div className="mt-auto pt-1">
+                <input
+                  type="number"
+                  min={0}
+                  value={visibilityImpressionsGoal}
+                  onChange={(e) => setVisibilityImpressionsGoal(e.target.value)}
+                  placeholder={
+                    analysis.projection.suggested_monthly_visibility_impressions_goal != null
+                      ? `Default: ${analysis.projection.suggested_monthly_visibility_impressions_goal}`
+                      : "Optional"
+                  }
+                  className={inputClass}
+                />
+                <span className="mt-1 block min-h-[1rem] text-xs text-[var(--text-secondary)]">
+                  {analysis.projection.suggested_monthly_visibility_impressions_goal != null
+                    ? `Leave blank to use ${fmt(analysis.projection.suggested_monthly_visibility_impressions_goal)}/mo.`
+                    : ""}
                 </span>
-              ) : null}
+              </div>
             </label>
           </div>
 

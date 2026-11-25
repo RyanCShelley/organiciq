@@ -33,6 +33,7 @@ export function ClientPicker({ clients }: { clients: Client[] }) {
   const pathname = usePathname();
   const first = pathname.split("/")[1];
   const current = clients.find((c) => c.slug === first);
+  const subpath = current ? pathname.slice(`/${current.slug}`.length) : "";
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -93,7 +94,7 @@ export function ClientPicker({ clients }: { clients: Client[] }) {
                   <Link
                     key={c.id}
                     ref={isSelected ? activeOption : undefined}
-                    href={`/${c.slug}`}
+                    href={`/${c.slug}${subpath}`}
                     role="option"
                     aria-selected={isSelected}
                     onClick={() => setOpen(false)}
