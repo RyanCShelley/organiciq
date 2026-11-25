@@ -195,8 +195,9 @@ def visibility_signals(
     prompts = ai["prompts"] if ai else 0
     stats = ai
 
+    from app.services.dashboard import period_lead_goal
     from app.services.decision_measurements import monthly_keyword_trend
-    from app.services.lead_goals import current_pillar_goals, period_lead_goal
+    from app.services.lead_goals import current_pillar_goals
 
     pillar = current_pillar_goals(client, on=today)
     impr_28d = impressions(recent_start, recent_end)
@@ -304,8 +305,9 @@ def traffic_signals(
 
     # T0 uses all measured visits. T2 keeps an organic-search-only session
     # comparison because its other half is Search Console impressions.
+    from app.services.dashboard import period_lead_goal
     from app.services.decision_measurements import session_totals
-    from app.services.lead_goals import current_pillar_goals, period_lead_goal
+    from app.services.lead_goals import current_pillar_goals
 
     all_now = session_totals(db, client.id, recent_start, recent_end)
     all_before = session_totals(db, client.id, prior_start, prior_end)
