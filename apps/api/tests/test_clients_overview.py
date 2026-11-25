@@ -490,5 +490,5 @@ def test_overview_query_count_is_bounded_no_n_plus_1(client, db, tier, admin_use
 
     assert res.status_code == 200
     assert len(res.json()["clients"]) == 6
-    # 1 user lookup (get_current_user) + 1 clients + 2 GSC + 2 GA4 + 1 conv_defs + 1 exclusions + 1 events = 9 queries
-    assert len(queries) <= 10, f"Expected <= 10 queries, got {len(queries)}: {queries}"
+    # 1 user lookup + 1 clients + 2 GSC + 2 GA4 + 1 conv_defs + 1 exclusions + 1 events + 1 watchlist = 10-11 queries
+    assert len(queries) <= 11, f"Expected <= 11 queries, got {len(queries)}: {queries}"

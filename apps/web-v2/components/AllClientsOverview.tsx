@@ -14,17 +14,19 @@ type SortKey =
   | "impressions"
   | "avg_position"
   | "organic_sessions"
+  | "clicks"
   | "leads"
   | "updated";
 
 type SortDir = "asc" | "desc";
 
-type StatusFilter = "all" | "active" | "onboarding" | "paused" | "archived";
+type StatusFilter = "all" | "active" | "onboarding" | "missing" | "paused" | "archived";
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
   { value: "onboarding", label: "Onboarding" },
+  { value: "missing", label: "Missing setup" },
   { value: "paused", label: "Paused" },
   { value: "archived", label: "Archived" },
 ];
@@ -42,6 +44,7 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   impressions: "desc",
   avg_position: "asc",
   organic_sessions: "desc",
+  clicks: "desc",
   leads: "desc",
   updated: "desc",
 };
@@ -77,6 +80,8 @@ function sortValue(row: ClientOverviewItem, key: SortKey): string | number | nul
       return row.avg_position;
     case "organic_sessions":
       return row.organic_sessions;
+    case "clicks":
+      return row.clicks;
     case "leads":
       return row.leads;
     case "updated":
@@ -100,6 +105,37 @@ function TrendDelta({ pct }: { pct: number | null }) {
     <span className="ml-1.5 text-xs font-semibold text-red-700">
       ▼ {Math.abs(pct).toFixed(0)}%
     </span>
+  );
+}
+
+function PositionDelta({ change }: { change: number | null | undefined }) {
+  if (change == null) return null;
+  if (Math.abs(change) < 0.1) {
+    return <span className="ml-1.5 text-xs text-[var(--text-secondary)]">flat</span>;
+  }
+  if (change > 0) {
+    return (
+      <span className="ml-1.5 text-xs font-semibold text-green-700">
+        ▲ {change.toFixed(1)}
+      </span>
+    );
+  }
+  return (
+    <span className="ml-1.5 text-xs font-semibold text-red-700">
+      ▼ {Math.abs(change).toFixed(1)}
+    </span>
+  );
+}
+
+function PacingBar({ pct }: { pct: number | null | undefined }) {
+  if (pct == null) return null;
+  const clamped = Math.min(Math.max(pct, 0), 100);
+  const color =
+    pct >= 95 ? "bg-[var(--brand-teal)]" : pct >= 75 ? "bg-amber-500" : "bg-red-500";
+  return (
+    <div className="ml-auto mt-1 h-1.5 w-24 overflow-hidden rounded-full bg-[#eceef2]">
+      <div className={`h-full rounded-full ${color}`} style={{ width: `${clamped}%` }} />
+    </div>
   );
 }
 
@@ -163,7 +199,11 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = clients.filter((row) => {
-      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      if (statusFilter === "missing") {
+        if ((row.missing_setup ?? []).length === 0) return false;
+      } else if (statusFilter !== "all" && row.status !== statusFilter) {
+        return false;
+      }
       if (!q) return true;
       return (
         row.client_name.toLowerCase().includes(q) ||
@@ -193,9 +233,15 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
   }, [clients, query, statusFilter, sortKey, sortDir]);
 
   const isFiltered = query.trim().length > 0 || statusFilter !== "all";
+  const missingClientsCount = clients.filter((c) => (c.missing_setup ?? []).length > 0).length;
+  const onboardingCount = clients.filter((c) => c.status === "onboarding").length;
+  const behindLeadsCount = clients.filter(
+    (c) => c.lead_goal_progress_pct != null && c.lead_goal_progress_pct < 85,
+  ).length;
+  const readyCount = clients.length - missingClientsCount;
 
   return (
-    <section className="max-w-7xl space-y-5">
+    <section className="w-full space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-[var(--text-primary)]">
@@ -215,6 +261,47 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
           Add client
         </Link>
       </header>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Total clients
+          </div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-[var(--text-primary)]">
+            {clients.length}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">{onboardingCount} onboarding</div>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Setup / data gaps
+          </div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-rose-700">
+            {missingClientsCount}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            Missing baseline, watchlist, or tracking
+          </div>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Behind lead goal (&lt;85%)
+          </div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-amber-700">
+            {behindLeadsCount}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">30-day checkpoint pacing</div>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Ready &amp; tracking
+          </div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-green-700">
+            {readyCount}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">All 3 pillars configured</div>
+        </div>
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -270,6 +357,23 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
       <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)]">
         <table className="w-full border-collapse text-sm">
           <thead className="border-b border-[var(--border)] bg-[var(--background)]">
+            <tr className="border-b border-[var(--border)] bg-slate-100/70 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+              <th colSpan={2} className="px-4 py-1.5 text-left">
+                Client &amp; Readiness
+              </th>
+              <th colSpan={2} className="border-l border-[var(--border)] px-4 py-1.5 text-right">
+                Visibility (Search Presence)
+              </th>
+              <th colSpan={2} className="border-l border-[var(--border)] px-4 py-1.5 text-right">
+                Traffic (Visits &amp; Clicks)
+              </th>
+              <th className="border-l border-[var(--border)] px-4 py-1.5 text-right">
+                Leads
+              </th>
+              <th className="border-l border-[var(--border)] px-4 py-1.5 text-right">
+                Data Freshness
+              </th>
+            </tr>
             <tr>
               <SortHeader
                 label="Client"
@@ -279,14 +383,14 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                 onSort={handleSort}
               />
               <SortHeader
-                label="Status"
+                label="Status & Missing Setup"
                 column="status"
                 activeKey={sortKey}
                 dir={sortDir}
                 onSort={handleSort}
               />
               <SortHeader
-                label="Visibility"
+                label="Impressions (GSC+Bing)"
                 column="impressions"
                 activeKey={sortKey}
                 dir={sortDir}
@@ -294,7 +398,7 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                 onSort={handleSort}
               />
               <SortHeader
-                label="Avg Pos"
+                label="Avg Position (Δ)"
                 column="avg_position"
                 activeKey={sortKey}
                 dir={sortDir}
@@ -302,7 +406,7 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                 onSort={handleSort}
               />
               <SortHeader
-                label="Traffic"
+                label="Sessions (Org / Total)"
                 column="organic_sessions"
                 activeKey={sortKey}
                 dir={sortDir}
@@ -310,7 +414,15 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                 onSort={handleSort}
               />
               <SortHeader
-                label="Leads"
+                label="Search Clicks"
+                column="clicks"
+                activeKey={sortKey}
+                dir={sortDir}
+                align="right"
+                onSort={handleSort}
+              />
+              <SortHeader
+                label="Leads & Goal"
                 column="leads"
                 activeKey={sortKey}
                 dir={sortDir}
@@ -330,7 +442,7 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
           <tbody className="divide-y divide-[var(--border)]">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-[var(--text-secondary)]">
+                <td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--text-secondary)]">
                   No clients match the current filter.
                 </td>
               </tr>
@@ -341,6 +453,7 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                   className: "bg-slate-100 text-[var(--text-secondary)]",
                 };
                 const goal = row.current_lead_goal ?? row.monthly_lead_goal;
+                const missing = row.missing_setup ?? [];
 
                 return (
                   <tr
@@ -378,30 +491,49 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                           </span>
                         ) : null}
                       </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {missing.length > 0 ? (
+                          missing.map((item) => (
+                            <span
+                              key={item}
+                              className="inline-flex whitespace-nowrap rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-rose-700"
+                            >
+                              {item}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="inline-flex whitespace-nowrap rounded border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-green-700">
+                            All set
+                          </span>
+                        )}
+                      </div>
                     </td>
 
-                    <td className="px-4 py-3 text-right align-middle tabular-nums">
+                    <td className="border-l border-slate-100 px-4 py-3 text-right align-middle tabular-nums">
                       <div className="font-medium text-[var(--text-primary)]">
                         {formatNumber(row.impressions)}
                         <TrendDelta pct={row.impressions_change_pct} />
                       </div>
-                      {row.clicks != null || row.current_impressions_goal != null ? (
+                      {row.current_impressions_goal != null ? (
                         <div className="text-xs text-[var(--text-secondary)]">
-                          {row.clicks != null ? `${formatNumber(row.clicks)} clicks` : ""}
-                          {row.current_impressions_goal != null
-                            ? `${row.clicks != null ? " · " : ""}goal ${formatNumber(row.current_impressions_goal)}${row.impressions_goal_progress_pct != null ? ` (${Math.round(row.impressions_goal_progress_pct)}%)` : ""}`
+                          goal {formatNumber(row.current_impressions_goal)}
+                          {row.impressions_goal_progress_pct != null
+                            ? ` (${Math.round(row.impressions_goal_progress_pct)}%)`
                             : ""}
+                          <PacingBar pct={row.impressions_goal_progress_pct} />
                         </div>
                       ) : null}
                     </td>
 
                     <td className="px-4 py-3 text-right align-middle tabular-nums">
-                      <span className="font-medium text-[var(--text-primary)]">
+                      <div className="font-medium text-[var(--text-primary)]">
                         {row.avg_position != null ? row.avg_position.toFixed(1) : "–"}
-                      </span>
+                        <PositionDelta change={row.avg_position_change} />
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)]">vs prior 30d</div>
                     </td>
 
-                    <td className="px-4 py-3 text-right align-middle tabular-nums">
+                    <td className="border-l border-slate-100 px-4 py-3 text-right align-middle tabular-nums">
                       <div className="font-medium text-[var(--text-primary)]">
                         {formatNumber(row.organic_sessions)}
                         <TrendDelta pct={row.organic_change_pct} />
@@ -412,11 +544,25 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                           {row.current_sessions_goal != null
                             ? `${row.total_sessions != null ? " · " : ""}goal ${formatNumber(row.current_sessions_goal)}${row.sessions_goal_progress_pct != null ? ` (${Math.round(row.sessions_goal_progress_pct)}%)` : ""}`
                             : ""}
+                          <PacingBar pct={row.sessions_goal_progress_pct} />
                         </div>
                       ) : null}
                     </td>
 
                     <td className="px-4 py-3 text-right align-middle tabular-nums">
+                      <div className="font-medium text-[var(--text-primary)]">
+                        {formatNumber(row.clicks)}
+                      </div>
+                      {row.current_clicks_goal != null ? (
+                        <div className="text-xs text-[var(--text-secondary)]">
+                          goal {formatNumber(row.current_clicks_goal)}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-[var(--text-secondary)]">search clicks</div>
+                      )}
+                    </td>
+
+                    <td className="border-l border-slate-100 px-4 py-3 text-right align-middle tabular-nums">
                       <div className="font-medium text-[var(--text-primary)]">
                         {formatNumber(row.leads)}
                         <TrendDelta pct={row.leads_change_pct} />
@@ -427,23 +573,30 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                           {goal != null
                             ? ` · goal ${formatNumber(goal)}${row.lead_goal_progress_pct != null ? ` (${Math.round(row.lead_goal_progress_pct)}%)` : ""}`
                             : ""}
+                          <PacingBar pct={row.lead_goal_progress_pct} />
                         </div>
                       ) : null}
                     </td>
 
-                    <td className="px-4 py-3 text-right align-middle text-xs tabular-nums text-[var(--text-secondary)]">
-                      {!row.gsc_through && !row.ga4_through ? (
-                        <span>No data</span>
-                      ) : (
-                        <div className="space-y-0.5">
+                    <td className="border-l border-slate-100 px-4 py-3 text-right align-middle text-xs tabular-nums text-[var(--text-secondary)]">
+                      <div className="space-y-0.5">
+                        <div>
+                          GSC{" "}
                           {row.gsc_through ? (
-                            <div>GSC {formatShortDate(row.gsc_through)}</div>
-                          ) : null}
-                          {row.ga4_through ? (
-                            <div>GA4 {formatShortDate(row.ga4_through)}</div>
-                          ) : null}
+                            formatShortDate(row.gsc_through)
+                          ) : (
+                            <span className="font-semibold text-rose-700">Missing</span>
+                          )}
                         </div>
-                      )}
+                        <div>
+                          GA4{" "}
+                          {row.ga4_through ? (
+                            formatShortDate(row.ga4_through)
+                          ) : (
+                            <span className="font-semibold text-rose-700">Missing</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 );

@@ -18,6 +18,7 @@ export type ClientOverviewItem = {
   group_name: string | null;
   plan_label: string | null;
   business_model: "lead_gen" | "ecommerce" | "both" | null;
+  missing_setup?: string[];
   monthly_lead_goal: number | null;
   current_lead_goal: number | null;
   lead_goal_progress_pct?: number | null;
@@ -25,6 +26,7 @@ export type ClientOverviewItem = {
   impressions: number | null;
   clicks: number | null;
   avg_position: number | null;
+  avg_position_change?: number | null;
   impressions_change_pct: number | null;
   current_impressions_goal?: number | null;
   impressions_goal_progress_pct?: number | null;

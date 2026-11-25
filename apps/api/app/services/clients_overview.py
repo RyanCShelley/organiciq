@@ -95,6 +95,10 @@ def build_clients_overview(
             ).label("cur_wpos"),
             func.count(case((gsc_in_prev, 1))).label("prev_rows"),
             func.coalesce(func.sum(case((gsc_in_prev, FactGscDaily.impressions), else_=0)), 0).label("prev_imp"),
+            func.coalesce(
+                func.sum(case((gsc_in_prev, FactGscDaily.average_position * FactGscDaily.impressions), else_=0)),
+                0,
+            ).label("prev_wpos"),
         )
         .filter(
             FactGscDaily.client_id.in_(client_ids),
@@ -229,17 +233,27 @@ def build_clients_overview(
         leads_by_client = {row.client_id: row for row in lead_rows}
 
     from app.models.bing_stats import FactBingQueryStat
+    from app.models.watchlist import WatchlistKeyword
+
+    watchlist_client_ids: set[UUID] = {
+        row[0]
+        for row in db.query(WatchlistKeyword.client_id)
+        .filter(WatchlistKeyword.client_id.in_(client_ids))
+        .distinct()
+        .all()
+    }
 
     pillars_by_client = {c.id: lead_goals.current_pillar_goals(c, on=cur_end) for c in clients}
     bing_client_ids = [
         c.id for c in clients if pillars_by_client[c.id]["monthly_gsc_impressions"]
     ]
-    bing_by_client: dict[UUID, int] = {}
+    bing_by_client: dict[UUID, tuple[int, int]] = {}
     if bing_client_ids:
         bing_rows = (
             db.query(
                 FactBingQueryStat.client_id,
                 func.coalesce(func.sum(FactBingQueryStat.impressions), 0).label("impressions"),
+                func.coalesce(func.sum(FactBingQueryStat.clicks), 0).label("clicks"),
             )
             .filter(
                 FactBingQueryStat.client_id.in_(bing_client_ids),
@@ -249,14 +263,17 @@ def build_clients_overview(
             .group_by(FactBingQueryStat.client_id)
             .all()
         )
-        bing_by_client = {row.client_id: int(row.impressions or 0) for row in bing_rows}
+        bing_by_client = {
+            row.client_id: (int(row.impressions or 0), int(row.clicks or 0))
+            for row in bing_rows
+        }
 
     items: list[ClientOverviewItemOut] = []
     for c in clients:
         # GSC extraction
         g_row = gsc_by_client.get(c.id)
         if g_row is None or int(g_row.cur_rows or 0) == 0:
-            impressions = clicks = avg_position = impressions_change_pct = None
+            impressions = clicks = avg_position = avg_position_change = impressions_change_pct = None
         else:
             cur_imp = float(g_row.cur_imp or 0)
             cur_clk = float(g_row.cur_clk or 0)
@@ -264,8 +281,16 @@ def build_clients_overview(
             impressions = round(cur_imp)
             clicks = round(cur_clk)
             avg_position = round(cur_wpos / cur_imp, 1) if cur_imp > 0 else None
+            prev_imp = float(g_row.prev_imp or 0)
+            prev_wpos = float(g_row.prev_wpos or 0)
+            prev_avg_pos = (prev_wpos / prev_imp) if prev_imp > 0 and int(g_row.prev_rows or 0) > 0 else None
+            avg_position_change = (
+                round(prev_avg_pos - avg_position, 1)
+                if avg_position is not None and prev_avg_pos is not None
+                else None
+            )
             impressions_change_pct = (
-                _pct_change(cur_imp, float(g_row.prev_imp or 0))
+                _pct_change(cur_imp, prev_imp)
                 if int(g_row.prev_rows or 0) > 0
                 else None
             )
@@ -310,7 +335,23 @@ def build_clients_overview(
         cur_impr_goal = pillar["monthly_gsc_impressions"]
         cur_clicks_goal = pillar["monthly_gsc_clicks"]
         cur_sess_goal = pillar["monthly_sessions"]
-        bing_impr_cur = bing_by_client.get(c.id, 0)
+        bing_impr_cur, bing_clicks_cur = bing_by_client.get(c.id, (0, 0))
+        if bing_impr_cur > 0:
+            impressions = (impressions or 0) + bing_impr_cur
+        if bing_clicks_cur > 0:
+            clicks = (clicks or 0) + bing_clicks_cur
+
+        missing_setup: list[str] = []
+        if not (c.baseline_projection_json or {}).get("checkpoints"):
+            missing_setup.append("No baseline")
+        if c.id not in watchlist_client_ids:
+            missing_setup.append("No watchlist")
+        if c.id not in configured_client_ids:
+            missing_setup.append("No conversions")
+        if ga4_through_map.get(c.id) is None:
+            missing_setup.append("No GA4 data")
+        if gsc_through_map.get(c.id) is None:
+            missing_setup.append("No GSC data")
 
         items.append(
             ClientOverviewItemOut(
@@ -323,6 +364,7 @@ def build_clients_overview(
                 group_name=c.group.name if c.group else None,
                 plan_label=_plan_label_for(c),
                 business_model=bm,
+                missing_setup=missing_setup,
                 monthly_lead_goal=c.monthly_lead_goal,
                 current_lead_goal=cur_lead_goal,
                 lead_goal_progress_pct=(
@@ -333,11 +375,12 @@ def build_clients_overview(
                 impressions=impressions,
                 clicks=clicks,
                 avg_position=avg_position,
+                avg_position_change=avg_position_change,
                 impressions_change_pct=impressions_change_pct,
                 current_impressions_goal=cur_impr_goal,
                 impressions_goal_progress_pct=(
-                    round((((impressions or 0) + bing_impr_cur) / cur_impr_goal) * 100, 1)
-                    if cur_impr_goal and (impressions is not None or bing_impr_cur > 0)
+                    round((impressions / cur_impr_goal) * 100, 1)
+                    if cur_impr_goal and impressions is not None
                     else None
                 ),
                 current_clicks_goal=cur_clicks_goal,

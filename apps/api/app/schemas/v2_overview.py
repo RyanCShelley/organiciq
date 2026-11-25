@@ -25,6 +25,7 @@ class ClientOverviewItemOut(BaseModel):
     group_name: str | None = None
     plan_label: str | None = None
     business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
+    missing_setup: list[str] = []
     monthly_lead_goal: int | None = None
     current_lead_goal: int | None = None
     lead_goal_progress_pct: float | None = None
@@ -33,6 +34,7 @@ class ClientOverviewItemOut(BaseModel):
     impressions: int | None = None
     clicks: int | None = None
     avg_position: float | None = None
+    avg_position_change: float | None = None
     impressions_change_pct: float | None = None
     current_impressions_goal: int | None = None
     impressions_goal_progress_pct: float | None = None
