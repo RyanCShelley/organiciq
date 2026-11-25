@@ -196,6 +196,16 @@ def visibility_signals(
     stats = ai
 
     from app.services.decision_measurements import monthly_keyword_trend
+    from app.services.lead_goals import current_pillar_goals, period_lead_goal
+
+    pillar = current_pillar_goals(client, on=today)
+    impr_28d = impressions(recent_start, recent_end)
+    impr_goal, _ = period_lead_goal(pillar["monthly_gsc_impressions"], recent_start, recent_end)
+    impr_progress = round((impr_28d / impr_goal) * 100.0, 1) if impr_goal and impr_28d is not None else None
+    ai_mention = float(stats["mention_pct"]) if stats else None
+    ai_goal = pillar["ai_visibility_pct"]
+    ai_progress = round((ai_mention / ai_goal) * 100.0, 1) if ai_goal and ai_mention is not None else None
+
     return VisibilitySignals(
         monthly_keyword_trend=monthly_keyword_trend(db, client, today),
         priority_keywords=len(judged),
@@ -210,17 +220,20 @@ def visibility_signals(
             today - timedelta(days=90),
             TREND_TOLERANCE_DAYS,
         ),
-        impressions_28d=impressions(recent_start, recent_end),
+        impressions_28d=impr_28d,
         impressions_prior_28d=impressions(prior_start, prior_end),
         priority_pages=len(assessed_pages),
         priority_pages_without_reach=without_reach,
         priority_pages_declared=bool(assessed_pages),
         page_reach_missing=("no target or conversion pages declared" if not declared_pages
                             else "declared pages have no Watch List keyword mappings" if not assessed_pages else None),
-        ai_mention_pct=(
-            float(stats["mention_pct"]) if stats else None
-        ),
+        ai_mention_pct=ai_mention,
         tracked_prompts=int(prompts),
+        checkpoint_month=pillar["checkpoint_month"],
+        impressions_goal=impr_goal,
+        impressions_goal_progress_pct=impr_progress,
+        ai_visibility_goal=ai_goal,
+        ai_visibility_progress_pct=ai_progress,
     )
 
 
@@ -292,10 +305,26 @@ def traffic_signals(
     # T0 uses all measured visits. T2 keeps an organic-search-only session
     # comparison because its other half is Search Console impressions.
     from app.services.decision_measurements import session_totals
+    from app.services.lead_goals import current_pillar_goals, period_lead_goal
+
     all_now = session_totals(db, client.id, recent_start, recent_end)
     all_before = session_totals(db, client.id, prior_start, prior_end)
     organic_now = all_now["channels"].get("organic_search")
     organic_before = all_before["channels"].get("organic_search")
+    pillar = current_pillar_goals(client, on=today)
+    sessions_goal, _ = period_lead_goal(pillar["monthly_sessions"], recent_start, recent_end)
+    sessions_progress = (
+        round((all_now["total"] / sessions_goal) * 100.0, 1)
+        if sessions_goal and all_now["total"] is not None
+        else None
+    )
+    clicks_goal, _ = period_lead_goal(pillar["monthly_gsc_clicks"], recent_start, recent_end)
+    clicks_progress = (
+        round((ctr["actual_clicks"] / clicks_goal) * 100.0, 1)
+        if clicks_goal and ctr["actual_clicks"] is not None
+        else None
+    )
+
     return TrafficSignals(
         sessions=all_now["total"], prior_sessions=all_before["total"],
         missed_clicks=ctr["missed_clicks"], actual_clicks=ctr["actual_clicks"],
@@ -306,6 +335,11 @@ def traffic_signals(
         sessions_change_pct=change(organic_now, organic_before),
         engaged_rate=engaged_rate,
         engaged_rate_median=median_rate,
+        checkpoint_month=pillar["checkpoint_month"],
+        sessions_goal=sessions_goal,
+        sessions_goal_progress_pct=sessions_progress,
+        clicks_goal=clicks_goal,
+        clicks_goal_progress_pct=clicks_progress,
     )
 
 

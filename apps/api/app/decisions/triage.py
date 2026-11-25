@@ -148,6 +148,11 @@ class VisibilitySignals:
     tracked_prompts: int = 0
     ai_sov: float | None = None
     ai_sov_90d_ago: float | None = None
+    checkpoint_month: int | None = None
+    impressions_goal: int | None = None
+    impressions_goal_progress_pct: float | None = None
+    ai_visibility_goal: float | None = None
+    ai_visibility_progress_pct: float | None = None
 
 
 def assess_visibility(
@@ -230,6 +235,13 @@ def assess_visibility(
             missing=None
             if impression_drop is not None
             else "not enough Search Console history",
+            evidence={
+                "impressions_28d": signals.impressions_28d,
+                "impressions_prior_28d": signals.impressions_prior_28d,
+                "checkpoint_month": signals.checkpoint_month,
+                "impressions_goal": signals.impressions_goal,
+                "impressions_goal_progress_pct": signals.impressions_goal_progress_pct,
+            },
         )
     )
 
@@ -268,7 +280,12 @@ def assess_visibility(
             mention,
             pass_line=t("v5_ai_mention_pct", 20.0),
             missing=None if mention is not None else "no tracked prompts",
-            evidence={"tracked_prompts": signals.tracked_prompts},
+            evidence={
+                "tracked_prompts": signals.tracked_prompts,
+                "checkpoint_month": signals.checkpoint_month,
+                "ai_visibility_goal": signals.ai_visibility_goal,
+                "ai_visibility_progress_pct": signals.ai_visibility_progress_pct,
+            },
         )
     )
     sov_drop = None
@@ -306,6 +323,11 @@ class TrafficSignals:
     sessions_change_pct: float | None = None
     engaged_rate: float | None = None
     engaged_rate_median: float | None = None
+    checkpoint_month: int | None = None
+    sessions_goal: int | None = None
+    sessions_goal_progress_pct: float | None = None
+    clicks_goal: int | None = None
+    clicks_goal_progress_pct: float | None = None
 
 
 def assess_traffic(
@@ -322,7 +344,13 @@ def assess_traffic(
     results.append(_judge("T0", "Site visits", "Change in all-channel GA4 sessions", change,
         pass_line=-t("t0_session_drop_pct", 15.0), direction="min", unit="chg",
         missing=None if change is not None else "no comparable all-channel GA4 session periods",
-        evidence={"sessions": signals.sessions, "prior_sessions": signals.prior_sessions}))
+        evidence={
+            "sessions": signals.sessions,
+            "prior_sessions": signals.prior_sessions,
+            "checkpoint_month": signals.checkpoint_month,
+            "sessions_goal": signals.sessions_goal,
+            "sessions_goal_progress_pct": signals.sessions_goal_progress_pct,
+        }))
 
     # T1 — estimated shortfall share of the benchmark opportunity, bounded 0–100.
     missed_share = None
@@ -347,7 +375,15 @@ def assess_traffic(
                 if missed_share is not None
                 else None
             ),
-            evidence={"estimated_missed_clicks": signals.missed_clicks, "actual_clicks": signals.actual_clicks, "formula_version": 2, **signals.ctr_evidence},
+            evidence={
+                "estimated_missed_clicks": signals.missed_clicks,
+                "actual_clicks": signals.actual_clicks,
+                "formula_version": 2,
+                "checkpoint_month": signals.checkpoint_month,
+                "clicks_goal": signals.clicks_goal,
+                "clicks_goal_progress_pct": signals.clicks_goal_progress_pct,
+                **signals.ctr_evidence,
+            },
         )
     )
 
