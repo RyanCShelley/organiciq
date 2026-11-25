@@ -18,7 +18,12 @@ export async function startLlmRunAction(clientId: string): Promise<LlmResult<nul
 
 export async function saveLlmSettingsAction(
   clientId: string,
-  body: { brand_name: string; brand_patterns: string[]; competitors: { domain: string; name: string; patterns: string[] }[] },
+  body: {
+    brand_name: string;
+    brand_patterns: string[];
+    competitors: { domain: string; name: string; patterns: string[] }[];
+    check_cadence?: "daily" | "weekly" | "monthly";
+  },
 ): Promise<LlmResult<LlmSettings>> {
   try {
     return { ok: true, value: await apiFetch<LlmSettings>("/v2/llm/settings", { method: "PUT", clientId, body }) };

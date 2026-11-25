@@ -147,3 +147,25 @@ def test_keyword_metrics_not_due_when_only_the_case_differs(db, client_a: Client
     _track(db, client_a.id, "  Managed IT Services ")
     _price(db, client_a.id, "managed it services", date.today())
     assert daily_sync.enqueue_due_keyword_metrics(db)["due"] == 0
+
+
+def test_llm_runs_respect_daily_and_monthly_cadence(db, client_a: Client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.llm_visibility import platforms, runner
+    from app.models.llm_visibility import ClientLlmSettings, LlmRun
+
+    monkeypatch.setattr(platforms, "enabled_platforms", lambda: ["openai"])
+    monkeypatch.setattr(runner, "prompts_for", lambda _db, _c: [{"prompt": "best it", "cluster": "it"}])
+
+    now = datetime.now(timezone.utc)
+    # 2 days ago: due under daily, NOT due under monthly or weekly.
+    db.add(LlmRun(client_id=client_a.id, started_at=now - timedelta(days=2), status="completed", platforms=["openai"]))
+    settings = ClientLlmSettings(client_id=client_a.id, brand_name="Acme", brand_patterns=["acme"], check_cadence="monthly")
+    db.add(settings)
+    db.commit()
+
+    assert daily_sync.enqueue_due_llm_runs(db)["due"] == 0
+
+    settings.check_cadence = "daily"
+    db.commit()
+    assert daily_sync.enqueue_due_llm_runs(db)["due"] == 1

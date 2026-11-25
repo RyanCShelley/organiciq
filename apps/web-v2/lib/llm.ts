@@ -89,6 +89,7 @@ export type LlmSettings = {
   brand_name: string;
   brand_patterns: string[];
   domain: string;
+  check_cadence?: "daily" | "weekly" | "monthly";
   competitors: { domain: string; name: string; patterns: string[] }[];
   prompts: number;
   clusters: string[];

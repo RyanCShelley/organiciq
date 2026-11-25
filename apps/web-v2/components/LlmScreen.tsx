@@ -985,6 +985,7 @@ function Setup({ client, settings }: { client: Client; settings: LlmSettings }) 
   const router = useRouter();
   const [brand, setBrand] = useState(settings.brand_name);
   const [patterns, setPatterns] = useState(settings.brand_patterns.join(", "));
+  const [cadence, setCadence] = useState<"daily" | "weekly" | "monthly">(settings.check_cadence ?? "weekly");
   const [comps, setComps] = useState(settings.competitors.map((c) => ({ ...c, text: c.patterns.join(", ") })));
   const [message, setMessage] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -995,6 +996,7 @@ function Setup({ client, settings }: { client: Client; settings: LlmSettings }) 
         brand_name: brand,
         brand_patterns: split(patterns),
         competitors: comps.map((c) => ({ domain: c.domain, name: c.name, patterns: split(c.text) })),
+        check_cadence: cadence,
       });
       setMessage(r.ok ? "Saved." : r.error);
       if (r.ok) router.refresh();
@@ -1025,7 +1027,23 @@ function Setup({ client, settings }: { client: Client; settings: LlmSettings }) 
       <ExtraPrompts client={client} settings={settings} />
       <SeenCompetitors client={client} />
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm">
-        <h3 className="font-semibold">How to spot the brand</h3>
+        <h3 className="font-semibold">Check schedule</h3>
+        <label className="mt-3 block max-w-xs">
+          <span className="font-semibold">How often to check</span>
+          <select
+            value={cadence}
+            onChange={(e) => setCadence(e.target.value as "daily" | "weekly" | "monthly")}
+            className={`mt-1 ${input}`}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <span className="mt-1 block text-xs text-[var(--text-tertiary)]">
+            Controls how often automatic runs are scheduled for this client.
+          </span>
+        </label>
+        <h3 className="mt-5 font-semibold">How to spot the brand</h3>
         <label className="mt-3 block"><span className="font-semibold">Brand name</span><input value={brand} onChange={(e) => setBrand(e.target.value)} className={`mt-1 ${input}`} /></label>
         <label className="mt-3 block">
           <span className="font-semibold">Names to look for</span>

@@ -29,6 +29,8 @@ class ClientLlmSettings(Base):
     brand_patterns: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, default=list)
     #: `{competitor domain: {"name": ..., "patterns": [...]}}`; a competitor not listed here is derived from its domain.
     competitors: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    #: How often daily_sync schedules automatic runs: daily | weekly | monthly.
+    check_cadence: Mapped[str] = mapped_column(String(16), nullable=False, default="weekly", server_default="weekly")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

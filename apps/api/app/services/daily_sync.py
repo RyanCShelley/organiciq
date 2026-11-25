@@ -314,12 +314,17 @@ def enqueue_due_bing_syncs(db: Session) -> dict[str, int]:
 #: A run asks every prompt on every platform and is billed per call (about 6 cents a client). Weekly, so share of voice rests on several runs a month.
 LLM_RUN_INTERVAL_DAYS = 7
 LLM_RETRY_DAYS = 3
+LLM_CADENCE_INTERVALS = {
+    "daily": timedelta(hours=20),
+    "weekly": timedelta(days=7),
+    "monthly": timedelta(days=30),
+}
 
 
 def enqueue_due_llm_runs(db: Session) -> dict[str, int]:
-    """Queue a weekly LLM visibility run for each worked client that has paired prompts, if a platform has a key."""
+    """Queue an LLM visibility run per client cadence (daily/weekly/monthly) when due."""
     from app.llm_visibility import platforms, runner
-    from app.models.llm_visibility import LlmRun
+    from app.models.llm_visibility import ClientLlmSettings, LlmRun
 
     if not platforms.enabled_platforms():
         return {"enqueued": 0, "skipped": 0, "errors": 0, "due": 0}
@@ -328,17 +333,29 @@ def enqueue_due_llm_runs(db: Session) -> dict[str, int]:
         cid: started
         for cid, started in db.query(LlmRun.client_id, func.max(LlmRun.started_at)).group_by(LlmRun.client_id)
     }
-    tried = {
-        row[0]
-        for row in db.query(SyncJob.client_id).filter(
-            SyncJob.source == runner.SOURCE, SyncJob.created_at >= now - timedelta(days=LLM_RETRY_DAYS)
+    cadence_by_client = {
+        cid: cadence
+        for cid, cadence in db.query(ClientLlmSettings.client_id, ClientLlmSettings.check_cadence)
+    }
+    last_tried = {
+        cid: created_at
+        for cid, created_at in (
+            db.query(SyncJob.client_id, func.max(SyncJob.created_at))
+            .filter(SyncJob.source == runner.SOURCE)
+            .group_by(SyncJob.client_id)
         )
     }
     enqueued = skipped = errors = due = 0
     today = now.date()
     for client in db.query(Client).filter(Client.status.in_(WORKED_STATUSES)).all():
+        cadence = cadence_by_client.get(client.id, "weekly")
+        min_interval = LLM_CADENCE_INTERVALS.get(cadence, timedelta(days=LLM_RUN_INTERVAL_DAYS))
+        retry_window = timedelta(hours=20) if cadence == "daily" else timedelta(days=LLM_RETRY_DAYS)
         started = last_run.get(client.id)
-        if (started is not None and now - started < timedelta(days=LLM_RUN_INTERVAL_DAYS)) or client.id in tried:
+        tried_at = last_tried.get(client.id)
+        if (started is not None and now - started < min_interval) or (
+            tried_at is not None and now - tried_at < retry_window
+        ):
             continue
         if not runner.prompts_for(db, client):
             continue

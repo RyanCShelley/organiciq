@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -47,6 +47,7 @@ class SettingsIn(BaseModel):
     brand_name: str = Field(min_length=1, max_length=255)
     brand_patterns: list[str] = Field(min_length=1, max_length=10)
     competitors: list[CompetitorIn] = Field(default_factory=list, max_length=10)
+    check_cadence: Literal["daily", "weekly", "monthly"] = "weekly"
 
 
 def _clean(values: list[str]) -> list[str]:
@@ -68,10 +69,13 @@ def get_llm_settings(
     config = runner.brand_config(db, client)
     prompts = runner.prompts_for(db, client)
     enabled = platforms.enabled_platforms()
+    settings_row = db.query(ClientLlmSettings).filter(ClientLlmSettings.client_id == client.id).one_or_none()
+    cadence = settings_row.check_cadence if settings_row and settings_row.check_cadence in ("daily", "weekly", "monthly") else "weekly"
     return {
         "brand_name": config.brand_name,
         "brand_patterns": config.brand_patterns,
         "domain": config.domain,
+        "check_cadence": cadence,
         "competitors": [
             {"domain": bare_domain(d), "name": name, "patterns": patterns}
             for d, (name, patterns) in zip(client.competitor_domains or [], config.competitors)
@@ -114,6 +118,7 @@ def save_llm_settings(
         row = ClientLlmSettings(client_id=client.id)
         db.add(row)
     row.brand_name, row.brand_patterns, row.competitors = payload.brand_name.strip(), patterns, competitors
+    row.check_cadence = payload.check_cadence
     db.commit()
     return get_llm_settings(client, _, db)
 
