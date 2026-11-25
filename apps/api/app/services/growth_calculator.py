@@ -1,8 +1,9 @@
 """OrganicIQ growth calculator — Launch / Lift / Lead CVR projection curves.
 
-Ported from the SMA Marketing OrganicIQ lead projection calculator.
-Curves are mean CVR multipliers from pooled Launch-relevant clients;
-Lift/Lead scale the Launch lift with diminishing-returns factors.
+Curves are mean CVR multipliers from pooled Launch-relevant clients, tapered by a
+diminishing-returns (Hill-style) factor based on starting CVR so sites that already
+convert well do not receive unrealistic multiplicative CVR targets. Traffic
+assumptions reflect AI Overview click erosion offset by each tier's SEO scope.
 """
 
 from __future__ import annotations
@@ -23,14 +24,30 @@ CVR_MULT: dict[PlanKey, tuple[float, ...]] = {
     "lead": tuple(1 + (m - 1) * 2.1 for m in LAUNCH_CURVE),
 }
 
-# Median GSC impressions decline over 12 months across Launch-relevant clients.
-TRAFFIC_DECLINE_12MO = 12.8
+# Half-saturation starting CVR (%): at C0 == 2.0% (typical B2B median), half of raw
+# multiplicative lift is achievable; higher starting CVRs taper asymptotically.
+CVR_HALF_SATURATION_PCT = 2.0
+
+# Net 12-month traffic change (%) by tier: AI Overview click erosion (-12.8% baseline)
+# is progressively offset by commercial content, GEO, and CTR optimization on Lift/Lead.
+TRAFFIC_CHANGE_12MO: dict[PlanKey, float] = {
+    "launch": -12.8,
+    "lift": -5.0,
+    "lead": 0.0,
+}
 
 PLAN_DISPLAY = {"launch": "Launch", "lift": "Lift", "lead": "Lead"}
 
 
-def traffic_mult(month: int) -> float:
-    return 1 - (TRAFFIC_DECLINE_12MO / 100) * (month / 12)
+def traffic_mult(month: int, plan: PlanKey = "launch") -> float:
+    return 1 + (TRAFFIC_CHANGE_12MO[plan] / 100) * (month / 12)
+
+
+def effective_cvr_mult(raw_mult: float, baseline_cvr_pct: float) -> float:
+    """Apply diminishing returns so high starting CVR tapers realistic lift."""
+    lift = max(raw_mult - 1.0, 0.0)
+    dampen = 1.0 / (1.0 + max(baseline_cvr_pct, 0.0) / CVR_HALF_SATURATION_PCT)
+    return 1.0 + lift * dampen
 
 
 def plan_key_from_tier_name(tier_name: str | None) -> PlanKey:
@@ -58,8 +75,8 @@ def project_leads(
 
     checkpoints: list[dict] = []
     for i, month in enumerate(MONTHS):
-        traffic_proj = traffic0 * traffic_mult(month)
-        cvr_proj = cvr0 * mult[i]
+        traffic_proj = traffic0 * traffic_mult(month, plan)
+        cvr_proj = cvr0 * effective_cvr_mult(mult[i], cvr0)
         leads_proj = traffic_proj * (cvr_proj / 100)
         if month > 0:
             leads_proj = max(leads_proj, leads0)
@@ -87,7 +104,7 @@ def project_leads(
         "goal_horizon_months": 12,
         "checkpoints": checkpoints,
         "disclaimer": (
-            "Projection based on historical client CVR curves, not a guarantee. "
+            "Projection uses diminishing-returns CVR curves and tier-adjusted traffic assumptions, not a guarantee. "
             "Actual results vary by industry, starting point, market, and execution."
         ),
     }
