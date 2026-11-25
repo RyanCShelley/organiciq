@@ -65,6 +65,7 @@ export const SETTINGS_PATHS = ["/settings", "/watchlist"];
 
 /** Where a path sits, for the top bar: the group and page names. */
 export function locate(pathname: string, clientSlug: string | undefined): { group: string | null; page: string | null } {
+  if (pathname === "/") return { group: null, page: "All clients" };
   if (pathname.startsWith("/admin")) return { group: null, page: "Admin" };
   if (!clientSlug) return { group: null, page: null };
   const rest = pathname.slice(`/${clientSlug}`.length);

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutGrid, LogOut, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -64,6 +64,11 @@ export function Sidebar({ clients, userEmail, isAdmin, signOutAction }: { client
       ) : null}
 
       <div className="mt-3 flex-1 space-y-1 overflow-y-auto px-2 pb-3">
+        <Link href="/" aria-current={pathname === "/" ? "page" : undefined} className={`${link} mb-1 ${pathname === "/" ? active : idle}`}>
+          <LayoutGrid size={16} className="text-[var(--brand-teal-soft)]" aria-hidden />
+          All clients
+          {pathname === "/" ? <ChevronRight size={14} className="ml-auto text-[var(--brand-teal-soft)]" aria-hidden /> : null}
+        </Link>
         {clientSlug
           ? GROUPS.filter((group) => !group.consulting || consulting).map((group) => {
               const isShut = shut.includes(group.title);
