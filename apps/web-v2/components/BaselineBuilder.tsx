@@ -103,7 +103,7 @@ export function BaselineBuilder({
 
   const [goal, setGoal] = useState("");
   const [trafficGoal, setTrafficGoal] = useState("");
-  const [visibilityClicksGoal, setVisibilityClicksGoal] = useState("");
+  const [visibilityImpressionsGoal, setVisibilityImpressionsGoal] = useState("");
   const [targetRate, setTargetRate] = useState(
     goalState?.target_lead_rate_pct != null ? String(goalState.target_lead_rate_pct) : "",
   );
@@ -419,9 +419,11 @@ export function BaselineBuilder({
                     : undefined
               }
               footnote={
-                (latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks) != null
-                  ? `Visibility goal: ${fmt(latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks)} clicks/mo`
-                  : undefined
+                (latestVersion.goals?.monthly_visibility_impressions ?? goalState?.pillar_goals?.monthly_visibility_impressions) != null
+                  ? `Visibility goal: ${fmt(latestVersion.goals?.monthly_visibility_impressions ?? goalState?.pillar_goals?.monthly_visibility_impressions)} impr/mo`
+                  : (latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks) != null
+                    ? `Visibility goal: ${fmt(latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks)} clicks/mo`
+                    : undefined
               }
             />
             <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3.5 space-y-2">
@@ -686,7 +688,7 @@ export function BaselineBuilder({
                     label={cp.label}
                     primary={`${fmt(cp.monthly_leads, 1)} ${noun.plural}`}
                     secondary={`${fmt(cp.monthly_sessions)} sessions${cp.monthly_gsc_clicks != null ? ` · ${fmt(cp.monthly_gsc_clicks)} clicks` : ""}`}
-                    footnote={`${fmt(cp.lead_rate_pct, 2)}% rate${cp.ai_visibility_pct != null ? ` · ${cp.ai_visibility_pct}% AI` : ""}`}
+                    footnote={`${fmt(cp.lead_rate_pct, 2)}% rate${cp.monthly_gsc_impressions != null ? ` · ${fmt(cp.monthly_gsc_impressions)} impr` : ""}${cp.ai_visibility_pct != null ? ` · ${cp.ai_visibility_pct}% AI` : ""}`}
                   />
                 ))}
               </div>
@@ -716,7 +718,7 @@ export function BaselineBuilder({
                 reason_note: isFirst ? null : note.trim() || null,
                 monthly_lead_goal: goal.trim() ? Number(goal) : null,
                 monthly_traffic_goal: trafficGoal.trim() ? Number(trafficGoal) : null,
-                monthly_visibility_clicks_goal: visibilityClicksGoal.trim() ? Number(visibilityClicksGoal) : null,
+                monthly_visibility_impressions_goal: visibilityImpressionsGoal.trim() ? Number(visibilityImpressionsGoal) : null,
                 target_lead_rate_pct: targetRate.trim() ? Number(targetRate) : null,
                 sync_lead_conversions: agree,
               });
@@ -727,7 +729,7 @@ export function BaselineBuilder({
                 setOpen(false);
                 setGoal("");
                 setTrafficGoal("");
-                setVisibilityClicksGoal("");
+                setVisibilityImpressionsGoal("");
                 setReason("");
                 setNote("");
                 setAgree(false);
@@ -790,22 +792,22 @@ export function BaselineBuilder({
               ) : null}
             </label>
             <label className="block text-sm">
-              <span className="font-semibold">12-month visibility goal (GSC clicks/mo)</span>
+              <span className="font-semibold">12-month visibility goal (GSC impr/mo)</span>
               <input
                 type="number"
                 min={0}
-                value={visibilityClicksGoal}
-                onChange={(e) => setVisibilityClicksGoal(e.target.value)}
+                value={visibilityImpressionsGoal}
+                onChange={(e) => setVisibilityImpressionsGoal(e.target.value)}
                 placeholder={
-                  analysis.projection.suggested_monthly_visibility_clicks_goal != null
-                    ? `Default: ${analysis.projection.suggested_monthly_visibility_clicks_goal}`
+                  analysis.projection.suggested_monthly_visibility_impressions_goal != null
+                    ? `Default: ${analysis.projection.suggested_monthly_visibility_impressions_goal}`
                     : "Optional"
                 }
                 className={`${inputClass} mt-1`}
               />
-              {analysis.projection.suggested_monthly_visibility_clicks_goal != null ? (
+              {analysis.projection.suggested_monthly_visibility_impressions_goal != null ? (
                 <span className="mt-1 block text-xs text-[var(--text-secondary)]">
-                  Leave blank to use {fmt(analysis.projection.suggested_monthly_visibility_clicks_goal)}/mo.
+                  Leave blank to use {fmt(analysis.projection.suggested_monthly_visibility_impressions_goal)}/mo.
                 </span>
               ) : null}
             </label>

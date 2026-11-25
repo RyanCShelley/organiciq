@@ -77,6 +77,7 @@ export async function lockBaselineAction(
     reason_note: string | null;
     monthly_lead_goal: number | null;
     monthly_traffic_goal?: number | null;
+    monthly_visibility_impressions_goal?: number | null;
     monthly_visibility_clicks_goal?: number | null;
     ai_visibility_pct_goal?: number | null;
     target_lead_rate_pct?: number | null;
@@ -109,6 +110,7 @@ export async function updateBaselineGoalAction(
   monthlyLeadGoal: number,
   pillarGoals?: {
     monthly_traffic_goal?: number | null;
+    monthly_visibility_impressions_goal?: number | null;
     monthly_visibility_clicks_goal?: number | null;
     ai_visibility_pct_goal?: number | null;
   },

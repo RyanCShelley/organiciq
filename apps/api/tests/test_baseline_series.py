@@ -139,7 +139,7 @@ def test_the_goal_starts_from_the_typical_figure_and_never_sits_below_baseline()
 
 def test_the_traffic_projection_uses_the_calculators_j_curve_for_launch():
     point = analyze(ACC, regime_start="2025-12")["projection_point"]["checkpoints"]
-    assert point[-1]["monthly_sessions"] == pytest.approx(point[0]["monthly_sessions"] * 1.05, rel=0.001)
+    assert point[-1]["monthly_sessions"] == pytest.approx(point[0]["monthly_sessions"], rel=0.001)
 
 
 def test_few_leads_widen_the_range_and_none_is_a_blocker():

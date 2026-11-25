@@ -296,6 +296,7 @@ def analyze(
     plan: growth_calculator.PlanKey = "launch",
     acknowledged: Iterable[str] = (),
     monthly_gsc_clicks: float | None = None,
+    monthly_gsc_impressions: float | None = None,
     ai_visibility_pct: float | None = None,
 ) -> dict[str, Any]:
     """The baseline, its ranges and its flags for one client.
@@ -385,6 +386,7 @@ def analyze(
         monthly_sessions=sessions_level,
         monthly_leads=leads_level,
         plan=plan,
+        monthly_gsc_impressions=monthly_gsc_impressions,
         monthly_gsc_clicks=monthly_gsc_clicks,
         ai_visibility_pct=ai_visibility_pct,
     )
@@ -392,6 +394,7 @@ def analyze(
         monthly_sessions=sessions_level,
         monthly_leads=goal_leads,
         plan=plan,
+        monthly_gsc_impressions=monthly_gsc_impressions,
         monthly_gsc_clicks=monthly_gsc_clicks,
         ai_visibility_pct=ai_visibility_pct,
     )
@@ -745,13 +748,16 @@ def build_result(
     if source != "ga4":
         raise ValueError("The source must be ga4 or csv.")
     rows, info = series_from_ga4(db, client, months=months, lead_events=lead_events)
+    monthly_gsc_impressions = None
     monthly_gsc_clicks = None
     ai_visibility_pct = None
     try:
         from app.services import baseline_pillars
 
         snap = baseline_pillars.snapshot(db, client.id, lead_events=info["lead_events"])
-        monthly_gsc_clicks = ((snap.get("visibility") or {}).get("gsc") or {}).get("clicks", {}).get("avg_30d")
+        gsc = (snap.get("visibility") or {}).get("gsc") or {}
+        monthly_gsc_impressions = (gsc.get("impressions") or {}).get("avg_30d")
+        monthly_gsc_clicks = (gsc.get("clicks") or {}).get("avg_30d")
         ai_visibility_pct = ((snap.get("visibility") or {}).get("llm") or {}).get("visibility_rate_pct")
     except Exception:
         pass
@@ -762,6 +768,7 @@ def build_result(
         half_life_months=half_life_months,
         plan=plan,
         acknowledged=acknowledged,
+        monthly_gsc_impressions=monthly_gsc_impressions,
         monthly_gsc_clicks=monthly_gsc_clicks,
         ai_visibility_pct=ai_visibility_pct,
     )

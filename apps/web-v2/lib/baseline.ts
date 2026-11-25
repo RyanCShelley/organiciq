@@ -14,6 +14,7 @@ export type Checkpoint = {
   monthly_sessions: number;
   lead_rate_pct: number;
   monthly_leads: number;
+  monthly_gsc_impressions?: number | null;
   monthly_gsc_clicks?: number | null;
   ai_visibility_pct?: number | null;
 };
@@ -21,6 +22,7 @@ export type Checkpoint = {
 export type PillarGoals = {
   monthly_leads?: number | null;
   monthly_traffic?: number | null;
+  monthly_visibility_impressions?: number | null;
   monthly_visibility_clicks?: number | null;
   ai_visibility_pct?: number | null;
 };
@@ -31,10 +33,12 @@ export type Projection = {
   baseline_monthly_sessions: number;
   baseline_monthly_leads: number;
   baseline_lead_rate_pct: number;
+  baseline_monthly_gsc_impressions?: number | null;
   baseline_monthly_gsc_clicks?: number | null;
   baseline_ai_visibility_pct?: number | null;
   suggested_monthly_lead_goal: number;
   suggested_monthly_traffic_goal?: number | null;
+  suggested_monthly_visibility_impressions_goal?: number | null;
   suggested_monthly_visibility_clicks_goal?: number | null;
   suggested_ai_visibility_pct_goal?: number | null;
   goal_horizon_months: number;

@@ -142,6 +142,8 @@ def update_pillar_goals(db: Session, client: Client, payload: Any) -> None:
     existing["monthly_leads"] = int(payload.monthly_lead_goal)
     if getattr(payload, "monthly_traffic_goal", None) is not None:
         existing["monthly_traffic"] = int(payload.monthly_traffic_goal)
+    if getattr(payload, "monthly_visibility_impressions_goal", None) is not None:
+        existing["monthly_visibility_impressions"] = int(payload.monthly_visibility_impressions_goal)
     if getattr(payload, "monthly_visibility_clicks_goal", None) is not None:
         existing["monthly_visibility_clicks"] = int(payload.monthly_visibility_clicks_goal)
     if getattr(payload, "ai_visibility_pct_goal", None) is not None:
@@ -265,6 +267,11 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
             int(request.monthly_traffic_goal)
             if request.monthly_traffic_goal is not None
             else proj.get("suggested_monthly_traffic_goal")
+        ),
+        "monthly_visibility_impressions": (
+            int(request.monthly_visibility_impressions_goal)
+            if request.monthly_visibility_impressions_goal is not None
+            else proj.get("suggested_monthly_visibility_impressions_goal")
         ),
         "monthly_visibility_clicks": (
             int(request.monthly_visibility_clicks_goal)
