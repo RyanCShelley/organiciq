@@ -95,6 +95,7 @@ def build_clients_overview(
             ).label("cur_wpos"),
             func.count(case((gsc_in_prev, 1))).label("prev_rows"),
             func.coalesce(func.sum(case((gsc_in_prev, FactGscDaily.impressions), else_=0)), 0).label("prev_imp"),
+            func.coalesce(func.sum(case((gsc_in_prev, FactGscDaily.clicks), else_=0)), 0).label("prev_clk"),
             func.coalesce(
                 func.sum(case((gsc_in_prev, FactGscDaily.average_position * FactGscDaily.impressions), else_=0)),
                 0,
@@ -273,7 +274,7 @@ def build_clients_overview(
         # GSC extraction
         g_row = gsc_by_client.get(c.id)
         if g_row is None or int(g_row.cur_rows or 0) == 0:
-            impressions = clicks = avg_position = avg_position_change = impressions_change_pct = None
+            impressions = clicks = clicks_change_pct = avg_position = avg_position_change = impressions_change_pct = None
         else:
             cur_imp = float(g_row.cur_imp or 0)
             cur_clk = float(g_row.cur_clk or 0)
@@ -282,6 +283,7 @@ def build_clients_overview(
             clicks = round(cur_clk)
             avg_position = round(cur_wpos / cur_imp, 1) if cur_imp > 0 else None
             prev_imp = float(g_row.prev_imp or 0)
+            prev_clk = float(g_row.prev_clk or 0)
             prev_wpos = float(g_row.prev_wpos or 0)
             prev_avg_pos = (prev_wpos / prev_imp) if prev_imp > 0 and int(g_row.prev_rows or 0) > 0 else None
             avg_position_change = (
@@ -291,6 +293,11 @@ def build_clients_overview(
             )
             impressions_change_pct = (
                 _pct_change(cur_imp, prev_imp)
+                if int(g_row.prev_rows or 0) > 0
+                else None
+            )
+            clicks_change_pct = (
+                _pct_change(cur_clk, prev_clk)
                 if int(g_row.prev_rows or 0) > 0
                 else None
             )
@@ -374,6 +381,7 @@ def build_clients_overview(
                 ),
                 impressions=impressions,
                 clicks=clicks,
+                clicks_change_pct=clicks_change_pct,
                 avg_position=avg_position,
                 avg_position_change=avg_position_change,
                 impressions_change_pct=impressions_change_pct,
@@ -384,6 +392,11 @@ def build_clients_overview(
                     else None
                 ),
                 current_clicks_goal=cur_clicks_goal,
+                clicks_goal_progress_pct=(
+                    round((clicks / cur_clicks_goal) * 100, 1)
+                    if cur_clicks_goal and clicks is not None
+                    else None
+                ),
                 total_sessions=total_sessions,
                 organic_sessions=organic_sessions,
                 organic_change_pct=organic_change_pct,

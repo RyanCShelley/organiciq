@@ -25,12 +25,14 @@ export type ClientOverviewItem = {
 
   impressions: number | null;
   clicks: number | null;
+  clicks_change_pct?: number | null;
   avg_position: number | null;
   avg_position_change?: number | null;
   impressions_change_pct: number | null;
   current_impressions_goal?: number | null;
   impressions_goal_progress_pct?: number | null;
   current_clicks_goal?: number | null;
+  clicks_goal_progress_pct?: number | null;
 
   total_sessions: number | null;
   organic_sessions: number | null;

@@ -33,12 +33,14 @@ class ClientOverviewItemOut(BaseModel):
     # Visibility (GSC 30d)
     impressions: int | None = None
     clicks: int | None = None
+    clicks_change_pct: float | None = None
     avg_position: float | None = None
     avg_position_change: float | None = None
     impressions_change_pct: float | None = None
     current_impressions_goal: int | None = None
     impressions_goal_progress_pct: float | None = None
     current_clicks_goal: int | None = None
+    clicks_goal_progress_pct: float | None = None
 
     # Traffic (GA4 30d)
     total_sessions: int | None = None

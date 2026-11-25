@@ -552,10 +552,15 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                     <td className="px-4 py-3 text-right align-middle tabular-nums">
                       <div className="font-medium text-[var(--text-primary)]">
                         {formatNumber(row.clicks)}
+                        <TrendDelta pct={row.clicks_change_pct ?? null} />
                       </div>
                       {row.current_clicks_goal != null ? (
                         <div className="text-xs text-[var(--text-secondary)]">
                           goal {formatNumber(row.current_clicks_goal)}
+                          {row.clicks_goal_progress_pct != null
+                            ? ` (${Math.round(row.clicks_goal_progress_pct)}%)`
+                            : ""}
+                          <PacingBar pct={row.clicks_goal_progress_pct} />
                         </div>
                       ) : (
                         <div className="text-xs text-[var(--text-secondary)]">search clicks</div>
