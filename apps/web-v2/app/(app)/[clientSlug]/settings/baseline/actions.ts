@@ -76,6 +76,9 @@ export async function lockBaselineAction(
     reason_code: string | null;
     reason_note: string | null;
     monthly_lead_goal: number | null;
+    monthly_traffic_goal?: number | null;
+    monthly_visibility_clicks_goal?: number | null;
+    ai_visibility_pct_goal?: number | null;
     target_lead_rate_pct?: number | null;
     sync_lead_conversions: boolean;
   },
@@ -104,11 +107,16 @@ export async function updateBaselineGoalAction(
   clientId: string,
   slug: string,
   monthlyLeadGoal: number,
+  pillarGoals?: {
+    monthly_traffic_goal?: number | null;
+    monthly_visibility_clicks_goal?: number | null;
+    ai_visibility_pct_goal?: number | null;
+  },
 ): Promise<{ ok: true; goal: BaselineGoalState } | { ok: false; error: string }> {
   try {
     const goal = await apiFetch<BaselineGoalState>(`/clients/${clientId}/baseline/goal`, {
       method: "POST",
-      body: { monthly_lead_goal: monthlyLeadGoal },
+      body: { monthly_lead_goal: monthlyLeadGoal, ...(pillarGoals ?? {}) },
     });
     invalidateClientsCache();
     revalidatePath("/");

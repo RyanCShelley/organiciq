@@ -102,6 +102,8 @@ export function BaselineBuilder({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [goal, setGoal] = useState("");
+  const [trafficGoal, setTrafficGoal] = useState("");
+  const [visibilityClicksGoal, setVisibilityClicksGoal] = useState("");
   const [targetRate, setTargetRate] = useState(
     goalState?.target_lead_rate_pct != null ? String(goalState.target_lead_rate_pct) : "",
   );
@@ -410,7 +412,16 @@ export function BaselineBuilder({
               label={`Active monthly ${noun.singular} goal`}
               primary={activeGoal != null ? `${fmt(activeGoal)}/mo` : "Not set"}
               secondary={
-                goalState?.suggested != null ? `12-mo suggested: ${fmt(goalState.suggested)}/mo` : undefined
+                (latestVersion.goals?.monthly_traffic ?? goalState?.pillar_goals?.monthly_traffic) != null
+                  ? `Traffic goal: ${fmt(latestVersion.goals?.monthly_traffic ?? goalState?.pillar_goals?.monthly_traffic)}/mo`
+                  : goalState?.suggested != null
+                    ? `12-mo suggested: ${fmt(goalState.suggested)}/mo`
+                    : undefined
+              }
+              footnote={
+                (latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks) != null
+                  ? `Visibility goal: ${fmt(latestVersion.goals?.monthly_visibility_clicks ?? goalState?.pillar_goals?.monthly_visibility_clicks)} clicks/mo`
+                  : undefined
               }
             />
             <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3.5 space-y-2">
@@ -674,8 +685,8 @@ export function BaselineBuilder({
                     accent={cp.month === analysis.projection.goal_horizon_months}
                     label={cp.label}
                     primary={`${fmt(cp.monthly_leads, 1)} ${noun.plural}`}
-                    secondary={`${fmt(cp.monthly_sessions)} sessions`}
-                    footnote={`${fmt(cp.lead_rate_pct, 2)}% rate`}
+                    secondary={`${fmt(cp.monthly_sessions)} sessions${cp.monthly_gsc_clicks != null ? ` · ${fmt(cp.monthly_gsc_clicks)} clicks` : ""}`}
+                    footnote={`${fmt(cp.lead_rate_pct, 2)}% rate${cp.ai_visibility_pct != null ? ` · ${cp.ai_visibility_pct}% AI` : ""}`}
                   />
                 ))}
               </div>
@@ -704,6 +715,8 @@ export function BaselineBuilder({
                 reason_code: isFirst ? null : reason,
                 reason_note: isFirst ? null : note.trim() || null,
                 monthly_lead_goal: goal.trim() ? Number(goal) : null,
+                monthly_traffic_goal: trafficGoal.trim() ? Number(trafficGoal) : null,
+                monthly_visibility_clicks_goal: visibilityClicksGoal.trim() ? Number(visibilityClicksGoal) : null,
                 target_lead_rate_pct: targetRate.trim() ? Number(targetRate) : null,
                 sync_lead_conversions: agree,
               });
@@ -713,6 +726,8 @@ export function BaselineBuilder({
                 setGoalDraft(String(result.data.monthly_lead_goal));
                 setOpen(false);
                 setGoal("");
+                setTrafficGoal("");
+                setVisibilityClicksGoal("");
                 setReason("");
                 setNote("");
                 setAgree(false);
@@ -731,7 +746,7 @@ export function BaselineBuilder({
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <label className="block text-sm">
               <span className="font-semibold">12-month monthly {noun.singular} goal</span>
               <input
@@ -750,11 +765,54 @@ export function BaselineBuilder({
               />
               {suggestedGoal != null ? (
                 <span className="mt-1 block text-xs text-[var(--text-secondary)]">
-                  Leave blank to set the monthly goal to the 12-month projection ({suggestedGoal}/mo).
+                  Leave blank to use {suggestedGoal}/mo.
                 </span>
               ) : null}
             </label>
-            {!isFirst ? (
+            <label className="block text-sm">
+              <span className="font-semibold">12-month traffic goal (sessions/mo)</span>
+              <input
+                type="number"
+                min={0}
+                value={trafficGoal}
+                onChange={(e) => setTrafficGoal(e.target.value)}
+                placeholder={
+                  analysis.projection.suggested_monthly_traffic_goal != null
+                    ? `Default: ${analysis.projection.suggested_monthly_traffic_goal}`
+                    : "Optional"
+                }
+                className={`${inputClass} mt-1`}
+              />
+              {analysis.projection.suggested_monthly_traffic_goal != null ? (
+                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
+                  Leave blank to use {fmt(analysis.projection.suggested_monthly_traffic_goal)}/mo.
+                </span>
+              ) : null}
+            </label>
+            <label className="block text-sm">
+              <span className="font-semibold">12-month visibility goal (GSC clicks/mo)</span>
+              <input
+                type="number"
+                min={0}
+                value={visibilityClicksGoal}
+                onChange={(e) => setVisibilityClicksGoal(e.target.value)}
+                placeholder={
+                  analysis.projection.suggested_monthly_visibility_clicks_goal != null
+                    ? `Default: ${analysis.projection.suggested_monthly_visibility_clicks_goal}`
+                    : "Optional"
+                }
+                className={`${inputClass} mt-1`}
+              />
+              {analysis.projection.suggested_monthly_visibility_clicks_goal != null ? (
+                <span className="mt-1 block text-xs text-[var(--text-secondary)]">
+                  Leave blank to use {fmt(analysis.projection.suggested_monthly_visibility_clicks_goal)}/mo.
+                </span>
+              ) : null}
+            </label>
+          </div>
+
+          {!isFirst ? (
+            <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-sm">
                 <span className="font-semibold">Why a new baseline?</span>
                 <select value={reason} onChange={(e) => setReason(e.target.value)} required className={`${inputClass} mt-1`}>
@@ -768,8 +826,8 @@ export function BaselineBuilder({
                   ))}
                 </select>
               </label>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
           {!isFirst ? (
             <label className="block text-sm">

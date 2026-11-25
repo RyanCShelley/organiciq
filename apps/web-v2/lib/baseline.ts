@@ -14,6 +14,15 @@ export type Checkpoint = {
   monthly_sessions: number;
   lead_rate_pct: number;
   monthly_leads: number;
+  monthly_gsc_clicks?: number | null;
+  ai_visibility_pct?: number | null;
+};
+
+export type PillarGoals = {
+  monthly_leads?: number | null;
+  monthly_traffic?: number | null;
+  monthly_visibility_clicks?: number | null;
+  ai_visibility_pct?: number | null;
 };
 
 export type Projection = {
@@ -22,7 +31,12 @@ export type Projection = {
   baseline_monthly_sessions: number;
   baseline_monthly_leads: number;
   baseline_lead_rate_pct: number;
+  baseline_monthly_gsc_clicks?: number | null;
+  baseline_ai_visibility_pct?: number | null;
   suggested_monthly_lead_goal: number;
+  suggested_monthly_traffic_goal?: number | null;
+  suggested_monthly_visibility_clicks_goal?: number | null;
+  suggested_ai_visibility_pct_goal?: number | null;
   goal_horizon_months: number;
   checkpoints: Checkpoint[];
   disclaimer: string;
@@ -163,6 +177,7 @@ export type BaselineVersion = {
   lead_rate_pct?: number | null;
   monthly_leads: number | null;
   goal_monthly_leads: number | null;
+  goals?: PillarGoals | null;
   has_pillars?: boolean;
 };
 
@@ -171,6 +186,7 @@ export type BaselineGoalState = {
   suggested: number | null;
   version: number | null;
   target_lead_rate_pct: number | null;
+  pillar_goals?: PillarGoals | null;
 };
 
 export type BaselineEventsResponse = {
@@ -187,6 +203,7 @@ export type BaselineLockResponse = {
   suggested_monthly_lead_goal: number;
   goal_set_by_lock: boolean;
   target_lead_rate_pct: number | null;
+  pillar_goals?: PillarGoals | null;
 };
 
 export type AnalysisResult = { ok: true; analysis: Analysis } | { ok: false; error: string };

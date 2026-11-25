@@ -266,6 +266,7 @@ def set_baseline_goal(
     """Set the plan-end monthly lead goal, e.g. to the newest locked baseline's 12-month figure."""
     client = _staff_client(db, user, client_id)
     client_service.update_client(db, client, ClientUpdate(monthly_lead_goal=payload.monthly_lead_goal))
+    baseline_lock.update_pillar_goals(db, client, payload)
     return baseline_lock.goal_state(db, client)
 
 

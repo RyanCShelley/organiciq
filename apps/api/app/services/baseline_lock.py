@@ -52,6 +52,7 @@ def _summary(row: BaselineVersion) -> dict[str, Any]:
         "lead_rate_pct": num(row.lead_rate_pct),
         "monthly_leads": num(row.monthly_leads),
         "goal_monthly_leads": num(row.goal_monthly_leads),
+        "goals": (row.snapshot or {}).get("goals"),
         "has_pillars": bool((row.snapshot or {}).get("pillars")),
     }
 
@@ -112,12 +113,41 @@ def goal_state(db: Session, client: Client) -> dict[str, Any]:
         .first()
     )
     suggested = None
+    pillar_goals = None
     if newest is not None:
         raw_suggested = ((newest.snapshot or {}).get("projection") or {}).get("suggested_monthly_lead_goal")
         if raw_suggested is not None:
             suggested = int(raw_suggested) or None
-    return {"current": client.monthly_lead_goal, "suggested": suggested, "version": newest.version if newest else None,
-            "target_lead_rate_pct": lead_rate_target(db, client.id)}
+        pillar_goals = (newest.snapshot or {}).get("goals")
+    return {
+        "current": client.monthly_lead_goal,
+        "suggested": suggested,
+        "version": newest.version if newest else None,
+        "target_lead_rate_pct": lead_rate_target(db, client.id),
+        "pillar_goals": pillar_goals,
+    }
+
+
+def update_pillar_goals(db: Session, client: Client, payload: Any) -> None:
+    """Update the 3-pillar goals stored on the newest locked baseline version (if any)."""
+    newest = (
+        db.query(BaselineVersion)
+        .filter(BaselineVersion.client_id == client.id)
+        .order_by(BaselineVersion.version.desc())
+        .first()
+    )
+    if newest is None:
+        return
+    existing = dict((newest.snapshot or {}).get("goals") or {})
+    existing["monthly_leads"] = int(payload.monthly_lead_goal)
+    if getattr(payload, "monthly_traffic_goal", None) is not None:
+        existing["monthly_traffic"] = int(payload.monthly_traffic_goal)
+    if getattr(payload, "monthly_visibility_clicks_goal", None) is not None:
+        existing["monthly_visibility_clicks"] = int(payload.monthly_visibility_clicks_goal)
+    if getattr(payload, "ai_visibility_pct_goal", None) is not None:
+        existing["ai_visibility_pct"] = round(float(payload.ai_visibility_pct_goal), 1)
+    newest.snapshot = {**(newest.snapshot or {}), "goals": existing}
+    db.commit()
 
 
 def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequest) -> dict[str, Any]:
@@ -228,6 +258,26 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
     # showed two baselines at once.
     suggested_goal = int(result["projection"]["suggested_monthly_lead_goal"])
     goal_to_set = request.monthly_lead_goal if request.monthly_lead_goal is not None else suggested_goal
+    proj = result["projection"]
+    pillar_goals = {
+        "monthly_leads": int(goal_to_set),
+        "monthly_traffic": (
+            int(request.monthly_traffic_goal)
+            if request.monthly_traffic_goal is not None
+            else proj.get("suggested_monthly_traffic_goal")
+        ),
+        "monthly_visibility_clicks": (
+            int(request.monthly_visibility_clicks_goal)
+            if request.monthly_visibility_clicks_goal is not None
+            else proj.get("suggested_monthly_visibility_clicks_goal")
+        ),
+        "ai_visibility_pct": (
+            round(float(request.ai_visibility_pct_goal), 1)
+            if request.ai_visibility_pct_goal is not None
+            else proj.get("suggested_ai_visibility_pct_goal")
+        ),
+    }
+    row.snapshot = {**row.snapshot, "goals": pillar_goals}
     update = {
         "baseline_as_of": window_end,
         "baseline_period_start": window_start,
@@ -258,4 +308,5 @@ def lock(db: Session, client: Client, user_email: str, request: BaselineLockRequ
         "suggested_monthly_lead_goal": suggested_goal,
         "goal_set_by_lock": request.monthly_lead_goal is None,
         "target_lead_rate_pct": lead_rate_target(db, client.id),
+        "pillar_goals": pillar_goals,
     }

@@ -351,6 +351,9 @@ class BaselineLockRequest(BaseModel):
     reason_note: str | None = Field(default=None, max_length=2000)
     #: The plan-end goal. Absent means the 12-month figure from this baseline's own projection.
     monthly_lead_goal: int | None = Field(default=None, ge=0)
+    monthly_traffic_goal: int | None = Field(default=None, ge=0)
+    monthly_visibility_clicks_goal: int | None = Field(default=None, ge=0)
+    ai_visibility_pct_goal: float | None = Field(default=None, ge=0, le=100)
     target_lead_rate_pct: float | None = Field(default=None, gt=0, le=100)
     #: Agree to make the chosen events the client's lead conversions, which the home
     #: screen, alerts and results count, when they differ from what is set now.
@@ -381,6 +384,9 @@ class BaselineResetRequest(BaseModel):
 
 class BaselineGoalRequest(BaseModel):
     monthly_lead_goal: int = Field(ge=0)
+    monthly_traffic_goal: int | None = Field(default=None, ge=0)
+    monthly_visibility_clicks_goal: int | None = Field(default=None, ge=0)
+    ai_visibility_pct_goal: float | None = Field(default=None, ge=0, le=100)
 
 
 class BaselineLeadConversionsRequest(BaseModel):
