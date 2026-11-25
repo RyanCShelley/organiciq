@@ -282,6 +282,11 @@ def build_clients_overview(
 
         bm = c.business_model if c.business_model in ("lead_gen", "ecommerce", "both") else None
         status_val = c.status.value if hasattr(c.status, "value") else str(c.status)
+        pillar = lead_goals.current_pillar_goals(c, on=cur_end)
+        cur_lead_goal = pillar["monthly_leads"]
+        cur_impr_goal = pillar["monthly_gsc_impressions"]
+        cur_clicks_goal = pillar["monthly_gsc_clicks"]
+        cur_sess_goal = pillar["monthly_sessions"]
 
         items.append(
             ClientOverviewItemOut(
@@ -295,14 +300,32 @@ def build_clients_overview(
                 plan_label=_plan_label_for(c),
                 business_model=bm,
                 monthly_lead_goal=c.monthly_lead_goal,
-                current_lead_goal=lead_goals.current_lead_goal(c, on=cur_end)[0],
+                current_lead_goal=cur_lead_goal,
+                lead_goal_progress_pct=(
+                    round((leads / cur_lead_goal) * 100, 1)
+                    if cur_lead_goal and leads is not None
+                    else None
+                ),
                 impressions=impressions,
                 clicks=clicks,
                 avg_position=avg_position,
                 impressions_change_pct=impressions_change_pct,
+                current_impressions_goal=cur_impr_goal,
+                impressions_goal_progress_pct=(
+                    round((impressions / cur_impr_goal) * 100, 1)
+                    if cur_impr_goal and impressions is not None
+                    else None
+                ),
+                current_clicks_goal=cur_clicks_goal,
                 total_sessions=total_sessions,
                 organic_sessions=organic_sessions,
                 organic_change_pct=organic_change_pct,
+                current_sessions_goal=cur_sess_goal,
+                sessions_goal_progress_pct=(
+                    round((total_sessions / cur_sess_goal) * 100, 1)
+                    if cur_sess_goal and total_sessions is not None
+                    else None
+                ),
                 leads=leads,
                 lead_label=_lead_label_for(bm),
                 leads_change_pct=leads_change_pct,

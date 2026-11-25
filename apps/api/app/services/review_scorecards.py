@@ -167,12 +167,17 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
     imp_pct = pct_change(imp_now, imp_then) if imp_now is not None and imp_then else None
     showing_before = _terms_showing_before(vis) if vis else None
     vis_change = imp_pct if imp_pct is not None else (None if not showing_before else pct_change(showing or 0, showing_before))
+    goal = review.get("goal") or {}
     visibility = {
         "available": bool(vis and terms),
         "headline": showing, "of": terms, "verdict": verdict(vis_change),
         "page_one": vs.get("on_page_one"), "bing": vs.get("showing_in_bing"),
         "has_bing": bool((vis.get("bing") or {}).get("has_data")),
         "impressions": {"current": imp_now, "previous": imp_then, "change_pct": imp_pct},
+        "impressions_goal": goal.get("period_impressions_goal"),
+        "impressions_goal_progress_pct": goal.get("impressions_progress_pct"),
+        "ai_visibility_goal": goal.get("ai_visibility_goal"),
+        "ai_visibility_progress_pct": goal.get("ai_visibility_progress_pct"),
         "ai_mentions": (llm_sum.get("mentions") or {}).get("current") if llm else None,
         "ai_links": (llm_sum.get("citations") or {}).get("current") if llm else None,
         "ai_runs": llm.get("runs") if llm else None,
@@ -183,11 +188,18 @@ def build(db: Session, client: Client, review: dict) -> dict[str, Any]:
     cur, prev, pct = _pair(review.get("sessions"))
     mix = traffic_mix(db, client, month)
     organic = next((c for c in mix if c["key"] == "organic_search"), None)
-    traffic = {"headline": cur, "previous": prev, "change_pct": pct, "verdict": verdict(pct), "channels": mix, "organic_change_pct": organic["change_pct"] if organic else (review.get("organic_sessions") or {}).get("change_pct")}
+    traffic = {
+        "headline": cur, "previous": prev, "change_pct": pct, "verdict": verdict(pct),
+        "channels": mix,
+        "organic_change_pct": organic["change_pct"] if organic else (review.get("organic_sessions") or {}).get("change_pct"),
+        "goal": goal.get("period_traffic_goal"),
+        "goal_progress_pct": goal.get("traffic_progress_pct"),
+        "clicks_goal": goal.get("period_clicks_goal"),
+        "clicks_goal_progress_pct": goal.get("clicks_progress_pct"),
+    }
 
     # Conversions
     c_cur, c_prev, c_pct = _pair(review.get("conversions"))
-    goal = review.get("goal") or {}
     rev = review.get("revenue") or {}
     revenue = rev.get("revenue") if rev.get("status") == "measured" else None
     conversions = {

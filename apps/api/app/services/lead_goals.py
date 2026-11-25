@@ -152,6 +152,32 @@ def current_lead_goal(client: Any, on: date | None = None) -> tuple[int | None, 
     return (goal if goal and goal > 0 else None), None
 
 
+def current_pillar_goals(client: Any, on: date | None = None) -> dict[str, Any]:
+    """Active checkpoint targets across Visibility, Traffic, and Leads."""
+    lead_goal, checkpoint = current_lead_goal(client, on)
+    row: dict[str, Any] | None = None
+    if checkpoint is not None:
+        for candidate in _checkpoints(client):
+            if int(candidate.get("month", -1)) == checkpoint.month:
+                row = candidate
+                break
+
+    def _pos_int(val: Any) -> int | None:
+        return int(round(float(val))) if isinstance(val, (int, float)) and float(val) > 0 else None
+
+    def _pos_float(val: Any) -> float | None:
+        return round(float(val), 1) if isinstance(val, (int, float)) and float(val) > 0 else None
+
+    return {
+        "checkpoint_month": checkpoint.month if checkpoint is not None else None,
+        "monthly_leads": lead_goal,
+        "monthly_sessions": _pos_int(row.get("monthly_sessions")) if row else None,
+        "monthly_gsc_impressions": _pos_int(row.get("monthly_gsc_impressions")) if row else None,
+        "monthly_gsc_clicks": _pos_int(row.get("monthly_gsc_clicks")) if row else None,
+        "ai_visibility_pct": _pos_float(row.get("ai_visibility_pct")) if row else None,
+    }
+
+
 def schedule_payload(client: Any, on: date | None = None) -> list[dict[str, Any]]:
     return [
         {

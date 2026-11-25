@@ -165,6 +165,7 @@ export function VisibilityCards({ review, cards }: { review: Review; cards: Scor
           note="Watchlist terms with at least one Google impression this month"
           facts={[
             ["Impressions", num(v.impressions.current)],
+            ...(v.impressions_goal ? ([["Impressions goal", `${v.impressions_goal_progress_pct != null ? `${Math.round(v.impressions_goal_progress_pct)}% of ` : ""}${num(v.impressions_goal)}`]] as [string, ReactNode][]) : []),
             ["Clicks from these terms", num(vis.summary.google_clicks)],
             ["On page one", `${num(v.page_one)} ${v.page_one === 1 ? "term" : "terms"}`],
           ]}
@@ -207,7 +208,8 @@ export function VisibilityCards({ review, cards }: { review: Review; cards: Scor
             source="AI runs"
             value={rate ? `${Math.round(rate.current * 100)}%` : "–"}
             changeNote={pts == null ? undefined : pts === 0 ? "unchanged vs the run before" : `${pts > 0 ? "up" : "down"} ${Math.abs(pts)} ${Math.abs(pts) === 1 ? "point" : "points"} vs the run before`}
-            note={`Share of AI answers to discovery prompts that named or cited the brand · ${runWhen}`}
+            bar={v.ai_visibility_goal ? v.ai_visibility_progress_pct ?? 0 : undefined}
+            note={v.ai_visibility_goal ? `${v.ai_visibility_progress_pct != null ? `${Math.round(v.ai_visibility_progress_pct)}% of ` : ""}${v.ai_visibility_goal}% target · ${runWhen}` : `Share of AI answers to discovery prompts that named or cited the brand · ${runWhen}`}
             facts={[
               ["Mentions", num(llm.summary.mentions.current)],
               ["Citations", num(llm.summary.citations.current)],
@@ -251,7 +253,15 @@ export function TrafficCards({ review, cards }: { review: Review; cards: Scoreca
   const organic = review.organic_sessions;
   return (
     <div className="grid gap-3 @3xl:grid-cols-3">
-      <StatCard label="All sessions" source="GA4" value={num(t.headline)} change={t.change_pct} changeNote={t.previous != null ? `vs ${prior} · was ${num(t.previous)}` : undefined}>
+      <StatCard
+        label="All sessions"
+        source="GA4"
+        value={num(t.headline)}
+        change={t.change_pct}
+        changeNote={t.previous != null ? `vs ${prior} · was ${num(t.previous)}` : undefined}
+        bar={t.goal ? t.goal_progress_pct ?? 0 : undefined}
+        note={t.goal ? `${t.goal_progress_pct != null ? `${Math.round(t.goal_progress_pct)}% of ` : ""}${num(t.goal)} · goal for the period` : undefined}
+      >
         {total > 0 ? (
           <>
             <div className="mb-1 mt-2 flex h-2 overflow-hidden rounded-full bg-[#eceef2]" role="img" aria-label="Where visits came from">
@@ -270,7 +280,7 @@ export function TrafficCards({ review, cards }: { review: Review; cards: Scoreca
         note="Visits that came from search engines"
         facts={[
           ...(mix.ai_referral ? ([["AI referrals", <>{num(mix.ai_referral.sessions)}<Delta key="d" pct={mix.ai_referral.change_pct} /></>]] as [string, ReactNode][]) : []),
-          ...(review.has_search_data ? ([["Search Console clicks", <>{num(review.search.clicks.current)}<Delta key="d" pct={pair(review.search.clicks)} /></>]] as [string, ReactNode][]) : []),
+          ...(review.has_search_data ? ([["Search Console clicks", <>{num(review.search.clicks.current)}<Delta key="d" pct={pair(review.search.clicks)} />{t.clicks_goal ? <span className="ml-1.5 text-xs text-[var(--text-tertiary)]">/ {num(t.clicks_goal)}</span> : null}</>]] as [string, ReactNode][]) : []),
         ]}
       />
       <StatCard label="Other channels" source="GA4" value="" note="Sessions this month" facts={others.map((c) => [c.label, <>{num(c.sessions)}<Delta key="d" pct={c.change_pct} /></>] as [string, ReactNode])} />

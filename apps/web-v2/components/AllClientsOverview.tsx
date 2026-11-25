@@ -385,9 +385,12 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                         {formatNumber(row.impressions)}
                         <TrendDelta pct={row.impressions_change_pct} />
                       </div>
-                      {row.clicks != null ? (
+                      {row.clicks != null || row.current_impressions_goal != null ? (
                         <div className="text-xs text-[var(--text-secondary)]">
-                          {formatNumber(row.clicks)} clicks
+                          {row.clicks != null ? `${formatNumber(row.clicks)} clicks` : ""}
+                          {row.current_impressions_goal != null
+                            ? `${row.clicks != null ? " · " : ""}goal ${formatNumber(row.current_impressions_goal)}${row.impressions_goal_progress_pct != null ? ` (${Math.round(row.impressions_goal_progress_pct)}%)` : ""}`
+                            : ""}
                         </div>
                       ) : null}
                     </td>
@@ -403,9 +406,12 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                         {formatNumber(row.organic_sessions)}
                         <TrendDelta pct={row.organic_change_pct} />
                       </div>
-                      {row.total_sessions != null ? (
+                      {row.total_sessions != null || row.current_sessions_goal != null ? (
                         <div className="text-xs text-[var(--text-secondary)]">
-                          {formatNumber(row.total_sessions)} total
+                          {row.total_sessions != null ? `${formatNumber(row.total_sessions)} total` : ""}
+                          {row.current_sessions_goal != null
+                            ? `${row.total_sessions != null ? " · " : ""}goal ${formatNumber(row.current_sessions_goal)}${row.sessions_goal_progress_pct != null ? ` (${Math.round(row.sessions_goal_progress_pct)}%)` : ""}`
+                            : ""}
                         </div>
                       ) : null}
                     </td>
@@ -418,7 +424,9 @@ export function AllClientsOverview({ data }: { data: ClientsOverviewResponse }) 
                       {row.leads != null || goal != null ? (
                         <div className="text-xs text-[var(--text-secondary)]">
                           {row.lead_label}
-                          {goal != null ? ` · goal ${formatNumber(goal)}` : ""}
+                          {goal != null
+                            ? ` · goal ${formatNumber(goal)}${row.lead_goal_progress_pct != null ? ` (${Math.round(row.lead_goal_progress_pct)}%)` : ""}`
+                            : ""}
                         </div>
                       ) : null}
                     </td>

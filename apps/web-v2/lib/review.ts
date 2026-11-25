@@ -74,6 +74,10 @@ export type Scorecards = {
     bing: number | null;
     has_bing: boolean;
     impressions: { current: number | null; previous: number | null; change_pct: number | null };
+    impressions_goal?: number | null;
+    impressions_goal_progress_pct?: number | null;
+    ai_visibility_goal?: number | null;
+    ai_visibility_progress_pct?: number | null;
     ai_mentions: number | null;
     ai_links: number | null;
     ai_runs: number | null;
@@ -85,6 +89,10 @@ export type Scorecards = {
     change_pct: number | null;
     verdict: "up" | "down" | "flat";
     organic_change_pct: number | null;
+    goal?: number | null;
+    goal_progress_pct?: number | null;
+    clicks_goal?: number | null;
+    clicks_goal_progress_pct?: number | null;
     channels: { key: string; label: string; sessions: number; previous: number; change_pct: number | null }[];
   };
   conversions: {

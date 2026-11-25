@@ -16,7 +16,7 @@ from app.models.config import OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.services.lead_goals import current_lead_goal, schedule_payload
+from app.services.lead_goals import current_lead_goal, current_pillar_goals, schedule_payload
 from app.models.seranking import (
     FactSerCompetitor,
     FactSerKeyword,
@@ -1229,6 +1229,31 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     if period_goal and current_leads is not None:
         progress_pct = (current_leads / period_goal) * 100
 
+    pillar_goals = current_pillar_goals(client, on=to_date)
+    monthly_impressions_goal = pillar_goals["monthly_gsc_impressions"]
+    period_impressions_goal, _ = period_lead_goal(monthly_impressions_goal, from_date, to_date)
+    impressions_goal_progress_pct: float | None = None
+    if period_impressions_goal and gsc_impressions_current is not None:
+        impressions_goal_progress_pct = (gsc_impressions_current / period_impressions_goal) * 100
+
+    ai_visibility_goal = pillar_goals["ai_visibility_pct"]
+    ai_mention_current = ai_current_metrics["mention_presence"]
+    ai_visibility_progress_pct: float | None = None
+    if ai_visibility_goal and ai_mention_current is not None:
+        ai_visibility_progress_pct = (ai_mention_current / ai_visibility_goal) * 100
+
+    monthly_traffic_goal = pillar_goals["monthly_sessions"]
+    period_traffic_goal, _ = period_lead_goal(monthly_traffic_goal, from_date, to_date)
+    traffic_goal_progress_pct: float | None = None
+    if period_traffic_goal and current_sessions is not None:
+        traffic_goal_progress_pct = (current_sessions / period_traffic_goal) * 100
+
+    monthly_clicks_goal = pillar_goals["monthly_gsc_clicks"]
+    period_clicks_goal, _ = period_lead_goal(monthly_clicks_goal, from_date, to_date)
+    clicks_goal_progress_pct: float | None = None
+    if period_clicks_goal and gsc_clicks_current is not None:
+        clicks_goal_progress_pct = (gsc_clicks_current / period_clicks_goal) * 100
+
     sessions_series, views_series = _daily_ga4_traffic_series(db, client.id, ga4_current)
     leads_series = _daily_leads_series(db, client.id, lead_events, ga4_current)
     lead_rate_series = _daily_lead_rate_series(sessions_series, leads_series)
@@ -1333,6 +1358,11 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             "leads_series": leads_series,
         },
         "visibility": {
+            "monthly_impressions_goal": monthly_impressions_goal,
+            "period_impressions_goal": period_impressions_goal,
+            "impressions_goal_progress_pct": impressions_goal_progress_pct,
+            "ai_visibility_goal": ai_visibility_goal,
+            "ai_visibility_progress_pct": ai_visibility_progress_pct,
             "search": {
                 "search_visibility": _period_metric(
                     search_visibility_current,
@@ -1381,6 +1411,12 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
             },
         },
         "traffic": {
+            "monthly_traffic_goal": monthly_traffic_goal,
+            "period_traffic_goal": period_traffic_goal,
+            "traffic_goal_progress_pct": traffic_goal_progress_pct,
+            "monthly_clicks_goal": monthly_clicks_goal,
+            "period_clicks_goal": period_clicks_goal,
+            "clicks_goal_progress_pct": clicks_goal_progress_pct,
             "gsc_clicks": _period_metric(
                 gsc_clicks_current, gsc_clicks_previous, gsc_clicks_series
             ),

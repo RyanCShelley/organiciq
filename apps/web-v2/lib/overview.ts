@@ -20,15 +20,21 @@ export type ClientOverviewItem = {
   business_model: "lead_gen" | "ecommerce" | "both" | null;
   monthly_lead_goal: number | null;
   current_lead_goal: number | null;
+  lead_goal_progress_pct?: number | null;
 
   impressions: number | null;
   clicks: number | null;
   avg_position: number | null;
   impressions_change_pct: number | null;
+  current_impressions_goal?: number | null;
+  impressions_goal_progress_pct?: number | null;
+  current_clicks_goal?: number | null;
 
   total_sessions: number | null;
   organic_sessions: number | null;
   organic_change_pct: number | null;
+  current_sessions_goal?: number | null;
+  sessions_goal_progress_pct?: number | null;
 
   leads: number | null;
   lead_label: "leads" | "orders" | "conversions";

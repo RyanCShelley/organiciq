@@ -192,6 +192,14 @@ def assemble(current: dict, previous: dict, *, month: str, model: str | None, re
         "final_goal": _get(current, "conversions", "final_lead_goal"),
         "checkpoint": _get(current, "conversions", "goal_checkpoint"),
         "baseline_version": _get(current, "baseline", "projection", "baseline_version"),
+        "period_traffic_goal": _get(current, "traffic", "period_traffic_goal"),
+        "traffic_progress_pct": _num(_get(current, "traffic", "traffic_goal_progress_pct")),
+        "period_clicks_goal": _get(current, "traffic", "period_clicks_goal"),
+        "clicks_progress_pct": _num(_get(current, "traffic", "clicks_goal_progress_pct")),
+        "period_impressions_goal": _get(current, "visibility", "period_impressions_goal"),
+        "impressions_progress_pct": _num(_get(current, "visibility", "impressions_goal_progress_pct")),
+        "ai_visibility_goal": _num(_get(current, "visibility", "ai_visibility_goal")),
+        "ai_visibility_progress_pct": _num(_get(current, "visibility", "ai_visibility_progress_pct")),
     }
 
     services = _get(current, "service_reporting") or {}

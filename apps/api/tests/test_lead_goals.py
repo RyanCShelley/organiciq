@@ -172,3 +172,41 @@ def test_junk_overrides_are_dropped_without_losing_the_good_ones(db, client_a):
     )
 
     assert client_a.lead_goal_overrides == {"3": 42, "12": 60}
+
+
+def test_current_pillar_goals_returns_visibility_traffic_and_leads(db, client_a):
+    from app.services.lead_goals import current_pillar_goals
+
+    client_a.baseline_as_of = ANCHOR
+    client_a.baseline_projection_json = {
+        "baseline_as_of": ANCHOR.isoformat(),
+        "checkpoints": [
+            {
+                "month": 0,
+                "monthly_leads": 30,
+                "monthly_sessions": 1000,
+                "monthly_gsc_impressions": 20000,
+                "monthly_gsc_clicks": 800,
+                "ai_visibility_pct": 12.0,
+            },
+            {
+                "month": 3,
+                "monthly_leads": 38,
+                "monthly_sessions": 1100,
+                "monthly_gsc_impressions": 24000,
+                "monthly_gsc_clicks": 920,
+                "ai_visibility_pct": 18.5,
+            },
+        ],
+    }
+    db.commit()
+
+    goals = current_pillar_goals(client_a, ANCHOR)
+    assert goals == {
+        "checkpoint_month": 3,
+        "monthly_leads": 38,
+        "monthly_sessions": 1100,
+        "monthly_gsc_impressions": 24000,
+        "monthly_gsc_clicks": 920,
+        "ai_visibility_pct": 18.5,
+    }

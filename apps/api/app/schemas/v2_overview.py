@@ -27,17 +27,23 @@ class ClientOverviewItemOut(BaseModel):
     business_model: Literal["lead_gen", "ecommerce", "both"] | None = None
     monthly_lead_goal: int | None = None
     current_lead_goal: int | None = None
+    lead_goal_progress_pct: float | None = None
 
     # Visibility (GSC 30d)
     impressions: int | None = None
     clicks: int | None = None
     avg_position: float | None = None
     impressions_change_pct: float | None = None
+    current_impressions_goal: int | None = None
+    impressions_goal_progress_pct: float | None = None
+    current_clicks_goal: int | None = None
 
     # Traffic (GA4 30d)
     total_sessions: int | None = None
     organic_sessions: int | None = None
     organic_change_pct: float | None = None
+    current_sessions_goal: int | None = None
+    sessions_goal_progress_pct: float | None = None
 
     # Leads (GA4 events 30d)
     leads: int | None = None
