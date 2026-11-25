@@ -792,7 +792,7 @@ export function BaselineBuilder({
               ) : null}
             </label>
             <label className="block text-sm">
-              <span className="font-semibold">12-month visibility goal (GSC impr/mo)</span>
+              <span className="font-semibold">12-month visibility goal (GSC + Bing impr/mo)</span>
               <input
                 type="number"
                 min={0}

@@ -228,6 +228,29 @@ def build_clients_overview(
         )
         leads_by_client = {row.client_id: row for row in lead_rows}
 
+    from app.models.bing_stats import FactBingQueryStat
+
+    pillars_by_client = {c.id: lead_goals.current_pillar_goals(c, on=cur_end) for c in clients}
+    bing_client_ids = [
+        c.id for c in clients if pillars_by_client[c.id]["monthly_gsc_impressions"]
+    ]
+    bing_by_client: dict[UUID, int] = {}
+    if bing_client_ids:
+        bing_rows = (
+            db.query(
+                FactBingQueryStat.client_id,
+                func.coalesce(func.sum(FactBingQueryStat.impressions), 0).label("impressions"),
+            )
+            .filter(
+                FactBingQueryStat.client_id.in_(bing_client_ids),
+                FactBingQueryStat.week_start >= cur_start,
+                FactBingQueryStat.week_start <= cur_end,
+            )
+            .group_by(FactBingQueryStat.client_id)
+            .all()
+        )
+        bing_by_client = {row.client_id: int(row.impressions or 0) for row in bing_rows}
+
     items: list[ClientOverviewItemOut] = []
     for c in clients:
         # GSC extraction
@@ -282,11 +305,12 @@ def build_clients_overview(
 
         bm = c.business_model if c.business_model in ("lead_gen", "ecommerce", "both") else None
         status_val = c.status.value if hasattr(c.status, "value") else str(c.status)
-        pillar = lead_goals.current_pillar_goals(c, on=cur_end)
+        pillar = pillars_by_client[c.id]
         cur_lead_goal = pillar["monthly_leads"]
         cur_impr_goal = pillar["monthly_gsc_impressions"]
         cur_clicks_goal = pillar["monthly_gsc_clicks"]
         cur_sess_goal = pillar["monthly_sessions"]
+        bing_impr_cur = bing_by_client.get(c.id, 0)
 
         items.append(
             ClientOverviewItemOut(
@@ -312,8 +336,8 @@ def build_clients_overview(
                 impressions_change_pct=impressions_change_pct,
                 current_impressions_goal=cur_impr_goal,
                 impressions_goal_progress_pct=(
-                    round((impressions / cur_impr_goal) * 100, 1)
-                    if cur_impr_goal and impressions is not None
+                    round((((impressions or 0) + bing_impr_cur) / cur_impr_goal) * 100, 1)
+                    if cur_impr_goal and (impressions is not None or bing_impr_cur > 0)
                     else None
                 ),
                 current_clicks_goal=cur_clicks_goal,

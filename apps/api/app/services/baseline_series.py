@@ -754,11 +754,23 @@ def build_result(
     try:
         from app.services import baseline_pillars
 
-        snap = baseline_pillars.snapshot(db, client.id, lead_events=info["lead_events"])
-        gsc = (snap.get("visibility") or {}).get("gsc") or {}
-        monthly_gsc_impressions = (gsc.get("impressions") or {}).get("avg_30d")
-        monthly_gsc_clicks = (gsc.get("clicks") or {}).get("avg_30d")
-        ai_visibility_pct = ((snap.get("visibility") or {}).get("llm") or {}).get("visibility_rate_pct")
+        snap = baseline_pillars.build_pillars_snapshot(
+            db, client, as_of=info["as_of"], lead_events=info["lead_events"]
+        )
+        vis = snap.get("visibility") or {}
+        gsc = vis.get("gsc") or {}
+        bing = vis.get("bing") or {}
+        gsc_impr = (gsc.get("impressions") or {}).get("avg_30d") or 0.0
+        bing_impr = (bing.get("impressions") or {}).get("avg_30d") or 0.0
+        combined_impr = round(float(gsc_impr) + float(bing_impr), 2)
+        monthly_gsc_impressions = combined_impr if combined_impr > 0 else None
+
+        gsc_clicks = (gsc.get("clicks") or {}).get("avg_30d") or 0.0
+        bing_clicks = (bing.get("clicks") or {}).get("avg_30d") or 0.0
+        combined_clicks = round(float(gsc_clicks) + float(bing_clicks), 2)
+        monthly_gsc_clicks = combined_clicks if combined_clicks > 0 else None
+
+        ai_visibility_pct = (vis.get("llm") or {}).get("visibility_rate_pct")
     except Exception:
         pass
     result = analyze(

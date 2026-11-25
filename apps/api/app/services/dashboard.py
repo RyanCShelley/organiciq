@@ -16,7 +16,7 @@ from app.models.config import OrganicChannel
 from app.models.ga4 import FactGa4Event, FactGa4Traffic
 from app.models.gsc import FactGscDaily, FactGscPage
 from app.models.job import DataWatermark, ValidationStatus
-from app.services.lead_goals import current_lead_goal, current_pillar_goals, schedule_payload
+from app.services.lead_goals import bing_search_totals, current_lead_goal, current_pillar_goals, schedule_payload
 from app.models.seranking import (
     FactSerCompetitor,
     FactSerKeyword,
@@ -1230,11 +1230,15 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
         progress_pct = (current_leads / period_goal) * 100
 
     pillar_goals = current_pillar_goals(client, on=to_date)
+    bing_start, bing_end = gsc_current if gsc_current else (from_date, to_date)
+    bing_impr_cur, bing_clicks_cur = bing_search_totals(db, client.id, bing_start, bing_end)
+
     monthly_impressions_goal = pillar_goals["monthly_gsc_impressions"]
     period_impressions_goal, _ = period_lead_goal(monthly_impressions_goal, from_date, to_date)
     impressions_goal_progress_pct: float | None = None
-    if period_impressions_goal and gsc_impressions_current is not None:
-        impressions_goal_progress_pct = (gsc_impressions_current / period_impressions_goal) * 100
+    if period_impressions_goal and (gsc_impressions_current is not None or bing_impr_cur > 0):
+        total_impr = (gsc_impressions_current or 0) + bing_impr_cur
+        impressions_goal_progress_pct = (total_impr / period_impressions_goal) * 100
 
     ai_visibility_goal = pillar_goals["ai_visibility_pct"]
     ai_mention_current = ai_current_metrics["mention_presence"]
@@ -1251,8 +1255,9 @@ def build_dashboard(db: Session, client: Client, from_date: date, to_date: date)
     monthly_clicks_goal = pillar_goals["monthly_gsc_clicks"]
     period_clicks_goal, _ = period_lead_goal(monthly_clicks_goal, from_date, to_date)
     clicks_goal_progress_pct: float | None = None
-    if period_clicks_goal and gsc_clicks_current is not None:
-        clicks_goal_progress_pct = (gsc_clicks_current / period_clicks_goal) * 100
+    if period_clicks_goal and (gsc_clicks_current is not None or bing_clicks_cur > 0):
+        total_clicks = (gsc_clicks_current or 0) + bing_clicks_cur
+        clicks_goal_progress_pct = (total_clicks / period_clicks_goal) * 100
 
     sessions_series, views_series = _daily_ga4_traffic_series(db, client.id, ga4_current)
     leads_series = _daily_leads_series(db, client.id, lead_events, ga4_current)

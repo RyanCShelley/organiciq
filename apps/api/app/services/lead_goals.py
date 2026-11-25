@@ -178,6 +178,26 @@ def current_pillar_goals(client: Any, on: date | None = None) -> dict[str, Any]:
     }
 
 
+def bing_search_totals(db: Any, client_id: Any, start: date, end: date) -> tuple[int, int]:
+    """Total Bing Webmaster impressions and clicks for weeks starting in [start, end]."""
+    from sqlalchemy import func
+    from app.models.bing_stats import FactBingQueryStat
+
+    row = (
+        db.query(
+            func.coalesce(func.sum(FactBingQueryStat.impressions), 0),
+            func.coalesce(func.sum(FactBingQueryStat.clicks), 0),
+        )
+        .filter(
+            FactBingQueryStat.client_id == client_id,
+            FactBingQueryStat.week_start >= start,
+            FactBingQueryStat.week_start <= end,
+        )
+        .first()
+    )
+    return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+
+
 def schedule_payload(client: Any, on: date | None = None) -> list[dict[str, Any]]:
     return [
         {

@@ -197,12 +197,17 @@ def visibility_signals(
 
     from app.services.dashboard import period_lead_goal
     from app.services.decision_measurements import monthly_keyword_trend
-    from app.services.lead_goals import current_pillar_goals
+    from app.services.lead_goals import bing_search_totals, current_pillar_goals
 
     pillar = current_pillar_goals(client, on=today)
     impr_28d = impressions(recent_start, recent_end)
+    bing_impr_28d, _ = bing_search_totals(db, client.id, recent_start, recent_end)
     impr_goal, _ = period_lead_goal(pillar["monthly_gsc_impressions"], recent_start, recent_end)
-    impr_progress = round((impr_28d / impr_goal) * 100.0, 1) if impr_goal and impr_28d is not None else None
+    impr_progress = (
+        round((((impr_28d or 0.0) + bing_impr_28d) / impr_goal) * 100.0, 1)
+        if impr_goal and (impr_28d is not None or bing_impr_28d > 0)
+        else None
+    )
     ai_mention = float(stats["mention_pct"]) if stats else None
     ai_goal = pillar["ai_visibility_pct"]
     ai_progress = round((ai_mention / ai_goal) * 100.0, 1) if ai_goal and ai_mention is not None else None
@@ -307,13 +312,14 @@ def traffic_signals(
     # comparison because its other half is Search Console impressions.
     from app.services.dashboard import period_lead_goal
     from app.services.decision_measurements import session_totals
-    from app.services.lead_goals import current_pillar_goals
+    from app.services.lead_goals import bing_search_totals, current_pillar_goals
 
     all_now = session_totals(db, client.id, recent_start, recent_end)
     all_before = session_totals(db, client.id, prior_start, prior_end)
     organic_now = all_now["channels"].get("organic_search")
     organic_before = all_before["channels"].get("organic_search")
     pillar = current_pillar_goals(client, on=today)
+    _bing_impr_28d, bing_clicks_28d = bing_search_totals(db, client.id, recent_start, recent_end)
     sessions_goal, _ = period_lead_goal(pillar["monthly_sessions"], recent_start, recent_end)
     sessions_progress = (
         round((all_now["total"] / sessions_goal) * 100.0, 1)
@@ -322,8 +328,8 @@ def traffic_signals(
     )
     clicks_goal, _ = period_lead_goal(pillar["monthly_gsc_clicks"], recent_start, recent_end)
     clicks_progress = (
-        round((ctr["actual_clicks"] / clicks_goal) * 100.0, 1)
-        if clicks_goal and ctr["actual_clicks"] is not None
+        round((((ctr["actual_clicks"] or 0.0) + bing_clicks_28d) / clicks_goal) * 100.0, 1)
+        if clicks_goal and (ctr["actual_clicks"] is not None or bing_clicks_28d > 0)
         else None
     )
 
